@@ -20,6 +20,7 @@ import type {
   OptionalDownloadEvent
 } from '@shared/ipc'
 import { Store } from '../lib/store'
+import { errorSummary } from '../lib/errors'
 
 export { useStore } from '../lib/store'
 
@@ -65,6 +66,9 @@ export interface AppState {
   todos: Record<string, Todo[]>
   permission: PermissionRequest | null
   modelSwitch: { to: string } | null
+  commitPath: string | null
+  renameTarget: string | null
+  confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; action: () => void } | null
   panelOpen: boolean
   panelGroups: PanelGroup[]
   reviewFile: string | null
@@ -73,10 +77,13 @@ export interface AppState {
   optionalProgress: Partial<Record<OptionalComponentId, OptionalDownloadEvent>>
   computerUse: ComputerUseStatus
   streaming: boolean
+  streamingLocked: boolean
   model: string | null
   projectPath: string
+  lastError: string | null
   drafts: Record<string, string>
   attachments: Record<string, Attachment[]>
+  history: Record<string, string[]>
   archived: string[]
 }
 
@@ -105,6 +112,9 @@ export const initialState: AppState = {
   todos: {},
   permission: null,
   modelSwitch: null,
+  commitPath: null,
+  renameTarget: null,
+  confirm: null,
   panelOpen: false,
   panelGroups: [],
   reviewFile: null,
@@ -113,10 +123,13 @@ export const initialState: AppState = {
   optionalProgress: {},
   computerUse: { enabled: false, running: false },
   streaming: false,
+  streamingLocked: false,
   model: null,
   projectPath: '',
+  lastError: null,
   drafts: {},
   attachments: {},
+  history: {},
   archived: []
 }
 
@@ -174,6 +187,7 @@ export function upsertMessagesFromList(messages: Record<string, MessageWithParts
 }
 
 export function applyEvent(state: AppState, ev: Record<string, unknown>): Partial<AppState> {
+  const props = (ev.properties ?? {}) as Record<string, unknown>
   switch (ev.type) {
     case 'server.connected':
       return { serverHealthy: true }
@@ -181,15 +195,21 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       return { serverHealthy: false }
     case 'session.updated':
       return {}
-    case 'message.updated':
-      return { messages: upsertMessage(state.messages, ev.message as MessageInfo) }
+    case 'message.updated': {
+      const info = (props.info ?? props.message) as MessageInfo | undefined
+      return info ? { messages: upsertMessage(state.messages, info) } : {}
+    }
     case 'message.part.updated':
-    case 'message.part.created':
-      return { messages: upsertPart(state.messages, ev.part as Part) }
+    case 'message.part.created': {
+      const part = props.part as Part | undefined
+      return part ? { messages: upsertPart(state.messages, part) } : {}
+    }
     case 'session.todo.updated':
-      return { todos: { ...state.todos, [ev.sessionID as string]: ev.todos as Todo[] } }
+      return { todos: { ...state.todos, [props.sessionID as string]: props.todos as Todo[] } }
     case 'permission.updated':
-      return { permission: (ev.permission as PermissionRequest) ?? null }
+      return { permission: (props.permission as PermissionRequest) ?? null }
+    case 'session.error':
+      return { lastError: errorSummary(props.error ?? props.message ?? 'opencode error') }
     case 'config.updated':
       return {}
     default:

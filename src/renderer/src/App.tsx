@@ -7,6 +7,9 @@ import { Panel, AddBar } from './components/Panel'
 import { Footer } from './components/Footer'
 import { PermissionModal } from './components/PermissionModal'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
+import { CommitDialog } from './components/CommitDialog'
+import { RenameModal } from './components/RenameModal'
+import { ConfirmModal } from './components/ConfirmModal'
 import {
   refreshAgents,
   refreshConfig,
@@ -183,6 +186,9 @@ export function App(): React.JSX.Element {
       {panelOpen ? <Panel /> : <AddBar />}
       <PermissionModal />
       <ModelSwitchModal />
+      <CommitDialog />
+      <RenameModal />
+      <ConfirmModal />
     </div>
   )
 }

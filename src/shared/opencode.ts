@@ -26,7 +26,7 @@ export interface MessageInfo {
   model?: SessionModel
   time?: { created?: number; completed?: number }
   tokens?: number
-  error?: string
+  error?: unknown
 }
 
 export type PartType = 'text' | 'tool' | 'reasoning' | 'snapshot' | 'file' | 'step' | 'agent'
@@ -80,6 +80,8 @@ export interface FileNode {
   name: string
   path: string
   type: 'file' | 'directory'
+  absolute?: string
+  ignored?: boolean
   children?: FileNode[]
 }
 

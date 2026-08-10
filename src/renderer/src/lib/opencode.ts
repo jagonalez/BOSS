@@ -45,6 +45,10 @@ export interface ModelOption {
   providerID: string
 }
 
+export function isHighVariant(id: string): boolean {
+  return /high.?speed|turbo|fast/i.test(id)
+}
+
 function isFreeCost(cost?: unknown): boolean {
   if (!cost || typeof cost !== 'object') return false
   const c = cost as { input?: number; output?: number; cache?: { read?: number; write?: number } }
@@ -88,6 +92,8 @@ export const OpenCode = {
     request<SessionInfo>('POST', '/session', { body: title ? { title } : {} }),
   deleteSession: (id: string) => request<boolean>('DELETE', `/session/${id}`),
   getSession: (id: string) => request<SessionInfo>('GET', `/session/${id}`),
+  renameSession: (id: string, title: string) =>
+    request<SessionInfo>('PATCH', `/session/${id}`, { body: { title } }),
   listMessages: (id: string, limit?: number) =>
     request<MessageWithParts[]>('GET', `/session/${id}/message`, { query: { limit } }),
   sendMessage: (id: string, parts: unknown[], opts?: { model?: string; agent?: string }) =>
@@ -104,7 +110,7 @@ export const OpenCode = {
     request<boolean>('POST', `/session/${sessionID}/permissions/${permissionID}`, { body: { response, remember } }),
   shell: (id: string, command: string, opts?: { model?: string; agent?: string }) =>
     request<MessageWithParts>('POST', `/session/${id}/shell`, { body: { command, ...opts } }),
-  fileTree: (path?: string) => request<FileNode[]>('GET', '/file', { query: { path } }),
+  fileTree: (path = '') => request<FileNode[]>('GET', '/file', { query: { path } }),
   fileContent: (path: string) => request<FileContent>('GET', '/file/content', { query: { path } }),
   projectList: () => request<Project[]>('GET', '/project'),
   projectCurrent: () => request<Project>('GET', '/project/current'),

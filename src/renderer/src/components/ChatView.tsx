@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part } from '@shared/opencode'
-import { abortRun, newSession, openProjectFolder, sendPrompt, setModel } from '../lib/actions'
+import { abortRun, newSession, openProjectFolder, pushHistory, sendPrompt, setModel } from '../lib/actions'
+import { errorSummary, errorDetails } from '../lib/errors'
 import { MessageText } from '../lib/text'
 import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, PlusIcon, SendIcon, StopIcon } from './icons'
 import { StepCard } from './StepCard'
@@ -95,6 +96,26 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
   }
 }
 
+function MessageError({ error }: { error?: unknown }): React.JSX.Element | null {
+  const [open, setOpen] = useState(false)
+  if (!error) return null
+  return (
+    <div className="msg-error">
+      <span className="msg-error-icon">!</span>
+      <div className="msg-error-main">
+        <span className="msg-error-summary">{errorSummary(error)}</span>
+        {open ? <pre className="msg-error-detail">{errorDetails(error)}</pre> : null}
+      </div>
+      <button className="msg-error-toggle" onClick={() => setOpen((o) => !o)}>
+        <span className={`msg-error-toggle-chevron ${open ? 'open' : ''}`}>
+          <ChevronIcon size={12} />
+        </span>
+        {open ? 'Hide' : 'Details'}
+      </button>
+    </div>
+  )
+}
+
 function MessageView({ item }: { item: MessageWithParts }): React.JSX.Element {
   const isUser = item.info.role === 'user'
   return (
@@ -103,6 +124,7 @@ function MessageView({ item }: { item: MessageWithParts }): React.JSX.Element {
         <span>{isUser ? 'You' : 'opencode'}</span>
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
       </div>
+      <MessageError error={item.info.error} />
       <div className="msg-body">
         {isUser ? (
           item.parts.map((part) => <PartView key={part.id} part={part} />)
@@ -138,6 +160,14 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? [] : []))
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [histIdx, setHistIdx] = useState(-1)
+  const [draftBackup, setDraftBackup] = useState('')
+  const history = useStore(appStore, (s) => (effectiveSession ? s.history[effectiveSession] ?? [] : []))
+
+  useEffect(() => {
+    setHistIdx(-1)
+    setDraftBackup('')
+  }, [effectiveSession])
 
   const setText = (value: string): void => {
     if (!effectiveSession) return
@@ -185,10 +215,39 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const submit = (): void => {
     if (!effectiveSession) return
     if (!text.trim() && attachments.length === 0) return
+    if (text.trim()) pushHistory(effectiveSession, text)
     void sendPrompt(text, sessionId, attachments)
     setText('')
     setAttachments([])
+    setHistIdx(-1)
+    setDraftBackup('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  const stepHistory = (dir: 1 | -1): void => {
+    if (history.length === 0) return
+    if (dir === -1) {
+      if (histIdx === -1) {
+        setDraftBackup(text)
+        setHistIdx(history.length - 1)
+        setText(history[history.length - 1])
+      } else if (histIdx > 0) {
+        const idx = histIdx - 1
+        setHistIdx(idx)
+        setText(history[idx])
+      }
+    } else {
+      if (histIdx === -1) return
+      if (histIdx < history.length - 1) {
+        const idx = histIdx + 1
+        setHistIdx(idx)
+        setText(history[idx])
+      } else {
+        setHistIdx(-1)
+        setText(draftBackup)
+      }
+    }
+    autoGrow()
   }
 
   const onModelChange = (to: string): void => {
@@ -207,6 +266,14 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       submit()
+      return
+    }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const el = textareaRef.current
+      if (el && el.selectionStart === 0 && el.selectionStart === el.selectionEnd) {
+        e.preventDefault()
+        stepHistory(e.key === 'ArrowUp' ? -1 : 1)
+      }
     }
   }
 
@@ -218,34 +285,21 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const canSend = text.trim().length > 0 || attachments.length > 0
+  const lastError = useStore(appStore, (s) => s.lastError)
 
   return (
     <div className="composer-wrap">
+      {lastError ? (
+        <div className="chat-error">
+          <span className="chat-error-icon">!</span>
+          <span className="chat-error-text">{lastError}</span>
+          <button className="chat-error-close" onClick={() => appStore.setState({ lastError: null })} title="Dismiss">
+            ×
+          </button>
+        </div>
+      ) : null}
       <div className="composer" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
-        {attachments.length > 0 && (
-          <div className="composer-attachments">
-            {attachments.map((a) => (
-              <div key={a.id} className={`attachment ${a.mime.startsWith('image/') ? '' : 'file'}`}>
-                {a.mime.startsWith('image/') ? (
-                  <img src={a.dataUrl} alt={a.name} />
-                ) : (
-                  <div className="attachment-file">
-                    <FileIcon size={16} />
-                    <span className="attachment-file-name">{a.name}</span>
-                  </div>
-                )}
-                <button
-                  className="attachment-remove"
-                  onClick={() => setAttachments(attachments.filter((x) => x.id !== a.id))}
-                  title="Remove"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="composer-row">
+        <div className="composer-input">
           <textarea
             ref={textareaRef}
             placeholder={hasSession ? 'Ask opencode…' : 'Start a chat to ask opencode'}
@@ -258,33 +312,58 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             onPaste={onPaste}
             rows={1}
           />
+          {attachments.length > 0 && (
+            <div className="composer-attachments">
+              {attachments.map((a) => (
+                <div key={a.id} className={`attachment ${a.mime.startsWith('image/') ? '' : 'file'}`}>
+                  {a.mime.startsWith('image/') ? (
+                    <img src={a.dataUrl} alt={a.name} />
+                  ) : (
+                    <div className="attachment-file">
+                      <FileIcon size={16} />
+                      <span className="attachment-file-name">{a.name}</span>
+                    </div>
+                  )}
+                  <button
+                    className="attachment-remove"
+                    onClick={() => setAttachments(attachments.filter((x) => x.id !== a.id))}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="composer-controls">
           <div className="row">
-            <button className="composer-attach" onClick={() => fileInputRef.current?.click()} title="Attach image">
+            <button className="composer-attach" onClick={() => fileInputRef.current?.click()} title="Attach file or image">
               <AttachmentIcon size={16} />
             </button>
             <ModelPicker onPick={onModelChange} />
-            {streaming ? (
-              <button className="btn-send" onClick={() => void abortRun()} title="Stop">
-                <StopIcon size={16} />
-              </button>
-            ) : (
-              <button className="btn-send" disabled={!canSend || !hasSession} onClick={submit} title="Send">
-                <SendIcon size={16} />
-              </button>
-            )}
           </div>
+          {streaming ? (
+            <button className="btn-send" onClick={() => void abortRun()} title="Stop">
+              <StopIcon size={16} />
+            </button>
+          ) : (
+            <button className="btn-send" disabled={!canSend || !hasSession} onClick={submit} title="Send">
+              <SendIcon size={16} />
+            </button>
+          )}
         </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            if (e.target.files) void addFiles(Array.from(e.target.files))
-            e.target.value = ''
-          }}
-        />
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files) void addFiles(Array.from(e.target.files))
+          e.target.value = ''
+        }}
+      />
     </div>
   )
 }
@@ -337,6 +416,7 @@ function TurnView({ turn, modelChanged }: { turn: TurnGroup; modelChanged?: bool
       {turn.user ? <MessageView item={turn.user} /> : null}
       {turn.assistants.length > 0 ? (
         <div className="msg assistant">
+          <MessageError error={turn.assistants[turn.assistants.length - 1].info.error} />
           <div className="msg-body">
             {modelChanged && model ? <span className="model-chip">{model}</span> : null}
             <StepCard message={combineAssistants(turn.assistants)} />
