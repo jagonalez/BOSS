@@ -1,14 +1,20 @@
 import React, { useState } from 'react'
-import { useStore, appStore, type PanelKind } from '../state/AppState'
+import { useStore, appStore, type PanelGroup, type PanelKind, type PanelTab } from '../state/AppState'
 import { ReviewTab } from './ReviewTab'
 import { FilesTab } from './FilesTab'
 import { BrowseTab } from './BrowseTab'
 import { TerminalTab } from './TerminalTab'
 import { ChatView } from './ChatView'
-import { closePanelTab, openPanelTab } from '../lib/actions'
+import { addPanelGroup, closePanelTab, openPanelTab, setPanelWidth } from '../lib/actions'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 
-export const PANEL_KINDS: Array<{ kind: PanelKind; label: string; icon: (p: { size?: number }) => React.JSX.Element }> = [
+const MIN_GROUP = 300
+
+function clampWidth(w: number): number {
+  return Math.min(Math.max(Math.round(w), MIN_GROUP), 1400)
+}
+
+const PANEL_KINDS: Array<{ kind: PanelKind; label: string; icon: (p: { size?: number }) => React.JSX.Element }> = [
   { kind: 'review', label: 'Review', icon: ReviewIcon },
   { kind: 'terminal', label: 'Terminal', icon: TerminalIcon },
   { kind: 'browse', label: 'Browser', icon: GlobeIcon },
@@ -16,51 +22,41 @@ export const PANEL_KINDS: Array<{ kind: PanelKind; label: string; icon: (p: { si
   { kind: 'chat', label: 'Side chat', icon: ChatIcon }
 ]
 
-export function AddPanelView(): React.JSX.Element {
-  return (
-    <div className="panel">
-      <div className="panel-add">
-        <div className="panel-add-title">Add to panel</div>
-        <div className="panel-add-grid">
-          {PANEL_KINDS.map((k) => {
-            const Icon = k.icon
-            return (
-              <button key={k.kind} className="panel-add-btn" onClick={() => void openPanelTab(k.kind)}>
-                <span className="icon">
-                  <Icon size={18} />
-                </span>
-                <span>{k.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-    </div>
-  )
+const SINGLE_KINDS: PanelKind[] = ['review', 'browse']
+
+function useExistingKinds(): Set<PanelKind> {
+  return useStore(appStore, (s) => new Set(s.panelGroups.flatMap((g) => g.tabs.map((t) => t.kind))))
 }
 
-export function AddBar(): React.JSX.Element {
-  return (
-    <div className="add-bar">
-      {PANEL_KINDS.map((k) => {
-        const Icon = k.icon
-        return (
-          <button key={k.kind} className="add-bar-btn" onClick={() => void openPanelTab(k.kind)} title={k.label}>
-            <Icon size={18} />
-          </button>
-        )
-      })}
-    </div>
-  )
+function addableKinds(existing: Set<PanelKind>): Array<(typeof PANEL_KINDS)[number]> {
+  return PANEL_KINDS.filter((k) => !SINGLE_KINDS.includes(k.kind) || !existing.has(k.kind))
 }
 
-function PanelResizer(): React.JSX.Element {
+function TabContent({ tab }: { tab: PanelTab }): React.JSX.Element {
+  switch (tab.kind) {
+    case 'review':
+      return <ReviewTab />
+    case 'files':
+      return <FilesTab />
+    case 'browse':
+      return <BrowseTab />
+    case 'terminal':
+      return <TerminalTab />
+    case 'chat':
+      return <ChatView sessionId={tab.sessionId} />
+  }
+}
+
+function Splitter({ left, right }: { left: PanelGroup; right: PanelGroup }): React.JSX.Element {
   const onMouseDown = (e: React.MouseEvent): void => {
     e.preventDefault()
+    const startX = e.clientX
+    const leftW = left.width
+    const rightW = right.width
     const move = (ev: MouseEvent): void => {
-      const width = window.innerWidth - ev.clientX
-      const max = Math.floor(window.innerWidth * 0.75)
-      appStore.setState({ panelWidth: Math.min(Math.max(width, 320), max) })
+      const delta = ev.clientX - startX
+      setPanelWidth(left.id, clampWidth(leftW + delta))
+      setPanelWidth(right.id, clampWidth(rightW - delta))
     }
     const up = (): void => {
       window.removeEventListener('mousemove', move)
@@ -69,97 +65,171 @@ function PanelResizer(): React.JSX.Element {
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
   }
-  return <div className="panel-resizer" onMouseDown={onMouseDown} />
+  return <div className="panel-splitter" onMouseDown={onMouseDown} />
+}
+
+function LeftResizer({ group }: { group: PanelGroup }): React.JSX.Element {
+  const onMouseDown = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = group.width
+    const move = (ev: MouseEvent): void => {
+      setPanelWidth(group.id, clampWidth(startW + (startX - ev.clientX)))
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  return <div className="panel-splitter panel-left-resizer" onMouseDown={onMouseDown} />
+}
+
+function AddPanelView({ group }: { group: PanelGroup }): React.JSX.Element {
+  const existing = useExistingKinds()
+  return (
+    <div className="panel-add">
+      <div className="panel-add-title">Add to panel</div>
+      <div className="panel-add-grid">
+        {addableKinds(existing).map((k) => {
+          const Icon = k.icon
+          return (
+            <button key={k.kind} className="panel-add-btn" onClick={() => void openPanelTab(k.kind, group.id)}>
+              <span className="icon">
+                <Icon size={18} />
+              </span>
+              <span>{k.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function GroupPanel({ group }: { group: PanelGroup }): React.JSX.Element {
+  const [adding, setAdding] = useState(false)
+  const existing = useExistingKinds()
+  const active = group.tabs.find((t) => t.id === group.activeTabId) ?? group.tabs[group.tabs.length - 1]
+
+  return (
+    <div className="panel-group" style={{ width: group.width }}>
+      {group.tabs.length > 0 ? (
+        <>
+          <div className="panel-tabs">
+            {group.tabs.map((tab) => {
+              const def = PANEL_KINDS.find((k) => k.kind === tab.kind)!
+              const Icon = def.icon
+              return (
+                <div
+                  key={tab.id}
+                  className={`panel-tab ${tab.id === active.id ? 'active' : ''}`}
+                  onClick={() =>
+                    appStore.setState((s) => ({
+                      panelGroups: s.panelGroups.map((g) => (g.id === group.id ? { ...g, activeTabId: tab.id } : g))
+                    }))
+                  }
+                  title={def.label}
+                >
+                  <span className="icon">
+                    <Icon size={13} />
+                  </span>
+                  <span className="panel-tab-label">{def.label}</span>
+                  <button
+                    className="tab-close"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      closePanelTab(group.id, tab.id)
+                    }}
+                    title="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            })}
+            <button className="tab-add" onClick={() => setAdding((o) => !o)} title="Add tab">
+              <PlusIcon size={13} />
+            </button>
+          </div>
+          {adding && (
+            <div className="tab-add-menu">
+              {addableKinds(existing).map((k) => {
+                const Icon = k.icon
+                return (
+                  <button
+                    key={k.kind}
+                    className="tab-add-item"
+                    onClick={() => {
+                      void openPanelTab(k.kind, group.id)
+                      setAdding(false)
+                    }}
+                  >
+                    <span className="icon">
+                      <Icon size={14} />
+                    </span>
+                    {k.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <div className="panel-content">
+            {active.kind === 'browse' && adding ? null : <TabContent tab={active} />}
+          </div>
+        </>
+      ) : (
+        <AddPanelView group={group} />
+      )}
+    </div>
+  )
+}
+
+export function AddBar(): React.JSX.Element {
+  const existing = useExistingKinds()
+  return (
+    <div className="add-bar">
+      {addableKinds(existing).map((k) => {
+        const Icon = k.icon
+        return (
+          <button key={k.kind} className="add-bar-btn" onClick={() => void openPanelTab(k.kind)} title={k.label}>
+            <Icon size={18} />
+          </button>
+        )
+      })}
+      <div className="add-bar-sep" />
+      <button className="add-bar-btn" onClick={addPanelGroup} title="New panel">
+        <PlusIcon size={18} />
+      </button>
+    </div>
+  )
 }
 
 export function Panel(): React.JSX.Element {
-  const tabs = useStore(appStore, (s) => s.tabs)
-  const activeTabId = useStore(appStore, (s) => s.activeTabId)
-  const panelWidth = useStore(appStore, (s) => s.panelWidth)
-  const [adding, setAdding] = useState(false)
+  const panelGroups = useStore(appStore, (s) => s.panelGroups)
 
-  if (tabs.length === 0) {
+  if (panelGroups.length === 0) {
     return (
-      <div className="panel" style={{ width: panelWidth }}>
-        <PanelResizer />
-        <div className="panel-add">
-          <div className="panel-add-title">Add to panel</div>
-          <div className="panel-add-grid">
-            {PANEL_KINDS.map((k) => {
-              const Icon = k.icon
-              return (
-                <button key={k.kind} className="panel-add-btn" onClick={() => void openPanelTab(k.kind)}>
-                  <span className="icon">
-                    <Icon size={18} />
-                  </span>
-                  <span>{k.label}</span>
-                </button>
-              )
-            })}
-          </div>
-        </div>
+      <div className="panel-groups">
+        <AddPanelView group={{ id: 'empty', tabs: [], activeTabId: null, width: 460 }} />
       </div>
     )
   }
 
-  const active = tabs.find((t) => t.id === activeTabId) ?? tabs[tabs.length - 1]
-
   return (
-    <div className="panel" style={{ width: panelWidth }}>
-      <PanelResizer />
-      <div className="panel-tabs">
-        {tabs.map((tab) => {
-          const def = PANEL_KINDS.find((k) => k.kind === tab.kind)!
-          const Icon = def.icon
-          return (
-            <div
-              key={tab.id}
-              className={`panel-tab ${tab.id === active.id ? 'active' : ''}`}
-              onClick={() => appStore.setState({ activeTabId: tab.id })}
-              title={def.label}
-            >
-              <span className="icon">
-                <Icon size={13} />
-              </span>
-              <span className="panel-tab-label">{def.label}</span>
-              <button className="tab-close" onClick={(e) => { e.stopPropagation(); closePanelTab(tab.id) }} title="Close">
-                ×
-              </button>
-            </div>
-          )
-        })}
-        <button className="tab-add" onClick={() => setAdding((o) => !o)} title="Add tab">
-          <PlusIcon size={13} />
+    <div className="panel-groups">
+      {panelGroups.length > 0 ? <LeftResizer group={panelGroups[0]} /> : null}
+      {panelGroups.map((group, i) => (
+        <React.Fragment key={group.id}>
+          <GroupPanel group={group} />
+          {i < panelGroups.length - 1 ? <Splitter left={group} right={panelGroups[i + 1]} /> : null}
+        </React.Fragment>
+      ))}
+      <div className="panel-split" title="Add panel">
+        <button className="tab-add" onClick={addPanelGroup}>
+          <PlusIcon size={14} />
         </button>
-      </div>
-      {adding && (
-        <div className="tab-add-menu">
-          {PANEL_KINDS.map((k) => {
-            const Icon = k.icon
-            return (
-              <button
-                key={k.kind}
-                className="tab-add-item"
-                onClick={() => {
-                  void openPanelTab(k.kind)
-                  setAdding(false)
-                }}
-              >
-                <span className="icon">
-                  <Icon size={14} />
-                </span>
-                {k.label}
-              </button>
-            )
-          })}
-        </div>
-      )}
-      <div className="panel-content">
-        {active.kind === 'review' && <ReviewTab />}
-        {active.kind === 'files' && <FilesTab />}
-        {active.kind === 'browse' && <BrowseTab />}
-        {active.kind === 'terminal' && <TerminalTab />}
-        {active.kind === 'chat' && <ChatView sessionId={active.sessionId} />}
       </div>
     </div>
   )

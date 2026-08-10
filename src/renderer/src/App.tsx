@@ -1,11 +1,12 @@
 import React, { useEffect } from 'react'
-import { useStore, appStore, applyEvent } from './state/AppState'
+import { useStore, appStore, applyEvent, MAIN_MIN_WIDTH, SIDEBAR_FALLBACK_WIDTH } from './state/AppState'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { ChatView } from './components/ChatView'
 import { Panel, AddBar } from './components/Panel'
 import { Footer } from './components/Footer'
 import { PermissionModal } from './components/PermissionModal'
+import { ModelSwitchModal } from './components/ModelSwitchModal'
 import {
   refreshAgents,
   refreshConfig,
@@ -15,8 +16,11 @@ import {
   refreshProjects,
   refreshProviders,
   refreshSessions,
+  refreshStreaming,
+  loadArchived,
   loadMessages,
-  loadTodos
+  loadTodos,
+  abortRun
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -35,18 +39,24 @@ async function refreshAll(): Promise<void> {
 
 export function App(): React.JSX.Element {
   const panelOpen = useStore(appStore, (s) => s.panelOpen)
-  const panelWidth = useStore(appStore, (s) => s.panelWidth)
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
-  const activeTabKind = useStore(appStore, (s) => s.tabs.find((t) => t.id === s.activeTabId)?.kind)
+  const activeTabKind = useStore(appStore, (s) => s.panelGroups[0]?.tabs.find((t) => t.id === s.panelGroups[0]?.activeTabId)?.kind)
 
   useEffect(() => {
-    const saved = Number(localStorage.getItem('ralf.panelWidth'))
-    if (Number.isFinite(saved) && saved >= 320) appStore.setState({ panelWidth: saved })
+    loadArchived()
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('ralf.panelWidth', String(panelWidth))
-  }, [panelWidth])
+    const onResize = (): void => {
+      const sidebarWidth = document.querySelector('.sidebar')?.getBoundingClientRect().width ?? SIDEBAR_FALLBACK_WIDTH
+      const max = Math.max(300, window.innerWidth - sidebarWidth - MAIN_MIN_WIDTH - 8)
+      appStore.setState((s) => ({
+        panelGroups: s.panelGroups.map((g) => (g.width > max ? { ...g, width: max } : g))
+      }))
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   useEffect(() => {
     let refreshTimer: number | undefined
@@ -80,6 +90,7 @@ export function App(): React.JSX.Element {
         case 'message.part.updated':
         case 'message.part.created':
           window.clearTimeout(refreshTimer)
+          refreshStreaming()
           refreshTimer = window.setTimeout(() => {
             const id = appStore.getState().activeSessionId
             if (id) {
@@ -145,6 +156,17 @@ export function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        const s = appStore.getState()
+        if (s.streaming && s.activeSessionId) void abortRun()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
     if (activeTabKind === 'review' && panelOpen) void refreshDiff(activeSessionId)
   }, [activeTabKind, panelOpen, activeSessionId])
 
@@ -160,6 +182,7 @@ export function App(): React.JSX.Element {
       </div>
       {panelOpen ? <Panel /> : <AddBar />}
       <PermissionModal />
+      <ModelSwitchModal />
     </div>
   )
 }

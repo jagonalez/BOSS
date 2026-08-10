@@ -7,6 +7,7 @@ import { EventStream } from './event-stream'
 import { BrowseManager } from './browse'
 import { OptionalDeps } from './optional-deps'
 import { ComputerUse } from './computer-use'
+import { PTYManager } from './pty-manager'
 import { registerIpc, type IpcDeps } from './ipc'
 import { loadState } from './state-store'
 
@@ -24,12 +25,13 @@ const api = new ApiClient(server)
 const events = new EventStream(server)
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse(api, join(mainDir, 'computer-use-helper.js'))
+const pty = new PTYManager()
 
 let browse: BrowseManager | null = null
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, browse: browse!, optional, computerUse }
+  return { server, api, events, browse: browse!, optional, computerUse, pty }
 }
 
 function registerIpcOnce(): void {

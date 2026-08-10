@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import { BackIcon, ForwardIcon, ReloadIcon } from './icons'
+import { BackIcon, ExternalIcon, ForwardIcon, ReloadIcon } from './icons'
 
 function rectOf(el: HTMLElement): { x: number; y: number; width: number; height: number } {
   const r = el.getBoundingClientRect()
@@ -61,6 +61,15 @@ export function BrowseTab(): React.JSX.Element {
         <button className="btn-ghost" onClick={() => void window.ralf.browseReload()} title="Reload">
           <ReloadIcon size={14} />
         </button>
+        {nav.url ? (
+          <button
+            className="btn-ghost"
+            onClick={() => void window.ralf.openExternal(nav.url)}
+            title="Open in default browser"
+          >
+            <ExternalIcon size={14} />
+          </button>
+        ) : null}
         <input
           value={urlInput}
           placeholder="Search the web or enter a URL"

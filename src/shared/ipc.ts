@@ -55,6 +55,16 @@ export interface ProjectInfo {
   healthy: boolean
 }
 
+export interface TerminalDataEvent {
+  id: string
+  data: string
+}
+
+export interface TerminalExitEvent {
+  id: string
+  code: number
+}
+
 export interface BrowseNavigationState {
   url: string
   title: string
@@ -79,6 +89,8 @@ export const IpcChannels = {
   BrowseReload: 'browse:reload',
   BrowseNavigation: 'browse:navigation',
   BrowseExternal: 'browse:external',
+  OpenExternal: 'open-external',
+  OpenPath: 'open-path',
   OptionalList: 'optional:list',
   OptionalDownload: 'optional:download',
   OptionalProgress: 'optional:progress',
@@ -86,7 +98,14 @@ export const IpcChannels = {
   ComputerUseSetEnabled: 'computer-use:set-enabled',
   ProjectCurrent: 'project:current',
   ProjectSet: 'project:set',
-  ProjectChoose: 'project:choose'
+  ProjectChoose: 'project:choose',
+  TerminalCreate: 'terminal:create',
+  TerminalWrite: 'terminal:write',
+  TerminalResize: 'terminal:resize',
+  TerminalDispose: 'terminal:dispose',
+  TerminalData: 'terminal:data',
+  TerminalExit: 'terminal:exit',
+  GitRun: 'git:run'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
