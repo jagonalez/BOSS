@@ -11,6 +11,7 @@ import {
   openProject,
   openProjectFolder,
   selectSession,
+  sessionMetaFor,
   toggleArchive
 } from '../lib/actions'
 import { ChatIcon, ChevronIcon, FolderIcon, PlusIcon } from './icons'
@@ -48,16 +49,20 @@ function projectName(path: string): string {
 }
 
 function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: boolean; onCtx: (e: React.MouseEvent, s: SessionInfo) => void }): React.JSX.Element {
+  const meta = sessionMetaFor(session.id)
   return (
     <div
       className={`item sub ${active ? 'active' : ''}`}
       onClick={() => selectSession(session.id)}
       onContextMenu={(e) => onCtx(e, session)}
+      title={meta?.forkedFrom ? `Forked from ${meta.forkedFrom.sessionId.slice(0, 12)}` : meta?.kind === 'side' ? 'Side chat' : session.title}
     >
       <span className="icon">
         <ChatIcon size={14} />
       </span>
       <span className="name">{session.title || 'Untitled'}</span>
+      {meta?.kind === 'fork' ? <span className="badge fork">fork</span> : null}
+      {meta?.kind === 'side' ? <span className="badge side">side</span> : null}
       <span className="meta">{timeAgo(session.time?.updated)}</span>
     </div>
   )

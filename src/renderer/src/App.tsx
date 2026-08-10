@@ -23,6 +23,7 @@ import {
   loadMode,
   loadAgent,
   loadArchived,
+  loadSessionMeta,
   loadMessages,
   loadTodos,
   autoRespond,
@@ -52,6 +53,7 @@ export function App(): React.JSX.Element {
     loadArchived()
     loadMode()
     loadAgent()
+    loadSessionMeta()
   }, [])
 
   useEffect(() => {

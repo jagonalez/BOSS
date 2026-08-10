@@ -244,6 +244,24 @@ button {
   flex-shrink: 0;
 }
 
+.item .badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.item .badge.fork {
+  color: var(--purple);
+  background: rgba(137, 87, 229, 0.15);
+}
+
+.item .badge.side {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .item .icon {
   color: var(--text-faint);
   flex-shrink: 0;

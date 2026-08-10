@@ -129,6 +129,30 @@ export interface Command {
   subtask?: boolean
 }
 
+export interface ReviewFinding {
+  file: string
+  severity: 'error' | 'warning' | 'info'
+  summary: string
+}
+
+export interface ReviewRun {
+  id: string
+  target: string
+  baseSha: string
+  findings: ReviewFinding[]
+  createdAt: number
+  stale: boolean
+}
+
+export interface SessionMeta {
+  sessionId: string
+  projectPath?: string
+  kind: 'main' | 'side' | 'fork'
+  forkedFrom?: { sessionId: string; messageId?: string }
+  gitBranch?: string
+  reviews: ReviewRun[]
+}
+
 export interface Provider {
   id: string
   name?: string
