@@ -155,7 +155,7 @@ export const initialState: AppState = {
   attention: null,
   tts: { available: false, ready: false, speaking: false },
   asr: { available: false, listening: false },
-  ttsVoice: 'stuart_bell',
+  ttsVoice: 'af_heart',
   speakAloud: false
 }
 

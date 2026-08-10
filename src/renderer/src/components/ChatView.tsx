@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest } from '@shared/opencode'
-import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, openProject, openProjectFolder, pushHistory, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
+import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -428,6 +428,20 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
       .catch(() => {})
   }, [])
 
+  // Live dictation: append ASR segments into the current text without
+  // clobbering anything the user is typing/editing.
+  useEffect(() => {
+    const off = onAsrText(({ sessionId, text }) => {
+      if (sessionId !== effectiveSession) return
+      setText((prev) => {
+        const sep = prev && !prev.endsWith('\n') ? ' ' : ''
+        return prev + sep + text
+      })
+      requestAnimationFrame(() => autoGrow())
+    })
+    return off
+  }, [effectiveSession])
+
   useEffect(() => {
     setHistIdx(-1)
     setDraftBackup('')
@@ -778,7 +792,7 @@ function MicToggle(): React.JSX.Element {
     <button
       className={`composer-mic ${listening ? 'active' : ''}`}
       onClick={() => void toggleAsr()}
-      title={listening ? 'Stop voice input' : 'Speak to type (Parakeet)'}
+      title={listening ? 'Stop voice input' : 'Speak to type'}
     >
       {listening ? <MicOffIcon size={16} /> : <MicIcon size={16} />}
     </button>
@@ -912,19 +926,32 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   const speakAloud = useStore(appStore, (s) => s.speakAloud)
   const spokenRef = useRef<Set<string>>(new Set())
+  const prevStreamingRef = useRef(false)
+  const prevSessionRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!speakAloud) return
+    // Switching sessions: discard the old streaming state so we never treat an
+    // old session's completion (or lack thereof) as a fresh response here.
+    if (prevSessionRef.current !== effectiveId) {
+      prevSessionRef.current = effectiveId
+      prevStreamingRef.current = streaming
+      return
+    }
+    // Speak only when a response just finished streaming — never when switching
+    // into an existing session with historical messages.
+    const finished = prevStreamingRef.current && !streaming
+    prevStreamingRef.current = streaming
+    if (!finished || !speakAloud) return
     const lastAssistant = turns[turns.length - 1]?.assistants[turns[turns.length - 1]?.assistants.length - 1]
     if (!lastAssistant) return
     if (!lastAssistant.info.time?.completed) return
     const text = msgText(lastAssistant)
     if (!text.trim()) return
-    const key = `${lastAssistant.info.id}:${text}`
+    const key = `${effectiveId}:${lastAssistant.info.id}:${text}`
     if (spokenRef.current.has(key)) return
     spokenRef.current.add(key)
     if (spokenRef.current.size > 200) spokenRef.current = new Set([...spokenRef.current].slice(-100))
     void speakText(text)
-  }, [turns, speakAloud])
+  }, [turns, streaming, speakAloud, effectiveId])
 
   const onScroll = (): void => {
     const el = scrollRef.current

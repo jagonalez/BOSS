@@ -127,6 +127,14 @@ app.whenReady().then(() => {
     callback({ responseHeaders: details.responseHeaders })
   })
 
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === 'media' || permission === 'mediaKeySystem') {
+      callback(true)
+      return
+    }
+    callback(false)
+  })
+
   createWindow()
   registerIpcOnce()
   loadRenderer()

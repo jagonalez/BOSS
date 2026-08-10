@@ -17,10 +17,13 @@
     "dist": "electron-vite build && electron-builder"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "highlight.js": "^11.11.1",
+    "kokoro-js": "^1.2.1",
     "node-pty": "^1.1.0",
+    "onnxruntime-node": "^1.27.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",

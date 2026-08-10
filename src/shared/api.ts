@@ -1,7 +1,8 @@
 import type {
   ApiRequest,
   ApiResponse,
-  AsrTranscriptEvent,
+  AsrTranscribeRequest,
+  AsrTranscribeResult,
   BrowseBounds,
   BrowseNavEvent,
   ComputerUseStatus,
@@ -14,7 +15,7 @@ import type {
   TerminalExitEvent,
   TtsSpeakRequest
 } from './ipc'
-import type { AsrStatus, SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
+import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
 
 export interface RalfApi {
   platform(): string
@@ -65,7 +66,5 @@ export interface RalfApi {
   ttsSpeak(req: TtsSpeakRequest): Promise<TtsSpeakResult>
   onSpeechStatusChanged(cb: (status: SpeechStatus) => void): () => void
 
-  asrStart(): Promise<AsrStatus>
-  asrStop(): Promise<AsrStatus>
-  onAsrTranscript(cb: (evt: AsrTranscriptEvent) => void): () => void
+  asrTranscribe(req: AsrTranscribeRequest): Promise<AsrTranscribeResult>
 }

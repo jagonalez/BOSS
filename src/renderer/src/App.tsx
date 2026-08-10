@@ -33,8 +33,7 @@ import {
   setAttention,
   clearAttention,
   loadSpeechPrefs,
-  applySpeechStatus,
-  handleAsrTranscript
+  applySpeechStatus
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -187,7 +186,6 @@ export function App(): React.JSX.Element {
     })
 
     const offSpeech = window.ralf.onSpeechStatusChanged(applySpeechStatus)
-    const offAsrTranscript = window.ralf.onAsrTranscript((evt) => handleAsrTranscript(evt.text))
 
     void window.ralf.ttsStatus().then((st) => applySpeechStatus({ tts: st, asr: appStore.getState().asr }))
 
@@ -215,7 +213,6 @@ export function App(): React.JSX.Element {
       offStatus()
       offProgress()
       offSpeech()
-      offAsrTranscript()
       window.clearTimeout(refreshTimer)
       void window.ralf.unsubscribeEvents()
     }

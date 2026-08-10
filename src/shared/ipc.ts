@@ -83,8 +83,13 @@ export interface TtsSpeakRequest {
   voice: string
 }
 
-export interface AsrTranscriptEvent {
+export interface AsrTranscribeRequest {
+  pcm: Float32Array
+}
+
+export interface AsrTranscribeResult {
   text: string
+  error?: string
 }
 
 export const IpcChannels = {
@@ -125,9 +130,7 @@ export const IpcChannels = {
   TtsStatus: 'tts:status',
   TtsSpeak: 'tts:speak',
   SpeechStatusChanged: 'speech:status-changed',
-  AsrStart: 'asr:start',
-  AsrStop: 'asr:stop',
-  AsrTranscript: 'asr:transcript'
+  AsrTranscribe: 'asr:transcribe'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

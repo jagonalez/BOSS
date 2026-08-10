@@ -64,9 +64,7 @@ const ralf: RalfApi = {
   ttsSpeak: (req) => ipcRenderer.invoke(IpcChannels.TtsSpeak, req),
   onSpeechStatusChanged: (cb) => subscribe(IpcChannels.SpeechStatusChanged, cb),
 
-  asrStart: () => ipcRenderer.invoke(IpcChannels.AsrStart),
-  asrStop: () => ipcRenderer.invoke(IpcChannels.AsrStop),
-  onAsrTranscript: (cb) => subscribe(IpcChannels.AsrTranscript, cb)
+  asrTranscribe: (req) => ipcRenderer.invoke(IpcChannels.AsrTranscribe, req)
 }
 
 contextBridge.exposeInMainWorld('ralf', ralf)
