@@ -1,4 +1,5 @@
-import { dialog, ipcMain, type WebContents } from 'electron'
+import { dialog, ipcMain, shell, type WebContents } from 'electron'
+import { execFile } from 'node:child_process'
 import {
   IpcChannels,
   type ApiRequest,
@@ -11,6 +12,7 @@ import type { EventStream } from './event-stream'
 import type { BrowseManager } from './browse'
 import type { OptionalDeps } from './optional-deps'
 import type { ComputerUse } from './computer-use'
+import type { PTYManager } from './pty-manager'
 
 export interface IpcDeps {
   server: OpenCodeServer
@@ -19,6 +21,7 @@ export interface IpcDeps {
   browse: BrowseManager
   optional: OptionalDeps
   computerUse: ComputerUse
+  pty: PTYManager
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -35,6 +38,8 @@ export function registerIpc(deps: IpcDeps): void {
   deps.browse.onNavigation = (state) => broadcast(IpcChannels.BrowseNavigation, state)
   deps.browse.onExternal = (url) => broadcast(IpcChannels.BrowseExternal, url)
   deps.computerUse.onStatusChange = (status) => broadcast(IpcChannels.ComputerUseStatus, status)
+  deps.pty.onData = (id, data) => broadcast(IpcChannels.TerminalData, { id, data })
+  deps.pty.onExit = (id, code) => broadcast(IpcChannels.TerminalExit, { id, code })
 
   ipcMain.handle(IpcChannels.ServerGetInfo, () => deps.server.info)
 
@@ -85,6 +90,16 @@ export function registerIpc(deps: IpcDeps): void {
     return true
   })
 
+  ipcMain.handle(IpcChannels.OpenExternal, (_e, url: string) => {
+    if (/^https?:/i.test(url)) void shell.openExternal(url)
+    return true
+  })
+
+  ipcMain.handle(IpcChannels.OpenPath, (_e, path: string) => {
+    void shell.openPath(path)
+    return true
+  })
+
   ipcMain.handle(IpcChannels.OptionalList, () => deps.optional.list())
 
   ipcMain.handle(IpcChannels.OptionalDownload, async (event, id) => {
@@ -119,5 +134,36 @@ export function registerIpc(deps: IpcDeps): void {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
+  })
+
+  ipcMain.handle(IpcChannels.TerminalCreate, (_e, body: { cwd?: string; cols?: number; rows?: number }) => {
+    return deps.pty.create(body.cwd, body.cols ?? 80, body.rows ?? 24)
+  })
+
+  ipcMain.handle(IpcChannels.TerminalWrite, (_e, body: { id: string; data: string }) => {
+    deps.pty.write(body.id, body.data)
+    return true
+  })
+
+  ipcMain.handle(IpcChannels.TerminalResize, (_e, body: { id: string; cols: number; rows: number }) => {
+    deps.pty.resize(body.id, body.cols, body.rows)
+    return true
+  })
+
+  ipcMain.handle(IpcChannels.TerminalDispose, (_e, id: string) => {
+    deps.pty.dispose(id)
+    return true
+  })
+
+  ipcMain.handle(IpcChannels.GitRun, (_event, body: { path: string; args: string[] }) => {
+    return new Promise((resolve) => {
+      execFile('git', body.args, { cwd: body.path, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+        resolve({
+          code: err ? (err as NodeJS.ErrnoException).code ?? 1 : 0,
+          stdout: String(stdout),
+          stderr: String(stderr)
+        })
+      })
+    })
   })
 }

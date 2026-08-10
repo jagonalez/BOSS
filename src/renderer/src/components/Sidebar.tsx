@@ -1,8 +1,25 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
-import { newSession, openProject, openProjectFolder, selectSession } from '../lib/actions'
+import {
+  archiveAllInPath,
+  deleteSession,
+  forkSession,
+  newChatInProject,
+  newSession,
+  openProject,
+  openProjectFolder,
+  selectSession,
+  toggleArchive
+} from '../lib/actions'
 import { ChatIcon, ChevronIcon, FolderIcon, PlusIcon } from './icons'
+
+interface CtxMenu {
+  x: number
+  y: number
+  project?: string
+  session?: SessionInfo
+}
 
 function SectionHeader({ label, onAdd, addTitle }: { label: string; onAdd: () => void; addTitle: string }): React.JSX.Element {
   return (
@@ -29,9 +46,13 @@ function projectName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-function SessionRow({ session, active }: { session: SessionInfo; active: boolean }): React.JSX.Element {
+function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: boolean; onCtx: (e: React.MouseEvent, s: SessionInfo) => void }): React.JSX.Element {
   return (
-    <div className={`item sub ${active ? 'active' : ''}`} onClick={() => selectSession(session.id)}>
+    <div
+      className={`item sub ${active ? 'active' : ''}`}
+      onClick={() => selectSession(session.id)}
+      onContextMenu={(e) => onCtx(e, session)}
+    >
       <span className="icon">
         <ChatIcon size={14} />
       </span>
@@ -47,11 +68,19 @@ export function Sidebar(): React.JSX.Element {
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const serverHealthy = useStore(appStore, (s) => s.serverHealthy)
   const projectPath = useStore(appStore, (s) => s.projectPath)
+  const archived = useStore(appStore, (s) => s.archived)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [ctx, setCtx] = useState<CtxMenu | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  const archivedSet = new Set(archived)
+  const visibleSessions = sessions.filter((s) => !archivedSet.has(s.id))
+  const archivedSessions = sessions.filter((s) => archivedSet.has(s.id))
 
   const sessionsByPath = new Map<string, SessionInfo[]>()
-  for (const session of sessions) {
-    const key = session.directory || session.path || ''
+  for (const session of visibleSessions) {
+    const raw = session.directory || session.path || ''
+    const key = raw === '/' ? '' : raw
     const list = sessionsByPath.get(key) ?? []
     list.push(session)
     sessionsByPath.set(key, list)
@@ -60,27 +89,67 @@ export function Sidebar(): React.JSX.Element {
   const projectPaths = Array.from(
     new Set(
       [
-        ...projects.map((p) => p.worktree ?? p.directory ?? p.path ?? '').filter(Boolean),
+        ...projects
+          .filter((p) => p.id !== 'global')
+          .map((p) => p.worktree ?? p.directory ?? p.path ?? '')
+          .filter((p) => p && p !== '/'),
         ...sessionsByPath.keys()
       ].filter(Boolean)
     )
   )
   const activePath = projectPath
 
-  const toggle = (path: string): void => {
-    const next = new Set(expanded)
-    if (next.has(path)) {
-      next.delete(path)
-    } else {
-      next.add(path)
+  useEffect(() => {
+    if (activePath && !expanded.has(activePath)) {
+      setExpanded((prev) => new Set(prev).add(activePath))
     }
-    setExpanded(next)
-  }
+  }, [activePath])
+
+  useEffect(() => {
+    if (!ctx) return
+    const close = (): void => setCtx(null)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [ctx])
 
   const open = (path: string): void => {
+    const next = new Set(expanded)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    setExpanded(next)
     if (path !== activePath) void openProject(path)
-    else toggle(path)
   }
+
+  const onProjectCtx = (e: React.MouseEvent, path: string): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCtx({ x: e.clientX, y: e.clientY, project: path })
+  }
+
+  const onSessionCtx = (e: React.MouseEvent, session: SessionInfo): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCtx({ x: e.clientX, y: e.clientY, session })
+  }
+
+  const menuItem = (label: string, fn: () => void): React.JSX.Element => (
+    <button
+      className="ctx-item"
+      onClick={() => {
+        setCtx(null)
+        fn()
+      }}
+    >
+      {label}
+    </button>
+  )
 
   return (
     <aside className="sidebar">
@@ -96,14 +165,28 @@ export function Sidebar(): React.JSX.Element {
       </button>
 
       <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="Add a project folder" />
-      <div className="list">
+      <div
+        className="list"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          const dropped = e.dataTransfer?.files?.[0] as File & { path?: string } | undefined
+          const path = dropped?.path
+          if (path) void openProject(path)
+        }}
+      >
         {projectPaths.map((path) => {
           const isActive = path === activePath
           const isExpanded = expanded.has(path)
           const pathSessions = sessionsByPath.get(path) ?? []
           return (
             <div key={path}>
-              <div className={`item dir ${isActive ? 'active' : ''}`} onClick={() => open(path)} title={path}>
+              <div
+                className={`item dir ${isActive ? 'active' : ''}`}
+                onClick={() => open(path)}
+                onContextMenu={(e) => onProjectCtx(e, path)}
+                title={path}
+              >
                 <span className="icon" style={{ transform: isExpanded ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s ease' }}>
                   <ChevronIcon size={14} />
                 </span>
@@ -116,7 +199,7 @@ export function Sidebar(): React.JSX.Element {
               {isExpanded &&
                 (pathSessions.length > 0 ? (
                   pathSessions.map((session) => (
-                    <SessionRow key={session.id} session={session} active={session.id === activeSessionId} />
+                    <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
                   ))
                 ) : (
                   <div style={{ padding: '4px 8px 4px 46px', fontSize: 12, color: 'var(--text-faint)' }}>
@@ -140,12 +223,28 @@ export function Sidebar(): React.JSX.Element {
       <SectionHeader label="Chats" onAdd={() => void newSession()} addTitle="New chat" />
       <div className="list">
         {looseChats.map((session) => (
-          <SessionRow key={session.id} session={session} active={session.id === activeSessionId} />
+          <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
         ))}
         {looseChats.length === 0 && (
           <div style={{ padding: '4px 8px', fontSize: 12, color: 'var(--text-faint)' }}>No chats yet</div>
         )}
       </div>
+
+      {archivedSessions.length > 0 && (
+        <>
+          <div className="section-label">Archived</div>
+          <div className="list">
+            {archivedSessions.map((session) => (
+              <div key={session.id} className="item sub" onContextMenu={(e) => onSessionCtx(e, session)} title={session.title || 'Untitled'}>
+                <span className="icon">
+                  <ChatIcon size={14} />
+                </span>
+                <span className="name" style={{ color: 'var(--text-faint)' }}>{session.title || 'Untitled'}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="footer">
         <span className={`status-dot ${serverHealthy ? 'ok' : 'pulse'}`} />
@@ -154,6 +253,30 @@ export function Sidebar(): React.JSX.Element {
           {projectName(activePath) || ''}
         </span>
       </div>
+
+      {ctx && (
+        <div ref={menuRef} className="ctx-menu" style={{ left: Math.min(ctx.x, window.innerWidth - 220), top: ctx.y }}>
+          {ctx.project ? (
+            <>
+              {menuItem('New chat here', () => void newChatInProject(ctx.project!))}
+              {menuItem('Archive all chats', () => archiveAllInPath(ctx.project!))}
+              {menuItem('Open in Finder', () => void window.ralf.openPath(ctx.project!))}
+            </>
+          ) : ctx.session ? (
+            <>
+              {menuItem('Open', () => selectSession(ctx.session!.id))}
+              {menuItem('Fork', () => void forkSession(ctx.session!.id))}
+              {archivedSet.has(ctx.session.id) ? (
+                menuItem('Unarchive', () => toggleArchive(ctx.session!.id))
+              ) : (
+                menuItem('Archive', () => toggleArchive(ctx.session!.id))
+              )}
+              {menuItem('Delete', () => void deleteSession(ctx.session!.id))}
+              {menuItem('Copy ID', () => void navigator.clipboard.writeText(ctx.session!.id))}
+            </>
+          ) : null}
+        </div>
+      )}
     </aside>
   )
 }

@@ -40,6 +40,15 @@ async function request<T>(method: HttpMethod, path: string, opts?: { query?: Rec
 
 export interface ModelOption {
   id: string
+  name?: string
+  free?: boolean
+  providerID: string
+}
+
+function isFreeCost(cost?: unknown): boolean {
+  if (!cost || typeof cost !== 'object') return false
+  const c = cost as { input?: number; output?: number; cache?: { read?: number; write?: number } }
+  return c.input === 0 && c.output === 0 && c.cache?.read === 0 && c.cache?.write === 0
 }
 
 export function providerModels(p: Provider): ModelOption[] {
@@ -47,11 +56,28 @@ export function providerModels(p: Provider): ModelOption[] {
   if (!models) return []
   if (Array.isArray(models)) {
     return models
-      .map((m) => (typeof m === 'string' ? { id: m } : { id: String((m as { id?: unknown })?.id ?? '') }))
+      .map((m) => {
+        if (typeof m === 'string') return { id: m, name: m, providerID: p.id }
+        const mm = m as { id?: unknown; name?: unknown; cost?: unknown }
+        return {
+          id: String(mm.id ?? ''),
+          name: typeof mm.name === 'string' ? mm.name : String(mm.id ?? ''),
+          free: isFreeCost(mm.cost),
+          providerID: p.id
+        }
+      })
       .filter((m) => Boolean(m.id))
   }
   if (typeof models === 'object') {
-    return Object.keys(models as Record<string, unknown>).map((id) => ({ id }))
+    return Object.entries(models as unknown as Record<string, unknown>).map(([id, value]) => {
+      const mm = (value ?? {}) as { name?: unknown; cost?: unknown }
+      return {
+        id,
+        name: typeof mm.name === 'string' ? mm.name : id,
+        free: isFreeCost(mm.cost),
+        providerID: p.id
+      }
+    })
   }
   return []
 }
@@ -66,7 +92,7 @@ export const OpenCode = {
     request<MessageWithParts[]>('GET', `/session/${id}/message`, { query: { limit } }),
   sendMessage: (id: string, parts: unknown[], opts?: { model?: string; agent?: string }) =>
     request<MessageWithParts>('POST', `/session/${id}/message`, { body: { parts, ...opts } }),
-  sendMessageAsync: (id: string, parts: unknown[], opts?: { model?: string; agent?: string }) =>
+  sendMessageAsync: (id: string, parts: unknown[], opts?: { model?: { providerID: string; modelID: string }; agent?: string }) =>
     request<unknown>('POST', `/session/${id}/prompt_async`, { body: { parts, ...opts } }),
   abort: (id: string) => request<boolean>('POST', `/session/${id}/abort`),
   fork: (id: string, messageID?: string) =>
@@ -83,7 +109,8 @@ export const OpenCode = {
   projectList: () => request<Project[]>('GET', '/project'),
   projectCurrent: () => request<Project>('GET', '/project/current'),
   agents: () => request<Agent[]>('GET', '/agent'),
-  providers: () => request<{ all: Provider[]; default: Record<string, string> }>('GET', '/provider'),
+  providers: () =>
+    request<{ all: Provider[]; default: Record<string, string>; connected?: string[] }>('GET', '/provider'),
   config: () => request<ConfigInfo>('GET', '/config'),
   findFile: (q: string) => request<string[]>('GET', '/find/file', { query: { query: q } })
 }

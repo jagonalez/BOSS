@@ -31,6 +31,23 @@ export interface PanelTab {
   sessionId?: string
 }
 
+export interface PanelGroup {
+  id: string
+  tabs: PanelTab[]
+  activeTabId: string | null
+  width: number
+}
+
+export const MAIN_MIN_WIDTH = 420
+export const SIDEBAR_FALLBACK_WIDTH = 280
+
+export interface Attachment {
+  id: string
+  name: string
+  mime: string
+  dataUrl: string
+}
+
 export interface AppState {
   serverUrl: string
   serverVersion: string
@@ -47,10 +64,10 @@ export interface AppState {
   fileContent: { path: string; content: string } | null
   todos: Record<string, Todo[]>
   permission: PermissionRequest | null
+  modelSwitch: { to: string } | null
   panelOpen: boolean
-  tabs: PanelTab[]
-  activeTabId: string | null
-  panelWidth: number
+  panelGroups: PanelGroup[]
+  reviewFile: string | null
   browse: BrowseNavigationState
   optional: OptionalComponentInfo[]
   optionalProgress: Partial<Record<OptionalComponentId, OptionalDownloadEvent>>
@@ -58,6 +75,9 @@ export interface AppState {
   streaming: boolean
   model: string | null
   projectPath: string
+  drafts: Record<string, string>
+  attachments: Record<string, Attachment[]>
+  archived: string[]
 }
 
 export const initialBrowseState: BrowseNavigationState = {
@@ -84,17 +104,20 @@ export const initialState: AppState = {
   fileContent: null,
   todos: {},
   permission: null,
+  modelSwitch: null,
   panelOpen: false,
-  tabs: [],
-  activeTabId: null,
-  panelWidth: 460,
+  panelGroups: [],
+  reviewFile: null,
   browse: initialBrowseState,
   optional: [],
   optionalProgress: {},
   computerUse: { enabled: false, running: false },
   streaming: false,
   model: null,
-  projectPath: ''
+  projectPath: '',
+  drafts: {},
+  attachments: {},
+  archived: []
 }
 
 export const appStore = new Store<AppState>(initialState)

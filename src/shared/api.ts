@@ -8,7 +8,9 @@ import type {
   OptionalComponentInfo,
   OptionalDownloadEvent,
   ProjectInfo,
-  ServerInfo
+  ServerInfo,
+  TerminalDataEvent,
+  TerminalExitEvent
 } from './ipc'
 
 export interface RalfApi {
@@ -31,6 +33,8 @@ export interface RalfApi {
   browseReload(): Promise<boolean>
   onBrowseNavigation(cb: (state: BrowseNavigationState) => void): () => void
   onBrowseExternal(cb: (url: string) => void): () => void
+  openExternal(url: string): Promise<boolean>
+  openPath(path: string): Promise<boolean>
 
   optionalList(): Promise<OptionalComponentInfo[]>
   optionalDownload(id: OptionalComponentId): Promise<{ ok: boolean; error?: string }>
@@ -42,4 +46,13 @@ export interface RalfApi {
   projectCurrent(): Promise<ProjectInfo>
   projectSet(path: string): Promise<ProjectInfo>
   projectChoose(): Promise<string | null>
+
+  terminalCreate(cwd?: string, cols?: number, rows?: number): Promise<string>
+  terminalWrite(id: string, data: string): Promise<boolean>
+  terminalResize(id: string, cols: number, rows: number): Promise<boolean>
+  terminalDispose(id: string): Promise<boolean>
+  onTerminalData(cb: (evt: TerminalDataEvent) => void): () => void
+  onTerminalExit(cb: (evt: TerminalExitEvent) => void): () => void
+
+  gitRun(path: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }>
 }

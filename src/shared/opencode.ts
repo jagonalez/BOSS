@@ -37,7 +37,7 @@ export interface Part {
   sessionID: string
   messageID: string
   text?: string
-  time?: { created?: number; completed?: number }
+  time?: { created?: number; completed?: number; start?: number; end?: number }
   state?: {
     status?: 'pending' | 'running' | 'completed' | 'error' | 'cancelled' | 'interrupted'
     error?: string

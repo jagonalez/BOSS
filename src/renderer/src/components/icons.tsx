@@ -118,3 +118,17 @@ export const PanelIcon = (p: IconProps): React.JSX.Element => (
     <path d="M15 4v16" />
   </Svg>
 )
+
+export const AttachmentIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="M21.4 11.05 12.25 20.2a4.5 4.5 0 0 1-6.36-6.36l9.19-9.19a2.75 2.75 0 0 1 3.89 3.89l-9.2 9.19a1 1 0 0 1-1.41-1.41l8.28-8.28" />
+  </Svg>
+)
+
+export const ExternalIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    <path d="M15 3h6v6" />
+    <path d="M10 14 21 3" />
+  </Svg>
+)

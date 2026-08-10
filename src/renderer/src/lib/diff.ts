@@ -21,7 +21,82 @@ function lcs(a: string[], b: string[]): number[][] {
   return dp
 }
 
-export function unifiedDiff(original: string, content: string): DiffLine[] {
+export function parseGitDiff(text: string): DiffLine[] {
+  const out: DiffLine[] = []
+  let oldNo = 0
+  let newNo = 0
+  let inHunk = false
+  for (const raw of text.split('\n')) {
+    const line = raw
+    if (line.startsWith('@@')) {
+      const m = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+      if (m) {
+        oldNo = Number(m[1])
+        newNo = Number(m[2])
+      }
+      out.push({ kind: 'hunk', oldNo, newNo, text: line })
+      inHunk = true
+      continue
+    }
+    if (!inHunk) continue
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      out.push({ kind: 'del', oldNo: oldNo++, newNo: null, text: line.slice(1) })
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      out.push({ kind: 'add', oldNo: null, newNo: newNo++, text: line.slice(1) })
+    } else {
+      out.push({ kind: 'ctx', oldNo: oldNo++, newNo: newNo++, text: line.startsWith(' ') ? line.slice(1) : line })
+    }
+  }
+  return out
+}
+
+export function parseGitNameStatus(text: string): Array<{ path: string; status: string }> {
+  const out: Array<{ path: string; status: string }> = []
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const m = /^(\S+)\t(.+)$/.exec(trimmed)
+    if (m) out.push({ status: m[1], path: m[2].trim() })
+  }
+  return out
+}
+
+export function parseGitLog(text: string): Array<{ sha: string; msg: string }> {
+  const out: Array<{ sha: string; msg: string }> = []
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    const idx = line.indexOf(' ')
+    if (idx > 0) out.push({ sha: line.slice(0, idx), msg: line.slice(idx + 1).trim() })
+  }
+  return out
+}
+
+export function parseGitBranches(text: string): string[] {
+  return text.split('\n').map((l) => l.trim()).filter(Boolean)
+}
+
+export function parseGitStatusPorcelain(text: string): { branch: string; files: Array<{ path: string; staged: boolean; unstaged: boolean; untracked: boolean }> } {
+  const files: Array<{ path: string; staged: boolean; unstaged: boolean; untracked: boolean }> = []
+  let branch = ''
+  for (const line of text.split('\n')) {
+    if (!line) continue
+    if (line.startsWith('##')) {
+      const m = /##\s+(\S+)/.exec(line)
+      if (m) branch = m[1].replace(/\.\.\./, '')
+      continue
+    }
+    const xy = line.slice(0, 2)
+    const path = line.slice(3)
+    if (xy[0] === '?') {
+      files.push({ path, staged: false, unstaged: false, untracked: true })
+    } else {
+      files.push({ path, staged: xy[0] !== ' ', unstaged: xy[1] !== ' ', untracked: false })
+    }
+  }
+  return { branch, files }
+}
+
+export function unifiedDiff(original: string, content: string, context = 3): DiffLine[] {
   const a = original.split('\n')
   const b = content.split('\n')
 
@@ -57,29 +132,48 @@ export function unifiedDiff(original: string, content: string): DiffLine[] {
     }
   }
 
+  const full = context >= ops.length
+  const nextChange: number[] = new Array(ops.length)
+  let nc = Infinity
+  for (let i = ops.length - 1; i >= 0; i--) {
+    nextChange[i] = nc
+    if (ops[i].kind !== 'eq') nc = i
+  }
+
   let oldNo = 1
   let newNo = 1
-  let lastChange: LineKind = 'ctx'
+  let lastChange = -Infinity
+  let skipping = false
   const out: DiffLine[] = []
-  for (const op of ops) {
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i]
     if (op.kind === 'eq') {
-      out.push({ kind: 'ctx', oldNo, newNo, text: op.text })
+      const near = full || i - lastChange <= context || nextChange[i] - i <= context
+      if (near) {
+        out.push({ kind: 'ctx', oldNo, newNo, text: op.text })
+        skipping = false
+      } else if (!skipping) {
+        out.push({ kind: 'hunk', oldNo, newNo, text: '⋯' })
+        skipping = true
+      }
       oldNo++
       newNo++
     } else if (op.kind === 'del') {
-      if (lastChange === 'ctx' && out.length) {
+      if (skipping && out[out.length - 1]?.kind !== 'hunk' && !full) {
         out.push({ kind: 'hunk', oldNo, newNo, text: '⋯' })
       }
       out.push({ kind: 'del', oldNo, newNo: null, text: op.text })
       oldNo++
-      lastChange = 'del'
+      lastChange = i
+      skipping = false
     } else {
-      if (lastChange === 'ctx' && out.length) {
+      if (skipping && out[out.length - 1]?.kind !== 'hunk' && !full) {
         out.push({ kind: 'hunk', oldNo, newNo, text: '⋯' })
       }
       out.push({ kind: 'add', oldNo: null, newNo, text: op.text })
       newNo++
-      lastChange = 'add'
+      lastChange = i
+      skipping = false
     }
   }
   return out

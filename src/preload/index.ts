@@ -34,6 +34,8 @@ const ralf: RalfApi = {
   browseReload: () => ipcRenderer.invoke(IpcChannels.BrowseReload),
   onBrowseNavigation: (cb) => subscribe(IpcChannels.BrowseNavigation, cb),
   onBrowseExternal: (cb) => subscribe(IpcChannels.BrowseExternal, cb),
+  openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OpenExternal, url),
+  openPath: (path: string) => ipcRenderer.invoke(IpcChannels.OpenPath, path),
 
   optionalList: () => ipcRenderer.invoke(IpcChannels.OptionalList),
   optionalDownload: (id) => ipcRenderer.invoke(IpcChannels.OptionalDownload, id),
@@ -44,7 +46,17 @@ const ralf: RalfApi = {
 
   projectCurrent: () => ipcRenderer.invoke(IpcChannels.ProjectCurrent),
   projectSet: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectSet, path),
-  projectChoose: () => ipcRenderer.invoke(IpcChannels.ProjectChoose)
+  projectChoose: () => ipcRenderer.invoke(IpcChannels.ProjectChoose),
+
+  terminalCreate: (cwd?: string, cols?: number, rows?: number) =>
+    ipcRenderer.invoke(IpcChannels.TerminalCreate, { cwd, cols, rows }),
+  terminalWrite: (id: string, data: string) => ipcRenderer.invoke(IpcChannels.TerminalWrite, { id, data }),
+  terminalResize: (id: string, cols: number, rows: number) =>
+    ipcRenderer.invoke(IpcChannels.TerminalResize, { id, cols, rows }),
+  terminalDispose: (id: string) => ipcRenderer.invoke(IpcChannels.TerminalDispose, id),
+  onTerminalData: (cb) => subscribe(IpcChannels.TerminalData, cb),
+  onTerminalExit: (cb) => subscribe(IpcChannels.TerminalExit, cb),
+  gitRun: (path: string, args: string[]) => ipcRenderer.invoke(IpcChannels.GitRun, { path, args })
 }
 
 contextBridge.exposeInMainWorld('ralf', ralf)

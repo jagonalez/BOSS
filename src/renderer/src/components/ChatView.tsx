@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { useStore, appStore } from '../state/AppState'
+import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part } from '@shared/opencode'
-import { abortRun, newSession, openProjectFolder, sendPrompt } from '../lib/actions'
-import { providerModels } from '../lib/opencode'
+import { abortRun, newSession, openProjectFolder, sendPrompt, setModel } from '../lib/actions'
 import { MessageText } from '../lib/text'
-import { ChevronIcon, FolderIcon, PlusIcon, SendIcon, StopIcon } from './icons'
+import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, PlusIcon, SendIcon, StopIcon } from './icons'
+import { StepCard } from './StepCard'
+import { ModelPicker } from './ModelPicker'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -103,27 +104,103 @@ function MessageView({ item }: { item: MessageWithParts }): React.JSX.Element {
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
       </div>
       <div className="msg-body">
-        {item.parts.map((part) => (
-          <PartView key={part.id} part={part} />
-        ))}
+        {isUser ? (
+          item.parts.map((part) => <PartView key={part.id} part={part} />)
+        ) : (
+          <>
+            <StepCard message={item} />
+            {item.parts
+              .filter((p) => p.type === 'text')
+              .map((part) => (
+                <PartView key={part.id} part={part} />
+              ))}
+          </>
+        )}
       </div>
     </div>
   )
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
-  const [text, setText] = useState('')
   const streaming = useStore(appStore, (s) => s.streaming)
-  const model = useStore(appStore, (s) => s.model)
-  const providers = useStore(appStore, (s) => s.providers)
   const hasSession = useStore(appStore, (s) => Boolean(sessionId ?? s.activeSessionId))
+  const effectiveSession = useStore(appStore, (s) => sessionId ?? s.activeSessionId)
+  const text = useStore(appStore, (s) => (effectiveSession ? s.drafts[effectiveSession] ?? '' : ''))
+  const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? [] : []))
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const setText = (value: string): void => {
+    if (!effectiveSession) return
+    appStore.setState((s) => ({ drafts: { ...s.drafts, [effectiveSession]: value } }))
+  }
+
+  const setAttachments = (list: Attachment[]): void => {
+    if (!effectiveSession) return
+    appStore.setState((s) => ({ attachments: { ...s.attachments, [effectiveSession]: list } }))
+  }
+
+  const addFiles = async (files: File[]): Promise<void> => {
+    if (!effectiveSession || files.length === 0) return
+    const loaded: Attachment[] = []
+    for (const f of files) {
+      if (f.size > 25 * 1024 * 1024) continue
+      try {
+        const dataUrl = await readFileAsDataUrl(f)
+        loaded.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: f.name, mime: f.type || 'application/octet-stream', dataUrl })
+      } catch {
+        /* ignore unreadable */
+      }
+    }
+    if (loaded.length) setAttachments([...attachments, ...loaded])
+  }
+
+  const onPaste = (e: React.ClipboardEvent): void => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const files = Array.from(items)
+      .filter((it) => it.kind === 'file')
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => Boolean(f))
+    if (files.length) {
+      e.preventDefault()
+      void addFiles(files)
+    }
+  }
+
+  const onDrop = (e: React.DragEvent): void => {
+    e.preventDefault()
+    if (e.dataTransfer?.files?.length) void addFiles(Array.from(e.dataTransfer.files))
+  }
 
   const submit = (): void => {
-    if (!text.trim() || !hasSession) return
-    void sendPrompt(text, sessionId)
+    if (!effectiveSession) return
+    if (!text.trim() && attachments.length === 0) return
+    void sendPrompt(text, sessionId, attachments)
     setText('')
+    setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  const onModelChange = (to: string): void => {
+    const state = appStore.getState()
+    if (to === state.model) return
+    const sid = sessionId ?? state.activeSessionId
+    const hasMessages = sid ? (state.messages[sid]?.length ?? 0) > 0 : false
+    if (hasMessages) {
+      appStore.setState({ modelSwitch: { to } })
+    } else {
+      setModel(to)
+    }
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -140,44 +217,136 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }
 
+  const canSend = text.trim().length > 0 || attachments.length > 0
+
   return (
     <div className="composer-wrap">
-      <div className="composer">
-        <textarea
-          ref={textareaRef}
-          placeholder={hasSession ? 'Ask opencode…' : 'Start a chat to ask opencode'}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            autoGrow()
-          }}
-          onKeyDown={onKeyDown}
-          rows={1}
-        />
-        <div className="row">
-          {providers.length > 0 && (
-            <select value={model ?? ''} onChange={(e) => appStore.setState({ model: e.target.value })}>
-              {providers.flatMap((p) =>
-                providerModels(p).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.id}
-                  </option>
-                ))
-              )}
-            </select>
-          )}
-          {streaming ? (
-            <button className="btn-send" onClick={() => void abortRun()} title="Stop">
-              <StopIcon size={16} />
+      <div className="composer" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+        {attachments.length > 0 && (
+          <div className="composer-attachments">
+            {attachments.map((a) => (
+              <div key={a.id} className={`attachment ${a.mime.startsWith('image/') ? '' : 'file'}`}>
+                {a.mime.startsWith('image/') ? (
+                  <img src={a.dataUrl} alt={a.name} />
+                ) : (
+                  <div className="attachment-file">
+                    <FileIcon size={16} />
+                    <span className="attachment-file-name">{a.name}</span>
+                  </div>
+                )}
+                <button
+                  className="attachment-remove"
+                  onClick={() => setAttachments(attachments.filter((x) => x.id !== a.id))}
+                  title="Remove"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="composer-row">
+          <textarea
+            ref={textareaRef}
+            placeholder={hasSession ? 'Ask opencode…' : 'Start a chat to ask opencode'}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value)
+              autoGrow()
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            rows={1}
+          />
+          <div className="row">
+            <button className="composer-attach" onClick={() => fileInputRef.current?.click()} title="Attach image">
+              <AttachmentIcon size={16} />
             </button>
-          ) : (
-            <button className="btn-send" disabled={!text.trim() || !hasSession} onClick={submit} title="Send">
-              <SendIcon size={16} />
-            </button>
-          )}
+            <ModelPicker onPick={onModelChange} />
+            {streaming ? (
+              <button className="btn-send" onClick={() => void abortRun()} title="Stop">
+                <StopIcon size={16} />
+              </button>
+            ) : (
+              <button className="btn-send" disabled={!canSend || !hasSession} onClick={submit} title="Send">
+                <SendIcon size={16} />
+              </button>
+            )}
+          </div>
         </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) void addFiles(Array.from(e.target.files))
+            e.target.value = ''
+          }}
+        />
       </div>
     </div>
+  )
+}
+
+interface TurnGroup {
+  user?: MessageWithParts
+  assistants: MessageWithParts[]
+}
+
+function groupTurns(messages: MessageWithParts[]): TurnGroup[] {
+  const groups: TurnGroup[] = []
+  let current: TurnGroup = { assistants: [] }
+  for (const m of messages) {
+    if (m.info.role === 'user') {
+      if (current.assistants.length > 0) groups.push(current)
+      current = { user: m, assistants: [] }
+    } else {
+      current.assistants.push(m)
+    }
+  }
+  if (current.user || current.assistants.length > 0) groups.push(current)
+  return groups
+}
+
+function combineAssistants(messages: MessageWithParts[]): MessageWithParts {
+  const parts = messages.flatMap((m) => m.parts)
+  const created = Math.min(...messages.map((m) => m.info.time?.created).filter((t): t is number => typeof t === 'number'))
+  const completed = Math.max(...messages.map((m) => m.info.time?.completed).filter((t): t is number => typeof t === 'number'))
+  return {
+    info: {
+      ...messages[0].info,
+      time: {
+        created: Number.isFinite(created) ? created : undefined,
+        completed: Number.isFinite(completed) ? completed : undefined
+      }
+    },
+    parts
+  }
+}
+
+function TurnView({ turn, modelChanged }: { turn: TurnGroup; modelChanged?: boolean }): React.JSX.Element {
+  const model = turn.assistants[0]?.info.model?.id
+  const texts = turn.assistants.flatMap((m) =>
+    m.parts
+      .filter((p) => p.type === 'text')
+      .map((p) => ({ key: p.id, part: p }))
+  )
+  return (
+    <>
+      {turn.user ? <MessageView item={turn.user} /> : null}
+      {turn.assistants.length > 0 ? (
+        <div className="msg assistant">
+          <div className="msg-body">
+            {modelChanged && model ? <span className="model-chip">{model}</span> : null}
+            <StepCard message={combineAssistants(turn.assistants)} />
+            {texts.map(({ key, part }) => (
+              <PartView key={key} part={part} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 }
 
@@ -221,9 +390,15 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   return (
     <div className="chat">
       <div className="messages" ref={scrollRef}>
-        {messages.map((item) => (
-          <MessageView key={item.info.id} item={item} />
-        ))}
+        {(() => {
+          let lastModel: string | undefined
+          return groupTurns(messages).map((turn, i) => {
+            const model = turn.assistants[0]?.info.model?.id
+            const changed = Boolean(model) && model !== lastModel
+            if (model) lastModel = model
+            return <TurnView key={i} turn={turn} modelChanged={changed} />
+          })
+        })()}
       </div>
       <Composer sessionId={sessionId} />
     </div>
