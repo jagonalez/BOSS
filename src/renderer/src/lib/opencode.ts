@@ -120,10 +120,12 @@ export const OpenCode = {
   diff: (id: string, messageID?: string) =>
     request<FileDiff[]>('GET', `/session/${id}/diff`, { query: { messageID } }),
   todos: (id: string) => request<Todo[]>('GET', `/session/${id}/todo`),
-  respondPermission: (sessionID: string, permissionID: string, response: string, remember?: boolean) =>
-    request<boolean>('POST', `/session/${sessionID}/permissions/${permissionID}`, { body: { response, remember } }),
+  respondPermission: (sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject') =>
+    request<boolean>('POST', `/session/${sessionID}/permissions/${permissionID}`, { body: { response } }),
   shell: (id: string, command: string, opts?: { model?: string; agent?: string }) =>
     request<MessageWithParts>('POST', `/session/${id}/shell`, { body: { command, ...opts } }),
+  summarize: (id: string, model: { providerID: string; modelID: string }) =>
+    request<boolean>('POST', `/session/${id}/summarize`, { body: model }),
   fileTree: (path = '') => request<FileNode[]>('GET', '/file', { query: { path } }),
   fileContent: (path: string) => request<FileContent>('GET', '/file/content', { query: { path } }),
   projectList: () => request<Project[]>('GET', '/project'),

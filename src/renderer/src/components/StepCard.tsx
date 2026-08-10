@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import type { MessageWithParts, Part } from '@shared/opencode'
 import { unifiedDiff, type DiffLine } from '../lib/diff'
-import { openReviewFile } from '../lib/actions'
+import { openReviewFile, selectSession } from '../lib/actions'
 import { ChevronIcon, ReviewIcon } from './icons'
 
 function formatDuration(ms: number): string {
@@ -129,6 +129,10 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
   const title = isEdit ? editPath(input) : part.state?.title || part.state?.tool || 'tool'
   const hasBody = Boolean(output && !isEdit) || isEdit
 
+  const meta = (part.state?.metadata ?? {}) as { sessionId?: string; parentSessionId?: string }
+  const subSessionId = part.state?.tool === 'task' ? meta.sessionId : undefined
+  const isTask = part.state?.tool === 'task'
+
   let diff: DiffLine[] | null = null
   if (isEdit) {
     const { oldS, newS } = editStrings(input)
@@ -152,6 +156,18 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
             }}
           >
             <ReviewIcon size={13} />
+          </span>
+        ) : null}
+        {isTask && subSessionId ? (
+          <span
+            className="tool-detail-open"
+            title="Open subagent session"
+            onClick={(e) => {
+              e.stopPropagation()
+              void selectSession(subSessionId)
+            }}
+          >
+            <span className="tool-detail-open-arrow">→</span>
           </span>
         ) : null}
         {hasBody ? (

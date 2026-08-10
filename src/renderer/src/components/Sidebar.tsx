@@ -50,6 +50,8 @@ function projectName(path: string): string {
 
 function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: boolean; onCtx: (e: React.MouseEvent, s: SessionInfo) => void }): React.JSX.Element {
   const meta = sessionMetaFor(session.id)
+  const busy = useStore(appStore, (s) => Boolean(s.sessionBusy[session.id]))
+  const compacting = useStore(appStore, (s) => Boolean(s.compacting[session.id]))
   return (
     <div
       className={`item sub ${active ? 'active' : ''}`}
@@ -63,6 +65,8 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
       <span className="name">{session.title || 'Untitled'}</span>
       {meta?.kind === 'fork' ? <span className="badge fork">fork</span> : null}
       {meta?.kind === 'side' ? <span className="badge side">side</span> : null}
+      {compacting ? <span className="badge compacting">compacting</span> : null}
+      {busy && !compacting ? <span className="spinner-sm" /> : null}
       <span className="meta">{timeAgo(session.time?.updated)}</span>
     </div>
   )
@@ -77,9 +81,18 @@ export function Sidebar(): React.JSX.Element {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const projectsRef = useRef<HTMLDivElement>(null)
+  const [projectsH, setProjectsH] = useState<number | null>(() => {
+    try {
+      const saved = Number(localStorage.getItem('ralf.sidebarProjectsH'))
+      return Number.isFinite(saved) && saved > 0 ? saved : null
+    } catch {
+      return null
+    }
+  })
 
   const archivedSet = new Set(archived)
-  const visibleSessions = sessions.filter((s) => !archivedSet.has(s.id))
+  const visibleSessions = sessions.filter((s) => !archivedSet.has(s.id) && !s.parentID)
   const archivedSessions = sessions.filter((s) => archivedSet.has(s.id))
 
   const sessionsByPath = new Map<string, SessionInfo[]>()
@@ -135,6 +148,29 @@ export function Sidebar(): React.JSX.Element {
     if (path !== activePath) void openProject(path)
   }
 
+  const onDividerDown = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = projectsH ?? projectsRef.current?.getBoundingClientRect().height ?? 200
+    const onMove = (ev: MouseEvent): void => {
+      const h = Math.min(Math.max(60, startH + (ev.clientY - startY)), 480)
+      setProjectsH(h)
+      try {
+        localStorage.setItem('ralf.sidebarProjectsH', String(h))
+      } catch {
+        /* ignore */
+      }
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+    }
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   const onProjectCtx = (e: React.MouseEvent, path: string): void => {
     e.preventDefault()
     e.stopPropagation()
@@ -172,17 +208,19 @@ export function Sidebar(): React.JSX.Element {
         <span>New chat</span>
       </button>
 
-      <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="Add a project folder" />
-      <div
-        className="list"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault()
-          const dropped = e.dataTransfer?.files?.[0] as File & { path?: string } | undefined
-          const path = dropped?.path
-          if (path) void openProject(path)
-        }}
-      >
+      <div className="sidebar-section projects" style={projectsH ? { height: projectsH } : undefined}>
+        <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="Add a project folder" />
+        <div
+          className="list"
+          ref={projectsRef}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault()
+            const dropped = e.dataTransfer?.files?.[0] as File & { path?: string } | undefined
+            const path = dropped?.path
+            if (path) void openProject(path)
+          }}
+        >
         {projectPaths.map((path) => {
           const isActive = path === activePath
           const isExpanded = expanded.has(path)
@@ -227,9 +265,11 @@ export function Sidebar(): React.JSX.Element {
           <span className="name">Open folder…</span>
         </div>
       </div>
+      </div>
+      <div className="sidebar-divider" onMouseDown={onDividerDown} title="Drag to resize" />
 
       <SectionHeader label="Chats" onAdd={() => void newSession()} addTitle="New chat" />
-      <div className="list">
+      <div className="list sidebar-section-chats">
         {looseChats.map((session) => (
           <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
         ))}

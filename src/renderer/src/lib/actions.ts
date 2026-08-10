@@ -30,6 +30,14 @@ export function upsertSessionMeta(sessionId: string, patch: Partial<SessionMeta>
   })
 }
 
+export function setAttention(kind: 'permission' | 'done' | 'error'): void {
+  appStore.setState({ attention: { kind, ts: Date.now() } })
+}
+
+export function clearAttention(): void {
+  if (appStore.getState().attention) appStore.setState({ attention: null })
+}
+
 export function loadChatOrder(): void {
   try {
     const parsed = JSON.parse(localStorage.getItem('ralf.chatOrder') ?? '[]')
@@ -76,6 +84,17 @@ export async function newChatWithPrompt(prompt: string, attachments?: Attachment
 
 export function sessionMetaFor(sessionId: string): SessionMeta | undefined {
   return appStore.getState().sessionMeta[sessionId]
+}
+
+export function syncPanelToMeta(): void {
+  const s = appStore.getState()
+  if (!s.activeSessionId) return
+  upsertSessionMeta(s.activeSessionId, { panelGroups: s.panelGroups })
+}
+
+export function loadPanelForSession(sessionId: string): void {
+  const meta = appStore.getState().sessionMeta[sessionId]
+  appStore.setState({ panelGroups: meta?.panelGroups ? JSON.parse(JSON.stringify(meta.panelGroups)) : [] })
 }
 
 export async function runThreadReview(sessionID: string, target: string): Promise<void> {
@@ -242,7 +261,7 @@ export function setAgent(id: string): void {
   }
 }
 
-export async function autoRespond(sessionID: string, permissionID: string, response: string): Promise<void> {
+export async function autoRespond(sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject'): Promise<void> {
   try {
     await OpenCode.respondPermission(sessionID, permissionID, response)
   } catch {
@@ -329,7 +348,8 @@ export function refreshStreaming(): void {
   const last = msgs[msgs.length - 1]
   const awaiting =
     last !== undefined && (last.info.role === 'user' || (last.info.role === 'assistant' && !last.info.time?.completed))
-  const working = runningPart || awaiting
+  const busy = Boolean(s.sessionBusy[sid]) || Boolean(s.compacting[sid])
+  const working = runningPart || awaiting || busy
   if (working !== s.streaming) appStore.setState({ streaming: working })
 }
 
@@ -613,6 +633,24 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   setTimeout(() => {
     void loadMessages(sessionID)
   }, 1200)
+}
+
+export async function compactSession(sessionID: string): Promise<void> {
+  const cur = appStore.getState()
+  const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
+  if (!modelKey) {
+    appStore.setState({ lastError: 'Select a model first to compact the session.' })
+    return
+  }
+  appStore.setState((s) => ({ compacting: { ...s.compacting, [sessionID]: true } }))
+  try {
+    await OpenCode.summarize(sessionID, modelKey)
+  } catch (err) {
+    appStore.setState({ lastError: errorSummary(err) })
+  }
+  appStore.setState((s) => ({ compacting: { ...s.compacting, [sessionID]: false } }))
+  await loadMessages(sessionID)
+  await refreshSessions()
 }
 
 export async function abortRun(): Promise<void> {
