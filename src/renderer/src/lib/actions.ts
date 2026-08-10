@@ -307,8 +307,46 @@ export async function revertMessage(sessionID: string, messageID: string): Promi
   } catch {
     /* ignore */
   }
+  const state = appStore.getState()
+  const msgs = state.messages[sessionID] ?? []
+  const idx = msgs.findIndex((m) => m.info.id === messageID)
+  const revertedIds =
+    idx >= 0
+      ? msgs.slice(idx).map((m) => m.info.id)
+      : [messageID]
+  appStore.setState((s) => ({
+    reverted: { ...s.reverted, [sessionID]: [...new Set([...(s.reverted[sessionID] ?? []), ...revertedIds])] },
+    gitRefresh: s.gitRefresh + 1
+  }))
   await loadMessages(sessionID)
   await refreshSessions()
+  await refreshFiles()
+}
+
+export async function unrevertSession(sessionID: string): Promise<void> {
+  try {
+    await OpenCode.unrevert(sessionID)
+  } catch {
+    /* ignore */
+  }
+  appStore.setState((s) => {
+    const reverted = { ...s.reverted }
+    delete reverted[sessionID]
+    return { reverted, gitRefresh: s.gitRefresh + 1 }
+  })
+  await loadMessages(sessionID)
+  await refreshSessions()
+  await refreshFiles()
+}
+
+export async function forkFromMessage(sessionID: string, messageID: string): Promise<void> {
+  try {
+    const session = await OpenCode.fork(sessionID, messageID)
+    await refreshSessions()
+    selectSession(session.id)
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function editMessage(sessionID: string, messageID: string, text: string): Promise<void> {

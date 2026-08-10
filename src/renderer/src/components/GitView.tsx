@@ -15,6 +15,7 @@ const SCOPE_LABELS: Record<Scope, string> = {
 
 export function GitView(): React.JSX.Element {
   const projectPath = useStore(appStore, (s) => s.projectPath)
+  const gitRefresh = useStore(appStore, (s) => s.gitRefresh)
   const [scope, setScope] = useState<Scope>('worktree')
   const [branches, setBranches] = useState<string[]>([])
   const [baseBranch, setBaseBranch] = useState('origin/main')
@@ -40,7 +41,7 @@ export function GitView(): React.JSX.Element {
 
   useEffect(() => {
     if (scope !== 'commits') void loadScope()
-  }, [projectPath, scope, baseBranch])
+  }, [projectPath, scope, baseBranch, gitRefresh])
 
   async function loadScope(): Promise<void> {
     setError('')

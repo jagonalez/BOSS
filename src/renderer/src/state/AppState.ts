@@ -87,6 +87,8 @@ export interface AppState {
   attachments: Record<string, Attachment[]>
   history: Record<string, string[]>
   archived: string[]
+  reverted: Record<string, string[]>
+  gitRefresh: number
 }
 
 export const initialBrowseState: BrowseNavigationState = {
@@ -134,7 +136,9 @@ export const initialState: AppState = {
   drafts: {},
   attachments: {},
   history: {},
-  archived: []
+  archived: [],
+  reverted: {},
+  gitRefresh: 0
 }
 
 export const appStore = new Store<AppState>(initialState)

@@ -1,10 +1,9 @@
-import { utilityProcess, type UtilityProcess } from 'electron'
 import type { ComputerUseStatus } from '@shared/ipc'
 import type { ApiClient } from './api-client'
 
 export class ComputerUse {
-  private helper: UtilityProcess | null = null
   private registered = false
+  private enabled = false
 
   onStatusChange?: (status: ComputerUseStatus) => void
 
@@ -14,30 +13,12 @@ export class ComputerUse {
   ) {}
 
   get status(): ComputerUseStatus {
-    const running = this.helper !== null
-    return { enabled: running, running }
+    return { enabled: this.enabled, running: this.registered }
   }
 
   async setEnabled(on: boolean): Promise<ComputerUseStatus> {
-    if (on && !this.helper) {
-      await this.start()
-    } else if (!on && this.helper) {
-      this.stop()
-    }
-    this.onStatusChange?.(this.status)
-    return this.status
-  }
-
-  private async start(): Promise<void> {
-    try {
-      const child = utilityProcess.fork(this.helperPath, [], { stdio: 'ignore' })
-      child.on('exit', () => {
-        this.helper = null
-        this.registered = false
-        this.onStatusChange?.(this.status)
-      })
-      this.helper = child
-      if (!this.registered) {
+    if (on && !this.registered) {
+      try {
         const res = await this.api.request({
           method: 'POST',
           path: '/mcp',
@@ -51,20 +32,16 @@ export class ComputerUse {
           }
         })
         this.registered = res.status >= 200 && res.status < 300
+      } catch {
+        this.registered = false
       }
-    } catch {
-      this.helper?.kill()
-      this.helper = null
     }
-  }
-
-  stop(): void {
-    this.helper?.kill()
-    this.helper = null
-    this.registered = false
+    this.enabled = on
+    this.onStatusChange?.(this.status)
+    return this.status
   }
 
   async dispose(): Promise<void> {
-    this.stop()
+    this.enabled = false
   }
 }
