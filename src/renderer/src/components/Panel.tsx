@@ -111,8 +111,23 @@ function AddPanelView({ group }: { group: PanelGroup }): React.JSX.Element {
 function GroupPanel({ group }: { group: PanelGroup }): React.JSX.Element {
   const [adding, setAdding] = useState(false)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [overIndex, setOverIndex] = useState<number | null>(null)
   const existing = useExistingKinds()
   const active = group.tabs.find((t) => t.id === group.activeTabId) ?? group.tabs[group.tabs.length - 1]
+
+  const reorder = (from: number, to: number): void => {
+    if (from === to) return
+    appStore.setState((s) => ({
+      panelGroups: s.panelGroups.map((g) => {
+        if (g.id !== group.id) return g
+        const tabs = [...g.tabs]
+        const [moved] = tabs.splice(from, 1)
+        tabs.splice(to, 0, moved)
+        return { ...g, tabs }
+      })
+    }))
+  }
 
   const toggleAdd = (e: React.MouseEvent): void => {
     const next = !adding
@@ -128,19 +143,38 @@ function GroupPanel({ group }: { group: PanelGroup }): React.JSX.Element {
       {group.tabs.length > 0 ? (
         <>
           <div className="panel-tabs">
-            {group.tabs.map((tab) => {
+            {group.tabs.map((tab, i) => {
               const def = PANEL_KINDS.find((k) => k.kind === tab.kind)!
               const Icon = def.icon
               return (
                 <div
                   key={tab.id}
-                  className={`panel-tab ${tab.id === active.id ? 'active' : ''}`}
+                  className={`panel-tab ${tab.id === active.id ? 'active' : ''} ${dragIndex != null && overIndex === i ? 'drag-over' : ''} ${dragIndex === i ? 'dragging' : ''}`}
                   onClick={() =>
                     appStore.setState((s) => ({
                       panelGroups: s.panelGroups.map((g) => (g.id === group.id ? { ...g, activeTabId: tab.id } : g))
                     }))
                   }
                   title={def.label}
+                  draggable
+                  onDragStart={() => {
+                    setDragIndex(i)
+                    setOverIndex(null)
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    if (dragIndex != null && i !== dragIndex) setOverIndex(i)
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    if (dragIndex != null) reorder(dragIndex, i)
+                    setDragIndex(null)
+                    setOverIndex(null)
+                  }}
+                  onDragEnd={() => {
+                    setDragIndex(null)
+                    setOverIndex(null)
+                  }}
                 >
                   <span className="icon">
                     <Icon size={13} />

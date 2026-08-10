@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command } from '@shared/opencode'
-import { abortRun, newSession, openProjectFolder, pushHistory, runCommand, sendPrompt, setAgent, setMode, setModel } from '../lib/actions'
+import { abortRun, editMessage, forkFromMessage, newSession, openProjectFolder, pushHistory, revertMessage, runCommand, sendPrompt, setAgent, setMode, setModel, unrevertSession } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -97,6 +97,14 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
   }
 }
 
+function msgText(m: MessageWithParts): string {
+  return m.parts
+    .filter((p) => p.type === 'text')
+    .map((p) => partText(p))
+    .filter(Boolean)
+    .join('\n')
+}
+
 function MessageError({ error }: { error?: unknown }): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   if (!error) return null
@@ -117,10 +125,21 @@ function MessageError({ error }: { error?: unknown }): React.JSX.Element | null 
   )
 }
 
-function MessageView({ item }: { item: MessageWithParts }): React.JSX.Element {
+function MessageView({
+  item,
+  onCtx
+}: {
+  item: MessageWithParts
+  onCtx?: (e: React.MouseEvent, item: MessageWithParts) => void
+}): React.JSX.Element {
   const isUser = item.info.role === 'user'
   return (
-    <div className={`msg ${isUser ? 'user' : 'assistant'}`}>
+    <div className={`msg ${isUser ? 'user' : 'assistant'}`} onContextMenu={onCtx ? (e) => onCtx(e, item) : undefined}>
+      {onCtx ? (
+        <button className="msg-more" onClick={(e) => onCtx(e, item)} title="Message options">
+          ⋯
+        </button>
+      ) : null}
       <div className="msg-role">
         <span>{isUser ? 'You' : 'opencode'}</span>
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
@@ -159,7 +178,8 @@ function ModePicker(): React.JSX.Element {
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  const otherAgents = agents.filter((a) => a.id !== 'build' && a.id !== 'plan')
+  const INTERNAL_AGENTS = new Set(['build', 'plan', 'compaction', 'title', 'summary'])
+  const otherAgents = agents.filter((a) => a.id && !INTERNAL_AGENTS.has(a.id))
   const label =
     mode === 'auto' ? 'Auto' : mode === 'plan' ? 'Plan' : agent && agent !== 'build' ? agent : 'Ask'
 
@@ -603,19 +623,36 @@ function combineAssistants(messages: MessageWithParts[]): MessageWithParts {
   }
 }
 
-function TurnView({ turn, modelChanged }: { turn: TurnGroup; modelChanged?: boolean }): React.JSX.Element {
+function TurnView({
+  turn,
+  modelChanged,
+  onCtx
+}: {
+  turn: TurnGroup
+  modelChanged?: boolean
+  onCtx?: (e: React.MouseEvent, item: MessageWithParts) => void
+}): React.JSX.Element {
   const model = turn.assistants[0]?.info.model?.id
   const texts = turn.assistants.flatMap((m) =>
     m.parts
       .filter((p) => p.type === 'text')
       .map((p) => ({ key: p.id, part: p }))
   )
+  const lastAssistant = turn.assistants[turn.assistants.length - 1]
   return (
     <>
-      {turn.user ? <MessageView item={turn.user} /> : null}
+      {turn.user ? <MessageView item={turn.user} onCtx={onCtx} /> : null}
       {turn.assistants.length > 0 ? (
-        <div className="msg assistant">
-          <MessageError error={turn.assistants[turn.assistants.length - 1].info.error} />
+        <div
+          className="msg assistant"
+          onContextMenu={onCtx && lastAssistant ? (e) => onCtx(e, lastAssistant) : undefined}
+        >
+          {onCtx && lastAssistant ? (
+            <button className="msg-more" onClick={(e) => onCtx(e, lastAssistant)} title="Message options">
+              ⋯
+            </button>
+          ) : null}
+          <MessageError error={lastAssistant.info.error} />
           <div className="msg-body">
             {modelChanged && model ? <span className="model-chip">{model}</span> : null}
             <StepCard message={combineAssistants(turn.assistants)} />
@@ -633,12 +670,39 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
+  const revertedIds = useStore(appStore, (s) => (effectiveId ? new Set(s.reverted[effectiveId] ?? []) : new Set()))
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [msgCtx, setMsgCtx] = useState<{ x: number; y: number; message: MessageWithParts } | null>(null)
+  const msgCtxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages.length, effectiveId])
+
+  useEffect(() => {
+    if (!msgCtx) return
+    const close = (): void => setMsgCtx(null)
+    const onDoc = (e: MouseEvent): void => {
+      if (msgCtxRef.current && !msgCtxRef.current.contains(e.target as Node)) close()
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [msgCtx])
+
+  const onMsgCtx = (e: React.MouseEvent, message: MessageWithParts): void => {
+    e.preventDefault()
+    setMsgCtx({ x: e.clientX, y: e.clientY, message })
+  }
+
+  const menuText = msgCtx ? msgText(msgCtx.message) : ''
 
   if (!effectiveId) {
     return (
@@ -668,17 +732,85 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   return (
     <div className="chat">
+      {revertedIds.size > 0 && (
+        <div className="reverted-banner">
+          <span>{revertedIds.size} message{revertedIds.size === 1 ? '' : 's'} reverted — file changes undone.</span>
+          <button className="btn-ghost" onClick={() => effectiveId && void unrevertSession(effectiveId)}>
+            Undo revert
+          </button>
+        </div>
+      )}
       <div className="messages" ref={scrollRef}>
         {(() => {
           let lastModel: string | undefined
-          return groupTurns(messages).map((turn, i) => {
+          const visible = messages.filter((m) => !revertedIds.has(m.info.id))
+          return groupTurns(visible).map((turn, i) => {
             const model = turn.assistants[0]?.info.model?.id
             const changed = Boolean(model) && model !== lastModel
             if (model) lastModel = model
-            return <TurnView key={i} turn={turn} modelChanged={changed} />
+            return <TurnView key={i} turn={turn} modelChanged={changed} onCtx={onMsgCtx} />
           })
         })()}
       </div>
+      {msgCtx && (
+        <div ref={msgCtxRef} className="ctx-menu" style={{ left: Math.min(msgCtx.x, window.innerWidth - 220), top: msgCtx.y }}>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              if (effectiveId) {
+                appStore.setState({
+                  confirm: {
+                    title: 'Revert message?',
+                    message: 'This removes this message and everything after it.',
+                    confirmLabel: 'Revert',
+                    destructive: true,
+                    action: () => void revertMessage(effectiveId, msgCtx.message.info.id)
+                  }
+                })
+              }
+              setMsgCtx(null)
+            }}
+          >
+            Revert
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              if (effectiveId) void editMessage(effectiveId, msgCtx.message.info.id, menuText)
+              setMsgCtx(null)
+            }}
+          >
+            Rewrite
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              if (effectiveId) void forkFromMessage(effectiveId, msgCtx.message.info.id)
+              setMsgCtx(null)
+            }}
+          >
+            Fork from here
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              void navigator.clipboard.writeText(menuText)
+              setMsgCtx(null)
+            }}
+          >
+            Copy text
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              void navigator.clipboard.writeText(msgCtx.message.info.id)
+              setMsgCtx(null)
+            }}
+          >
+            Copy ID
+          </button>
+        </div>
+      )}
       <Composer sessionId={sessionId} />
     </div>
   )
