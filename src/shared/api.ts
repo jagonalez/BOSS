@@ -1,6 +1,7 @@
 import type {
   ApiRequest,
   ApiResponse,
+  AsrTranscriptEvent,
   BrowseBounds,
   BrowseNavEvent,
   ComputerUseStatus,
@@ -10,8 +11,10 @@ import type {
   ProjectInfo,
   ServerInfo,
   TerminalDataEvent,
-  TerminalExitEvent
+  TerminalExitEvent,
+  TtsSpeakRequest
 } from './ipc'
+import type { AsrStatus, SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
 
 export interface RalfApi {
   platform(): string
@@ -57,4 +60,12 @@ export interface RalfApi {
   onTerminalExit(cb: (evt: TerminalExitEvent) => void): () => void
 
   gitRun(path: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }>
+
+  ttsStatus(): Promise<TtsStatus>
+  ttsSpeak(req: TtsSpeakRequest): Promise<TtsSpeakResult>
+  onSpeechStatusChanged(cb: (status: SpeechStatus) => void): () => void
+
+  asrStart(): Promise<AsrStatus>
+  asrStop(): Promise<AsrStatus>
+  onAsrTranscript(cb: (evt: AsrTranscriptEvent) => void): () => void
 }

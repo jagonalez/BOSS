@@ -162,3 +162,24 @@ export const PaletteIcon = (p: IconProps): React.JSX.Element => (
     <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2Z" />
   </Svg>
 )
+
+export const MicIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+  </Svg>
+)
+
+export const MicOffIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0 0 14 0M12 18v3M3 3l18 18" />
+  </Svg>
+)
+
+export const VolumeIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8 8 0 0 1 0 12" />
+  </Svg>
+)
