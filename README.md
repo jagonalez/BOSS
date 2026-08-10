@@ -9,6 +9,7 @@ Codex Desktop pairs a chat UI with an app-server that runs the coding agent. Ral
 ## Features
 
 - **Chat** — streamed conversations with opencode, model picker, thinking-mode toggle, permission prompts, abort/stop.
+- **Voice** — local text-to-speech (Kokoro) and speech-to-text (Whisper), both running in-process via ONNX. Read assistant messages aloud, or dictate into the composer.
 - **Projects** — open any folder; Ralf restarts `opencode serve` in that directory and groups its chats under it. Sessions are grouped by their directory (opencode has no native chat-vs-project concept — we bucket them ourselves). The last project you had open is remembered and reopened on launch.
 - **Panel** (right side, resizable via the edge handle) — add any of these as closable tabs:
   - **Review** — per-session diff of changed files (single instance only).
@@ -26,6 +27,7 @@ Codex Desktop pairs a chat UI with an app-server that runs the coding agent. Ral
 │  • OpenCodeServer — spawns `opencode serve` on a random port   │
 │    with a generated password, health-checks, auto-restarts     │
 │  • EventStream — forwards opencode SSE to the renderer         │
+│  • SpeechManager — in-process TTS (Kokoro) + ASR (Whisper)      │
 │  • BrowseManager — isolated WebContentsView for the Browser    │
 │  • typed IPC (src/shared)                                      │
 ├───────────────────────────────────────────────────────────────┤
@@ -36,6 +38,30 @@ Codex Desktop pairs a chat UI with an app-server that runs the coding agent. Ral
 ```
 
 The renderer never talks to opencode directly: every request goes through main-process IPC, so the server URL/password never leak to page content.
+
+## Voice (TTS & ASR)
+
+Ralf ships local speech built on [`@huggingface/transformers`](https://www.npmjs.com/package/@huggingface/transformers) — no Python, no separate runtimes. On first use, the models download automatically and are cached on disk:
+
+| Model | Size (approx.) | Used for |
+| --- | --- | --- |
+| `onnx-community/Kokoro-82M-v1.0-ONNX` (q8) | ~90 MB | TTS |
+| `onnx-community/whisper-base` (q8) | ~150 MB | ASR |
+
+**Read responses aloud (TTS)**
+- Hover any assistant message and click the speaker icon.
+- Or enable **Settings → Voice → "Speak responses aloud"** to auto-read new responses.
+- Pick a voice (28 Kokoro voices) and hit **Preview** in Settings. First click downloads the model; afterwards it's instant.
+
+**Dictate a message (ASR)**
+- Click the **mic button** in the composer, start talking — the transcript streams in live and stays editable.
+- Click the mic again to stop. First use prompts macOS for microphone access (System Settings → Privacy & Security → Microphone) and downloads the Whisper model.
+
+### Configuration
+
+| Env var | Purpose |
+| --- | --- |
+| `RALF_MODEL_CACHE` | Directory for downloaded models (default `~/.cache/ralf/models`). Point multiple apps at the same path to share weights. |
 
 ## Getting started
 
@@ -74,6 +100,7 @@ The packaged app uses the bundled binary; in dev it uses your PATH `opencode`.
 | `RALF_SERVER_URL` / `RALF_SERVER_PASSWORD` | Connect to an already-running `opencode serve` instead of spawning one |
 | `RALF_OPTIONAL_CDN` | Base URL for optional component downloads (browser-core, computer-use) |
 | `RALF_DEBUG` | Verbose logging from the opencode child process |
+| `RALF_MODEL_CACHE` | Directory for speech model downloads (default `~/.cache/ralf/models`) |
 
 ## Project structure
 
