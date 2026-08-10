@@ -1,6 +1,7 @@
 import { appStore, upsertMessagesFromList, type Attachment, type PanelKind, type PanelTab } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
+import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 function persistSessionMeta(meta: Record<string, SessionMeta>): void {
@@ -847,38 +848,108 @@ export async function speakText(text: string): Promise<void> {
 
 export function stopSpeaking(): void {
   ttsAudio?.pause()
-  ttsAudio = undefined
+  ttsAudio = null
+}
+
+let micSession: ReturnType<typeof startMicCapture> extends Promise<infer T> ? T | null : null = null
+let micDrainTimer: number | null = null
+let micTranscribing = false
+let micSessionId: string | null = null
+
+export interface AsrTextEvent {
+  sessionId: string
+  text: string
+}
+
+const asrTextListeners = new Set<(evt: AsrTextEvent) => void>()
+
+export function onAsrText(cb: (evt: AsrTextEvent) => void): () => void {
+  asrTextListeners.add(cb)
+  return () => {
+    asrTextListeners.delete(cb)
+  }
+}
+
+function emitAsrText(sessionId: string, text: string): void {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  for (const cb of asrTextListeners) cb({ sessionId, text: trimmed })
 }
 
 export async function toggleAsr(): Promise<void> {
   const cur = appStore.getState()
-  if (cur.asr.listening) {
-    const status = await window.ralf.asrStop()
-    appStore.setState({ asr: status })
+  if (cur.asr.listening || micSession) {
+    await stopAsrRecording()
     return
   }
-  const status = await window.ralf.asrStart()
-  appStore.setState({ asr: status })
-  if (!status.listening && status.error) {
-    appStore.setState({ lastError: `Speech input: ${status.error}` })
+  micSessionId = cur.activeSessionId
+  try {
+    micSession = await startMicCapture()
+    appStore.setState((s) => ({ asr: { ...s.asr, listening: true } }))
+    // While recording, transcribe a rolling segment every ~2.2s so text
+    // appears live instead of only when the button is released.
+    micDrainTimer = window.setInterval(() => {
+      void transcribeMicSegment()
+    }, 2200)
+  } catch (err) {
+    micSession = null
+    appStore.setState({ lastError: `Mic: ${errorSummary(err)}` })
+  }
+}
+
+async function transcribeMicSegment(): Promise<void> {
+  if (!micSession || micTranscribing) return
+  micTranscribing = true
+  try {
+    const pcm = micSession.drain()
+    if (pcm.length < 8000) return // less than ~0.5s — wait for more
+    const { text, error } = await window.ralf.asrTranscribe({ pcm })
+    if (error) {
+      appStore.setState({ lastError: `Speech input: ${error}` })
+      return
+    }
+    if (micSessionId) emitAsrText(micSessionId, text)
+  } catch (err) {
+    appStore.setState({ lastError: `Speech input: ${errorSummary(err)}` })
+  } finally {
+    micTranscribing = false
+  }
+}
+
+async function stopAsrRecording(): Promise<void> {
+  const session = micSession
+  const sessionId = micSessionId
+  micSession = null
+  micSessionId = null
+  if (micDrainTimer !== null) {
+    window.clearInterval(micDrainTimer)
+    micDrainTimer = null
+  }
+  appStore.setState((s) => ({ asr: { ...s.asr, listening: false } }))
+  if (!session) return
+  let pcm: Float32Array
+  try {
+    pcm = await session.stop()
+  } catch (err) {
+    appStore.setState({ lastError: `Mic: ${errorSummary(err)}` })
+    return
+  }
+  if (pcm.length < 8000) {
+    // Too little to bother transcribing.
+    return
+  }
+  try {
+    const { text, error } = await window.ralf.asrTranscribe({ pcm })
+    if (error) {
+      appStore.setState({ lastError: `Speech input: ${error}` })
+      return
+    }
+    if (sessionId) emitAsrText(sessionId, text)
+  } catch (err) {
+    appStore.setState({ lastError: `Speech input: ${errorSummary(err)}` })
   }
 }
 
 export function applySpeechStatus(status: { tts: TtsStatus; asr: AsrStatus }): void {
   appStore.setState({ tts: status.tts, asr: status.asr })
-}
-
-export function handleAsrTranscript(text: string): void {
-  const s = appStore.getState()
-  if (!s.asr.listening) return
-  const sessionID = s.activeSessionId
-  if (!sessionID) return
-  appStore.setState((st) => {
-    const cur = st.drafts[sessionID] ?? ''
-    const sep = cur && !cur.endsWith('\n') ? ' ' : ''
-    return {
-      drafts: { ...st.drafts, [sessionID]: `${cur}${sep}${text}` },
-      composerEpoch: st.composerEpoch + 1
-    }
-  })
 }

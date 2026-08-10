@@ -1,68 +1,52 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, readFileSync, unlinkSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { randomBytes } from 'node:crypto'
-import { systemPreferences } from 'electron'
 import type { AsrStatus, SpeechStatus, TtsSpeakResult, TtsStatus } from '@shared/speech'
 import { DEFAULT_TTS_VOICE } from '@shared/speech'
 
+export { DEFAULT_TTS_VOICE }
+
+// Shared model store. Defaults to a common cache under the user's home so
+// multiple apps can reuse the same weights; override with RALF_MODEL_CACHE.
+function resolveModelCache(): string {
+  return process.env.RALF_MODEL_CACHE ?? join(homedir(), '.cache', 'ralf', 'models')
+}
+
 export class SpeechManager {
-  private ttsProc: ChildProcess | null = null
+  private tts: {
+    generate: (
+      text: string,
+      opts: { voice?: string; speed?: number }
+    ) => Promise<{ audio: Float32Array; sampling_rate: number }>
+  } | null = null
+  private ttsLoading: Promise<boolean> | null = null
   private ttsReady = false
-  private ttsReadyPromise: Promise<void> | null = null
-  private ttsQueue: Array<{ resolve: (payload: Record<string, unknown>) => void }> = []
-  private ttsBuffer = ''
-  private earsProc: ChildProcess | null = null
-  private earsListening = false
-  private earsBuffer = ''
   private ttsError: string | null = null
 
-  onTranscript?: (text: string) => void
+  private asr: ((audio: Float32Array) => Promise<{ text: string }>) | null = null
+  private asrLoading: Promise<boolean> | null = null
+  private asrReady = false
+  private asrError: string | null = null
+
   onStatusChange?: (status: SpeechStatus) => void
 
-  get dir(): string {
-    return process.env.RALF_SPEECH_DIR ?? join(homedir(), 'dev', 'just-us', 'bots', 'marvin', 'tts')
-  }
-
-  private get ttsPython(): string {
-    return join(this.dir, '.venv-pt', 'bin', 'python')
-  }
-
-  private get earsPython(): string {
-    return join(this.dir, '.venv-ears', 'bin', 'python')
-  }
-
-  private get ttsScript(): string {
-    return join(this.dir, 'pocket_server.py')
-  }
-
-  private get earsScript(): string {
-    return join(this.dir, 'ears_server.py')
-  }
-
-  ttsAvailable(): boolean {
-    return existsSync(this.ttsPython) && existsSync(this.ttsScript)
-  }
-
-  asrAvailable(): boolean {
-    return existsSync(this.earsPython) && existsSync(this.earsScript)
+  get modelCache(): string {
+    return resolveModelCache()
   }
 
   ttsStatus(): TtsStatus {
     return {
-      available: this.ttsAvailable(),
+      available: true,
       ready: this.ttsReady,
-      speaking: this.ttsQueue.length > 0,
+      speaking: this.ttsLoading !== null,
       error: this.ttsError ?? undefined
     }
   }
 
   asrStatus(): AsrStatus {
     return {
-      available: this.asrAvailable(),
-      listening: this.earsListening,
-      error: this.ttsError ?? undefined
+      available: true,
+      listening: false,
+      error: this.asrError ?? undefined
     }
   }
 
@@ -70,202 +54,126 @@ export class SpeechManager {
     this.onStatusChange?.({ tts: this.ttsStatus(), asr: this.asrStatus() })
   }
 
-  async speak(text: string, voice: string): Promise<TtsSpeakResult> {
-    if (!this.ttsAvailable()) {
-      return { ok: false, error: 'Pocket TTS not installed — missing .venv-pt or pocket_server.py' }
-    }
-    try {
-      await this.ensureTts()
-    } catch (err) {
-      return { ok: false, error: `Could not start Pocket TTS: ${String(err)}` }
-    }
-    if (!this.ttsProc) return { ok: false, error: 'Pocket TTS is not running' }
-    const out = join(tmpdir(), `ralf-tts-${randomBytes(6).toString('hex')}.wav`)
-    return new Promise<TtsSpeakResult>((resolve) => {
-      this.ttsQueue.push({
-        resolve: (payload) => {
-          if (!payload.ok) {
-            this.ttsError = String(payload.error ?? 'TTS error')
-            this.emitStatus()
-            resolve({ ok: false, error: this.ttsError })
-            return
-          }
-          try {
-            const data = readFileSync(out)
-            resolve({ ok: true, dataUrl: `data:audio/wav;base64,${data.toString('base64')}` })
-          } catch (err) {
-            resolve({ ok: false, error: String(err) })
-          } finally {
-            try {
-              unlinkSync(out)
-            } catch {
-              /* ignore */
-            }
-          }
-        }
-      })
-      this.ttsProc!.stdin.write(JSON.stringify({ text, voice, out }) + '\n')
-      this.emitStatus()
-    })
-  }
-
-  private ensureTts(): Promise<void> {
-    if (this.ttsReady && this.ttsProc) return Promise.resolve()
-    if (this.ttsReadyPromise) return this.ttsReadyPromise
-    this.ttsReadyPromise = new Promise<void>((resolve, reject) => {
-      const proc = spawn(this.ttsPython, [this.ttsScript], { stdio: ['pipe', 'pipe', 'pipe'] })
-      this.ttsProc = proc
-      proc.stdout.setEncoding('utf8')
-      proc.stdout.on('data', (d) => {
-        this.ttsBuffer += d
-        let nl = this.ttsBuffer.indexOf('\n')
-        while (nl >= 0) {
-          const line = this.ttsBuffer.slice(0, nl).trim()
-          this.ttsBuffer = this.ttsBuffer.slice(nl + 1)
-          if (line) this.handleTtsLine(line)
-          nl = this.ttsBuffer.indexOf('\n')
-        }
-      })
-      proc.stderr.on('data', (d) => {
-        if (process.env.RALF_DEBUG) process.stderr.write(`[pocket-tts] ${d}`)
-      })
-      proc.on('exit', (code, signal) => {
-        this.ttsProc = null
-        this.ttsReady = false
-        this.ttsReadyPromise = null
-        this.ttsQueue.forEach((q) => q.resolve({ ok: false, error: 'Pocket TTS exited' }))
-        this.ttsQueue = []
-        this.emitStatus()
-        if (process.env.RALF_DEBUG) process.stderr.write(`[pocket-tts] exited ${code} ${signal}\n`)
-      })
-      proc.on('error', (err) => {
-        this.ttsProc = null
-        this.ttsReady = false
-        this.ttsReadyPromise = null
-        this.ttsQueue.forEach((q) => q.resolve({ ok: false, error: String(err) }))
-        this.ttsQueue = []
-        reject(err)
-        this.emitStatus()
-      })
-    })
-    return this.ttsReadyPromise
-  }
-
-  private handleTtsLine(line: string): void {
-    let payload: Record<string, unknown>
-    try {
-      payload = JSON.parse(line) as Record<string, unknown>
-    } catch {
-      return
-    }
-    if (payload.ready) {
+  private async loadTts(): Promise<boolean> {
+    if (this.ttsReady) return true
+    if (this.ttsLoading) return this.ttsLoading
+    this.ttsLoading = (async () => {
+      const { env } = await import('@huggingface/transformers')
+      env.cacheDir = this.modelCache
+      env.localModelPath = this.modelCache
+      const { KokoroTTS } = await import('kokoro-js')
+      const tts = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'q8' })
+      this.tts = {
+        generate: (text, opts) =>
+          tts.generate(text, { voice: (opts.voice ?? DEFAULT_TTS_VOICE) as 'af_heart', speed: opts.speed ?? 1 })
+      }
       this.ttsReady = true
-      this.ttsReadyPromise = null
       this.ttsError = null
+      return true
+    })().catch((err) => {
+      this.ttsError = String(err?.message ?? err)
+      return false
+    }).finally(() => {
+      this.ttsLoading = null
       this.emitStatus()
-      return
-    }
-    const pending = this.ttsQueue.shift()
-    if (pending) pending.resolve(payload)
+    })
+    this.emitStatus()
+    return this.ttsLoading
   }
 
-  async startAsr(): Promise<AsrStatus> {
-    if (this.earsProc) return this.asrStatus()
-    if (!this.asrAvailable()) {
-      return { available: false, listening: false, error: 'Parakeet ASR not installed — missing .venv-ears or ears_server.py' }
-    }
-    if (process.platform === 'darwin') {
-      const granted = await this.ensureMicPermission()
-      if (!granted) {
-        return { available: true, listening: false, error: 'Microphone permission denied' }
-      }
+  async speak(text: string, voice: string): Promise<TtsSpeakResult> {
+    const ok = await this.loadTts()
+    if (!ok || !this.tts) {
+      return { ok: false, error: this.ttsError ?? 'Voice model failed to load' }
     }
     try {
-      await this.spawnEars()
-      return this.asrStatus()
+      const { audio, sampling_rate } = await this.tts.generate(text, { voice })
+      return { ok: true, dataUrl: pcmToWavDataUrl(audio, sampling_rate) }
     } catch (err) {
-      return { available: true, listening: false, error: String(err) }
+      const message = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: message }
     }
   }
 
-  stopAsr(): AsrStatus {
-    if (this.earsProc) {
-      const proc = this.earsProc
-      this.earsProc = null
-      this.earsListening = false
-      proc.kill('SIGTERM')
-    }
-    this.emitStatus()
-    return this.asrStatus()
-  }
-
-  private async ensureMicPermission(): Promise<boolean> {
-    const status = systemPreferences.getMediaAccessStatus('microphone')
-    if (status === 'granted') return true
-    if (status === 'denied') return false
-    return await systemPreferences.askForMediaAccess('microphone')
-  }
-
-  private spawnEars(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const proc = spawn(this.earsPython, [this.earsScript], { stdio: ['pipe', 'pipe', 'pipe'] })
-      this.earsProc = proc
-      const started = setTimeout(() => reject(new Error('ASR start timed out')), 30000)
-      const done = (): void => {
-        clearTimeout(started)
-        resolve()
-      }
-      proc.stdout.setEncoding('utf8')
-      proc.stdout.on('data', (d) => {
-        this.earsBuffer += d
-        let nl = this.earsBuffer.indexOf('\n')
-        while (nl >= 0) {
-          const line = this.earsBuffer.slice(0, nl).trim()
-          this.earsBuffer = this.earsBuffer.slice(nl + 1)
-          if (!line) continue
-          let payload: Record<string, unknown>
-          try {
-            payload = JSON.parse(line) as Record<string, unknown>
-          } catch {
-            continue
-          }
-          if (payload.ready) {
-            this.earsListening = true
-            this.emitStatus()
-            done()
-          } else if (typeof payload.text === 'string') {
-            this.onTranscript?.(payload.text)
-          }
-        }
+  private async loadAsr(): Promise<boolean> {
+    if (this.asrReady) return true
+    if (this.asrLoading) return this.asrLoading
+    this.asrLoading = (async () => {
+      const { env, pipeline } = await import('@huggingface/transformers')
+      env.cacheDir = this.modelCache
+      env.localModelPath = this.modelCache
+      const transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-base', {
+        dtype: 'q8'
       })
-      proc.stderr.on('data', (d) => {
-        if (process.env.RALF_DEBUG) process.stderr.write(`[ears] ${d}`)
-      })
-      proc.on('exit', () => {
-        this.earsProc = null
-        this.earsListening = false
-        this.emitStatus()
-      })
-      proc.on('error', (err) => {
-        this.earsProc = null
-        this.earsListening = false
-        clearTimeout(started)
-        reject(err)
-        this.emitStatus()
-      })
+      this.asr = (audio) => transcriber(audio) as Promise<{ text: string }>
+      this.asrReady = true
+      this.asrError = null
+      return true
+    })().catch((err) => {
+      this.asrError = String(err?.message ?? err)
+      return false
+    }).finally(() => {
+      this.asrLoading = null
+      this.emitStatus()
     })
+    this.emitStatus()
+    return this.asrLoading
+  }
+
+  async transcribe(audio: Float32Array): Promise<{ text: string; error?: string }> {
+    const ok = await this.loadAsr()
+    if (!ok || !this.asr) {
+      return { text: '', error: this.asrError ?? 'Speech model failed to load' }
+    }
+    try {
+      const { text } = await this.asr(audio)
+      return { text }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { text: '', error: message }
+    }
   }
 
   dispose(): void {
-    if (this.ttsProc) {
-      this.ttsProc.kill('SIGTERM')
-      this.ttsProc = null
-    }
-    if (this.earsProc) {
-      this.earsProc.kill('SIGTERM')
-      this.earsProc = null
-    }
+    this.tts = null
+    this.asr = null
   }
 }
 
-export { DEFAULT_TTS_VOICE }
+function pcmToWavDataUrl(samples: Float32Array, sampleRate: number): string {
+  const numSamples = samples.length
+  const dataSize = numSamples * 2
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+
+  function writeString(offset: number, str: string): void {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
+  }
+
+  writeString(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeString(8, 'WAVE')
+  writeString(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  writeString(36, 'data')
+  view.setUint32(40, dataSize, true)
+
+  for (let i = 0; i < numSamples; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return `data:audio/wav;base64,${btoa(binary)}`
+}

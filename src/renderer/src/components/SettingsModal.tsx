@@ -1,7 +1,7 @@
 import React from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme } from '../lib/themes'
-import { POCKET_VOICES } from '@shared/speech'
+import { KOKORO_VOICES } from '@shared/speech'
 import { setSpeakAloud, setTtsVoice, speakText } from '../lib/actions'
 
 export function SettingsModal(): React.JSX.Element | null {
@@ -37,9 +37,9 @@ export function SettingsModal(): React.JSX.Element | null {
         <div className="settings-section-title">Voice</div>
         <div className="settings-row">
           <div className="settings-row-main">
-            <div className="settings-row-label">Pocket voice</div>
+            <div className="settings-row-label">Voice</div>
             <div className="settings-row-hint">
-              {tts.available ? (tts.ready ? 'Ready' : 'Loading…') : 'Pocket TTS not installed (bots/marvin/tts/.venv-pt)'}
+              {tts.ready ? 'Ready' : tts.error ?? (tts.available ? 'Loading…' : 'Unavailable')}
             </div>
           </div>
           <select
@@ -47,7 +47,7 @@ export function SettingsModal(): React.JSX.Element | null {
             value={ttsVoice}
             onChange={(e) => setTtsVoice(e.target.value)}
           >
-            {POCKET_VOICES.map((v) => (
+            {KOKORO_VOICES.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.label}
               </option>
@@ -55,11 +55,11 @@ export function SettingsModal(): React.JSX.Element | null {
           </select>
           <button
             className="btn-ghost"
-            disabled={!tts.ready}
+            disabled={!tts.available || tts.speaking}
             onClick={() => void speakText('This is the ' + ttsVoice + ' voice.')}
-            title="Preview this voice"
+            title="Preview this voice (first click downloads the model)"
           >
-            Preview
+            {tts.speaking ? 'Loading…' : 'Preview'}
           </button>
         </div>
         <label className="settings-check">
