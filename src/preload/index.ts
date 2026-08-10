@@ -58,7 +58,15 @@ const ralf: RalfApi = {
   terminalDispose: (id: string) => ipcRenderer.invoke(IpcChannels.TerminalDispose, id),
   onTerminalData: (cb) => subscribe(IpcChannels.TerminalData, cb),
   onTerminalExit: (cb) => subscribe(IpcChannels.TerminalExit, cb),
-  gitRun: (path: string, args: string[]) => ipcRenderer.invoke(IpcChannels.GitRun, { path, args })
+  gitRun: (path: string, args: string[]) => ipcRenderer.invoke(IpcChannels.GitRun, { path, args }),
+
+  ttsStatus: () => ipcRenderer.invoke(IpcChannels.TtsStatus),
+  ttsSpeak: (req) => ipcRenderer.invoke(IpcChannels.TtsSpeak, req),
+  onSpeechStatusChanged: (cb) => subscribe(IpcChannels.SpeechStatusChanged, cb),
+
+  asrStart: () => ipcRenderer.invoke(IpcChannels.AsrStart),
+  asrStop: () => ipcRenderer.invoke(IpcChannels.AsrStop),
+  onAsrTranscript: (cb) => subscribe(IpcChannels.AsrTranscript, cb)
 }
 
 contextBridge.exposeInMainWorld('ralf', ralf)

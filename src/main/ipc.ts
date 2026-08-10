@@ -13,6 +13,8 @@ import type { BrowseManager } from './browse'
 import type { OptionalDeps } from './optional-deps'
 import type { ComputerUse } from './computer-use'
 import type { PTYManager } from './pty-manager'
+import type { SpeechManager } from './speech'
+import type { TtsSpeakRequest } from '@shared/ipc'
 
 export interface IpcDeps {
   server: OpenCodeServer
@@ -22,6 +24,7 @@ export interface IpcDeps {
   optional: OptionalDeps
   computerUse: ComputerUse
   pty: PTYManager
+  speech: SpeechManager
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -40,6 +43,8 @@ export function registerIpc(deps: IpcDeps): void {
   deps.computerUse.onStatusChange = (status) => broadcast(IpcChannels.ComputerUseStatus, status)
   deps.pty.onData = (id, data) => broadcast(IpcChannels.TerminalData, { id, data })
   deps.pty.onExit = (id, code) => broadcast(IpcChannels.TerminalExit, { id, code })
+  deps.speech.onStatusChange = (status) => broadcast(IpcChannels.SpeechStatusChanged, status)
+  deps.speech.onTranscript = (text) => broadcast(IpcChannels.AsrTranscript, { text })
 
   ipcMain.handle(IpcChannels.ServerGetInfo, () => deps.server.info)
 
@@ -179,4 +184,12 @@ export function registerIpc(deps: IpcDeps): void {
       })
     })
   })
+
+  ipcMain.handle(IpcChannels.TtsStatus, () => deps.speech.ttsStatus())
+
+  ipcMain.handle(IpcChannels.TtsSpeak, (_e, req: TtsSpeakRequest) => deps.speech.speak(req.text, req.voice))
+
+  ipcMain.handle(IpcChannels.AsrStart, () => deps.speech.startAsr())
+
+  ipcMain.handle(IpcChannels.AsrStop, () => deps.speech.stopAsr())
 }

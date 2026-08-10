@@ -23,6 +23,7 @@ import type {
   OptionalComponentInfo,
   OptionalDownloadEvent
 } from '@shared/ipc'
+import type { AsrStatus, TtsStatus } from '@shared/speech'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
 
@@ -89,6 +90,10 @@ export interface AppState {
   chatOrder: string[]
   launcherProject: string | null
   attention: { kind: 'permission' | 'done' | 'error'; ts: number } | null
+  tts: TtsStatus
+  asr: AsrStatus
+  ttsVoice: string
+  speakAloud: boolean
 }
 
 export const initialBrowseState: BrowseNavigationState = {
@@ -147,7 +152,11 @@ export const initialState: AppState = {
   sessionMeta: {},
   chatOrder: [],
   launcherProject: null,
-  attention: null
+  attention: null,
+  tts: { available: false, ready: false, speaking: false },
+  asr: { available: false, listening: false },
+  ttsVoice: 'stuart_bell',
+  speakAloud: false
 }
 
 export const appStore = new Store<AppState>(initialState)

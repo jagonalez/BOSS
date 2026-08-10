@@ -8,6 +8,7 @@ import { BrowseManager } from './browse'
 import { OptionalDeps } from './optional-deps'
 import { ComputerUse } from './computer-use'
 import { PTYManager } from './pty-manager'
+import { SpeechManager } from './speech'
 import { registerIpc, type IpcDeps } from './ipc'
 import { loadState } from './state-store'
 
@@ -26,12 +27,13 @@ const events = new EventStream(server)
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse(api, join(mainDir, 'computer-use-helper.js'))
 const pty = new PTYManager()
+const speech = new SpeechManager()
 
 let browse: BrowseManager | null = null
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, browse: browse!, optional, computerUse, pty }
+  return { server, api, events, browse: browse!, optional, computerUse, pty, speech }
 }
 
 function registerIpcOnce(): void {
@@ -116,8 +118,8 @@ app.whenReady().then(() => {
   }
   const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
   const csp = isDev
-    ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; img-src 'self' data:; font-src 'self' data:;"
-    : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; font-src 'self' data:;"
+    ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; img-src 'self' data:; media-src 'self' data: blob:; font-src 'self' data:;"
+    : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; media-src 'self' data: blob:; font-src 'self' data:;"
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     if (details.responseHeaders) {
       details.responseHeaders['Content-Security-Policy'] = [csp]
@@ -150,4 +152,5 @@ app.on('before-quit', () => {
   events.stop()
   void computerUse.dispose()
   void server.stop()
+  speech.dispose()
 })

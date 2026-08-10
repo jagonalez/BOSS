@@ -2,7 +2,7 @@ import { appStore, upsertMessagesFromList, type Attachment, type PanelKind, type
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
-
+import type { AsrStatus, TtsStatus } from '@shared/speech'
 function persistSessionMeta(meta: Record<string, SessionMeta>): void {
   try {
     localStorage.setItem('ralf.sessionMeta', JSON.stringify(meta))
@@ -793,4 +793,92 @@ export async function openProjectFolder(): Promise<void> {
   } catch (err) {
     console.error('open project folder:', err)
   }
+}
+
+export function loadSpeechPrefs(): void {
+  try {
+    const voice = localStorage.getItem('ralf.ttsVoice')
+    if (voice) appStore.setState({ ttsVoice: voice })
+    const speakAloud = localStorage.getItem('ralf.speakAloud')
+    if (speakAloud !== null) appStore.setState({ speakAloud: speakAloud === '1' })
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setTtsVoice(voice: string): void {
+  appStore.setState({ ttsVoice: voice })
+  try {
+    localStorage.setItem('ralf.ttsVoice', voice)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setSpeakAloud(on: boolean): void {
+  appStore.setState({ speakAloud: on })
+  try {
+    localStorage.setItem('ralf.speakAloud', on ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+}
+
+let ttsAudio: HTMLAudioElement | null = null
+
+export async function speakText(text: string): Promise<void> {
+  const cur = appStore.getState()
+  const trimmed = text.trim()
+  if (!trimmed) return
+  try {
+    const result = await window.ralf.ttsSpeak({ text: trimmed, voice: cur.ttsVoice })
+    if (!result.ok) {
+      if (result.error) appStore.setState({ lastError: `TTS: ${result.error}` })
+      return
+    }
+    if (!result.dataUrl) return
+    ttsAudio?.pause()
+    ttsAudio = new Audio(result.dataUrl)
+    void ttsAudio.play()
+  } catch (err) {
+    appStore.setState({ lastError: errorSummary(err) })
+  }
+}
+
+export function stopSpeaking(): void {
+  ttsAudio?.pause()
+  ttsAudio = undefined
+}
+
+export async function toggleAsr(): Promise<void> {
+  const cur = appStore.getState()
+  if (cur.asr.listening) {
+    const status = await window.ralf.asrStop()
+    appStore.setState({ asr: status })
+    return
+  }
+  const status = await window.ralf.asrStart()
+  appStore.setState({ asr: status })
+  if (!status.listening && status.error) {
+    appStore.setState({ lastError: `Speech input: ${status.error}` })
+  }
+}
+
+export function applySpeechStatus(status: { tts: TtsStatus; asr: AsrStatus }): void {
+  appStore.setState({ tts: status.tts, asr: status.asr })
+}
+
+export function handleAsrTranscript(text: string): void {
+  const s = appStore.getState()
+  if (!s.asr.listening) return
+  const sessionID = s.activeSessionId
+  if (!sessionID) return
+  appStore.setState((st) => {
+    const cur = st.drafts[sessionID] ?? ''
+    const sep = cur && !cur.endsWith('\n') ? ' ' : ''
+    return {
+      drafts: { ...st.drafts, [sessionID]: `${cur}${sep}${text}` },
+      composerEpoch: st.composerEpoch + 1
+    }
+  })
 }

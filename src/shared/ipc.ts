@@ -78,6 +78,15 @@ export interface BrowseNavigationState {
   loading: boolean
 }
 
+export interface TtsSpeakRequest {
+  text: string
+  voice: string
+}
+
+export interface AsrTranscriptEvent {
+  text: string
+}
+
 export const IpcChannels = {
   ServerGetInfo: 'server:get-info',
   ServerStatusChanged: 'server:status-changed',
@@ -112,7 +121,13 @@ export const IpcChannels = {
   TerminalDispose: 'terminal:dispose',
   TerminalData: 'terminal:data',
   TerminalExit: 'terminal:exit',
-  GitRun: 'git:run'
+  GitRun: 'git:run',
+  TtsStatus: 'tts:status',
+  TtsSpeak: 'tts:speak',
+  SpeechStatusChanged: 'speech:status-changed',
+  AsrStart: 'asr:start',
+  AsrStop: 'asr:stop',
+  AsrTranscript: 'asr:transcript'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

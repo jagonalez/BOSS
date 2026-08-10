@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest } from '@shared/opencode'
-import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, openProject, openProjectFolder, pushHistory, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, unrevertSession } from '../lib/actions'
+import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, openProject, openProjectFolder, pushHistory, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
-import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, SendIcon, StopIcon } from './icons'
+import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, SendIcon, StopIcon, MicIcon, MicOffIcon, VolumeIcon } from './icons'
 import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
 
@@ -732,6 +732,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             <button className="composer-attach" onClick={() => fileInputRef.current?.click()} title="Attach file or image">
               <AttachmentIcon size={16} />
             </button>
+            <MicToggle />
             <ModePicker />
             <ModelPicker onPick={onModelChange} />
             <EffortPicker />
@@ -767,6 +768,20 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         }}
       />
     </div>
+  )
+}
+
+function MicToggle(): React.JSX.Element {
+  const asr = useStore(appStore, (s) => s.asr)
+  const listening = asr.listening
+  return (
+    <button
+      className={`composer-mic ${listening ? 'active' : ''}`}
+      onClick={() => void toggleAsr()}
+      title={listening ? 'Stop voice input' : 'Speak to type (Parakeet)'}
+    >
+      {listening ? <MicOffIcon size={16} /> : <MicIcon size={16} />}
+    </button>
   )
 }
 
@@ -821,6 +836,10 @@ function TurnView({
       .filter((p) => p.type === 'text')
       .map((p) => ({ key: p.id, part: p }))
   )
+  const speakable = texts
+    .map(({ part }) => partText(part))
+    .filter(Boolean)
+    .join('\n')
   const lastAssistant = turn.assistants[turn.assistants.length - 1]
   return (
     <>
@@ -835,6 +854,13 @@ function TurnView({
               ⋯
             </button>
           ) : null}
+          <div className="msg-actions">
+            {speakable ? (
+              <button className="msg-speak" onClick={() => void speakText(speakable)} title="Read aloud">
+                <VolumeIcon size={14} />
+              </button>
+            ) : null}
+          </div>
           <MessageError error={lastAssistant.info.error} />
           <div className="msg-body">
             {modelChanged && model ? <span className="model-chip">{model}</span> : null}
@@ -883,6 +909,22 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const waitingForReply = visible[visible.length - 1]?.info.role === 'user'
   const activity = streaming ? (runningPart ? runningLabel(runningPart) : waitingForReply || !liveText ? 'Thinking' : null) : null
   const expandingRef = useRef(false)
+
+  const speakAloud = useStore(appStore, (s) => s.speakAloud)
+  const spokenRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!speakAloud) return
+    const lastAssistant = turns[turns.length - 1]?.assistants[turns[turns.length - 1]?.assistants.length - 1]
+    if (!lastAssistant) return
+    if (!lastAssistant.info.time?.completed) return
+    const text = msgText(lastAssistant)
+    if (!text.trim()) return
+    const key = `${lastAssistant.info.id}:${text}`
+    if (spokenRef.current.has(key)) return
+    spokenRef.current.add(key)
+    if (spokenRef.current.size > 200) spokenRef.current = new Set([...spokenRef.current].slice(-100))
+    void speakText(text)
+  }, [turns, speakAloud])
 
   const onScroll = (): void => {
     const el = scrollRef.current
