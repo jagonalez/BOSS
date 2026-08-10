@@ -270,6 +270,22 @@ export async function autoRespond(sessionID: string, permissionID: string, respo
   }
 }
 
+export async function respondQuestion(requestID: string, answers: string[][]): Promise<void> {
+  try {
+    await OpenCode.replyQuestion(requestID, answers)
+  } finally {
+    appStore.setState((s) => (s.question?.id === requestID ? { question: null } : {}))
+  }
+}
+
+export async function rejectQuestion(requestID: string): Promise<void> {
+  try {
+    await OpenCode.rejectQuestion(requestID)
+  } finally {
+    appStore.setState((s) => (s.question?.id === requestID ? { question: null } : {}))
+  }
+}
+
 export function pushHistory(sessionId: string, text: string): void {
   if (!sessionId || !text.trim()) return
   appStore.setState((s) => {

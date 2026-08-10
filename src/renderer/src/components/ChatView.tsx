@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
-import type { MessageWithParts, Part, Command, PermissionRequest } from '@shared/opencode'
-import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
+import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
+import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, rejectQuestion, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -205,6 +205,83 @@ function PermissionCard({ permission }: { permission: PermissionRequest }): Reac
         </button>
         <button className="btn-allow" onClick={() => void respond('always')}>
           Always allow
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function QuestionCard({ question }: { question: QuestionRequest }): React.JSX.Element | null {
+  if (!question) return null
+  const [selections, setSelections] = useState<string[][]>(() => question.questions.map(() => []))
+  const [custom, setCustom] = useState<string[]>(() => question.questions.map(() => ''))
+
+  const toggle = (idx: number, label: string): void => {
+    setSelections((prev) =>
+      prev.map((arr, i) => {
+        if (i !== idx) return arr
+        const q = question.questions[i]
+        if (q.multiple) {
+          return arr.includes(label) ? arr.filter((l) => l !== label) : [...arr, label]
+        }
+        return arr.includes(label) ? [] : [label]
+      })
+    )
+  }
+
+  const submit = async (): Promise<void> => {
+    const answers = question.questions.map((q, i) => {
+      const picked = [...selections[i]]
+      const customText = custom[i].trim()
+      if (customText && q.custom !== false) picked.push(customText)
+      return picked
+    })
+    await respondQuestion(question.id, answers)
+  }
+
+  return (
+    <div className="question-card">
+      <div className="question-card-head">
+        <span className="question-card-dot" />
+        <span className="question-card-title">opencode is asking you</span>
+        <span className="question-card-waiting">waiting for your answer</span>
+      </div>
+      {question.questions.map((q, i) => (
+        <div key={i} className="question-item">
+          <div className="question-item-text">
+            {q.header ? <span className="question-item-header">{q.header}: </span> : null}
+            {q.question}
+          </div>
+          {q.options && q.options.length > 0 ? (
+            <div className="question-options">
+              {q.options.map((opt) => {
+                const active = selections[i].includes(opt.label)
+                return (
+                  <button key={opt.label} className={`question-option ${active ? 'active' : ''}`} onClick={() => toggle(i, opt.label)}>
+                    <span className="question-option-check">{q.multiple ? (active ? '☑' : '☐') : active ? '◉' : '○'}</span>
+                    <span className="question-option-label">{opt.label}</span>
+                    {opt.description ? <span className="question-option-desc">{opt.description}</span> : null}
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
+          {q.custom !== false ? (
+            <input
+              className="question-custom"
+              placeholder="Type your own answer…"
+              value={custom[i]}
+              onChange={(e) => setCustom((prev) => prev.map((v, j) => (j === i ? e.target.value : v)))}
+            />
+          ) : null}
+        </div>
+      ))}
+      <div className="question-card-actions">
+        <button className="btn-deny" onClick={() => void rejectQuestion(question.id)}>
+          Dismiss
+        </button>
+        <button className="btn-allow" onClick={() => void submit()}>
+          Submit answer
         </button>
       </div>
     </div>
@@ -904,6 +981,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   const streaming = useStore(appStore, (s) => s.streaming)
   const permission = useStore(appStore, (s) => (effectiveId && s.permission?.sessionID === effectiveId ? s.permission : null))
+  const question = useStore(appStore, (s) => (effectiveId && s.question?.sessionID === effectiveId ? s.question : null))
   const revertedIds = useMemo(() => new Set(revertedList ?? []), [revertedList])
   const visible = useMemo(() => messages.filter((m) => !revertedIds.has(m.info.id)), [messages, revertedIds])
   const WINDOW = 100
@@ -1126,6 +1204,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
             </div>
           ) : null}
           {permission ? <PermissionCard permission={permission} /> : null}
+          {question ? <QuestionCard question={question} /> : null}
         </div>
       </div>
       {msgCtx && (

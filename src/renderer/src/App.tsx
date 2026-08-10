@@ -141,6 +141,12 @@ export function App(): React.JSX.Element {
           setAttention('permission')
           break
         }
+        case 'question.asked': {
+          const patch = applyEvent(appStore.getState(), ev)
+          if (Object.keys(patch).length > 0) appStore.setState(patch)
+          setAttention('permission')
+          break
+        }
         case 'session.error': {
           const props = (ev.properties ?? {}) as { sessionID?: string }
           if (props.sessionID) {
