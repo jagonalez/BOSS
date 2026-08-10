@@ -30,7 +30,10 @@ import {
   loadMessages,
   loadTodos,
   autoRespond,
-  abortRun
+  abortRun,
+  loadSpeechPrefs,
+  applySpeechStatus,
+  handleAsrTranscript
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -58,6 +61,7 @@ export function App(): React.JSX.Element {
     loadAgent()
     loadSessionMeta()
     loadVariant()
+    loadSpeechPrefs()
     applyTheme(loadTheme())
   }, [])
 
@@ -150,6 +154,11 @@ export function App(): React.JSX.Element {
       if (evt.phase === 'done') void refreshOptional()
     })
 
+    const offSpeech = window.ralf.onSpeechStatusChanged(applySpeechStatus)
+    const offAsrTranscript = window.ralf.onAsrTranscript((evt) => handleAsrTranscript(evt.text))
+
+    void window.ralf.ttsStatus().then((st) => applySpeechStatus({ tts: st, asr: appStore.getState().asr }))
+
     void window.ralf
       .serverInfo()
       .then((info) => {
@@ -173,6 +182,8 @@ export function App(): React.JSX.Element {
       offEvent()
       offStatus()
       offProgress()
+      offSpeech()
+      offAsrTranscript()
       window.clearTimeout(refreshTimer)
       void window.ralf.unsubscribeEvents()
     }
