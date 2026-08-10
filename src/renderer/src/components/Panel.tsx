@@ -252,6 +252,19 @@ export function AddBar(): React.JSX.Element {
 
 export function Panel(): React.JSX.Element {
   const panelGroups = useStore(appStore, (s) => s.panelGroups)
+  const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
+
+  if (!activeSessionId) {
+    return (
+      <div className="panel">
+        <div className="panel-add">
+          <p style={{ color: 'var(--text-faint)', fontSize: 13, maxWidth: 260, textAlign: 'center', lineHeight: 1.5 }}>
+            Select a thread to open its panel (Review, Files, Browser, Terminal).
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   if (panelGroups.length === 0) {
     return (

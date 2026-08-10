@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { parseGitDiff } from '../lib/diff'
 import { gitBranches, gitCommitFiles, gitCurrentBranch, gitDiffFiles, gitFileDiff, gitLog, gitShow } from '../lib/git'
+import { markStaleReviews, runThreadReview } from '../lib/actions'
 import { DiffReview, type DiffFileData } from './DiffReview'
+import { ReviewIcon } from './icons'
 
 type Scope = 'worktree' | 'staged' | 'compare' | 'commits'
 
@@ -16,6 +18,8 @@ const SCOPE_LABELS: Record<Scope, string> = {
 export function GitView(): React.JSX.Element {
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const gitRefresh = useStore(appStore, (s) => s.gitRefresh)
+  const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
+  const reviews = useStore(appStore, (s) => (activeSessionId ? s.sessionMeta[activeSessionId]?.reviews ?? [] : []))
   const [scope, setScope] = useState<Scope>('worktree')
   const [branches, setBranches] = useState<string[]>([])
   const [baseBranch, setBaseBranch] = useState('origin/main')
@@ -42,6 +46,10 @@ export function GitView(): React.JSX.Element {
   useEffect(() => {
     if (scope !== 'commits') void loadScope()
   }, [projectPath, scope, baseBranch, gitRefresh])
+
+  useEffect(() => {
+    if (activeSessionId) markStaleReviews(activeSessionId)
+  }, [activeSessionId, gitRefresh])
 
   async function loadScope(): Promise<void> {
     setError('')
@@ -134,7 +142,32 @@ export function GitView(): React.JSX.Element {
             ))}
           </select>
         )}
+        {activeSessionId ? (
+          <button
+            className="btn-ghost"
+            onClick={() =>
+              void runThreadReview(
+                activeSessionId,
+                SCOPE_LABELS[scope] + (scope === 'compare' ? ` vs ${baseBranch}` : '')
+              )
+            }
+            title="Ask the agent to review the current changes in this thread"
+          >
+            <ReviewIcon size={14} /> Run review
+          </button>
+        ) : null}
       </div>
+      {reviews.length > 0 ? (
+        <div className="git-reviews">
+          <span className="git-reviews-title">Reviews</span>
+          {reviews.map((r) => (
+            <span key={r.id} className={`git-review ${r.stale ? 'stale' : ''}`} title={`${r.target} — reviewed at ${r.baseSha.slice(0, 8)}`}>
+              {r.target} · {new Date(r.createdAt).toLocaleTimeString()}
+              {r.stale ? ' · stale' : ''}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {scope === 'commits' ? (
         <div className="two-pane">
           <div className="pane pane-list">

@@ -44,6 +44,7 @@ export interface ModelOption {
   name?: string
   free?: boolean
   providerID: string
+  variants: string[]
 }
 
 export function isHighVariant(id: string): boolean {
@@ -62,27 +63,36 @@ export function providerModels(p: Provider): ModelOption[] {
   if (Array.isArray(models)) {
     return models
       .map((m) => {
-        if (typeof m === 'string') return { id: m, name: m, providerID: p.id }
-        const mm = m as { id?: unknown; name?: unknown; cost?: unknown }
+        if (typeof m === 'string') return { id: m, name: m, providerID: p.id, variants: [] }
+        const mm = m as { id?: unknown; name?: unknown; cost?: unknown; variants?: unknown }
         return {
           id: String(mm.id ?? ''),
           name: typeof mm.name === 'string' ? mm.name : String(mm.id ?? ''),
           free: isFreeCost(mm.cost),
-          providerID: p.id
+          providerID: p.id,
+          variants: modelVariants(mm.variants)
         }
       })
       .filter((m) => Boolean(m.id))
   }
   if (typeof models === 'object') {
     return Object.entries(models as unknown as Record<string, unknown>).map(([id, value]) => {
-      const mm = (value ?? {}) as { name?: unknown; cost?: unknown }
+      const mm = (value ?? {}) as { name?: unknown; cost?: unknown; variants?: unknown }
       return {
         id,
         name: typeof mm.name === 'string' ? mm.name : id,
         free: isFreeCost(mm.cost),
-        providerID: p.id
+        providerID: p.id,
+        variants: modelVariants(mm.variants)
       }
     })
+  }
+  return []
+}
+
+function modelVariants(variants?: unknown): string[] {
+  if (variants && typeof variants === 'object') {
+    return Object.keys(variants as Record<string, unknown>)
   }
   return []
 }
@@ -99,7 +109,7 @@ export const OpenCode = {
     request<MessageWithParts[]>('GET', `/session/${id}/message`, { query: { limit } }),
   sendMessage: (id: string, parts: unknown[], opts?: { model?: string; agent?: string }) =>
     request<MessageWithParts>('POST', `/session/${id}/message`, { body: { parts, ...opts } }),
-  sendMessageAsync: (id: string, parts: unknown[], opts?: { model?: { providerID: string; modelID: string }; agent?: string }) =>
+  sendMessageAsync: (id: string, parts: unknown[], opts?: { model?: { providerID: string; modelID: string; variant?: string }; agent?: string }) =>
     request<unknown>('POST', `/session/${id}/prompt_async`, { body: { parts, ...opts } }),
   abort: (id: string) => request<boolean>('POST', `/session/${id}/abort`),
   revertMessage: (id: string, messageID: string) =>
@@ -123,7 +133,7 @@ export const OpenCode = {
     request<{ all: Provider[]; default: Record<string, string>; connected?: string[] }>('GET', '/provider'),
   config: () => request<ConfigInfo>('GET', '/config'),
   listCommands: () => request<Command[]>('GET', '/command'),
-  runCommand: (id: string, command: string, args: string, opts?: { agent?: string; model?: { providerID: string; modelID: string } }) =>
+  runCommand: (id: string, command: string, args: string, opts?: { agent?: string; model?: { providerID: string; modelID: string; variant?: string } }) =>
     request<MessageWithParts>('POST', `/session/${id}/command`, { body: { command, arguments: args, ...opts } }),
   findFile: (q: string) => request<string[]>('GET', '/find/file', { query: { query: q } })
 }

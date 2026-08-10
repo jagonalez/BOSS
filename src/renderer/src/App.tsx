@@ -7,9 +7,11 @@ import { Panel, AddBar } from './components/Panel'
 import { Footer } from './components/Footer'
 import { PermissionModal } from './components/PermissionModal'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
+import { applyTheme, loadTheme } from './lib/themes'
 import { CommitDialog } from './components/CommitDialog'
 import { RenameModal } from './components/RenameModal'
 import { ConfirmModal } from './components/ConfirmModal'
+import { SettingsModal } from './components/SettingsModal'
 import {
   refreshAgents,
   refreshConfig,
@@ -22,6 +24,7 @@ import {
   refreshStreaming,
   loadMode,
   loadAgent,
+  loadVariant,
   loadArchived,
   loadSessionMeta,
   loadMessages,
@@ -54,6 +57,8 @@ export function App(): React.JSX.Element {
     loadMode()
     loadAgent()
     loadSessionMeta()
+    loadVariant()
+    applyTheme(loadTheme())
   }, [])
 
   useEffect(() => {
@@ -203,6 +208,7 @@ export function App(): React.JSX.Element {
       <CommitDialog />
       <RenameModal />
       <ConfirmModal />
+      <SettingsModal />
     </div>
   )
 }

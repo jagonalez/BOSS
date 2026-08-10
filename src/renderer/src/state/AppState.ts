@@ -80,6 +80,7 @@ export interface AppState {
   streaming: boolean
   streamingLocked: boolean
   model: string | null
+  variant: string | null
   mode: 'auto' | 'ask' | 'plan'
   agent: string
   projectPath: string
@@ -91,7 +92,10 @@ export interface AppState {
   reverted: Record<string, string[]>
   gitRefresh: number
   composerEpoch: number
+  settingsOpen: boolean
   sessionMeta: Record<string, SessionMeta>
+  chatOrder: string[]
+  launcherProject: string | null
 }
 
 export const initialBrowseState: BrowseNavigationState = {
@@ -132,6 +136,7 @@ export const initialState: AppState = {
   streaming: false,
   streamingLocked: false,
   model: null,
+  variant: null,
   mode: 'ask',
   agent: 'build',
   projectPath: '',
@@ -143,7 +148,10 @@ export const initialState: AppState = {
   reverted: {},
   gitRefresh: 0,
   composerEpoch: 0,
-  sessionMeta: {}
+  settingsOpen: false,
+  sessionMeta: {},
+  chatOrder: [],
+  launcherProject: null
 }
 
 export const appStore = new Store<AppState>(initialState)

@@ -1,7 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { highlightCode } from '../lib/highlight'
 import { CodeIcon, CopyIcon } from './icons'
-import 'highlight.js/styles/github-dark.css'
 
 export function CodeView({ text, path }: { text: string; path?: string }): React.JSX.Element {
   const html = useMemo(() => highlightCode(text, path), [text, path])

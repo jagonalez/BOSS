@@ -139,7 +139,7 @@ export function DiffReview({
                     <span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span>
                   </span>
                 </button>
-                {!isCollapsed ? <DiffLines lines={f.lines} /> : null}
+                {!isCollapsed ? <DiffLines lines={f.lines} path={f.path} /> : null}
               </div>
             )
           })}

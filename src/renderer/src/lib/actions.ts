@@ -1,7 +1,7 @@
 import { appStore, upsertMessagesFromList, type Attachment, type PanelKind, type PanelTab } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
-import type { SessionMeta } from '@shared/opencode'
+import type { ReviewRun, SessionMeta } from '@shared/opencode'
 
 function persistSessionMeta(meta: Record<string, SessionMeta>): void {
   try {
@@ -30,8 +30,116 @@ export function upsertSessionMeta(sessionId: string, patch: Partial<SessionMeta>
   })
 }
 
+export function loadChatOrder(): void {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('ralf.chatOrder') ?? '[]')
+    if (Array.isArray(parsed)) appStore.setState({ chatOrder: parsed.filter((x) => typeof x === 'string') })
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setChatOrder(ids: string[]): void {
+  appStore.setState({ chatOrder: ids })
+  try {
+    localStorage.setItem('ralf.chatOrder', JSON.stringify(ids))
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setLauncherProject(path: string | null): void {
+  appStore.setState({ launcherProject: path })
+}
+
+async function ensureProject(path: string | null): Promise<void> {
+  if (!path) return
+  const cur = appStore.getState()
+  if (cur.projectPath === path) return
+  try {
+    await window.ralf.projectSet(path)
+    appStore.setState({ projectPath: path })
+    await refreshSessions()
+    await refreshProjects()
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function newChatWithPrompt(prompt: string, attachments?: Attachment[]): Promise<void> {
+  const project = appStore.getState().launcherProject
+  await ensureProject(project)
+  await newSession()
+  const id = appStore.getState().activeSessionId
+  if (id) await sendPrompt(prompt, id, attachments)
+}
+
 export function sessionMetaFor(sessionId: string): SessionMeta | undefined {
   return appStore.getState().sessionMeta[sessionId]
+}
+
+export async function runThreadReview(sessionID: string, target: string): Promise<void> {
+  const projectPath = appStore.getState().projectPath
+  let baseSha = ''
+  try {
+    const r = await window.ralf.gitRun(projectPath, ['rev-parse', 'HEAD'])
+    if (r.code === 0) baseSha = r.stdout.trim()
+  } catch {
+    /* ignore */
+  }
+  const review: ReviewRun = {
+    id: `rev-${Date.now()}`,
+    target,
+    baseSha,
+    findings: [],
+    createdAt: Date.now(),
+    stale: false
+  }
+  appStore.setState((s) => {
+    const meta = { ...s.sessionMeta }
+    const cur = meta[sessionID] ?? { sessionId: sessionID, kind: 'main', reviews: [] }
+    meta[sessionID] = { ...cur, reviews: [...(cur.reviews ?? []), review] }
+    persistSessionMeta(meta)
+    return { sessionMeta: meta }
+  })
+  const cur = appStore.getState()
+  const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
+  const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
+  const parts = [
+    {
+      type: 'text',
+      text: `Review the current ${target} changes. Report findings as a concise, prioritized list of issues (bugs, security, performance, style) with file references where possible.`
+    }
+  ]
+  try {
+    await OpenCode.sendMessageAsync(sessionID, parts, { model: modelKey, agent })
+  } catch (err) {
+    appStore.setState({ lastError: errorSummary(err) })
+  }
+  await loadMessages(sessionID)
+}
+
+export function markStaleReviews(sessionID: string): void {
+  const projectPath = appStore.getState().projectPath
+  void (async () => {
+    let head = ''
+    try {
+      const r = await window.ralf.gitRun(projectPath, ['rev-parse', 'HEAD'])
+      if (r.code === 0) head = r.stdout.trim()
+    } catch {
+      /* ignore */
+    }
+    if (!head) return
+    appStore.setState((s) => {
+      const meta = s.sessionMeta[sessionID]
+      if (!meta) return {}
+      const reviews = meta.reviews.map((r) => (r.baseSha && r.baseSha !== head ? { ...r, stale: true } : r))
+      if (!reviews.some((r, i) => r.stale !== meta.reviews[i].stale)) return {}
+      const next = { ...s.sessionMeta, [sessionID]: { ...meta, reviews } }
+      persistSessionMeta(next)
+      return { sessionMeta: next }
+    })
+  })()
 }
 
 export async function refreshSessions(): Promise<void> {
@@ -63,12 +171,39 @@ export async function refreshProviders(): Promise<void> {
 }
 
 export function setModel(id: string): void {
-  appStore.setState({ model: id })
+  appStore.setState({ model: id, variant: null })
   try {
     localStorage.setItem('ralf.model', id)
   } catch {
     /* ignore */
   }
+}
+
+export function loadVariant(): void {
+  try {
+    const saved = localStorage.getItem('ralf.variant')
+    appStore.setState({ variant: saved || null })
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setVariant(v: string | null): void {
+  appStore.setState({ variant: v })
+  try {
+    if (v) localStorage.setItem('ralf.variant', v)
+    else localStorage.removeItem('ralf.variant')
+  } catch {
+    /* ignore */
+  }
+}
+
+function modelKeyWithVariant(model: string | null): { providerID: string; modelID: string; variant?: string } | undefined {
+  const key = model ? resolveModelKey(model) : undefined
+  if (!key) return undefined
+  const variant = appStore.getState().variant
+  if (variant) return { ...key, variant }
+  return key
 }
 
 export function loadMode(): void {
@@ -397,7 +532,7 @@ export async function editMessage(sessionID: string, messageID: string, text: st
 export async function runCommand(sessionID: string, command: string, args: string): Promise<void> {
   appStore.setState({ streaming: true, lastError: null, streamingLocked: false })
   const cur = appStore.getState()
-  const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
+  const modelKey = cur.model ? modelKeyWithVariant(cur.model) : undefined
   const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
     await OpenCode.runCommand(sessionID, command, args, { agent, model: modelKey })
@@ -446,7 +581,7 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   }
   if (text.trim()) parts.push({ type: 'text', text })
   appStore.setState({ streaming: true, lastError: null, streamingLocked: false })
-  const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
+  const modelKey = cur.model ? modelKeyWithVariant(cur.model) : undefined
   const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
     await OpenCode.sendMessageAsync(sessionID, parts, {
