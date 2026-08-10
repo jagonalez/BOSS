@@ -7,18 +7,16 @@ function isHttpUrl(url: string): boolean {
   return /^https?:/i.test(url)
 }
 
-export class BrowseManager {
-  private view: WebContentsView | null = null
-  private attached = false
-  private state: BrowseNavigationState = {
-    url: '',
-    title: '',
-    canGoBack: false,
-    canGoForward: false,
-    loading: false
-  }
+interface BrowseView {
+  view: WebContentsView
+  loadedOnce: boolean
+  state: BrowseNavigationState
+}
 
-  onNavigation?: (state: BrowseNavigationState) => void
+export class BrowseManager {
+  private views = new Map<string, BrowseView>()
+
+  onNavigation?: (id: string, state: BrowseNavigationState) => void
   onExternal?: (url: string) => void
 
   constructor(private readonly win: BrowserWindow) {
@@ -39,30 +37,35 @@ export class BrowseManager {
     return session.fromPartition('persist:ralf-browse')
   }
 
-  attach(bounds: BrowseBounds): void {
-    if (!this.view) this.createView()
-    const view = this.view!
-    view.setBounds(bounds)
-    this.win.contentView.addChildView(view)
-    this.attached = true
-    if (this.state.url && !view.webContents.isLoading()) {
-      void view.webContents.loadURL(this.state.url)
+  attach(id: string, bounds: BrowseBounds): void {
+    let entry = this.views.get(id)
+    if (!entry) {
+      entry = this.createView(id)
+      this.views.set(id, entry)
+    }
+    entry.view.setBounds(bounds)
+    this.win.contentView.addChildView(entry.view)
+    if (!entry.loadedOnce && entry.state.url && !entry.view.webContents.isLoading()) {
+      entry.loadedOnce = true
+      void entry.view.webContents.loadURL(entry.state.url)
     }
   }
 
-  detach(): void {
-    if (this.view && this.attached) {
-      this.win.contentView.removeChildView(this.view)
-      this.attached = false
+  detach(id: string): void {
+    const entry = this.views.get(id)
+    if (entry) {
+      this.win.contentView.removeChildView(entry.view)
     }
   }
 
-  setBounds(bounds: BrowseBounds): void {
-    if (this.view && this.attached) this.view.setBounds(bounds)
+  setBounds(id: string, bounds: BrowseBounds): void {
+    const entry = this.views.get(id)
+    if (entry) entry.view.setBounds(bounds)
   }
 
-  navigate(url: string): void {
-    if (!this.view) return
+  navigate(id: string, url: string): void {
+    const entry = this.views.get(id)
+    if (!entry) return
     let parsed: URL
     try {
       parsed = new URL(url)
@@ -70,22 +73,34 @@ export class BrowseManager {
       return
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
-    void this.view.webContents.loadURL(url)
+    void entry.view.webContents.loadURL(url)
   }
 
-  goBack(): void {
-    this.view?.webContents.navigationHistory.goBack()
+  goBack(id: string): void {
+    this.views.get(id)?.view.webContents.navigationHistory.goBack()
   }
 
-  goForward(): void {
-    this.view?.webContents.navigationHistory.goForward()
+  goForward(id: string): void {
+    this.views.get(id)?.view.webContents.navigationHistory.goForward()
   }
 
-  reload(): void {
-    this.view?.webContents.reload()
+  reload(id: string): void {
+    this.views.get(id)?.view.webContents.reload()
   }
 
-  private createView(): void {
+  destroy(id: string): void {
+    const entry = this.views.get(id)
+    if (!entry) return
+    this.win.contentView.removeChildView(entry.view)
+    entry.view.webContents.close()
+    this.views.delete(id)
+  }
+
+  destroyAll(): void {
+    for (const id of [...this.views.keys()]) this.destroy(id)
+  }
+
+  private createView(id: string): BrowseView {
     const view = new WebContentsView({
       webPreferences: {
         partition: 'persist:ralf-browse',
@@ -98,6 +113,11 @@ export class BrowseManager {
       }
     })
     const wc = view.webContents
+    const entry: BrowseView = {
+      view,
+      loadedOnce: false,
+      state: { url: '', title: '', canGoBack: false, canGoForward: false, loading: false }
+    }
 
     wc.setWindowOpenHandler(({ url }) => {
       if (isHttpUrl(url)) void shell.openExternal(url)
@@ -117,24 +137,22 @@ export class BrowseManager {
       event.preventDefault()
     })
 
-    wc.on('did-start-loading', () => this.updateState({ loading: true }))
-    wc.on('did-stop-loading', () => this.updateState({ loading: false }))
-    wc.on('did-navigate', (_e, url) => this.updateState({ url }))
-    wc.on('did-navigate-in-page', (_e, url) => this.updateState({ url }))
-    wc.on('page-title-updated', (_e, title) => this.updateState({ title }))
-
-    this.view = view
-    this.updateState({})
-  }
-
-  private updateState(partial: Partial<BrowseNavigationState>): void {
-    const wc = this.view?.webContents
-    this.state = {
-      ...this.state,
-      ...partial,
-      canGoBack: wc?.navigationHistory.canGoBack() ?? false,
-      canGoForward: wc?.navigationHistory.canGoForward() ?? false
+    const update = (partial: Partial<BrowseNavigationState>): void => {
+      entry.state = {
+        ...entry.state,
+        ...partial,
+        canGoBack: wc.navigationHistory.canGoBack(),
+        canGoForward: wc.navigationHistory.canGoForward()
+      }
+      this.onNavigation?.(id, entry.state)
     }
-    this.onNavigation?.(this.state)
+
+    wc.on('did-start-loading', () => update({ loading: true }))
+    wc.on('did-stop-loading', () => update({ loading: false }))
+    wc.on('did-navigate', (_e, url) => update({ url }))
+    wc.on('did-navigate-in-page', (_e, url) => update({ url }))
+    wc.on('page-title-updated', (_e, title) => update({ title }))
+
+    return entry
   }
 }

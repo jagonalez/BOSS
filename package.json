@@ -44,6 +44,7 @@
       "out/**/*",
       "resources/**/*"
     ],
+    "icon": "resources/icons/512x512.png",
     "extraResources": [
       {
         "from": "resources/opencode",
@@ -54,6 +55,7 @@
       }
     ],
     "mac": {
+      "icon": "resources/icons/icon.icns",
       "target": [
         "dmg",
         "zip"

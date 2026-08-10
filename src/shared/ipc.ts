@@ -26,6 +26,11 @@ export interface BrowseBounds {
   height: number
 }
 
+export interface BrowseNavEvent {
+  id: string
+  state: BrowseNavigationState
+}
+
 export type OptionalComponentId = 'opencode' | 'browser-core' | 'computer-use'
 
 export interface OptionalComponentInfo {
@@ -87,6 +92,7 @@ export const IpcChannels = {
   BrowseGoBack: 'browse:go-back',
   BrowseGoForward: 'browse:go-forward',
   BrowseReload: 'browse:reload',
+  BrowseDestroy: 'browse:destroy',
   BrowseNavigation: 'browse:navigation',
   BrowseExternal: 'browse:external',
   OpenExternal: 'open-external',

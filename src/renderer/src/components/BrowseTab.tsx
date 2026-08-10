@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { BackIcon, ExternalIcon, ForwardIcon, ReloadIcon } from './icons'
-
 function rectOf(el: HTMLElement): { x: number; y: number; width: number; height: number } {
   const r = el.getBoundingClientRect()
   return {
@@ -12,17 +11,17 @@ function rectOf(el: HTMLElement): { x: number; y: number; width: number; height:
   }
 }
 
-export function BrowseTab(): React.JSX.Element {
+export function BrowseTab({ id }: { id: string }): React.JSX.Element {
   const viewRef = useRef<HTMLDivElement>(null)
-  const nav = useStore(appStore, (s) => s.browse)
+  const nav = useStore(appStore, (s) => s.browse[id] ?? { url: '', title: '', canGoBack: false, canGoForward: false, loading: false })
   const [urlInput, setUrlInput] = useState('')
 
   useEffect(() => {
     const el = viewRef.current
     if (!el) return
-    void window.ralf.browseAttach(rectOf(el))
+    void window.ralf.browseAttach(id, rectOf(el))
     const report = (): void => {
-      void window.ralf.browseBounds(rectOf(el))
+      void window.ralf.browseBounds(id, rectOf(el))
     }
     const ro = new ResizeObserver(report)
     ro.observe(el)
@@ -30,9 +29,19 @@ export function BrowseTab(): React.JSX.Element {
     return () => {
       ro.disconnect()
       window.removeEventListener('resize', report)
-      void window.ralf.browseDetach()
+      void window.ralf.browseDetach(id)
+      void window.ralf.browseDestroy(id)
     }
-  }, [])
+  }, [id])
+
+  useEffect(() => {
+    const off = window.ralf.onBrowseNavigation((evt) => {
+      if (evt.id === id) {
+        appStore.setState((s) => ({ browse: { ...s.browse, [evt.id]: evt.state } }))
+      }
+    })
+    return off
+  }, [id])
 
   useEffect(() => {
     if (nav.url) setUrlInput(nav.url)
@@ -42,7 +51,7 @@ export function BrowseTab(): React.JSX.Element {
     let target = urlInput.trim()
     if (!target) return
     if (!/^https?:\/\//i.test(target)) target = `https://${target}`
-    void window.ralf.browseNavigate(target)
+    void window.ralf.browseNavigate(id, target)
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -52,13 +61,13 @@ export function BrowseTab(): React.JSX.Element {
   return (
     <div className="browse">
       <div className="browse-bar">
-        <button className="btn-ghost" disabled={!nav.canGoBack} onClick={() => void window.ralf.browseBack()} title="Back">
+        <button className="btn-ghost" disabled={!nav.canGoBack} onClick={() => void window.ralf.browseBack(id)} title="Back">
           <BackIcon size={14} />
         </button>
-        <button className="btn-ghost" disabled={!nav.canGoForward} onClick={() => void window.ralf.browseForward()} title="Forward">
+        <button className="btn-ghost" disabled={!nav.canGoForward} onClick={() => void window.ralf.browseForward(id)} title="Forward">
           <ForwardIcon size={14} />
         </button>
-        <button className="btn-ghost" onClick={() => void window.ralf.browseReload()} title="Reload">
+        <button className="btn-ghost" onClick={() => void window.ralf.browseReload(id)} title="Reload">
           <ReloadIcon size={14} />
         </button>
         {nav.url ? (

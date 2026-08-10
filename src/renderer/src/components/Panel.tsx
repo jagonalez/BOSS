@@ -22,7 +22,7 @@ const PANEL_KINDS: Array<{ kind: PanelKind; label: string; icon: (p: { size?: nu
   { kind: 'chat', label: 'Side chat', icon: ChatIcon }
 ]
 
-const SINGLE_KINDS: PanelKind[] = ['review', 'browse']
+const SINGLE_KINDS: PanelKind[] = ['review', 'files']
 
 function useExistingKinds(): Set<PanelKind> {
   return useStore(appStore, (s) => new Set(s.panelGroups.flatMap((g) => g.tabs.map((t) => t.kind))))
@@ -39,7 +39,7 @@ function TabContent({ tab }: { tab: PanelTab }): React.JSX.Element {
     case 'files':
       return <FilesTab />
     case 'browse':
-      return <BrowseTab />
+      return <BrowseTab id={tab.id} />
     case 'terminal':
       return <TerminalTab />
     case 'chat':
@@ -110,8 +110,18 @@ function AddPanelView({ group }: { group: PanelGroup }): React.JSX.Element {
 
 function GroupPanel({ group }: { group: PanelGroup }): React.JSX.Element {
   const [adding, setAdding] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
   const existing = useExistingKinds()
   const active = group.tabs.find((t) => t.id === group.activeTabId) ?? group.tabs[group.tabs.length - 1]
+
+  const toggleAdd = (e: React.MouseEvent): void => {
+    const next = !adding
+    setAdding(next)
+    if (next) {
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      setMenuPos({ x: r.left, y: r.bottom + 4 })
+    }
+  }
 
   return (
     <div className="panel-group" style={{ width: group.width }}>
@@ -149,12 +159,12 @@ function GroupPanel({ group }: { group: PanelGroup }): React.JSX.Element {
                 </div>
               )
             })}
-            <button className="tab-add" onClick={() => setAdding((o) => !o)} title="Add tab">
+            <button className="tab-add" onClick={toggleAdd} title="Add tab">
               <PlusIcon size={13} />
             </button>
           </div>
-          {adding && (
-            <div className="tab-add-menu">
+          {adding && menuPos && (
+            <div className="tab-add-menu" style={{ position: 'fixed', left: menuPos.x, top: menuPos.y }}>
               {addableKinds(existing).map((k) => {
                 const Icon = k.icon
                 return (
