@@ -7,11 +7,13 @@ export interface SessionInfo {
   path?: string
   directory?: string
   model?: SessionModel
+  parentID?: string
 }
 
 export interface SessionTime {
   created?: number
   updated?: number
+  compacting?: number
 }
 
 export interface SessionModel {
@@ -29,7 +31,7 @@ export interface MessageInfo {
   error?: unknown
 }
 
-export type PartType = 'text' | 'tool' | 'reasoning' | 'snapshot' | 'file' | 'step' | 'agent'
+export type PartType = 'text' | 'tool' | 'reasoning' | 'snapshot' | 'file' | 'step' | 'agent' | 'compaction'
 
 export interface Part {
   id: string
@@ -37,6 +39,9 @@ export interface Part {
   sessionID: string
   messageID: string
   text?: string
+  auto?: boolean
+  overflow?: boolean
+  tail_start_id?: string
   time?: { created?: number; completed?: number; start?: number; end?: number }
   state?: {
     status?: 'pending' | 'running' | 'completed' | 'error' | 'cancelled' | 'interrupted'
@@ -61,8 +66,9 @@ export interface MessageWithParts {
 export interface Todo {
   id: string
   content: string
-  status: 'pending' | 'in_progress' | 'completed'
-  sessionID: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  priority?: string
+  sessionID?: string
 }
 
 export interface FileDiff {
@@ -144,6 +150,22 @@ export interface ReviewRun {
   stale: boolean
 }
 
+export type PanelKind = 'review' | 'files' | 'browse' | 'terminal' | 'chat'
+
+export interface PanelTab {
+  id: string
+  kind: PanelKind
+  sessionId?: string
+  terminalId?: string
+}
+
+export interface PanelGroup {
+  id: string
+  tabs: PanelTab[]
+  activeTabId: string | null
+  width: number
+}
+
 export interface SessionMeta {
   sessionId: string
   projectPath?: string
@@ -151,6 +173,7 @@ export interface SessionMeta {
   forkedFrom?: { sessionId: string; messageId?: string }
   gitBranch?: string
   reviews: ReviewRun[]
+  panelGroups?: PanelGroup[]
 }
 
 export interface Provider {
@@ -168,20 +191,29 @@ export interface ConfigInfo {
 export interface PermissionRequest {
   id: string
   sessionID: string
-  permissionType?: string
-  description?: string
-  tool?: string
-  input?: unknown
+  permission: string
+  patterns?: string[]
+  metadata?: Record<string, unknown>
+  always?: string[]
+  tool?: { messageID?: string; callID?: string }
+  time?: { created?: number }
 }
 
 export type EventMessage =
   | { type: 'session.updated'; session: SessionInfo }
+  | { type: 'session.created'; session: SessionInfo }
+  | { type: 'session.deleted'; session: SessionInfo }
   | { type: 'message.updated'; message: MessageInfo }
   | { type: 'message.part.updated'; part: Part }
   | { type: 'session.error'; sessionID: string; error: string }
   | { type: 'message.part.created'; part: Part }
   | { type: 'session.todo.updated'; sessionID: string; todos: Todo[] }
+  | { type: 'permission.asked'; permission: PermissionRequest }
   | { type: 'permission.updated'; permission: PermissionRequest }
+  | { type: 'permission.replied'; sessionID: string; permissionID: string; response: string }
+  | { type: 'session.status'; sessionID: string; status: { type: 'idle' | 'busy' | 'retry' } }
+  | { type: 'session.idle'; sessionID: string }
+  | { type: 'session.compacted'; sessionID: string }
   | { type: 'server.connected' }
   | { type: 'server.disconnected' }
   | { type: 'config.updated' }

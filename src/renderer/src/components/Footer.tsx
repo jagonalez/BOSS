@@ -4,17 +4,10 @@ import { toggleComputerUse } from '../lib/actions'
 
 export function Footer(): React.JSX.Element {
   const computerUse = useStore(appStore, (s) => s.computerUse)
-  const streaming = useStore(appStore, (s) => s.streaming)
 
   return (
     <div className="footer">
       <div className="right">
-        {streaming && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span className="spinner" />
-            working
-          </span>
-        )}
         <label className="toggle">
           <input
             type="checkbox"

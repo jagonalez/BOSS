@@ -5,7 +5,6 @@ import { Toolbar } from './components/Toolbar'
 import { ChatView } from './components/ChatView'
 import { Panel, AddBar } from './components/Panel'
 import { Footer } from './components/Footer'
-import { PermissionModal } from './components/PermissionModal'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme } from './lib/themes'
 import { CommitDialog } from './components/CommitDialog'
@@ -30,7 +29,9 @@ import {
   loadMessages,
   loadTodos,
   autoRespond,
-  abortRun
+  abortRun,
+  setAttention,
+  clearAttention
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -99,21 +100,47 @@ export function App(): React.JSX.Element {
       if (Object.keys(patch).length > 0) appStore.setState(patch)
       switch (ev.type) {
         case 'session.updated':
+        case 'session.created':
+        case 'session.deleted':
           void refreshSessions()
           break
+        case 'session.status':
+        case 'session.idle': {
+          const wasStreaming = appStore.getState().streaming
+          refreshStreaming()
+          if (wasStreaming && !appStore.getState().streaming && !document.hasFocus()) {
+            setAttention('done')
+          }
+          break
+        }
+        case 'session.compacted': {
+          const props = (ev.properties ?? {}) as { sessionID?: string }
+          if (props.sessionID) {
+            void loadMessages(props.sessionID)
+            void loadTodos(props.sessionID)
+          }
+          void refreshSessions()
+          break
+        }
+        case 'permission.asked':
         case 'permission.updated': {
           const mode = appStore.getState().mode
+          const props = (ev.properties ?? {}) as { sessionID?: string; id?: string }
           if (mode !== 'ask') {
-            const props = (ev.properties ?? {}) as { sessionID?: string; id?: string }
+            appStore.setState({ permission: null })
             if (props.sessionID && props.id) {
-              void autoRespond(props.sessionID, props.id, mode === 'auto' ? 'allowed' : 'rejected')
+              void autoRespond(props.sessionID, props.id, mode === 'auto' ? 'once' : 'reject')
             }
             break
           }
           const patch = applyEvent(appStore.getState(), ev)
           if (Object.keys(patch).length > 0) appStore.setState(patch)
+          setAttention('permission')
           break
         }
+        case 'session.error':
+          setAttention('error')
+          break
         case 'message.updated':
         case 'message.part.updated':
         case 'message.part.created':
@@ -185,9 +212,21 @@ export function App(): React.JSX.Element {
         if (s.streaming && s.activeSessionId) void abortRun()
       }
     }
+    const onFocus = (): void => clearAttention()
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
+
+  const attention = useStore(appStore, (s) => s.attention)
+  useEffect(() => {
+    document.title = attention
+      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'error' ? '✕ ' : '✓ '}Ralf`
+      : 'Ralf'
+  }, [attention])
 
   useEffect(() => {
     if (activeTabKind === 'review' && panelOpen) void refreshDiff(activeSessionId)
@@ -203,7 +242,6 @@ export function App(): React.JSX.Element {
         <Footer />
       </div>
       {panelOpen ? <Panel /> : <AddBar />}
-      <PermissionModal />
       <ModelSwitchModal />
       <CommitDialog />
       <RenameModal />

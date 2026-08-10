@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
-import type { MessageWithParts, Part, Command } from '@shared/opencode'
-import { abortRun, editMessage, forkFromMessage, newChatWithPrompt, openProject, openProjectFolder, pushHistory, revertMessage, runCommand, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, unrevertSession } from '../lib/actions'
+import type { MessageWithParts, Part, Command, PermissionRequest } from '@shared/opencode'
+import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, openProject, openProjectFolder, pushHistory, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, unrevertSession } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -90,11 +90,25 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
         </div>
       )
     }
+    case 'compaction':
+      return (
+        <div className="compaction-note">
+          <span className="compaction-note-icon">✂</span>
+          <span>Context compacted — earlier messages were summarized.</span>
+        </div>
+      )
     case 'snapshot':
       return null
     default:
       return null
   }
+}
+
+function runningLabel(part: Part): string {
+  const title = part.state?.title || part.state?.tool || part.state?.name
+  if (part.type === 'agent') return `Agent ${title || 'working'}…`
+  if (part.type === 'tool') return `Running ${title || 'tool'}…`
+  return 'Working…'
 }
 
 function msgText(m: MessageWithParts): string {
@@ -125,6 +139,78 @@ function MessageError({ error }: { error?: unknown }): React.JSX.Element | null 
   )
 }
 
+function TodoList({ sessionId }: { sessionId: string }): React.JSX.Element | null {
+  const todos = useStore(appStore, (s) => s.todos[sessionId])
+  const [open, setOpen] = useState(true)
+  if (!todos || todos.length === 0) return null
+  const done = todos.filter((t) => t.status === 'completed' || t.status === 'cancelled').length
+  if (done === todos.length) return null
+  const running = todos.filter((t) => t.status === 'in_progress').length
+  const total = todos.length
+  return (
+    <div className="todo-list">
+      <button className="todo-list-head" onClick={() => setOpen((o) => !o)}>
+        <span className="todo-list-chevron" style={{ transform: open ? 'rotate(90deg)' : undefined }}>
+          <ChevronIcon size={13} />
+        </span>
+        <span className="todo-list-title">Todos</span>
+        <span className="todo-list-progress">
+          {done}/{total} done
+        </span>
+        {running > 0 ? <span className="spinner-sm" /> : null}
+      </button>
+      {open && (
+        <div className="todo-list-body">
+          {todos.map((t) => (
+            <div key={t.id} className={`todo-item ${t.status}`}>
+              <span className="todo-check">{t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '◐' : '○'}</span>
+              <span className="todo-content">{t.content}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PermissionCard({ permission }: { permission: PermissionRequest }): React.JSX.Element | null {
+  if (!permission) return null
+  const respond = async (response: 'once' | 'always' | 'reject'): Promise<void> => {
+    try {
+      await OpenCode.respondPermission(permission.sessionID, permission.id, response)
+    } catch {
+      /* ignore */
+    }
+    appStore.setState({ permission: null })
+  }
+
+  const patterns = permission.patterns ?? []
+  const cmd = typeof permission.metadata?.command === 'string' ? permission.metadata.command : undefined
+  const desc = cmd ?? patterns.join(', ') ?? ''
+
+  return (
+    <div className="perm-card">
+      <div className="perm-card-head">
+        <span className={`perm-card-dot ${permission.permission || 'other'}`} />
+        <span className="perm-card-title">{permission.permission || 'permission'}</span>
+        <span className="perm-card-waiting">waiting for your approval</span>
+      </div>
+      {desc ? <div className="perm-card-desc">{desc}</div> : null}
+      <div className="perm-card-actions">
+        <button className="btn-deny" onClick={() => void respond('reject')}>
+          Deny
+        </button>
+        <button className="btn-deny" onClick={() => void respond('always')}>
+          Always deny
+        </button>
+        <button className="btn-allow" onClick={() => void respond('once')}>
+          Allow once
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function MessageView({
   item,
   onCtx
@@ -133,6 +219,17 @@ function MessageView({
   onCtx?: (e: React.MouseEvent, item: MessageWithParts) => void
 }): React.JSX.Element {
   const isUser = item.info.role === 'user'
+  const hasCompactionPart = item.parts.some((p) => p.type === 'compaction')
+  const hasText = item.parts.some((p) => p.type === 'text' && (p.text ?? '').trim().length > 0)
+  if (isUser && hasCompactionPart && !hasText) {
+    return (
+      <div className="compaction-divider">
+        <span className="compaction-divider-line" />
+        <span className="compaction-divider-label">Context compacted</span>
+        <span className="compaction-divider-line" />
+      </div>
+    )
+  }
   return (
     <div className={`msg ${isUser ? 'user' : 'assistant'}`} onContextMenu={onCtx ? (e) => onCtx(e, item) : undefined}>
       {onCtx ? (
@@ -312,6 +409,8 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const streaming = useStore(appStore, (s) => s.streaming)
   const hasSession = useStore(appStore, (s) => Boolean(sessionId ?? s.activeSessionId))
   const effectiveSession = useStore(appStore, (s) => sessionId ?? s.activeSessionId)
+  const sessions = useStore(appStore, (s) => s.sessions)
+  const activeSession = effectiveSession ? sessions.find((s) => s.id === effectiveSession) : undefined
   const composerEpoch = useStore(appStore, (s) => s.composerEpoch)
   const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? [] : []))
   const [text, setText] = useState('')
@@ -548,6 +647,19 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const canSend = text.trim().length > 0 || attachments.length > 0
   const lastError = useStore(appStore, (s) => s.lastError)
 
+  if (activeSession?.parentID) {
+    return (
+      <div className="composer-wrap">
+        <div className="child-session-bar">
+          <span>Subagent sessions cannot be prompted.</span>
+          <button className="btn-ghost" onClick={() => void selectSession(activeSession.parentID!)}>
+            Back to main session
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="composer-wrap">
       {lastError ? (
@@ -623,6 +735,15 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             <ModePicker />
             <ModelPicker onPick={onModelChange} />
             <EffortPicker />
+            {hasSession && effectiveSession && !streaming ? (
+              <button
+                className="composer-compact"
+                onClick={() => void compactSession(effectiveSession)}
+                title="Summarize older messages into a compact context summary"
+              >
+                Compact
+              </button>
+            ) : null}
           </div>
           {streaming ? (
             <button className="btn-send" onClick={() => void abortRun()} title="Stop">
@@ -741,6 +862,8 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const msgCtxRef = useRef<HTMLDivElement>(null)
   const launcherProject = useStore(appStore, (s) => s.launcherProject)
 
+  const streaming = useStore(appStore, (s) => s.streaming)
+  const permission = useStore(appStore, (s) => (effectiveId && s.permission?.sessionID === effectiveId ? s.permission : null))
   const revertedIds = useMemo(() => new Set(revertedList ?? []), [revertedList])
   const visible = useMemo(() => messages.filter((m) => !revertedIds.has(m.info.id)), [messages, revertedIds])
   const WINDOW = 100
@@ -753,6 +876,12 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   const windowed = useMemo(() => visible.slice(-visibleCount), [visible, visibleCount])
   const turns = useMemo(() => groupTurns(windowed), [windowed])
+  const lastTurnAssistants = turns[turns.length - 1]?.assistants ?? []
+  const allParts = lastTurnAssistants.flatMap((m) => m.parts)
+  const liveText = allParts.some((p) => p.type === 'text' && (p.text ?? '').trim().length > 0)
+  const runningPart = allParts.find((p) => p.state?.status === 'running' || p.state?.status === 'pending')
+  const waitingForReply = visible[visible.length - 1]?.info.role === 'user'
+  const activity = streaming ? (runningPart ? runningLabel(runningPart) : waitingForReply || !liveText ? 'Thinking' : null) : null
   const expandingRef = useRef(false)
 
   const onScroll = (): void => {
@@ -772,11 +901,26 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   useEffect(() => {
     const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+    const t1 = setTimeout(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }, 150)
+    const t2 = setTimeout(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }, 600)
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+    }
+  }, [effectiveId])
+
+  useEffect(() => {
+    const el = scrollRef.current
     if (el) {
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
       if (nearBottom) el.scrollTop = el.scrollHeight
     }
-  }, [messages.length, effectiveId])
+  }, [messages.length])
 
   useEffect(() => {
     if (!msgCtx) return
@@ -875,16 +1019,29 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
           </button>
         </div>
       )}
-      <div className="messages" ref={scrollRef} onScroll={onScroll}>
-        {(() => {
-          let lastModel: string | undefined
-          return turns.map((turn, i) => {
-            const model = turn.assistants[0]?.info.model?.id
-            const changed = Boolean(model) && model !== lastModel
-            if (model) lastModel = model
-            return <TurnViewMemo key={i} turn={turn} modelChanged={changed} onCtx={onMsgCtx} />
-          })
-        })()}
+      <div className="chat-messages-area">
+        <div className="messages" ref={scrollRef} onScroll={onScroll}>
+          {(() => {
+            let lastModel: string | undefined
+            return turns.map((turn, i) => {
+              const model = turn.assistants[0]?.info.model?.id
+              const changed = Boolean(model) && model !== lastModel
+              if (model) lastModel = model
+              return <TurnViewMemo key={i} turn={turn} modelChanged={changed} onCtx={onMsgCtx} />
+            })
+          })()}
+          {activity ? (
+            <div className="thinking-indicator">
+              <span>{activity}</span>
+              <span className="thinking-dots">
+                <span>.</span>
+                <span>.</span>
+                <span>.</span>
+              </span>
+            </div>
+          ) : null}
+          {permission ? <PermissionCard permission={permission} /> : null}
+        </div>
       </div>
       {msgCtx && (
         <div ref={msgCtxRef} className="ctx-menu" style={{ left: Math.min(msgCtx.x, window.innerWidth - 220), top: msgCtx.y }}>
@@ -945,6 +1102,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
           </button>
         </div>
       )}
+      {effectiveId ? <TodoList sessionId={effectiveId} /> : null}
       <Composer sessionId={sessionId} />
     </div>
   )
