@@ -200,11 +200,11 @@ function PermissionCard({ permission }: { permission: PermissionRequest }): Reac
         <button className="btn-deny" onClick={() => void respond('reject')}>
           Deny
         </button>
-        <button className="btn-deny" onClick={() => void respond('always')}>
-          Always deny
-        </button>
         <button className="btn-allow" onClick={() => void respond('once')}>
           Allow once
+        </button>
+        <button className="btn-allow" onClick={() => void respond('always')}>
+          Always allow
         </button>
       </div>
     </div>
