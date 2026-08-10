@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command } from '@shared/opencode'
-import { abortRun, editMessage, forkFromMessage, newSession, openProjectFolder, pushHistory, revertMessage, runCommand, sendPrompt, setAgent, setMode, setModel, unrevertSession } from '../lib/actions'
+import { abortRun, editMessage, forkFromMessage, newChatWithPrompt, openProject, openProjectFolder, pushHistory, revertMessage, runCommand, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, unrevertSession } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
-import { OpenCode } from '../lib/opencode'
+import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
-import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, PlusIcon, SendIcon, StopIcon } from './icons'
+import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, SendIcon, StopIcon } from './icons'
 import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
 
@@ -253,6 +253,52 @@ function ModePicker(): React.JSX.Element {
   )
 }
 
+function EffortPicker(): React.JSX.Element {
+  const model = useStore(appStore, (s) => s.model)
+  const variant = useStore(appStore, (s) => s.variant)
+  const providers = useStore(appStore, (s) => s.providers)
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const currentModel = providers.flatMap((p) => providerModels(p)).find((m) => m.id === model)
+  const variants = currentModel?.variants ?? []
+  if (variants.length === 0) return <></>
+
+  return (
+    <div className="model-picker" ref={ref}>
+      <button className="model-picker-btn" onClick={() => setOpen((o) => !o)} title="Reasoning effort">
+        <span className="model-picker-name">{variant || 'Default'}</span>
+        <span className="model-picker-chevron">
+          <ChevronIcon size={12} />
+        </span>
+      </button>
+      {open && (
+        <div className="model-picker-pop">
+          <div className="model-picker-list">
+            <div className="model-section-title">Effort</div>
+            <button className={`model-row ${!variant ? 'active' : ''}`} onClick={() => { setVariant(null); setOpen(false) }}>
+              <span className="model-row-name">Default</span>
+            </button>
+            {variants.map((v) => (
+              <button key={v} className={`model-row ${variant === v ? 'active' : ''}`} onClick={() => { setVariant(v); setOpen(false) }}>
+                <span className="model-row-name">{v}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -385,8 +431,17 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const submit = (): void => {
-    if (!effectiveSession) return
     if (!text.trim() && attachments.length === 0) return
+    if (!effectiveSession) {
+      void newChatWithPrompt(text, attachments)
+      setText('')
+      setAttachments([])
+      setCompletion(null)
+      setHistIdx(-1)
+      setDraftBackup('')
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      return
+    }
     const cmdMatch = /^\/([\w-]+)(?:\s+(.*))?$/.exec(text.trim())
     if (cmdMatch && commands.some((c) => c.name === cmdMatch[1])) {
       if (text.trim()) pushHistory(effectiveSession, text)
@@ -567,13 +622,14 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             </button>
             <ModePicker />
             <ModelPicker onPick={onModelChange} />
+            <EffortPicker />
           </div>
           {streaming ? (
             <button className="btn-send" onClick={() => void abortRun()} title="Stop">
               <StopIcon size={16} />
             </button>
           ) : (
-            <button className="btn-send" disabled={!canSend || !hasSession} onClick={submit} title="Send">
+            <button className="btn-send" disabled={!canSend} onClick={submit} title="Send">
               <SendIcon size={16} />
             </button>
           )}
@@ -678,18 +734,48 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
+  const projects = useStore(appStore, (s) => s.projects)
   const revertedList = useStore(appStore, (s) => (effectiveId ? s.reverted[effectiveId] : undefined))
   const scrollRef = useRef<HTMLDivElement>(null)
   const [msgCtx, setMsgCtx] = useState<{ x: number; y: number; message: MessageWithParts } | null>(null)
   const msgCtxRef = useRef<HTMLDivElement>(null)
+  const launcherProject = useStore(appStore, (s) => s.launcherProject)
 
   const revertedIds = useMemo(() => new Set(revertedList ?? []), [revertedList])
   const visible = useMemo(() => messages.filter((m) => !revertedIds.has(m.info.id)), [messages, revertedIds])
-  const turns = useMemo(() => groupTurns(visible), [visible])
+  const WINDOW = 100
+  const PAGE = 200
+  const [visibleCount, setVisibleCount] = useState(WINDOW)
+
+  useEffect(() => {
+    setVisibleCount(WINDOW)
+  }, [effectiveId])
+
+  const windowed = useMemo(() => visible.slice(-visibleCount), [visible, visibleCount])
+  const turns = useMemo(() => groupTurns(windowed), [windowed])
+  const expandingRef = useRef(false)
+
+  const onScroll = (): void => {
+    const el = scrollRef.current
+    if (!el || expandingRef.current) return
+    if (visible.length <= windowed.length) return
+    if (el.scrollTop < 120) {
+      expandingRef.current = true
+      const before = el.scrollHeight
+      setVisibleCount((c) => c + PAGE)
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop += el.scrollHeight - before
+        expandingRef.current = false
+      })
+    }
+  }
 
   useEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el) {
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
+      if (nearBottom) el.scrollTop = el.scrollHeight
+    }
   }, [messages.length, effectiveId])
 
   useEffect(() => {
@@ -721,22 +807,59 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
       <div className="chat">
         <div className="empty">
           <img className="hero-mark" src="./icon.png" alt="Ralf" />
-          <h2>Ralf</h2>
-          <p>A Codex-style desktop client for opencode.</p>
+          <h2>How can I help you today?</h2>
+          <div className="launcher-composer">
+            <div className="launcher-project-row">
+              <span className="launcher-project-label">Chat in</span>
+              <select
+                className="launcher-project-select"
+                value={launcherProject ?? ''}
+                onChange={(e) => {
+                  if (e.target.value === '__new__') {
+                    void openProjectFolder()
+                  } else {
+                    setLauncherProject(e.target.value === '' ? null : e.target.value)
+                  }
+                }}
+              >
+                <option value="">Just a chat (no project)</option>
+                {projects.map((p) => {
+                  const path = p.worktree ?? p.directory ?? p.path
+                  if (!path) return null
+                  return (
+                    <option key={path} value={path}>
+                      {path.split('/').pop()}
+                    </option>
+                  )
+                })}
+                <option value="__new__">New project…</option>
+              </select>
+            </div>
+            <Composer />
+          </div>
           <div className="actions">
-            <button className="action" onClick={() => void newSession()}>
-              <span className="icon">
-                <PlusIcon size={15} />
-              </span>
-              New chat
-            </button>
             <button className="action" onClick={() => void openProjectFolder()}>
               <span className="icon">
                 <FolderIcon size={15} />
               </span>
-              Open folder
+              New project
             </button>
           </div>
+          {projects.length > 0 ? (
+            <div className="recent-projects">
+              <div className="section-label">Open a project</div>
+              {projects.slice(0, 6).map((p) => {
+                const path = p.worktree ?? p.directory ?? p.path
+                if (!path) return null
+                return (
+                  <button key={path} className="recent-project" onClick={() => void openProject(path)} title={path}>
+                    <FolderIcon size={13} />
+                    <span>{path.split('/').pop()}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
       </div>
     )
@@ -752,7 +875,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
           </button>
         </div>
       )}
-      <div className="messages" ref={scrollRef}>
+      <div className="messages" ref={scrollRef} onScroll={onScroll}>
         {(() => {
           let lastModel: string | undefined
           return turns.map((turn, i) => {

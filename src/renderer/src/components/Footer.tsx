@@ -8,7 +8,6 @@ export function Footer(): React.JSX.Element {
 
   return (
     <div className="footer">
-      <span>Ralf</span>
       <div className="right">
         {streaming && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

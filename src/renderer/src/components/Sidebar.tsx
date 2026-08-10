@@ -14,7 +14,7 @@ import {
   sessionMetaFor,
   toggleArchive
 } from '../lib/actions'
-import { ChatIcon, ChevronIcon, FolderIcon, PlusIcon } from './icons'
+import { ChatIcon, ChevronIcon, FolderIcon, GearIcon, PlusIcon } from './icons'
 
 interface CtxMenu {
   x: number
@@ -36,7 +36,7 @@ function SectionHeader({ label, onAdd, addTitle }: { label: string; onAdd: () =>
 
 function timeAgo(ts?: number): string {
   if (!ts) return ''
-  const diff = Date.now() - ts * 1000
+  const diff = Date.now() - ts
   if (diff < 60_000) return 'now'
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`
@@ -72,7 +72,6 @@ export function Sidebar(): React.JSX.Element {
   const sessions = useStore(appStore, (s) => s.sessions)
   const projects = useStore(appStore, (s) => s.projects)
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
-  const serverHealthy = useStore(appStore, (s) => s.serverHealthy)
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const archived = useStore(appStore, (s) => s.archived)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -256,10 +255,11 @@ export function Sidebar(): React.JSX.Element {
       )}
 
       <div className="footer">
-        <span className={`status-dot ${serverHealthy ? 'ok' : 'pulse'}`} />
-        <span>{serverHealthy ? 'opencode ready' : 'starting…'}</span>
-        <span className="right" style={{ marginLeft: 'auto', fontSize: 11 }}>
-          {projectName(activePath) || ''}
+        <span className="right" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11 }}>{projectName(activePath) || ''}</span>
+          <button className="footer-gear" onClick={() => appStore.setState({ settingsOpen: true })} title="Settings">
+            <GearIcon size={18} />
+          </button>
         </span>
       </div>
 

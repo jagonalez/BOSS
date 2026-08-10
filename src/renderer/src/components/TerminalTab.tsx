@@ -4,28 +4,40 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useStore, appStore } from '../state/AppState'
 
-const THEME = {
-  background: '#0b0d10',
-  foreground: '#f2f4f8',
-  cursor: '#4f8cff',
-  cursorAccent: '#0b0d10',
-  selectionBackground: 'rgba(79,140,255,0.3)',
-  black: '#0b0d10',
-  red: '#f85149',
-  green: '#3fb950',
-  yellow: '#d29922',
-  blue: '#4f8cff',
-  magenta: '#8957e5',
-  cyan: '#2dd4bf',
-  white: '#f2f4f8',
-  brightBlack: '#7d8590',
-  brightRed: '#ff7b72',
-  brightGreen: '#56d364',
-  brightYellow: '#e3b341',
-  brightBlue: '#6ba1ff',
-  brightMagenta: '#b58cff',
-  brightCyan: '#5eead4',
-  brightWhite: '#ffffff'
+function xtermTheme(): Record<string, string> {
+  const cs = getComputedStyle(document.documentElement)
+  const v = (name: string): string => cs.getPropertyValue(name).trim()
+  const bg = v('--bg') || '#0b0d10'
+  const text = v('--text') || '#f2f4f8'
+  const accent = v('--accent') || '#4f8cff'
+  const red = v('--red') || '#f85149'
+  const green = v('--green') || '#3fb950'
+  const yellow = v('--yellow') || '#d29922'
+  const purple = v('--purple') || '#8957e5'
+  const faint = v('--text-faint') || '#7d8590'
+  return {
+    background: bg,
+    foreground: text,
+    cursor: accent,
+    cursorAccent: bg,
+    selectionBackground: v('--accent-soft') || 'rgba(79,140,255,0.3)',
+    black: bg,
+    red,
+    green,
+    yellow,
+    blue: accent,
+    magenta: purple,
+    cyan: '#2dd4bf',
+    white: text,
+    brightBlack: faint,
+    brightRed: red,
+    brightGreen: green,
+    brightYellow: yellow,
+    brightBlue: accent,
+    brightMagenta: purple,
+    brightCyan: '#5eead4',
+    brightWhite: text
+  }
 }
 
 export function TerminalTab(): React.JSX.Element {
@@ -41,7 +53,7 @@ export function TerminalTab(): React.JSX.Element {
       fontSize: 13,
       lineHeight: 1.35,
       cursorBlink: true,
-      theme: THEME,
+      theme: xtermTheme(),
       scrollback: 5000
     })
     const fit = new FitAddon()
