@@ -5,7 +5,9 @@ export function errorSummary(err: unknown): string {
     const nested = o.data?.message ?? o.data?.error?.message
     const msg = typeof nested === 'string' && nested ? nested : typeof o.message === 'string' ? o.message : ''
     const name = typeof o.name === 'string' && o.name ? o.name : ''
-    return [name, msg].filter(Boolean).join(': ') || JSON.stringify(o).slice(0, 200)
+    const full = [name, msg].filter(Boolean).join(': ')
+    if (full.length <= 240) return full
+    return `${full.slice(0, 240)}…`
   }
   return String(err)
 }

@@ -138,9 +138,14 @@ export function App(): React.JSX.Element {
           setAttention('permission')
           break
         }
-        case 'session.error':
+        case 'session.error': {
+          const props = (ev.properties ?? {}) as { sessionID?: string }
+          if (props.sessionID) {
+            void loadMessages(props.sessionID)
+          }
           setAttention('error')
           break
+        }
         case 'message.updated':
         case 'message.part.updated':
         case 'message.part.created':
