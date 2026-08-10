@@ -926,24 +926,36 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   const speakAloud = useStore(appStore, (s) => s.speakAloud)
   const spokenRef = useRef<Set<string>>(new Set())
-  const prevStreamingRef = useRef(false)
+  const baselineMsgIdRef = useRef<Record<string, string>>({})
+  const baselineSetRef = useRef(false)
   const prevSessionRef = useRef<string | null>(null)
   useEffect(() => {
-    // Switching sessions: discard the old streaming state so we never treat an
-    // old session's completion (or lack thereof) as a fresh response here.
-    if (prevSessionRef.current !== effectiveId) {
-      prevSessionRef.current = effectiveId
-      prevStreamingRef.current = streaming
+    if (!effectiveId) {
+      prevSessionRef.current = null
+      baselineSetRef.current = false
       return
     }
-    // Speak only when a response just finished streaming — never when switching
-    // into an existing session with historical messages.
-    const finished = prevStreamingRef.current && !streaming
-    prevStreamingRef.current = streaming
-    if (!finished || !speakAloud) return
+    if (prevSessionRef.current !== effectiveId) {
+      prevSessionRef.current = effectiveId
+      baselineSetRef.current = false
+      return
+    }
+    if (!baselineSetRef.current) {
+      const lastAssistant = turns[turns.length - 1]?.assistants[turns[turns.length - 1]?.assistants.length - 1]
+      if (!lastAssistant) return // messages not loaded yet — wait
+      // First stable view of this session: snapshot the last message id so we
+      // never read out historical messages when clicking into a session.
+      baselineSetRef.current = true
+      baselineMsgIdRef.current[effectiveId] = lastAssistant.info.id
+      return
+    }
+    if (!speakAloud) return
     const lastAssistant = turns[turns.length - 1]?.assistants[turns[turns.length - 1]?.assistants.length - 1]
     if (!lastAssistant) return
     if (!lastAssistant.info.time?.completed) return
+    // Only speak if a brand-new message appeared since we entered the session.
+    if (lastAssistant.info.id === baselineMsgIdRef.current[effectiveId]) return
+    baselineMsgIdRef.current[effectiveId] = lastAssistant.info.id
     const text = msgText(lastAssistant)
     if (!text.trim()) return
     const key = `${effectiveId}:${lastAssistant.info.id}:${text}`
@@ -951,7 +963,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
     spokenRef.current.add(key)
     if (spokenRef.current.size > 200) spokenRef.current = new Set([...spokenRef.current].slice(-100))
     void speakText(text)
-  }, [turns, streaming, speakAloud, effectiveId])
+  }, [turns, speakAloud, effectiveId])
 
   const onScroll = (): void => {
     const el = scrollRef.current
