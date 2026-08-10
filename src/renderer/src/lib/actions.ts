@@ -1,6 +1,38 @@
 import { appStore, upsertMessagesFromList, type Attachment, type PanelKind, type PanelTab } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
+import type { SessionMeta } from '@shared/opencode'
+
+function persistSessionMeta(meta: Record<string, SessionMeta>): void {
+  try {
+    localStorage.setItem('ralf.sessionMeta', JSON.stringify(meta))
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadSessionMeta(): void {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('ralf.sessionMeta') ?? '{}')
+    if (parsed && typeof parsed === 'object') appStore.setState({ sessionMeta: parsed })
+  } catch {
+    /* ignore */
+  }
+}
+
+export function upsertSessionMeta(sessionId: string, patch: Partial<SessionMeta>): void {
+  appStore.setState((s) => {
+    const meta = { ...s.sessionMeta }
+    const cur = meta[sessionId] ?? { sessionId, kind: 'main', reviews: [] }
+    meta[sessionId] = { ...cur, ...patch }
+    persistSessionMeta(meta)
+    return { sessionMeta: meta }
+  })
+}
+
+export function sessionMetaFor(sessionId: string): SessionMeta | undefined {
+  return appStore.getState().sessionMeta[sessionId]
+}
 
 export async function refreshSessions(): Promise<void> {
   try {
@@ -212,6 +244,7 @@ export function selectSession(id: string): void {
 export async function newSession(): Promise<void> {
   try {
     const session = await OpenCode.createSession()
+    upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
     await refreshSessions()
     selectSession(session.id)
   } catch {
@@ -294,6 +327,7 @@ export function archiveAllInPath(path: string): void {
 export async function forkSession(id: string): Promise<void> {
   try {
     const session = await OpenCode.fork(id)
+    upsertSessionMeta(session.id, { kind: 'fork', forkedFrom: { sessionId: id } })
     await refreshSessions()
     selectSession(session.id)
   } catch {
@@ -342,6 +376,7 @@ export async function unrevertSession(sessionID: string): Promise<void> {
 export async function forkFromMessage(sessionID: string, messageID: string): Promise<void> {
   try {
     const session = await OpenCode.fork(sessionID, messageID)
+    upsertSessionMeta(session.id, { kind: 'fork', forkedFrom: { sessionId: sessionID, messageId: messageID } })
     await refreshSessions()
     selectSession(session.id)
   } catch {
@@ -352,7 +387,10 @@ export async function forkFromMessage(sessionID: string, messageID: string): Pro
 export async function editMessage(sessionID: string, messageID: string, text: string): Promise<void> {
   await revertMessage(sessionID, messageID)
   if (text.trim()) {
-    appStore.setState((s) => ({ drafts: { ...s.drafts, [sessionID]: text } }))
+    appStore.setState((s) => ({
+      drafts: { ...s.drafts, [sessionID]: text },
+      composerEpoch: s.composerEpoch + 1
+    }))
   }
 }
 
@@ -514,6 +552,7 @@ export async function openPanelTab(kind: PanelKind, groupId?: string): Promise<v
     try {
       const session = await OpenCode.createSession()
       tab.sessionId = session.id
+      upsertSessionMeta(session.id, { kind: 'side', projectPath: appStore.getState().projectPath })
     } catch {
       /* ignore */
     }

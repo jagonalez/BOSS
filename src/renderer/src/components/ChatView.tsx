@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command } from '@shared/opencode'
 import { abortRun, editMessage, forkFromMessage, newSession, openProjectFolder, pushHistory, revertMessage, runCommand, sendPrompt, setAgent, setMode, setModel, unrevertSession } from '../lib/actions'
@@ -266,8 +266,9 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const streaming = useStore(appStore, (s) => s.streaming)
   const hasSession = useStore(appStore, (s) => Boolean(sessionId ?? s.activeSessionId))
   const effectiveSession = useStore(appStore, (s) => sessionId ?? s.activeSessionId)
-  const text = useStore(appStore, (s) => (effectiveSession ? s.drafts[effectiveSession] ?? '' : ''))
+  const composerEpoch = useStore(appStore, (s) => s.composerEpoch)
   const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? [] : []))
+  const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [histIdx, setHistIdx] = useState(-1)
@@ -285,7 +286,17 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   useEffect(() => {
     setHistIdx(-1)
     setDraftBackup('')
-  }, [effectiveSession])
+    if (effectiveSession) setText(appStore.getState().drafts[effectiveSession] ?? '')
+  }, [effectiveSession, composerEpoch])
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (effectiveSession && text !== (appStore.getState().drafts[effectiveSession] ?? '')) {
+        appStore.setState((s) => ({ drafts: { ...s.drafts, [effectiveSession]: text } }))
+      }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [text, effectiveSession])
 
   const completionTrigger = (value: string): { type: 'command' | 'file'; query: string } | null => {
     if (value.startsWith('/') && !value.slice(1).includes(' ')) {
@@ -333,11 +344,6 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     }
     setCompletion(null)
     autoGrow()
-  }
-
-  const setText = (value: string): void => {
-    if (!effectiveSession) return
-    appStore.setState((s) => ({ drafts: { ...s.drafts, [effectiveSession]: value } }))
   }
 
   const setAttachments = (list: Attachment[]): void => {
@@ -666,14 +672,20 @@ function TurnView({
   )
 }
 
+const TurnViewMemo = React.memo(TurnView)
+
 export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
-  const revertedIds = useStore(appStore, (s) => (effectiveId ? new Set(s.reverted[effectiveId] ?? []) : new Set()))
+  const revertedList = useStore(appStore, (s) => (effectiveId ? s.reverted[effectiveId] : undefined))
   const scrollRef = useRef<HTMLDivElement>(null)
   const [msgCtx, setMsgCtx] = useState<{ x: number; y: number; message: MessageWithParts } | null>(null)
   const msgCtxRef = useRef<HTMLDivElement>(null)
+
+  const revertedIds = useMemo(() => new Set(revertedList ?? []), [revertedList])
+  const visible = useMemo(() => messages.filter((m) => !revertedIds.has(m.info.id)), [messages, revertedIds])
+  const turns = useMemo(() => groupTurns(visible), [visible])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -697,10 +709,10 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
     }
   }, [msgCtx])
 
-  const onMsgCtx = (e: React.MouseEvent, message: MessageWithParts): void => {
+  const onMsgCtx = useCallback((e: React.MouseEvent, message: MessageWithParts): void => {
     e.preventDefault()
     setMsgCtx({ x: e.clientX, y: e.clientY, message })
-  }
+  }, [])
 
   const menuText = msgCtx ? msgText(msgCtx.message) : ''
 
@@ -743,12 +755,11 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
       <div className="messages" ref={scrollRef}>
         {(() => {
           let lastModel: string | undefined
-          const visible = messages.filter((m) => !revertedIds.has(m.info.id))
-          return groupTurns(visible).map((turn, i) => {
+          return turns.map((turn, i) => {
             const model = turn.assistants[0]?.info.model?.id
             const changed = Boolean(model) && model !== lastModel
             if (model) lastModel = model
-            return <TurnView key={i} turn={turn} modelChanged={changed} onCtx={onMsgCtx} />
+            return <TurnViewMemo key={i} turn={turn} modelChanged={changed} onCtx={onMsgCtx} />
           })
         })()}
       </div>

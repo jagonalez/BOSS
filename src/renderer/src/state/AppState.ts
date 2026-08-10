@@ -10,6 +10,7 @@ import type {
   Project,
   Provider,
   SessionInfo,
+  SessionMeta,
   Todo
 } from '@shared/opencode'
 import type {
@@ -89,6 +90,8 @@ export interface AppState {
   archived: string[]
   reverted: Record<string, string[]>
   gitRefresh: number
+  composerEpoch: number
+  sessionMeta: Record<string, SessionMeta>
 }
 
 export const initialBrowseState: BrowseNavigationState = {
@@ -138,7 +141,9 @@ export const initialState: AppState = {
   history: {},
   archived: [],
   reverted: {},
-  gitRefresh: 0
+  gitRefresh: 0,
+  composerEpoch: 0,
+  sessionMeta: {}
 }
 
 export const appStore = new Store<AppState>(initialState)
