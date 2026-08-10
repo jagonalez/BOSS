@@ -100,6 +100,14 @@ export function registerIpc(deps: IpcDeps): void {
     return true
   })
 
+  ipcMain.handle(IpcChannels.OpenInEditor, (_e, body: { path: string; line?: number }) => {
+    const line = body.line ?? 1
+    execFile('code', ['-g', `${body.path}:${line}`], (err) => {
+      if (err) void shell.openPath(body.path)
+    })
+    return true
+  })
+
   ipcMain.handle(IpcChannels.OptionalList, () => deps.optional.list())
 
   ipcMain.handle(IpcChannels.OptionalDownload, async (event, id) => {

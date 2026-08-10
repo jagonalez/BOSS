@@ -1,5 +1,6 @@
 import { appStore, upsertMessagesFromList, type Attachment, type PanelKind, type PanelTab } from '../state/AppState'
-import { OpenCode, providerModels } from './opencode'
+import { OpenCode, isHighVariant, providerModels } from './opencode'
+import { errorSummary } from './errors'
 
 export async function refreshSessions(): Promise<void> {
   try {
@@ -38,6 +39,15 @@ export function setModel(id: string): void {
   }
 }
 
+export function pushHistory(sessionId: string, text: string): void {
+  if (!sessionId || !text.trim()) return
+  appStore.setState((s) => {
+    const list = s.history[sessionId] ?? []
+    const next = [...list, text].slice(-100)
+    return { history: { ...s.history, [sessionId]: next } }
+  })
+}
+
 export function resolveDefaultModel(): void {
   const s = appStore.getState()
   if (s.model) return
@@ -52,13 +62,13 @@ export function resolveDefaultModel(): void {
     /* ignore */
   }
   const recent = [...s.sessions].sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0]
-  if (recent?.model?.id && valid(recent.model.id)) {
+  if (recent?.model?.id && valid(recent.model.id) && !isHighVariant(recent.model.id)) {
     setModel(recent.model.id)
     return
   }
   const first = s.providers[0]
   if (first) {
-    const m = providerModels(first)[0]
+    const m = providerModels(first).find((mm) => !isHighVariant(mm.id)) ?? providerModels(first)[0]
     if (m) setModel(m.id)
   }
 }
@@ -93,6 +103,10 @@ export async function loadMessages(sessionID: string): Promise<void> {
 
 export function refreshStreaming(): void {
   const s = appStore.getState()
+  if (s.streamingLocked) {
+    if (s.streaming) appStore.setState({ streaming: false })
+    return
+  }
   const sid = s.activeSessionId
   if (!sid) {
     appStore.setState({ streaming: false })
@@ -249,6 +263,19 @@ export async function newChatInProject(path: string): Promise<void> {
   await newSession()
 }
 
+export function openCommitDialog(path: string): void {
+  appStore.setState({ commitPath: path })
+}
+
+export async function renameSessionById(id: string, title: string): Promise<void> {
+  try {
+    await OpenCode.renameSession(id, title)
+    await refreshSessions()
+  } catch {
+    /* ignore */
+  }
+}
+
 export function resolveModelKey(id: string): { providerID: string; modelID: string } | undefined {
   const s = appStore.getState()
   for (const p of s.providers) {
@@ -269,12 +296,30 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     parts.push({ type: 'file', mime: a.mime, filename: a.name, url: a.dataUrl })
   }
   if (text.trim()) parts.push({ type: 'text', text })
-  appStore.setState({ streaming: true })
+  appStore.setState({ streaming: true, lastError: null, streamingLocked: false })
   const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
   try {
     await OpenCode.sendMessageAsync(sessionID, parts, modelKey ? { model: modelKey } : {})
-  } catch {
-    /* ignore */
+  } catch (err) {
+    const raw = String((err as Error).message ?? err)
+    const isNetwork = /-> 0:|fetch failed|ECONNREFUSED/i.test(raw)
+    const msg = isNetwork
+      ? 'Couldn’t reach the opencode server — it may be restarting. Your message was not sent; please try again.'
+      : errorSummary(err)
+    const providerID = modelKey?.providerID
+    const noAccess = /no access|subscription|upgrade|credits|401|403/i.test(msg)
+    if (noAccess && providerID) {
+      const provider = appStore.getState().providers.find((p) => p.id === providerID)
+      const base = provider ? providerModels(provider).find((m) => !isHighVariant(m.id)) : undefined
+      if (base && base.id !== cur.model) {
+        setModel(base.id)
+        appStore.setState({ lastError: `No access to “${cur.model}” — switched to ${base.name ?? base.id}.` })
+      } else {
+        appStore.setState({ lastError: msg })
+      }
+    } else {
+      appStore.setState({ lastError: msg })
+    }
   }
   await loadMessages(sessionID)
   setTimeout(() => {
@@ -284,6 +329,7 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
 
 export async function abortRun(): Promise<void> {
   const cur = appStore.getState()
+  appStore.setState({ streaming: false, streamingLocked: true })
   if (!cur.activeSessionId) return
   try {
     await OpenCode.abort(cur.activeSessionId)

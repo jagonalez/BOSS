@@ -36,6 +36,7 @@ const ralf: RalfApi = {
   onBrowseExternal: (cb) => subscribe(IpcChannels.BrowseExternal, cb),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OpenExternal, url),
   openPath: (path: string) => ipcRenderer.invoke(IpcChannels.OpenPath, path),
+  openInEditor: (path: string, line?: number) => ipcRenderer.invoke(IpcChannels.OpenInEditor, { path, line }),
 
   optionalList: () => ipcRenderer.invoke(IpcChannels.OptionalList),
   optionalDownload: (id) => ipcRenderer.invoke(IpcChannels.OptionalDownload, id),

@@ -91,6 +91,7 @@ export const IpcChannels = {
   BrowseExternal: 'browse:external',
   OpenExternal: 'open-external',
   OpenPath: 'open-path',
+  OpenInEditor: 'open-in-editor',
   OptionalList: 'optional:list',
   OptionalDownload: 'optional:download',
   OptionalProgress: 'optional:progress',

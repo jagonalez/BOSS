@@ -7,6 +7,7 @@ import {
   forkSession,
   newChatInProject,
   newSession,
+  openCommitDialog,
   openProject,
   openProjectFolder,
   selectSession,
@@ -111,10 +112,13 @@ export function Sidebar(): React.JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') close()
     }
-    document.addEventListener('mousedown', close)
+    const onDoc = (e: MouseEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) close()
+    }
+    document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
     return () => {
-      document.removeEventListener('mousedown', close)
+      document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
     }
   }, [ctx])
@@ -259,19 +263,49 @@ export function Sidebar(): React.JSX.Element {
           {ctx.project ? (
             <>
               {menuItem('New chat here', () => void newChatInProject(ctx.project!))}
-              {menuItem('Archive all chats', () => archiveAllInPath(ctx.project!))}
+              {menuItem('Commit & push…', () => openCommitDialog(ctx.project!))}
+              {menuItem('Archive all chats', () =>
+                appStore.setState({
+                  confirm: {
+                    title: 'Archive all chats?',
+                    message: `Archive all chats in this project? You can restore them later from the Archived section.`,
+                    confirmLabel: 'Archive',
+                    action: () => archiveAllInPath(ctx.project!)
+                  }
+                })
+              )}
               {menuItem('Open in Finder', () => void window.ralf.openPath(ctx.project!))}
             </>
           ) : ctx.session ? (
             <>
               {menuItem('Open', () => selectSession(ctx.session!.id))}
+              {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Fork', () => void forkSession(ctx.session!.id))}
               {archivedSet.has(ctx.session.id) ? (
                 menuItem('Unarchive', () => toggleArchive(ctx.session!.id))
               ) : (
-                menuItem('Archive', () => toggleArchive(ctx.session!.id))
+                menuItem('Archive', () =>
+                  appStore.setState({
+                    confirm: {
+                      title: 'Archive chat?',
+                      message: 'Archive this chat? You can restore it later from the Archived section.',
+                      confirmLabel: 'Archive',
+                      action: () => toggleArchive(ctx.session!.id)
+                    }
+                  })
+                )
               )}
-              {menuItem('Delete', () => void deleteSession(ctx.session!.id))}
+              {menuItem('Delete', () =>
+                appStore.setState({
+                  confirm: {
+                    title: 'Delete chat?',
+                    message: 'This permanently deletes the chat and its history. This cannot be undone.',
+                    confirmLabel: 'Delete',
+                    destructive: true,
+                    action: () => void deleteSession(ctx.session!.id)
+                  }
+                })
+              )}
               {menuItem('Copy ID', () => void navigator.clipboard.writeText(ctx.session!.id))}
             </>
           ) : null}

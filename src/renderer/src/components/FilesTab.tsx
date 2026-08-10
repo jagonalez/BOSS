@@ -3,6 +3,12 @@ import { useStore, appStore } from '../state/AppState'
 import type { FileNode } from '@shared/opencode'
 import { OpenCode } from '../lib/opencode'
 import { ChevronIcon, FileIcon } from './icons'
+import { CodeView } from './CodeView'
+
+function baseName(path: string): string {
+  const parts = path.replace(/\/+$/, '').split('/')
+  return parts[parts.length - 1] || path
+}
 
 function FileNodeRow({
   node,
@@ -19,6 +25,7 @@ function FileNodeRow({
 }): React.JSX.Element {
   const isDir = node.type === 'directory'
   const isExpanded = expanded.has(node.path)
+  const children = (node.children ?? []).filter((c) => !c.ignored)
   return (
     <>
       <div
@@ -40,16 +47,9 @@ function FileNodeRow({
         )}
         <span>{node.name}</span>
       </div>
-      {isDir && isExpanded && node.children
-        ? node.children.map((child) => (
-            <FileNodeRow
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              expanded={expanded}
-              onToggle={onToggle}
-              onSelect={onSelect}
-            />
+      {isDir && isExpanded
+        ? children.map((child) => (
+            <FileNodeRow key={child.path} node={child} depth={depth + 1} expanded={expanded} onToggle={onToggle} onSelect={onSelect} />
           ))
         : null}
     </>
@@ -59,8 +59,24 @@ function FileNodeRow({
 export function FilesTab(): React.JSX.Element {
   const files = useStore(appStore, (s) => s.files)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [content, setContent] = useState<{ path: string; text: string } | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [tabs, setTabs] = useState<Array<{ path: string; text: string }>>([])
+  const [activePath, setActivePath] = useState<string | null>(null)
+  const [treeWidth, setTreeWidth] = useState(280)
+
+  const onTreeResize = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = treeWidth
+    const move = (ev: MouseEvent): void => {
+      setTreeWidth(Math.min(Math.max(startW + (ev.clientX - startX), 200), 460))
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
 
   useEffect(() => {
     if (!files) {
@@ -78,30 +94,45 @@ export function FilesTab(): React.JSX.Element {
       next.add(path)
       const tree = await OpenCode.fileTree(path).catch(() => [])
       const update = (nodes: FileNode[]): FileNode[] =>
-        nodes.map((node) => (node.path === path ? { ...node, children: tree } : { ...node, children: node.children ? update(node.children) : node.children }))
+        nodes.map((node) =>
+          node.path === path ? { ...node, children: tree } : { ...node, children: node.children ? update(node.children) : node.children }
+        )
       appStore.setState({ files: files ? update(files) : files })
     }
     setExpanded(next)
   }
 
   const selectFile = async (path: string): Promise<void> => {
-    setLoading(true)
+    if (tabs.some((t) => t.path === path)) {
+      setActivePath(path)
+      return
+    }
     try {
       const file = await OpenCode.fileContent(path)
-      setContent({ path, text: file.content })
-      appStore.setState({ fileContent: { path, content: file.content } })
+      setTabs((prev) => [...prev, { path, text: file.content }])
+      setActivePath(path)
     } catch {
-      setContent(null)
-    } finally {
-      setLoading(false)
+      /* ignore */
     }
   }
 
+  const closeTab = (path: string): void => {
+    const idx = tabs.findIndex((t) => t.path === path)
+    const next = tabs.filter((t) => t.path !== path)
+    setTabs(next)
+    if (activePath === path) {
+      const neighbor = next[idx] ?? next[idx - 1] ?? next[0]
+      setActivePath(neighbor ? neighbor.path : null)
+    }
+  }
+
+  const active = tabs.find((t) => t.path === activePath) ?? tabs[tabs.length - 1] ?? null
+
   return (
     <div className="two-pane">
-      <div className="pane" style={{ width: 280, borderRight: '1px solid var(--border-subtle)' }}>
+      <div className="pane files-tree" style={{ width: treeWidth }}>
         <div className="tree">
-          {files?.map((node) => (
+          {(files ?? []).filter((n) => !n.ignored).map((node) => (
             <FileNodeRow
               key={node.path}
               node={node}
@@ -112,13 +143,39 @@ export function FilesTab(): React.JSX.Element {
             />
           ))}
         </div>
+        <div className="diff-files-resizer" onMouseDown={onTreeResize} />
       </div>
-      <div className="pane">
-        {loading && <div className="empty"><p>Loading…</p></div>}
-        {!loading && content ? (
-          <pre className="code-view">{content.text}</pre>
+      <div className="pane files-view">
+        {tabs.length > 0 ? (
+          <>
+            <div className="file-tabs">
+              {tabs.map((t) => (
+                <div
+                  key={t.path}
+                  className={`file-tab ${t.path === active?.path ? 'active' : ''}`}
+                  onClick={() => setActivePath(t.path)}
+                  title={t.path}
+                >
+                  <span className="file-tab-name">{baseName(t.path)}</span>
+                  <button
+                    className="tab-close"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      closeTab(t.path)
+                    }}
+                    title="Close"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            {active ? <CodeView text={active.text} path={active.path} /> : null}
+          </>
         ) : (
-          !loading && <div className="empty"><p>Select a file to view its contents.</p></div>
+          <div className="empty">
+            <p>Select a file to view its contents.</p>
+          </div>
         )}
       </div>
     </div>

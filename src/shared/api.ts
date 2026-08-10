@@ -35,6 +35,7 @@ export interface RalfApi {
   onBrowseExternal(cb: (url: string) => void): () => void
   openExternal(url: string): Promise<boolean>
   openPath(path: string): Promise<boolean>
+  openInEditor(path: string, line?: number): Promise<boolean>
 
   optionalList(): Promise<OptionalComponentInfo[]>
   optionalDownload(id: OptionalComponentId): Promise<{ ok: boolean; error?: string }>
