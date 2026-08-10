@@ -11,6 +11,7 @@ import { PTYManager } from './pty-manager'
 import { SpeechManager } from './speech'
 import { registerIpc, type IpcDeps } from './ipc'
 import { loadState } from './state-store'
+import { createBackend } from './backend/factory'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -24,6 +25,7 @@ let mainWindow: BrowserWindow | null = null
 const server = new OpenCodeServer()
 const api = new ApiClient(server)
 const events = new EventStream(server)
+const backend = createBackend((process.env.RALF_ENGINE as 'opencode'|'pi') ?? 'opencode', { server, api, events })
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse(api, join(mainDir, 'computer-use-helper.js'))
 const pty = new PTYManager()
@@ -140,8 +142,8 @@ app.whenReady().then(() => {
   loadRenderer()
   const saved = loadState()
   if (saved.projectPath) server.setInitialCwd(saved.projectPath)
-  void server.start()
-  events.start()
+  void backend.start()
+  // events.start() is handled by OpenCodeBackend.start()
 })
 
 app.on('activate', () => {
@@ -157,8 +159,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  events.stop()
+  void backend.stop()
   void computerUse.dispose()
-  void server.stop()
   speech.dispose()
 })
