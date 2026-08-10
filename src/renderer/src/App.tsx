@@ -20,9 +20,12 @@ import {
   refreshProviders,
   refreshSessions,
   refreshStreaming,
+  loadMode,
+  loadAgent,
   loadArchived,
   loadMessages,
   loadTodos,
+  autoRespond,
   abortRun
 } from './lib/actions'
 
@@ -47,6 +50,8 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     loadArchived()
+    loadMode()
+    loadAgent()
   }, [])
 
   useEffect(() => {
@@ -89,6 +94,19 @@ export function App(): React.JSX.Element {
         case 'session.updated':
           void refreshSessions()
           break
+        case 'permission.updated': {
+          const mode = appStore.getState().mode
+          if (mode !== 'ask') {
+            const props = (ev.properties ?? {}) as { sessionID?: string; id?: string }
+            if (props.sessionID && props.id) {
+              void autoRespond(props.sessionID, props.id, mode === 'auto' ? 'allowed' : 'rejected')
+            }
+            break
+          }
+          const patch = applyEvent(appStore.getState(), ev)
+          if (Object.keys(patch).length > 0) appStore.setState(patch)
+          break
+        }
         case 'message.updated':
         case 'message.part.updated':
         case 'message.part.created':
@@ -116,10 +134,6 @@ export function App(): React.JSX.Element {
         serverVersion: info.version,
         serverHealthy: info.healthy
       })
-    })
-
-    const offBrowse = window.ralf.onBrowseNavigation((state) => {
-      appStore.setState({ browse: state })
     })
 
     const offProgress = window.ralf.onOptionalProgress((evt) => {
@@ -151,7 +165,6 @@ export function App(): React.JSX.Element {
     return () => {
       offEvent()
       offStatus()
-      offBrowse()
       offProgress()
       window.clearTimeout(refreshTimer)
       void window.ralf.unsubscribeEvents()
@@ -172,7 +185,6 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (activeTabKind === 'review' && panelOpen) void refreshDiff(activeSessionId)
   }, [activeTabKind, panelOpen, activeSessionId])
-
   return (
     <div className="app">
       <Sidebar />

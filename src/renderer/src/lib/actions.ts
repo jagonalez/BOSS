@@ -39,6 +39,50 @@ export function setModel(id: string): void {
   }
 }
 
+export function loadMode(): void {
+  try {
+    const saved = localStorage.getItem('ralf.mode')
+    if (saved === 'auto' || saved === 'ask' || saved === 'plan') appStore.setState({ mode: saved })
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setMode(id: 'auto' | 'ask' | 'plan'): void {
+  appStore.setState({ mode: id })
+  try {
+    localStorage.setItem('ralf.mode', id)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadAgent(): void {
+  try {
+    const saved = localStorage.getItem('ralf.agent')
+    if (saved) appStore.setState({ agent: saved })
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setAgent(id: string): void {
+  appStore.setState({ agent: id })
+  try {
+    localStorage.setItem('ralf.agent', id)
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function autoRespond(sessionID: string, permissionID: string, response: string): Promise<void> {
+  try {
+    await OpenCode.respondPermission(sessionID, permissionID, response)
+  } catch {
+    /* ignore */
+  }
+}
+
 export function pushHistory(sessionId: string, text: string): void {
   if (!sessionId || !text.trim()) return
   appStore.setState((s) => {
@@ -197,7 +241,6 @@ export async function openProject(path: string): Promise<void> {
   await refreshSessions()
   await refreshProjects()
   await refreshFiles()
-  await openPanelTab('files')
 }
 
 export async function deleteSession(id: string): Promise<void> {
@@ -258,6 +301,36 @@ export async function forkSession(id: string): Promise<void> {
   }
 }
 
+export async function revertMessage(sessionID: string, messageID: string): Promise<void> {
+  try {
+    await OpenCode.revertMessage(sessionID, messageID)
+  } catch {
+    /* ignore */
+  }
+  await loadMessages(sessionID)
+  await refreshSessions()
+}
+
+export async function editMessage(sessionID: string, messageID: string, text: string): Promise<void> {
+  await revertMessage(sessionID, messageID)
+  if (text.trim()) {
+    appStore.setState((s) => ({ drafts: { ...s.drafts, [sessionID]: text } }))
+  }
+}
+
+export async function runCommand(sessionID: string, command: string, args: string): Promise<void> {
+  appStore.setState({ streaming: true, lastError: null, streamingLocked: false })
+  const cur = appStore.getState()
+  const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
+  const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
+  try {
+    await OpenCode.runCommand(sessionID, command, args, { agent, model: modelKey })
+  } catch (err) {
+    appStore.setState({ lastError: errorSummary(err) })
+  }
+  await loadMessages(sessionID)
+}
+
 export async function newChatInProject(path: string): Promise<void> {
   await openProject(path)
   await newSession()
@@ -298,8 +371,12 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   if (text.trim()) parts.push({ type: 'text', text })
   appStore.setState({ streaming: true, lastError: null, streamingLocked: false })
   const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
+  const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
-    await OpenCode.sendMessageAsync(sessionID, parts, modelKey ? { model: modelKey } : {})
+    await OpenCode.sendMessageAsync(sessionID, parts, {
+      model: modelKey,
+      agent
+    })
   } catch (err) {
     const raw = String((err as Error).message ?? err)
     const isNetwork = /-> 0:|fetch failed|ECONNREFUSED/i.test(raw)

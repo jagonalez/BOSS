@@ -159,7 +159,7 @@ export function Sidebar(): React.JSX.Element {
     <aside className="sidebar">
       <div className="sidebar-head">
         <div className="logo">
-          <span className="logo-mark">R</span>
+          <img className="logo-mark" src="./icon.png" alt="Ralf" />
           <span>Ralf</span>
         </div>
       </div>

@@ -48,6 +48,7 @@ function createWindow(): void {
     minHeight: 600,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     backgroundColor: '#0b0d10',
+    icon: join(app.getAppPath(), 'resources', 'icons', '512x512.png'),
     webPreferences: {
       preload: join(mainDir, '../preload/index.cjs'),
       sandbox: true,
@@ -110,6 +111,9 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(join(app.getAppPath(), 'resources', 'icons', '512x512.png'))
+  }
   const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
   const csp = isDev
     ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; img-src 'self' data:; font-src 'self' data:;"

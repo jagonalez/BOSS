@@ -2,7 +2,7 @@ import type {
   ApiRequest,
   ApiResponse,
   BrowseBounds,
-  BrowseNavigationState,
+  BrowseNavEvent,
   ComputerUseStatus,
   OptionalComponentId,
   OptionalComponentInfo,
@@ -24,14 +24,15 @@ export interface RalfApi {
   unsubscribeEvents(): Promise<boolean>
   onEvent(cb: (data: string) => void): () => void
 
-  browseAttach(bounds: BrowseBounds): Promise<boolean>
-  browseDetach(): Promise<boolean>
-  browseBounds(bounds: BrowseBounds): Promise<boolean>
-  browseNavigate(url: string): Promise<boolean>
-  browseBack(): Promise<boolean>
-  browseForward(): Promise<boolean>
-  browseReload(): Promise<boolean>
-  onBrowseNavigation(cb: (state: BrowseNavigationState) => void): () => void
+  browseAttach(id: string, bounds: BrowseBounds): Promise<boolean>
+  browseDetach(id: string): Promise<boolean>
+  browseBounds(id: string, bounds: BrowseBounds): Promise<boolean>
+  browseNavigate(id: string, url: string): Promise<boolean>
+  browseBack(id: string): Promise<boolean>
+  browseForward(id: string): Promise<boolean>
+  browseReload(id: string): Promise<boolean>
+  browseDestroy(id: string): Promise<boolean>
+  onBrowseNavigation(cb: (evt: BrowseNavEvent) => void): () => void
   onBrowseExternal(cb: (url: string) => void): () => void
   openExternal(url: string): Promise<boolean>
   openPath(path: string): Promise<boolean>

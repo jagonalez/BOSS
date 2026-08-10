@@ -120,6 +120,15 @@ export interface Agent {
   mode?: string
 }
 
+export interface Command {
+  name: string
+  description?: string
+  agent?: string
+  model?: string
+  template: string
+  subtask?: boolean
+}
+
 export interface Provider {
   id: string
   name?: string

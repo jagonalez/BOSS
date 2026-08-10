@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
-import type { MessageWithParts, Part } from '@shared/opencode'
-import { abortRun, newSession, openProjectFolder, pushHistory, sendPrompt, setModel } from '../lib/actions'
+import type { MessageWithParts, Part, Command } from '@shared/opencode'
+import { abortRun, newSession, openProjectFolder, pushHistory, runCommand, sendPrompt, setAgent, setMode, setModel } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
+import { OpenCode } from '../lib/opencode'
 import { MessageText } from '../lib/text'
 import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, PlusIcon, SendIcon, StopIcon } from './icons'
 import { StepCard } from './StepCard'
@@ -143,6 +144,95 @@ function MessageView({ item }: { item: MessageWithParts }): React.JSX.Element {
   )
 }
 
+function ModePicker(): React.JSX.Element {
+  const mode = useStore(appStore, (s) => s.mode)
+  const agent = useStore(appStore, (s) => s.agent)
+  const agents = useStore(appStore, (s) => s.agents)
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const otherAgents = agents.filter((a) => a.id !== 'build' && a.id !== 'plan')
+  const label =
+    mode === 'auto' ? 'Auto' : mode === 'plan' ? 'Plan' : agent && agent !== 'build' ? agent : 'Ask'
+
+  const pickMode = (m: 'auto' | 'ask' | 'plan'): void => {
+    if (m === 'auto' && mode !== 'auto') {
+      appStore.setState({
+        confirm: {
+          title: 'Enable auto-approve?',
+          message:
+            'Auto mode auto-approves every permission (file edits, shell commands, web access, etc.) without asking. opencode may run destructive commands or modify any file without confirmation. Use with caution.',
+          confirmLabel: 'Enable Auto',
+          destructive: true,
+          action: () => {
+            setMode('auto')
+            setAgent('build')
+          }
+        }
+      })
+    } else {
+      setMode(m)
+      setAgent(m === 'plan' ? 'plan' : 'build')
+    }
+    setOpen(false)
+  }
+
+  const pickAgent = (id: string): void => {
+    setAgent(id)
+    setMode('ask')
+    setOpen(false)
+  }
+
+  return (
+    <div className="model-picker" ref={ref}>
+      <button className="model-picker-btn" onClick={() => setOpen((o) => !o)} title="Mode / agent">
+        <span className="model-picker-name">{label}</span>
+        <span className="model-picker-chevron">
+          <ChevronIcon size={12} />
+        </span>
+      </button>
+      {open && (
+        <div className="model-picker-pop">
+          <div className="model-picker-list">
+            <div className="model-section-title">Mode</div>
+            <button className={`model-row ${mode === 'auto' ? 'active' : ''}`} onClick={() => pickMode('auto')}>
+              <span className="model-row-name">Auto</span>
+              <span className="model-row-desc">auto-approve all permissions</span>
+            </button>
+            <button className={`model-row ${mode === 'ask' && agent === 'build' ? 'active' : ''}`} onClick={() => pickMode('ask')}>
+              <span className="model-row-name">Ask</span>
+              <span className="model-row-desc">prompt before sensitive actions</span>
+            </button>
+            <button className={`model-row ${mode === 'plan' ? 'active' : ''}`} onClick={() => pickMode('plan')}>
+              <span className="model-row-name">Plan</span>
+              <span className="model-row-desc">read-only</span>
+            </button>
+            {otherAgents.length > 0 && <div className="model-section-title">Agents</div>}
+            {otherAgents.map((a) => (
+              <button
+                key={a.id}
+                className={`model-row ${mode === 'ask' && agent === a.id ? 'active' : ''}`}
+                onClick={() => pickAgent(a.id)}
+                title={a.description}
+              >
+                <span className="model-row-name">{a.id}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -162,12 +252,68 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [histIdx, setHistIdx] = useState(-1)
   const [draftBackup, setDraftBackup] = useState('')
+  const [commands, setCommands] = useState<Command[]>([])
+  const [completion, setCompletion] = useState<{ type: 'command' | 'file'; query: string; items: string[]; index: number } | null>(null)
   const history = useStore(appStore, (s) => (effectiveSession ? s.history[effectiveSession] ?? [] : []))
+
+  useEffect(() => {
+    void OpenCode.listCommands()
+      .then(setCommands)
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     setHistIdx(-1)
     setDraftBackup('')
   }, [effectiveSession])
+
+  const completionTrigger = (value: string): { type: 'command' | 'file'; query: string } | null => {
+    if (value.startsWith('/') && !value.slice(1).includes(' ')) {
+      return { type: 'command', query: value.slice(1).toLowerCase() }
+    }
+    const m = /(^|\s)@([\w/.\-]*)$/.exec(value)
+    if (m) return { type: 'file', query: m[2].toLowerCase() }
+    return null
+  }
+
+  const refreshCompletion = (value: string): void => {
+    const trig = completionTrigger(value)
+    if (!trig) {
+      setCompletion(null)
+      return
+    }
+    if (trig.type === 'command') {
+      const items = commands.filter((c) => c.name.toLowerCase().startsWith(trig.query)).map((c) => c.name)
+      setCompletion({ ...trig, items, index: 0 })
+    } else {
+      setCompletion({ ...trig, items: [], index: 0 })
+      if (trig.query) {
+        void OpenCode.findFile(trig.query)
+          .then((paths) => {
+            setCompletion((prev) =>
+              prev && prev.type === 'file' && prev.query === trig.query ? { ...prev, items: paths.slice(0, 8) } : prev
+            )
+          })
+          .catch(() => {})
+      }
+    }
+  }
+
+  const insertCompletion = (item: string): void => {
+    const value = text
+    if (completion?.type === 'command') {
+      setText(`/${item} `)
+    } else {
+      const m = /(^|\s)@([\w/.\-]*)$/.exec(value)
+      if (m) {
+        const before = value.slice(0, m.index)
+        const sep = value[m.index] === '@' ? '' : ' '
+        setText(`${before}${sep}@${item} `)
+      }
+    }
+    setCompletion(null)
+    autoGrow()
+  }
 
   const setText = (value: string): void => {
     if (!effectiveSession) return
@@ -215,6 +361,18 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const submit = (): void => {
     if (!effectiveSession) return
     if (!text.trim() && attachments.length === 0) return
+    const cmdMatch = /^\/([\w-]+)(?:\s+(.*))?$/.exec(text.trim())
+    if (cmdMatch && commands.some((c) => c.name === cmdMatch[1])) {
+      if (text.trim()) pushHistory(effectiveSession, text)
+      void runCommand(effectiveSession, cmdMatch[1], cmdMatch[2] ?? '')
+      setText('')
+      setAttachments([])
+      setCompletion(null)
+      setHistIdx(-1)
+      setDraftBackup('')
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      return
+    }
     if (text.trim()) pushHistory(effectiveSession, text)
     void sendPrompt(text, sessionId, attachments)
     setText('')
@@ -263,6 +421,28 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (completion && completion.items.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setCompletion((c) => (c ? { ...c, index: (c.index + 1) % c.items.length } : c))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setCompletion((c) => (c ? { ...c, index: (c.index - 1 + c.items.length) % c.items.length } : c))
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        insertCompletion(completion.items[completion.index])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setCompletion(null)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       submit()
@@ -299,6 +479,23 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         </div>
       ) : null}
       <div className="composer" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+        {completion && completion.items.length > 0 && (
+          <div className="completion-pop">
+            {completion.items.map((item, i) => (
+              <button
+                key={item}
+                className={`completion-item ${i === completion.index ? 'active' : ''}`}
+                onClick={() => insertCompletion(item)}
+                onMouseEnter={() => setCompletion((c) => (c ? { ...c, index: i } : c))}
+              >
+                <span className={`completion-sigil ${completion.type === 'command' ? 'cmd' : 'file'}`}>
+                  {completion.type === 'command' ? '/' : '@'}
+                </span>
+                <span className="completion-label">{item}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="composer-input">
           <textarea
             ref={textareaRef}
@@ -307,6 +504,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             onChange={(e) => {
               setText(e.target.value)
               autoGrow()
+              refreshCompletion(e.target.value)
             }}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
@@ -341,6 +539,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             <button className="composer-attach" onClick={() => fileInputRef.current?.click()} title="Attach file or image">
               <AttachmentIcon size={16} />
             </button>
+            <ModePicker />
             <ModelPicker onPick={onModelChange} />
           </div>
           {streaming ? (
@@ -445,7 +644,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
     return (
       <div className="chat">
         <div className="empty">
-          <div className="hero-mark">R</div>
+          <img className="hero-mark" src="./icon.png" alt="Ralf" />
           <h2>Ralf</h2>
           <p>A Codex-style desktop client for opencode.</p>
           <div className="actions">

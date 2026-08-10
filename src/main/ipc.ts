@@ -35,7 +35,7 @@ export function registerIpc(deps: IpcDeps): void {
 
   deps.server.onStatusChange = (info: ServerInfo) => broadcast(IpcChannels.ServerStatusChanged, info)
   deps.events.onEvent = (data: string) => broadcast(IpcChannels.EventData, data)
-  deps.browse.onNavigation = (state) => broadcast(IpcChannels.BrowseNavigation, state)
+  deps.browse.onNavigation = (id, state) => broadcast(IpcChannels.BrowseNavigation, { id, state })
   deps.browse.onExternal = (url) => broadcast(IpcChannels.BrowseExternal, url)
   deps.computerUse.onStatusChange = (status) => broadcast(IpcChannels.ComputerUseStatus, status)
   deps.pty.onData = (id, data) => broadcast(IpcChannels.TerminalData, { id, data })
@@ -55,38 +55,43 @@ export function registerIpc(deps: IpcDeps): void {
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseAttach, (_e, bounds: BrowseBounds) => {
-    deps.browse.attach(bounds)
+  ipcMain.handle(IpcChannels.BrowseAttach, (_e, body: { id: string; bounds: BrowseBounds }) => {
+    deps.browse.attach(body.id, body.bounds)
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseDetach, () => {
-    deps.browse.detach()
+  ipcMain.handle(IpcChannels.BrowseDetach, (_e, id: string) => {
+    deps.browse.detach(id)
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseBounds, (_e, bounds: BrowseBounds) => {
-    deps.browse.setBounds(bounds)
+  ipcMain.handle(IpcChannels.BrowseBounds, (_e, body: { id: string; bounds: BrowseBounds }) => {
+    deps.browse.setBounds(body.id, body.bounds)
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseNavigate, (_e, url: string) => {
-    deps.browse.navigate(url)
+  ipcMain.handle(IpcChannels.BrowseNavigate, (_e, body: { id: string; url: string }) => {
+    deps.browse.navigate(body.id, body.url)
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseGoBack, () => {
-    deps.browse.goBack()
+  ipcMain.handle(IpcChannels.BrowseGoBack, (_e, id: string) => {
+    deps.browse.goBack(id)
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseGoForward, () => {
-    deps.browse.goForward()
+  ipcMain.handle(IpcChannels.BrowseGoForward, (_e, id: string) => {
+    deps.browse.goForward(id)
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseReload, () => {
-    deps.browse.reload()
+  ipcMain.handle(IpcChannels.BrowseReload, (_e, id: string) => {
+    deps.browse.reload(id)
+    return true
+  })
+
+  ipcMain.handle(IpcChannels.BrowseDestroy, (_e, id: string) => {
+    deps.browse.destroy(id)
     return true
   })
 

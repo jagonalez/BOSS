@@ -1,6 +1,7 @@
 import type { HttpMethod } from '@shared/ipc'
 import type {
   Agent,
+  Command,
   ConfigInfo,
   FileContent,
   FileDiff,
@@ -101,6 +102,9 @@ export const OpenCode = {
   sendMessageAsync: (id: string, parts: unknown[], opts?: { model?: { providerID: string; modelID: string }; agent?: string }) =>
     request<unknown>('POST', `/session/${id}/prompt_async`, { body: { parts, ...opts } }),
   abort: (id: string) => request<boolean>('POST', `/session/${id}/abort`),
+  revertMessage: (id: string, messageID: string) =>
+    request<SessionInfo>('POST', `/session/${id}/revert`, { body: { messageID } }),
+  unrevert: (id: string) => request<SessionInfo>('POST', `/session/${id}/unrevert`),
   fork: (id: string, messageID?: string) =>
     request<SessionInfo>('POST', `/session/${id}/fork`, { body: messageID ? { messageID } : {} }),
   diff: (id: string, messageID?: string) =>
@@ -118,5 +122,8 @@ export const OpenCode = {
   providers: () =>
     request<{ all: Provider[]; default: Record<string, string>; connected?: string[] }>('GET', '/provider'),
   config: () => request<ConfigInfo>('GET', '/config'),
+  listCommands: () => request<Command[]>('GET', '/command'),
+  runCommand: (id: string, command: string, args: string, opts?: { agent?: string; model?: { providerID: string; modelID: string } }) =>
+    request<MessageWithParts>('POST', `/session/${id}/command`, { body: { command, arguments: args, ...opts } }),
   findFile: (q: string) => request<string[]>('GET', '/find/file', { query: { query: q } })
 }

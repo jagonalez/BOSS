@@ -72,13 +72,15 @@ export interface AppState {
   panelOpen: boolean
   panelGroups: PanelGroup[]
   reviewFile: string | null
-  browse: BrowseNavigationState
+  browse: Record<string, BrowseNavigationState>
   optional: OptionalComponentInfo[]
   optionalProgress: Partial<Record<OptionalComponentId, OptionalDownloadEvent>>
   computerUse: ComputerUseStatus
   streaming: boolean
   streamingLocked: boolean
   model: string | null
+  mode: 'auto' | 'ask' | 'plan'
+  agent: string
   projectPath: string
   lastError: string | null
   drafts: Record<string, string>
@@ -118,13 +120,15 @@ export const initialState: AppState = {
   panelOpen: false,
   panelGroups: [],
   reviewFile: null,
-  browse: initialBrowseState,
+  browse: {},
   optional: [],
   optionalProgress: {},
   computerUse: { enabled: false, running: false },
   streaming: false,
   streamingLocked: false,
   model: null,
+  mode: 'ask',
+  agent: 'build',
   projectPath: '',
   lastError: null,
   drafts: {},
