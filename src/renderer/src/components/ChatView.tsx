@@ -953,6 +953,10 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
     const lastAssistant = turns[turns.length - 1]?.assistants[turns[turns.length - 1]?.assistants.length - 1]
     if (!lastAssistant) return
     if (!lastAssistant.info.time?.completed) return
+    // Only speak genuinely fresh responses. Historical messages (completed long
+    // ago, e.g. when clicking into an old session) must never be read aloud.
+    const completed = lastAssistant.info.time.completed
+    if (Date.now() - completed > 30_000) return
     // Only speak if a brand-new message appeared since we entered the session.
     if (lastAssistant.info.id === baselineMsgIdRef.current[effectiveId]) return
     baselineMsgIdRef.current[effectiveId] = lastAssistant.info.id
