@@ -122,6 +122,9 @@ export const OpenCode = {
   todos: (id: string) => request<Todo[]>('GET', `/session/${id}/todo`),
   respondPermission: (sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject') =>
     request<boolean>('POST', `/session/${sessionID}/permissions/${permissionID}`, { body: { response } }),
+  replyQuestion: (requestID: string, answers: string[][]) =>
+    request<boolean>('POST', `/question/${requestID}/reply`, { body: { answers } }),
+  rejectQuestion: (requestID: string) => request<boolean>('POST', `/question/${requestID}/reject`),
   shell: (id: string, command: string, opts?: { model?: string; agent?: string }) =>
     request<MessageWithParts>('POST', `/session/${id}/shell`, { body: { command, ...opts } }),
   summarize: (id: string, model: { providerID: string; modelID: string }) =>

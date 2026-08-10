@@ -9,6 +9,7 @@ import type {
   PermissionRequest,
   Project,
   Provider,
+  QuestionRequest,
   SessionInfo,
   SessionMeta,
   PanelGroup,
@@ -57,6 +58,7 @@ export interface AppState {
   fileContent: { path: string; content: string } | null
   todos: Record<string, Todo[]>
   permission: PermissionRequest | null
+  question: QuestionRequest | null
   modelSwitch: { to: string } | null
   commitPath: string | null
   renameTarget: string | null
@@ -120,6 +122,7 @@ export const initialState: AppState = {
   fileContent: null,
   todos: {},
   permission: null,
+  question: null,
   modelSwitch: null,
   commitPath: null,
   renameTarget: null,
@@ -247,6 +250,13 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       return { permission: (props as unknown as PermissionRequest) ?? null }
     case 'permission.replied':
       return { permission: null }
+    case 'question.asked':
+      return { question: (props as unknown as QuestionRequest) ?? null }
+    case 'question.replied':
+    case 'question.rejected': {
+      const requestID = props.requestID as string | undefined
+      return requestID && state.question?.id === requestID ? { question: null } : {}
+    }
     case 'session.status': {
       const sid = props.sessionID as string | undefined
       const status = (props.status as { type?: string } | undefined)?.type

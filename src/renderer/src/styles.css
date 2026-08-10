@@ -3634,6 +3634,139 @@ select:hover {
   font-size: 12px;
 }
 
+.question-card {
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  border: 1px solid rgba(129, 140, 248, 0.4);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.question-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.question-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.question-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.question-card-waiting {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.question-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.question-item-text {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.question-item-header {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.question-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.question-option:hover {
+  border-color: var(--accent);
+}
+
+.question-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.question-option-check {
+  font-size: 13px;
+  color: var(--accent);
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+.question-option-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.question-option-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: auto;
+  text-align: right;
+}
+
+.question-custom {
+  width: 100%;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.question-custom:focus {
+  border-color: var(--accent);
+}
+
+.question-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.question-card-actions .btn-deny,
+.question-card-actions .btn-allow {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
 .spinner {
   width: 14px;
   height: 14px;
