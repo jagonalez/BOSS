@@ -561,7 +561,24 @@ export default function (pi: ExtensionAPI) {
 
   async modelsList(): Promise<{ id: string; name?: string; provider?: string; variants?: string[] }[]> {
     const runtime = this.sessions.values().next().value as PiRpcSession | undefined
-    if (!runtime) return []
+    if (!runtime) {
+      try {
+        const output = execFileSync('pi', ['--offline', '--list-models'], { encoding: 'utf8', timeout: 12_000 })
+        return output.split(/\r?\n/).slice(1).flatMap((line) => {
+          const fields = line.trim().split(/\s{2,}/)
+          if (fields.length < 6) return []
+          const [provider, id, , , thinking] = fields
+          return [{
+            id,
+            name: id,
+            provider,
+            variants: thinking === 'yes' ? ['off', 'minimal', 'low', 'medium', 'high'] : []
+          }]
+        })
+      } catch {
+        return []
+      }
+    }
     const response = await runtime.send({ type: 'get_available_models' })
     const data = response.data as {
       models?: Array<{ id: string; name?: string; provider?: string; reasoning?: boolean; thinkingLevelMap?: Record<string, unknown> }>
