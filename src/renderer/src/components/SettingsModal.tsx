@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
 import { clearThreadBusFailures, importNativeThreads, openBackendLogin, refreshBackendAuth, refreshBackendModels, setDefaultModel, setEngine, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
+import type { BackendId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
 import type { WorktreeSettings } from '@shared/worktree'
 
 type SettingsSection = 'agents' | 'connections' | 'collaboration' | 'worktrees' | 'appearance' | 'voice'
@@ -47,6 +48,120 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
 
 function modelValue(providerID: string, modelID: string): string {
   return JSON.stringify([providerID, modelID])
+}
+
+function DefaultModelPicker({
+  backendId,
+  models,
+  selected,
+  loading,
+  disabled
+}: {
+  backendId: BackendId
+  models: BackendModelDescriptor[]
+  selected?: BackendModelPreference
+  loading: boolean
+  disabled: boolean
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const root = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent): void => {
+      if (!root.current?.contains(event.target as Node)) {
+        setOpen(false)
+        setQuery('')
+      }
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  const selectedModel = selected
+    ? models.find((model) => model.id === selected.modelID && (model.provider || backendId) === selected.providerID)
+    : undefined
+  const normalizedQuery = query.trim().toLowerCase()
+  const visibleModels = normalizedQuery
+    ? models.filter((model) => `${model.name ?? ''} ${model.id} ${model.provider ?? backendId}`.toLowerCase().includes(normalizedQuery))
+    : models
+  const grouped = new Map<string, BackendModelDescriptor[]>()
+  for (const model of visibleModels) {
+    const provider = model.provider || backendId
+    grouped.set(provider, [...(grouped.get(provider) ?? []), model])
+  }
+
+  const pick = (model: BackendModelDescriptor | null): void => {
+    setDefaultModel(backendId, model)
+    setOpen(false)
+    setQuery('')
+  }
+
+  return (
+    <div className="settings-model-picker" ref={root}>
+      <button
+        className="settings-model-picker-trigger"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>
+          <strong>{loading ? 'Loading models…' : selectedModel?.name || selected?.modelID || (models.length ? 'Automatic' : 'No models available')}</strong>
+          {selected ? <small>{selected.providerID}</small> : null}
+        </span>
+        <span className="settings-model-picker-chevron">⌄</span>
+      </button>
+      {open ? (
+        <div className="settings-model-picker-menu">
+          <input
+            autoFocus
+            className="settings-model-search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setOpen(false)
+                setQuery('')
+              }
+            }}
+            placeholder="Search models…"
+            aria-label={`Search ${backendId} models`}
+          />
+          <div className="settings-model-results" role="listbox">
+            {!normalizedQuery || 'automatic'.includes(normalizedQuery) ? (
+              <button className={!selected ? 'active' : ''} onClick={() => pick(null)}>
+                <span>Automatic</span>
+                {!selected ? <em>✓</em> : null}
+              </button>
+            ) : null}
+            {selected && !selectedModel ? (
+              <button className="active" onClick={() => pick(null)}>
+                <span>{selected.modelID}<small>{selected.providerID} · unavailable</small></span>
+                <em>Clear</em>
+              </button>
+            ) : null}
+            {[...grouped].map(([provider, items]) => (
+              <div className="settings-model-provider" key={provider}>
+                <div>{provider}</div>
+                {[...items].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((model) => {
+                  const active = selected?.modelID === model.id && selected.providerID === provider
+                  return (
+                    <button key={modelValue(provider, model.id)} className={active ? 'active' : ''} onClick={() => pick(model)}>
+                      <span>{model.name || model.id}{model.name && model.name !== model.id ? <small>{model.id}</small> : null}</span>
+                      {active ? <em>✓</em> : null}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+            {visibleModels.length === 0 && normalizedQuery ? <div className="settings-model-empty">No matching models</div> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 export function SettingsModal(): React.JSX.Element | null {
@@ -165,16 +280,6 @@ export function SettingsModal(): React.JSX.Element | null {
                     const auth = (backendAuth ?? []).find((item) => item.backendId === backend.id)
                     const models = backendModels[backend.id] ?? []
                     const selected = defaultModels[backend.id]
-                    const selectedValue = selected ? modelValue(selected.providerID, selected.modelID) : ''
-                    const selectedAvailable = !selected || models.some((model) =>
-                      model.id === selected.modelID && (model.provider || backend.id) === selected.providerID
-                    )
-                    const grouped = new Map<string, typeof models>()
-                    for (const model of models) {
-                      const provider = model.provider || backend.id
-                      grouped.set(provider, [...(grouped.get(provider) ?? []), model])
-                    }
-
                     return (
                       <section className="settings-connection-card" key={backend.id}>
                         <div className="settings-connection-header">
@@ -192,35 +297,16 @@ export function SettingsModal(): React.JSX.Element | null {
                           {auth?.accounts?.length ? ` · ${auth.accounts.join(', ')}` : ''}
                         </p>
 
-                        <label className="settings-field">
+                        <div className="settings-field">
                           <span>Default model for new threads</span>
-                          <select
-                            className="settings-select settings-model-select"
-                            value={selectedValue}
+                          <DefaultModelPicker
+                            backendId={backend.id}
+                            models={models}
+                            selected={selected}
+                            loading={backendModelsLoading}
                             disabled={!backend.available || backendModelsLoading || (models.length === 0 && !selected)}
-                            onChange={(event) => {
-                              const value = event.target.value
-                              if (!value) {
-                                setDefaultModel(backend.id, null)
-                                return
-                              }
-                              const model = models.find((item) => modelValue(item.provider || backend.id, item.id) === value)
-                              if (model) setDefaultModel(backend.id, model)
-                            }}
-                          >
-                            <option value="">{backendModelsLoading ? 'Loading models…' : models.length ? 'Automatic' : 'No models available'}</option>
-                            {selected && !selectedAvailable ? <option value={selectedValue}>{selected.modelID} (unavailable)</option> : null}
-                            {[...grouped].map(([provider, items]) => (
-                              <optgroup key={provider} label={provider}>
-                                {[...items].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((model) => (
-                                  <option key={modelValue(provider, model.id)} value={modelValue(provider, model.id)}>
-                                    {model.name || model.id}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            ))}
-                          </select>
-                        </label>
+                          />
+                        </div>
 
                         <div className="settings-connection-actions">
                           <span>{backend.available ? backend.version || 'CLI available' : backend.unavailableReason}</span>
