@@ -14,12 +14,12 @@ function timeAgo(timestamp?: number): string {
 }
 
 function projectName(session: SessionInfo): string {
-  const path = session.directory || session.path || ''
+  const path = session.projectPath || session.directory || session.path || ''
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || 'Chat'
 }
 
 async function openSession(session: SessionInfo): Promise<void> {
-  const path = session.directory || session.path || ''
+  const path = session.projectPath || session.directory || session.path || ''
   if (path && path !== '/' && path !== appStore.getState().projectPath) await openProject(path)
   selectSession(session.id)
 }
@@ -27,7 +27,8 @@ async function openSession(session: SessionInfo): Promise<void> {
 function SessionCard({ session, state }: { session: SessionInfo; state: 'attention' | 'running' | 'recent' }): React.JSX.Element {
   const permission = useStore(appStore, (value) => Boolean(value.permissions[session.id]))
   const error = useStore(appStore, (value) => value.lastErrorBySession[session.id])
-  const label = permission ? 'Permission needed' : error ? 'Run failed' : state === 'running' ? 'Working' : 'Updated'
+  const busFailed = useStore(appStore, (value) => Boolean(value.threadBus?.messages.some((message) => message.fromThreadId === session.id && message.status === 'failed')))
+  const label = permission ? 'Permission needed' : error ? 'Run failed' : busFailed ? 'Thread message failed' : state === 'running' ? 'Working' : 'Updated'
   return (
     <button className="command-session-card" onClick={() => void openSession(session)}>
       <span className={`command-state-icon ${state}`}><ChatIcon size={14} /></span>
@@ -48,9 +49,10 @@ export function CommandCenter(): React.JSX.Element {
   const errors = useStore(appStore, (state) => state.lastErrorBySession)
   const streaming = useStore(appStore, (state) => state.streaming)
   const serverHealthy = useStore(appStore, (state) => state.serverHealthy)
+  const threadBus = useStore(appStore, (state) => state.threadBus)
 
   const ordered = [...sessions].sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
-  const needsAttention = ordered.filter((session) => permissions[session.id] || questions[session.id] || errors[session.id])
+  const needsAttention = ordered.filter((session) => permissions[session.id] || questions[session.id] || errors[session.id] || threadBus?.messages.some((message) => message.fromThreadId === session.id && message.status === 'failed'))
   const running = ordered.filter((session) => streaming[session.id] && !needsAttention.includes(session))
   const recent = ordered.filter((session) => !streaming[session.id] && !needsAttention.includes(session)).slice(0, 6)
 

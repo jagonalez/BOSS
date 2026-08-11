@@ -113,6 +113,9 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
   const busy = useStore(appStore, (state) => Boolean(item.sessionId && state.streaming[item.sessionId]))
   const permission = useStore(appStore, (state) => Boolean(item.sessionId && state.permissions[item.sessionId]))
   const failed = useStore(appStore, (state) => Boolean(item.sessionId && state.lastErrorBySession[item.sessionId]))
+  const busActivity = useStore(appStore, (state) => Boolean(item.sessionId && state.threadBus?.messages.some((message) =>
+    (message.fromThreadId === item.sessionId || message.toThreadId === item.sessionId) && message.status !== 'delivered'
+  )))
 
   return (
     <>
@@ -121,6 +124,7 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
       </span>
       <span className="workspace-tab-label" title={label}>{label}</span>
       {item.kind === 'thread' ? <BackendBadge backendId={backendId} /> : null}
+      {busActivity ? <span className="workspace-tab-bus" title="Thread message queued or failed" /> : null}
     </>
   )
 }

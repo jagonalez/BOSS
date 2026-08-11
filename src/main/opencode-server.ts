@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import net from 'node:net'
-import { statSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { ServerInfo } from '@shared/ipc'
 import { saveState } from './state-store'
+import type { ThreadBusConnection } from '@shared/thread-bus'
 
 interface Health {
   healthy: boolean
@@ -84,6 +85,8 @@ export class OpenCodeServer {
   private attempts = 0
   private cwd = app.getPath('home')
   private fallbackToPath = false
+  private threadBus?: ThreadBusConnection
+  private threadBusConfigDir = ''
 
   onStatusChange?: (info: ServerInfo) => void
 
@@ -102,6 +105,73 @@ export class OpenCodeServer {
 
   setInitialCwd(path: string): void {
     if (isDirectory(path)) this.cwd = path
+  }
+
+  configureThreadBus(connection: ThreadBusConnection): void {
+    this.threadBus = connection
+    if (process.env.OPENCODE_CONFIG_DIR) {
+      if (process.env.RALF_DEBUG) process.stderr.write('[opencode] OPENCODE_CONFIG_DIR is already set; R.A.L.F. thread tools were not injected.\n')
+      return
+    }
+    this.threadBusConfigDir = join(app.getPath('userData'), 'opencode-ralf')
+    const toolsDir = join(this.threadBusConfigDir, 'tools')
+    mkdirSync(toolsDir, { recursive: true })
+    writeFileSync(join(toolsDir, 'ralf_threads.ts'), this.threadToolSource())
+  }
+
+  private threadToolSource(): string {
+    return `import { tool } from "@opencode-ai/plugin"
+
+async function call(name, args, context) {
+  const url = process.env.RALF_THREAD_BUS_URL
+  const token = process.env.RALF_THREAD_BUS_TOKEN
+  if (!url || !token) throw new Error("R.A.L.F. thread collaboration is unavailable.")
+  const response = await fetch(url + "/agent-call", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ backendId: "opencode", nativeThreadId: context.sessionID, tool: name, arguments: args })
+  })
+  const payload = await response.json()
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. thread tool failed.")
+  return JSON.stringify(payload.result, null, 2)
+}
+
+export const list = tool({
+  description: "List other R.A.L.F. threads in this project using OpenCode.",
+  args: {},
+  execute(args, context) { return call("ralf_threads_list", args, context) }
+})
+
+export const read = tool({
+  description: "Read a bounded recent transcript from another R.A.L.F. OpenCode thread.",
+  args: {
+    threadId: tool.schema.string().describe("R.A.L.F. thread id returned by ralf_threads_list"),
+    limit: tool.schema.number().min(1).max(20).optional()
+  },
+  execute(args, context) { return call("ralf_threads_read", args, context) }
+})
+
+export const send = tool({
+  description: "Send a durable message to another R.A.L.F. OpenCode thread. Busy targets queue it.",
+  args: {
+    threadId: tool.schema.string().describe("Target R.A.L.F. thread id"),
+    message: tool.schema.string().describe("Concise context, question, or requested task"),
+    expectsReply: tool.schema.boolean().optional(),
+    maxTurns: tool.schema.number().min(1).max(8).optional()
+  },
+  execute(args, context) { return call("ralf_threads_send", args, context) }
+})
+
+export const reply = tool({
+  description: "Reply to a R.A.L.F. thread message addressed to this thread.",
+  args: {
+    messageId: tool.schema.string().describe("Message id from the incoming R.A.L.F. thread message"),
+    message: tool.schema.string().describe("Reply for the sending thread"),
+    expectsReply: tool.schema.boolean().optional()
+  },
+  execute(args, context) { return call("ralf_threads_reply", args, context) }
+})
+`
   }
 
   async setProject(path: string): Promise<void> {
@@ -157,7 +227,12 @@ export class OpenCodeServer {
       env: {
         ...process.env,
         OPENCODE_SERVER_PASSWORD: this.password,
-        OPENCODE_SERVER_USERNAME: 'opencode'
+        OPENCODE_SERVER_USERNAME: 'opencode',
+        ...(this.threadBus ? {
+          RALF_THREAD_BUS_URL: this.threadBus.url,
+          RALF_THREAD_BUS_TOKEN: this.threadBus.token
+        } : {}),
+        ...(this.threadBusConfigDir ? { OPENCODE_CONFIG_DIR: this.threadBusConfigDir } : {})
       },
       stdio: ['ignore', 'pipe', 'pipe']
     })
