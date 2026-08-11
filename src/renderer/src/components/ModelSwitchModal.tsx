@@ -19,7 +19,7 @@ export function ModelSwitchModal(): React.JSX.Element | null {
           <button className="btn-deny" onClick={() => appStore.setState({ modelSwitch: null })}>
             Cancel
           </button>
-          <button className="btn-allow" onClick={() => { setModel(pending.to); appStore.setState({ modelSwitch: null }) }}>
+          <button className="btn-allow" onClick={() => { setModel(pending.to, pending.sessionId ?? null); appStore.setState({ modelSwitch: null }) }}>
             Switch model
           </button>
         </div>

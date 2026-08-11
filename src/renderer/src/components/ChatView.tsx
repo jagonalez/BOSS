@@ -8,6 +8,7 @@ import { MessageText } from '../lib/text'
 import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, SendIcon, StopIcon, MicIcon, MicOffIcon, VolumeIcon } from './icons'
 import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
+import { BackendControls, BACKEND_SHORT_LABELS } from './BackendControls'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -319,7 +320,7 @@ function MessageView({
         </button>
       ) : null}
       <div className="msg-role">
-        <span>{isUser ? 'You' : 'opencode'}</span>
+        <span>{isUser ? 'You' : 'Agent'}</span>
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
       </div>
       <MessageError error={item.info.error} />
@@ -341,10 +342,11 @@ function MessageView({
   )
 }
 
-function ModePicker(): React.JSX.Element {
-  const mode = useStore(appStore, (s) => s.mode)
+function ModePicker({ backendId, sessionId }: { backendId: 'opencode' | 'pi' | 'codex' | 'claude'; sessionId?: string }): React.JSX.Element {
+  const mode = useStore(appStore, (s) => (sessionId && s.modesBySession[sessionId]) || s.mode)
   const agent = useStore(appStore, (s) => s.agent)
   const agents = useStore(appStore, (s) => s.agents)
+  const descriptor = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId))
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -357,27 +359,31 @@ function ModePicker(): React.JSX.Element {
   }, [])
 
   const INTERNAL_AGENTS = new Set(['build', 'plan', 'compaction', 'title', 'summary'])
-  const otherAgents = agents.filter((a) => a.id && !INTERNAL_AGENTS.has(a.id))
-  const label =
-    mode === 'auto' ? 'Auto' : mode === 'plan' ? 'Plan' : agent && agent !== 'build' ? agent : 'Ask'
+  const otherAgents = backendId === 'opencode' ? agents.filter((a) => a.id && !INTERNAL_AGENTS.has(a.id)) : []
+  const modes = descriptor?.modes ?? []
+  const selectedMode = modes.find((item) => item.id === mode) ?? modes[0]
+  const effectiveMode = selectedMode?.id ?? mode
+  const label = backendId === 'opencode' && effectiveMode === 'ask' && agent && agent !== 'build'
+    ? agent
+    : selectedMode?.label ?? 'Mode'
 
-  const pickMode = (m: 'auto' | 'ask' | 'plan'): void => {
-    if (m === 'auto' && mode !== 'auto') {
+  const pickMode = (m: typeof mode): void => {
+    if (m === 'auto' && effectiveMode !== 'auto') {
       appStore.setState({
         confirm: {
           title: 'Enable auto-approve?',
           message:
-            'Auto mode auto-approves every permission (file edits, shell commands, web access, etc.) without asking. opencode may run destructive commands or modify any file without confirmation. Use with caution.',
+            'Auto mode allows the selected backend to approve supported actions without asking. An agent may run destructive commands or modify files. Use with caution.',
           confirmLabel: 'Enable Auto',
           destructive: true,
           action: () => {
-            setMode('auto')
+            setMode('auto', sessionId ?? null)
             setAgent('build')
           }
         }
       })
     } else {
-      setMode(m)
+      setMode(m, sessionId ?? null)
       setAgent(m === 'plan' ? 'plan' : 'build')
     }
     setOpen(false)
@@ -385,8 +391,18 @@ function ModePicker(): React.JSX.Element {
 
   const pickAgent = (id: string): void => {
     setAgent(id)
-    setMode('ask')
+    setMode('ask', sessionId ?? null)
     setOpen(false)
+  }
+
+  if (modes.length <= 1) {
+    return (
+      <div className="model-picker">
+        <button className="model-picker-btn" disabled title={selectedMode?.description ?? 'This backend exposes one execution policy.'}>
+          <span className="model-picker-name">{selectedMode?.label ?? 'Backend policy'}</span>
+        </button>
+      </div>
+    )
   }
 
   return (
@@ -401,23 +417,17 @@ function ModePicker(): React.JSX.Element {
         <div className="model-picker-pop">
           <div className="model-picker-list">
             <div className="model-section-title">Mode</div>
-            <button className={`model-row ${mode === 'auto' ? 'active' : ''}`} onClick={() => pickMode('auto')}>
-              <span className="model-row-name">Auto</span>
-              <span className="model-row-desc">auto-approve all permissions</span>
-            </button>
-            <button className={`model-row ${mode === 'ask' && agent === 'build' ? 'active' : ''}`} onClick={() => pickMode('ask')}>
-              <span className="model-row-name">Ask</span>
-              <span className="model-row-desc">prompt before sensitive actions</span>
-            </button>
-            <button className={`model-row ${mode === 'plan' ? 'active' : ''}`} onClick={() => pickMode('plan')}>
-              <span className="model-row-name">Plan</span>
-              <span className="model-row-desc">read-only</span>
-            </button>
+            {modes.map((item) => (
+              <button key={item.id} className={`model-row ${effectiveMode === item.id ? 'active' : ''}`} onClick={() => pickMode(item.id)}>
+                <span className="model-row-name">{item.label}</span>
+                <span className="model-row-desc">{item.description}</span>
+              </button>
+            ))}
             {otherAgents.length > 0 && <div className="model-section-title">Agents</div>}
             {otherAgents.map((a) => (
               <button
                 key={a.id}
-                className={`model-row ${mode === 'ask' && agent === a.id ? 'active' : ''}`}
+                className={`model-row ${effectiveMode === 'ask' && agent === a.id ? 'active' : ''}`}
                 onClick={() => pickAgent(a.id)}
                 title={a.description}
               >
@@ -431,10 +441,12 @@ function ModePicker(): React.JSX.Element {
   )
 }
 
-function EffortPicker(): React.JSX.Element {
-  const model = useStore(appStore, (s) => s.model)
-  const variant = useStore(appStore, (s) => s.variant)
-  const providers = useStore(appStore, (s) => s.providers)
+function EffortPicker({ sessionId }: { sessionId?: string }): React.JSX.Element {
+  const model = useStore(appStore, (s) => (sessionId && s.modelsBySession[sessionId]) || s.model)
+  const variant = useStore(appStore, (s) => sessionId && Object.prototype.hasOwnProperty.call(s.variantsBySession, sessionId)
+    ? s.variantsBySession[sessionId]
+    : s.variant)
+  const providers = useStore(appStore, (s) => (sessionId && s.providersBySession[sessionId]) || s.providers)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -462,11 +474,11 @@ function EffortPicker(): React.JSX.Element {
         <div className="model-picker-pop">
           <div className="model-picker-list">
             <div className="model-section-title">Effort</div>
-            <button className={`model-row ${!variant ? 'active' : ''}`} onClick={() => { setVariant(null); setOpen(false) }}>
+            <button className={`model-row ${!variant ? 'active' : ''}`} onClick={() => { setVariant(null, sessionId ?? null); setOpen(false) }}>
               <span className="model-row-name">Default</span>
             </button>
             {variants.map((v) => (
-              <button key={v} className={`model-row ${variant === v ? 'active' : ''}`} onClick={() => { setVariant(v); setOpen(false) }}>
+              <button key={v} className={`model-row ${variant === v ? 'active' : ''}`} onClick={() => { setVariant(v, sessionId ?? null); setOpen(false) }}>
                 <span className="model-row-name">{v}</span>
               </button>
             ))}
@@ -491,7 +503,12 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const hasSession = useStore(appStore, (s) => Boolean(sessionId ?? s.activeSessionId))
   const effectiveSession = useStore(appStore, (s) => sessionId ?? s.activeSessionId)
   const sessions = useStore(appStore, (s) => s.sessions)
+  const backends = useStore(appStore, (s) => s.backends)
+  const defaultBackendId = useStore(appStore, (s) => s.engine)
   const activeSession = effectiveSession ? sessions.find((s) => s.id === effectiveSession) : undefined
+  const backendId = activeSession?.backendId ?? defaultBackendId
+  const backendLabel = BACKEND_SHORT_LABELS[backendId]
+  const supportsAttachments = backends.find((backend) => backend.id === backendId)?.capabilities.images ?? backendId === 'opencode'
   const composerEpoch = useStore(appStore, (s) => s.composerEpoch)
   const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? [] : []))
   const [text, setText] = useState('')
@@ -592,7 +609,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const addFiles = async (files: File[]): Promise<void> => {
-    if (!effectiveSession || files.length === 0) return
+    if (!effectiveSession || !supportsAttachments || files.length === 0) return
     const loaded: Attachment[] = []
     for (const f of files) {
       if (f.size > 25 * 1024 * 1024) continue
@@ -607,6 +624,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const onPaste = (e: React.ClipboardEvent): void => {
+    if (!supportsAttachments) return
     const items = e.clipboardData?.items
     if (!items) return
     const files = Array.from(items)
@@ -621,6 +639,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
 
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault()
+    if (!supportsAttachments) return
     if (e.dataTransfer?.files?.length) void addFiles(Array.from(e.dataTransfer.files))
   }
 
@@ -685,13 +704,14 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
 
   const onModelChange = (to: string): void => {
     const state = appStore.getState()
-    if (to === state.model) return
     const sid = sessionId ?? state.activeSessionId
+    const current = (sid && state.modelsBySession[sid]) || state.model
+    if (to === current) return
     const hasMessages = sid ? (state.messages[sid]?.length ?? 0) > 0 : false
     if (hasMessages) {
-      appStore.setState({ modelSwitch: { to } })
+      appStore.setState({ modelSwitch: { to, sessionId: sid ?? undefined } })
     } else {
-      setModel(to)
+      setModel(to, sid)
     }
   }
 
@@ -800,7 +820,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         <div className="composer-input">
           <textarea
             ref={textareaRef}
-            placeholder={hasSession ? 'Ask opencode…' : 'Start a chat to ask opencode'}
+            placeholder={hasSession ? `Ask ${backendLabel}…` : 'Start a thread'}
             value={text}
             onChange={(e) => {
               setText(e.target.value)
@@ -837,13 +857,19 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         </div>
         <div className="composer-controls">
           <div className="row">
-            <button className="composer-attach" onClick={() => fileInputRef.current?.click()} title="Attach file or image">
+            <button
+              className="composer-attach"
+              disabled={!supportsAttachments}
+              onClick={() => fileInputRef.current?.click()}
+              title={supportsAttachments ? 'Attach file or image' : `${backendLabel} attachments are not wired into R.A.L.F. yet`}
+            >
               <AttachmentIcon size={16} />
             </button>
             <MicToggle />
-            <ModePicker />
-            <ModelPicker onPick={onModelChange} />
-            <EffortPicker />
+            {effectiveSession ? <BackendControls sessionId={effectiveSession} /> : null}
+            <ModePicker backendId={backendId} sessionId={effectiveSession ?? undefined} />
+            <ModelPicker onPick={onModelChange} sessionId={effectiveSession ?? undefined} />
+            <EffortPicker sessionId={effectiveSession ?? undefined} />
             {hasSession && effectiveSession && !streaming ? (
               <button
                 className="composer-compact"
@@ -989,6 +1015,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
+  const backendId = useStore(appStore, (s) => s.sessions.find((session) => session.id === effectiveId)?.backendId ?? 'opencode')
   const projects = useStore(appStore, (s) => s.projects)
   const revertedList = useStore(appStore, (s) => (effectiveId ? s.reverted[effectiveId] : undefined))
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1130,7 +1157,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
     return (
       <div className="chat">
         <div className="empty">
-          <img className="hero-mark" src="./icon.png" alt="Ralf" />
+          <img className="hero-mark" src="./icon.png" alt="R.A.L.F." />
           <h2>How can I help you today?</h2>
           <div className="launcher-composer">
             <div className="launcher-project-row">
@@ -1191,7 +1218,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   return (
     <div className="chat">
-      {revertedIds.size > 0 && (
+      {backendId === 'opencode' && revertedIds.size > 0 && (
         <div className="reverted-banner">
           <span>{revertedIds.size} message{revertedIds.size === 1 ? '' : 's'} reverted — file changes undone.</span>
           <button className="btn-ghost" onClick={() => effectiveId && void unrevertSession(effectiveId)}>
@@ -1226,34 +1253,38 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
       </div>
       {msgCtx && (
         <div ref={msgCtxRef} className="ctx-menu" style={{ left: Math.min(msgCtx.x, window.innerWidth - 220), top: msgCtx.y }}>
-          <button
-            className="ctx-item"
-            onClick={() => {
-              if (effectiveId) {
-                appStore.setState({
-                  confirm: {
-                    title: 'Revert message?',
-                    message: 'This removes this message and everything after it.',
-                    confirmLabel: 'Revert',
-                    destructive: true,
-                    action: () => void revertMessage(effectiveId, msgCtx.message.info.id)
+          {backendId === 'opencode' ? (
+            <>
+              <button
+                className="ctx-item"
+                onClick={() => {
+                  if (effectiveId) {
+                    appStore.setState({
+                      confirm: {
+                        title: 'Revert message?',
+                        message: 'This removes this message and everything after it.',
+                        confirmLabel: 'Revert',
+                        destructive: true,
+                        action: () => void revertMessage(effectiveId, msgCtx.message.info.id)
+                      }
+                    })
                   }
-                })
-              }
-              setMsgCtx(null)
-            }}
-          >
-            Revert
-          </button>
-          <button
-            className="ctx-item"
-            onClick={() => {
-              if (effectiveId) void editMessage(effectiveId, msgCtx.message.info.id, menuText)
-              setMsgCtx(null)
-            }}
-          >
-            Rewrite
-          </button>
+                  setMsgCtx(null)
+                }}
+              >
+                Revert
+              </button>
+              <button
+                className="ctx-item"
+                onClick={() => {
+                  if (effectiveId) void editMessage(effectiveId, msgCtx.message.info.id, menuText)
+                  setMsgCtx(null)
+                }}
+              >
+                Rewrite
+              </button>
+            </>
+          ) : null}
           <button
             className="ctx-item"
             onClick={() => {
@@ -1261,7 +1292,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
               setMsgCtx(null)
             }}
           >
-            Fork from here
+            {backendId === 'opencode' ? 'Fork from here' : 'Fork thread'}
           </button>
           <button
             className="ctx-item"

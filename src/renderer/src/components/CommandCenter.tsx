@@ -44,22 +44,23 @@ function SessionCard({ session, state }: { session: SessionInfo; state: 'attenti
 export function CommandCenter(): React.JSX.Element {
   const sessions = useStore(appStore, (state) => state.sessions.filter((session) => !session.parentID))
   const permissions = useStore(appStore, (state) => state.permissions)
+  const questions = useStore(appStore, (state) => state.questions)
   const errors = useStore(appStore, (state) => state.lastErrorBySession)
   const streaming = useStore(appStore, (state) => state.streaming)
   const serverHealthy = useStore(appStore, (state) => state.serverHealthy)
 
   const ordered = [...sessions].sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
-  const needsAttention = ordered.filter((session) => permissions[session.id] || errors[session.id])
+  const needsAttention = ordered.filter((session) => permissions[session.id] || questions[session.id] || errors[session.id])
   const running = ordered.filter((session) => streaming[session.id] && !needsAttention.includes(session))
   const recent = ordered.filter((session) => !streaming[session.id] && !needsAttention.includes(session)).slice(0, 6)
 
   return (
     <div className="command-center">
-      <header className="command-header">
+      <header className="command-header" onDoubleClick={() => void window.ralf.toggleMaximize()}>
         <div>
           <span className="command-eyebrow">Command Center</span>
           <h1>Here’s what’s happening.</h1>
-          <p>Status is based on live Ralf events. An optional AI briefing can be layered on later.</p>
+          <p>Status is based on live R.A.L.F. events. An optional AI briefing can be layered on later.</p>
         </div>
         <div className={`command-connection ${serverHealthy ? 'connected' : ''}`}>
           <span />{serverHealthy ? 'Connected' : 'Connecting'}
@@ -101,7 +102,7 @@ export function CommandCenter(): React.JSX.Element {
 export function EmptyProductPage({ title, description }: { title: string; description: string }): React.JSX.Element {
   return (
     <div className="product-empty-page">
-      <span className="command-eyebrow">Ralf</span>
+      <span className="command-eyebrow">R.A.L.F.</span>
       <h1>{title}</h1>
       <p>{description}</p>
     </div>

@@ -14,6 +14,7 @@ import type {
   SessionMeta,
   Todo
 } from '@shared/opencode'
+import type { BackendDescriptor, BackendId, BackendModeId } from '@shared/backend'
 import type {
   BrowseNavigationState,
   CloudflareSettings,
@@ -52,6 +53,7 @@ export interface AppState {
   projects: Project[]
   agents: Agent[]
   providers: Provider[]
+  providersBySession: Record<string, Provider[]>
   config: ConfigInfo | null
   diffs: FileDiff[] | null
   files: FileNode[] | null
@@ -59,7 +61,7 @@ export interface AppState {
   todos: Record<string, Todo[]>
   permissions: Record<string, PermissionRequest>
   questions: Record<string, QuestionRequest>
-  modelSwitch: { to: string } | null
+  modelSwitch: { to: string; sessionId?: string } | null
   commitPath: string | null
   renameTarget: string | null
   confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; action: () => void } | null
@@ -75,9 +77,13 @@ export interface AppState {
   compacting: Record<string, boolean>
   model: string | null
   variant: string | null
-  mode: 'auto' | 'ask' | 'plan'
+  mode: BackendModeId
+  modelsBySession: Record<string, string>
+  variantsBySession: Record<string, string | null>
+  modesBySession: Record<string, BackendModeId>
   agent: string
-  engine: 'opencode' | 'pi'
+  engine: BackendId
+  backends: BackendDescriptor[]
   projectPath: string
   lastError: string | null
   lastErrorBySession: Record<string, string>
@@ -124,6 +130,7 @@ export const initialState: AppState = {
   projects: [],
   agents: [],
   providers: [],
+  providersBySession: {},
   config: null,
   diffs: null,
   files: null,
@@ -148,8 +155,12 @@ export const initialState: AppState = {
   model: null,
   variant: null,
   mode: 'ask',
+  modelsBySession: {},
+  variantsBySession: {},
+  modesBySession: {},
   agent: 'build',
   engine: 'opencode',
+  backends: [],
   projectPath: '',
   lastError: null,
   lastErrorBySession: {},

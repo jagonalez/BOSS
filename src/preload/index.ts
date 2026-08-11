@@ -16,6 +16,7 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
 
 const ralf: RalfApi = {
   platform: () => process.platform,
+  toggleMaximize: () => ipcRenderer.invoke(IpcChannels.WindowToggleMaximize),
   serverInfo: () => ipcRenderer.invoke(IpcChannels.ServerGetInfo),
   onServerStatusChanged: (cb) => subscribe(IpcChannels.ServerStatusChanged, cb),
 
@@ -70,8 +71,7 @@ const ralf: RalfApi = {
 
   asrTranscribe: (req) => ipcRenderer.invoke(IpcChannels.AsrTranscribe, req),
 
-  getBackendEngine: () => ipcRenderer.invoke(IpcChannels.BackendGetEngine),
-  setBackendEngine: (engine: 'opencode' | 'pi') => ipcRenderer.invoke(IpcChannels.BackendSetEngine, engine),
+  backendRequest: (req) => ipcRenderer.invoke(IpcChannels.BackendRequest, req),
 
   sitesList: () => ipcRenderer.invoke(IpcChannels.SitesList),
   sitesPublish: (folder: string, name?: string) => ipcRenderer.invoke(IpcChannels.SitesPublish, { folder, name }),

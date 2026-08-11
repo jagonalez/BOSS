@@ -2,13 +2,16 @@ import React from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { setSpeakAloud, setTtsVoice, speakText } from '../lib/actions'
+import { setEngine, setSpeakAloud, setTtsVoice, speakText } from '../lib/actions'
+import { BackendBadge } from './BackendControls'
 
 export function SettingsModal(): React.JSX.Element | null {
   const open = useStore(appStore, (s) => s.settingsOpen)
   const ttsVoice = useStore(appStore, (s) => s.ttsVoice)
   const speakAloud = useStore(appStore, (s) => s.speakAloud)
   const tts = useStore(appStore, (s) => s.tts)
+  const backends = useStore(appStore, (s) => s.backends)
+  const defaultBackend = useStore(appStore, (s) => s.engine)
   if (!open) return null
 
   const current = document.documentElement.dataset.theme ?? 'graphite'
@@ -17,6 +20,23 @@ export function SettingsModal(): React.JSX.Element | null {
     <div className="modal-backdrop" onClick={() => appStore.setState({ settingsOpen: false })}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>Settings</h3>
+        <div className="settings-section-title">Agents</div>
+        <div className="settings-backends">
+          {backends.map((backend) => (
+            <button
+              key={backend.id}
+              className={`settings-backend ${defaultBackend === backend.id ? 'active' : ''}`}
+              disabled={!backend.available}
+              onClick={() => void setEngine(backend.id)}
+              title={backend.available ? backend.description : backend.unavailableReason}
+            >
+              <BackendBadge backendId={backend.id} />
+              <span><strong>{backend.label}</strong><small>{backend.available ? backend.version || 'Available' : backend.unavailableReason}</small></span>
+              {defaultBackend === backend.id ? <em>Default</em> : null}
+            </button>
+          ))}
+        </div>
+        <div className="settings-row-hint">The default is used by quick-create. Every project workspace can choose a backend when creating a thread.</div>
         <div className="settings-section-title">Theme</div>
         <div className="theme-grid">
           {THEMES.map((t) => (
