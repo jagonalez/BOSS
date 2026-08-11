@@ -54,3 +54,6 @@ export type BackendRequest =
   | { type: 'thread.models'; threadId?: string; backendId?: BackendId }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string }
   | { type: 'thread.relay'; sourceThreadId: string; targetThreadId: string; instruction?: string }
+  | { type: 'thread.bus.get'; threadId?: string }
+  | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
+  | { type: 'thread.bus.clear-failures'; threadId?: string }

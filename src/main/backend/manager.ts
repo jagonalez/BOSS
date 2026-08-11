@@ -12,6 +12,8 @@ import type {
   BackendMessageOptions
 } from '@shared/backend'
 import type { EventMessage, MessageWithParts, SessionInfo } from '@shared/opencode'
+import type { ThreadBus } from '../thread-bus'
+import type { ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 
 interface ThreadBinding {
   id: string
@@ -138,10 +140,19 @@ export class BackendManager {
   private readonly started = new Set<BackendId>()
   private readonly starting = new Map<BackendId, Promise<Backend>>()
   private readonly unsubscribers = new Map<BackendId, () => void>()
+  private readonly busyThreads = new Set<string>()
+  private threadBus?: ThreadBus
   private eventCb?: (event: Record<string, unknown>) => void
   private loaded = false
 
   constructor(private readonly backends: Record<BackendId, Backend>) {}
+
+  attachThreadBus(threadBus: ThreadBus): void {
+    this.threadBus = threadBus
+    for (const backend of Object.values(this.backends)) {
+      backend.setThreadBusHandler?.((call) => threadBus.agentCall(backend.id, call.nativeThreadId, call.tool, call.arguments))
+    }
+  }
 
   get currentProject(): string {
     return this.projectPath
@@ -158,6 +169,7 @@ export class BackendManager {
     this.load()
     if (projectPath) this.projectPath = projectPath
     await this.ensureStarted('opencode')
+    await this.threadBus?.resume()
   }
 
   async stop(): Promise<void> {
@@ -165,6 +177,7 @@ export class BackendManager {
     this.started.clear()
     for (const off of this.unsubscribers.values()) off()
     this.unsubscribers.clear()
+    await this.threadBus?.stop()
   }
 
   async setProject(path: string): Promise<void> {
@@ -321,6 +334,16 @@ export class BackendManager {
       if (properties.sessionID) properties.sessionID = binding.id
       if (part) properties.part = { ...part, sessionID: binding.id }
       if (messageInfo?.sessionID) properties.info = { ...messageInfo, sessionID: binding.id }
+      if (eventType === 'session.status') {
+        const status = (properties.status as { type?: string } | undefined)?.type
+        if (status === 'busy' || status === 'retry') this.busyThreads.add(binding.id)
+        else this.busyThreads.delete(binding.id)
+      } else if (eventType === 'session.idle') {
+        this.busyThreads.delete(binding.id)
+        void this.threadBus?.flush(binding.id)
+      } else if (eventType === 'session.error') {
+        this.busyThreads.delete(binding.id)
+      }
     }
     this.eventCb?.({ ...event, properties, backendId })
   }
@@ -425,6 +448,45 @@ export class BackendManager {
     await backend.sendMessage(binding.nativeSessionId, parts, options)
   }
 
+  threadForNative(backendId: BackendId, nativeThreadId: string): ThreadBusThread | undefined {
+    const binding = this.bindingForNative(backendId, nativeThreadId)
+    return binding ? this.threadBusInfo(binding) : undefined
+  }
+
+  threadInfo(threadId: string): ThreadBusThread | undefined {
+    const binding = this.bindings.get(threadId)
+    return binding ? this.threadBusInfo(binding) : undefined
+  }
+
+  threadList(projectPath: string): ThreadBusThread[] {
+    return [...this.bindings.values()]
+      .filter((binding) => !projectPath || !binding.projectPath || binding.projectPath === projectPath)
+      .map((binding) => this.threadBusInfo(binding))
+      .sort((a, b) => a.title.localeCompare(b.title))
+  }
+
+  private threadBusInfo(binding: ThreadBinding): ThreadBusThread {
+    return {
+      id: binding.id,
+      title: binding.title || 'Untitled thread',
+      backendId: binding.backendId,
+      projectPath: binding.projectPath || this.projectPath,
+      busy: this.busyThreads.has(binding.id)
+    }
+  }
+
+  async threadMessages(threadId: string, limit: number): Promise<MessageWithParts[]> {
+    return this.messagesList(threadId, limit)
+  }
+
+  async deliverThreadMessage(threadId: string, body: string): Promise<void> {
+    await this.sendMessage(threadId, [{ type: 'text', text: body }], { mode: 'ask' })
+  }
+
+  emitThreadBus(snapshot: ThreadBusSnapshot): void {
+    this.eventCb?.({ type: 'thread.bus.updated', properties: { snapshot } })
+  }
+
   async abort(threadId: string): Promise<void> {
     const binding = this.binding(threadId)
     const backend = await this.ensureStarted(binding.backendId)
@@ -522,6 +584,21 @@ export class BackendManager {
       }
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction)
       case 'thread.relay': return this.relay(request.sourceThreadId, request.targetThreadId, request.instruction)
+      case 'thread.bus.get': {
+        if (!this.threadBus) throw new Error('Thread collaboration is not available.')
+        const projectPath = request.threadId ? this.binding(request.threadId).projectPath : this.projectPath
+        return this.threadBus.snapshot(projectPath)
+      }
+      case 'thread.bus.policy': {
+        if (!this.threadBus) throw new Error('Thread collaboration is not available.')
+        const projectPath = request.threadId ? this.binding(request.threadId).projectPath : this.projectPath
+        return this.threadBus.setPolicy(projectPath, request.policy)
+      }
+      case 'thread.bus.clear-failures': {
+        if (!this.threadBus) throw new Error('Thread collaboration is not available.')
+        const projectPath = request.threadId ? this.binding(request.threadId).projectPath : this.projectPath
+        return this.threadBus.clearFailures(projectPath)
+      }
     }
   }
 }

@@ -5047,3 +5047,11 @@ select:hover {
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+.workspace-tab-bus {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: var(--warning, #d6a657);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning, #d6a657) 18%, transparent);
+}
