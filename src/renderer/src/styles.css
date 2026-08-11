@@ -892,6 +892,11 @@ button {
 }
 
 .workspace-tab-close:hover {
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+.workspace-tab-close.destructive:hover {
   color: var(--red);
   background: var(--red-soft);
 }

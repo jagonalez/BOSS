@@ -55,6 +55,47 @@ function tabIcon(kind: WorkspaceTabKind): (props: { size?: number }) => React.JS
   return TAB_TYPES.find((item) => item.kind === kind)?.icon ?? ChatIcon
 }
 
+function isLiveSurface(item: WorkspaceTab): boolean {
+  return item.kind === 'browser' || item.kind === 'terminal'
+}
+
+function requestCloseWorkspaceTab(groupId: string, item: WorkspaceTab): void {
+  if (item.kind !== 'terminal') {
+    closeWorkspaceTab(groupId, item.id)
+    return
+  }
+
+  appStore.setState({
+    confirm: {
+      title: 'Close terminal?',
+      message: 'This closes the terminal and ends its running shell and processes.',
+      confirmLabel: 'Close terminal',
+      destructive: true,
+      action: () => closeWorkspaceTab(groupId, item.id)
+    }
+  })
+}
+
+function requestCloseWorkspaceGroup(group: WorkspaceGroup): void {
+  const terminals = group.tabs.filter((item) => item.kind === 'terminal').length
+  if (terminals === 0) {
+    closeWorkspaceGroup(group.id)
+    return
+  }
+
+  appStore.setState({
+    confirm: {
+      title: 'Close pane?',
+      message: terminals === 1
+        ? 'This closes the terminal and ends its running shell and processes.'
+        : `This closes ${terminals} terminals and ends their running shells and processes.`,
+      confirmLabel: 'Close pane',
+      destructive: true,
+      action: () => closeWorkspaceGroup(group.id)
+    }
+  })
+}
+
 function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   const sessionTitle = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.title)
   const browserTitle = useStore(appStore, (state) => state.browse[`workspace-${item.id}`]?.title)
@@ -331,14 +372,14 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
             >
               <TabLabel item={item} group={group} />
               <span
-                className="workspace-tab-close"
+                className={`workspace-tab-close ${isLiveSurface(item) ? 'destructive' : ''}`}
                 role="button"
-                title="Hide this surface (the thread is not deleted)"
+                title={isLiveSurface(item) ? `Close ${item.kind}` : 'Hide this surface'}
                 onClick={(event) => {
                   event.stopPropagation()
-                  closeWorkspaceTab(group.id, item.id)
+                  requestCloseWorkspaceTab(group.id, item)
                 }}
-              >−</span>
+              >{isLiveSurface(item) ? '×' : '−'}</span>
             </button>
           ))}
           <button
@@ -355,7 +396,10 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
         <div className="workspace-group-actions">
           <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>
           <button onClick={() => splitWorkspaceGroup(group.id, 'vertical')} title="Split top and bottom">↕</button>
-          <button onClick={() => closeWorkspaceGroup(group.id)} title="Close pane (threads are not deleted)">−</button>
+          <button
+            onClick={() => requestCloseWorkspaceGroup(group)}
+            title={group.tabs.some(isLiveSurface) ? 'Close pane and its live resources' : 'Hide pane'}
+          >{group.tabs.some(isLiveSurface) ? '×' : '−'}</button>
         </div>
       </header>
 
@@ -558,7 +602,8 @@ export function Workspace(): React.JSX.Element {
         splitWorkspaceGroup(focused.id, event.shiftKey ? 'vertical' : 'horizontal')
       } else if (event.key.toLowerCase() === 'w' && focused.activeTabId) {
         event.preventDefault()
-        closeWorkspaceTab(focused.id, focused.activeTabId)
+        const activeTab = focused.tabs.find((item) => item.id === focused.activeTabId)
+        if (activeTab) requestCloseWorkspaceTab(focused.id, activeTab)
       } else if (event.key.startsWith('Arrow')) {
         event.preventDefault()
         const direction = event.key.replace('Arrow', '').toLowerCase() as 'left' | 'right' | 'up' | 'down'
