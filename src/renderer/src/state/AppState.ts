@@ -11,9 +11,6 @@ import type {
   Provider,
   SessionInfo,
   SessionMeta,
-  PanelGroup,
-  PanelKind,
-  PanelTab,
   Todo
 } from '@shared/opencode'
 import type {
@@ -25,15 +22,11 @@ import type {
   OptionalDownloadEvent
 } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
+import type { AppPage, LayoutTemplate, ProjectWorkspace } from '@shared/workspace'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
 
 export { useStore } from '../lib/store'
-
-export type { PanelKind, PanelTab, PanelGroup }
-
-export const MAIN_MIN_WIDTH = 420
-export const SIDEBAR_FALLBACK_WIDTH = 280
 
 export interface Attachment {
   id: string
@@ -43,6 +36,10 @@ export interface Attachment {
 }
 
 export interface AppState {
+  activePage: AppPage
+  projectWorkspace: ProjectWorkspace | null
+  layoutTemplates: LayoutTemplate[]
+  nativeViewSuspensions: string[]
   serverUrl: string
   serverVersion: string
   serverHealthy: boolean
@@ -62,8 +59,6 @@ export interface AppState {
   commitPath: string | null
   renameTarget: string | null
   confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; action: () => void } | null
-  panelOpen: boolean
-  panelGroups: PanelGroup[]
   reviewFile: string | null
   browse: Record<string, BrowseNavigationState>
   optional: OptionalComponentInfo[]
@@ -109,6 +104,10 @@ export const initialBrowseState: BrowseNavigationState = {
 }
 
 export const initialState: AppState = {
+  activePage: 'command-center',
+  projectWorkspace: null,
+  layoutTemplates: [],
+  nativeViewSuspensions: [],
   serverUrl: '',
   serverVersion: '',
   serverHealthy: false,
@@ -128,8 +127,6 @@ export const initialState: AppState = {
   commitPath: null,
   renameTarget: null,
   confirm: null,
-  panelOpen: false,
-  panelGroups: [],
   reviewFile: null,
   browse: {},
   optional: [],

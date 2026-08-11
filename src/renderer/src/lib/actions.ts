@@ -1,9 +1,226 @@
-import { appStore, upsertMessagesFromList, type Attachment, type PanelKind, type PanelTab } from '../state/AppState'
+import { appStore, upsertMessagesFromList, type Attachment } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
+import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
+import {
+  activateTab,
+  addTab,
+  bindTemplate,
+  closeGroup,
+  closeTab,
+  findGroup,
+  findSessionTab,
+  findTab,
+  loadTemplates,
+  loadWorkspace,
+  moveTab,
+  reorderTab,
+  resizeSplit,
+  saveCustomTemplates,
+  saveWorkspace,
+  splitGroup,
+  tab,
+  templateFromWorkspace,
+  walkGroups,
+  walkTabs
+} from './workspaces'
+
+export function initializeWorkspaceState(): void {
+  appStore.setState({ layoutTemplates: loadTemplates() })
+}
+
+export function showPage(page: AppPage): void {
+  appStore.setState({ activePage: page })
+}
+
+export function setNativeViewsSuspended(reason: string, suspended: boolean): void {
+  appStore.setState((state) => {
+    const reasons = new Set(state.nativeViewSuspensions)
+    if (suspended) reasons.add(reason)
+    else reasons.delete(reason)
+    return { nativeViewSuspensions: [...reasons] }
+  })
+}
+
+export function loadProjectWorkspace(projectKey: string, preferredSessionId?: string): void {
+  const workspace = loadWorkspace(projectKey, preferredSessionId)
+  appStore.setState({ projectWorkspace: workspace })
+}
+
+function updateWorkspace(
+  update: (workspace: NonNullable<ReturnType<typeof currentWorkspace>>) => NonNullable<ReturnType<typeof currentWorkspace>>
+): NonNullable<ReturnType<typeof currentWorkspace>> | null {
+  const current = currentWorkspace()
+  if (!current) return null
+  const next = { ...update(current), updatedAt: Date.now() }
+  saveWorkspace(next)
+  appStore.setState({ projectWorkspace: next })
+  return next
+}
+
+function currentWorkspace() {
+  return appStore.getState().projectWorkspace
+}
+
+function activeTabInFocusedGroup() {
+  const workspace = currentWorkspace()
+  if (!workspace) return undefined
+  const target = findGroup(workspace.root, workspace.focusedGroupId)
+  return target?.tabs.find((item) => item.id === target.activeTabId)
+}
+
+function syncFocusedThread(): void {
+  const active = activeTabInFocusedGroup()
+  if (active?.kind === 'thread' && active.sessionId) selectSession(active.sessionId, false)
+}
+
+export function focusWorkspaceGroup(groupId: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace || !findGroup(workspace.root, groupId)) return
+  if (workspace.focusedGroupId !== groupId) updateWorkspace((item) => ({ ...item, focusedGroupId: groupId }))
+  syncFocusedThread()
+}
+
+export function activateWorkspaceTab(groupId: string, tabId: string): void {
+  const next = updateWorkspace((item) => ({
+    ...item,
+    root: activateTab(item.root, groupId, tabId),
+    focusedGroupId: groupId
+  }))
+  const active = next ? findTab(next.root, tabId)?.tab : undefined
+  if (active?.kind === 'thread' && active.sessionId) selectSession(active.sessionId, false)
+  if (active?.kind === 'review') void refreshDiff(appStore.getState().activeSessionId)
+}
+
+export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, sessionId?: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  if (kind === 'thread' && sessionId) {
+    const existing = findSessionTab(workspace.root, sessionId)
+    if (existing) {
+      activateWorkspaceTab(existing.group.id, existing.tab.id)
+      return
+    }
+  }
+  if (kind === 'review' || kind === 'files') {
+    const existing = walkTabs(workspace.root).find((item) => item.kind === kind)
+    if (existing) {
+      const location = findTab(workspace.root, existing.id)
+      if (location) activateWorkspaceTab(location.group.id, existing.id)
+      return
+    }
+  }
+  const created = tab(kind, sessionId)
+  updateWorkspace((item) => ({
+    ...item,
+    root: addTab(item.root, groupId, created),
+    focusedGroupId: groupId
+  }))
+  if (kind === 'thread' && sessionId) selectSession(sessionId, false)
+}
+
+export async function createThreadInGroup(groupId: string): Promise<void> {
+  try {
+    const session = await OpenCode.createSession()
+    upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
+    await refreshSessions()
+    addWorkspaceTab(groupId, 'thread', session.id)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function splitWorkspaceGroup(groupId: string, direction: SplitDirection): void {
+  updateWorkspace((item) => {
+    const result = splitGroup(item.root, groupId, direction)
+    return { ...item, root: result.root, focusedGroupId: result.groupId }
+  })
+}
+
+export function closeWorkspaceTab(groupId: string, tabId: string): void {
+  const next = updateWorkspace((item) => {
+    const root = closeTab(item.root, groupId, tabId)
+    const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
+    return { ...item, root, focusedGroupId }
+  })
+  if (next) syncFocusedThread()
+}
+
+export function closeWorkspaceGroup(groupId: string): void {
+  const next = updateWorkspace((item) => {
+    const root = closeGroup(item.root, groupId)
+    return { ...item, root, focusedGroupId: walkGroups(root)[0].id }
+  })
+  if (next) syncFocusedThread()
+}
+
+export function setWorkspaceSplitRatio(splitId: string, ratio: number): void {
+  updateWorkspace((item) => ({ ...item, root: resizeSplit(item.root, splitId, ratio) }))
+}
+
+export function moveWorkspaceTab(tabId: string, targetGroupId: string, position: DropPosition): void {
+  const next = updateWorkspace((item) => {
+    const moved = moveTab(item.root, tabId, targetGroupId, position)
+    return { ...item, root: moved.root, focusedGroupId: moved.focusedGroupId }
+  })
+  if (next) syncFocusedThread()
+}
+
+export function reorderWorkspaceTab(groupId: string, tabId: string, beforeTabId?: string): void {
+  updateWorkspace((item) => ({ ...item, root: reorderTab(item.root, groupId, tabId, beforeTabId) }))
+}
+
+export function openSessionInWorkspace(sessionId: string): boolean {
+  const workspace = currentWorkspace()
+  if (!workspace) return false
+  const existing = findSessionTab(workspace.root, sessionId)
+  if (existing) {
+    activateWorkspaceTab(existing.group.id, existing.tab.id)
+    return true
+  }
+  const groupId = findGroup(workspace.root, workspace.focusedGroupId)?.id ?? walkGroups(workspace.root)[0].id
+  addWorkspaceTab(groupId, 'thread', sessionId)
+  return true
+}
+
+export function applyLayoutTemplate(templateId: string): void {
+  const state = appStore.getState()
+  const workspace = state.projectWorkspace
+  const template = state.layoutTemplates.find((item) => item.id === templateId)
+  if (!workspace || !template) return
+  const focusedGroup = findGroup(workspace.root, workspace.focusedGroupId)
+  const focusedTab = focusedGroup?.tabs.find((item) => item.id === focusedGroup.activeTabId)
+  const focused = focusedTab?.kind === 'thread' ? focusedTab.sessionId : undefined
+  const sessions = [focused, ...state.sessions.map((item) => item.id)].filter(
+    (id, index, all): id is string => Boolean(id) && all.indexOf(id) === index
+  )
+  const next = bindTemplate(template, workspace.projectKey, sessions)
+  saveWorkspace(next)
+  appStore.setState({ projectWorkspace: next })
+  const firstThread = walkTabs(next.root).find((item) => item.kind === 'thread' && item.sessionId)
+  if (firstThread?.sessionId) selectSession(firstThread.sessionId, false)
+}
+
+export function saveCurrentLayoutTemplate(name: string): void {
+  const state = appStore.getState()
+  if (!state.projectWorkspace) return
+  const template = templateFromWorkspace(state.projectWorkspace, name)
+  const templates = [...state.layoutTemplates, template]
+  saveCustomTemplates(templates)
+  appStore.setState({ layoutTemplates: templates })
+}
+
+export function removeLayoutTemplate(templateId: string): void {
+  const state = appStore.getState()
+  const target = state.layoutTemplates.find((item) => item.id === templateId)
+  if (!target || target.builtIn) return
+  const templates = state.layoutTemplates.filter((item) => item.id !== templateId)
+  saveCustomTemplates(templates)
+  appStore.setState({ layoutTemplates: templates })
+}
 function persistSessionMeta(meta: Record<string, SessionMeta>): void {
   try {
     localStorage.setItem('ralf.sessionMeta', JSON.stringify(meta))
@@ -85,17 +302,6 @@ export async function newChatWithPrompt(prompt: string, attachments?: Attachment
 
 export function sessionMetaFor(sessionId: string): SessionMeta | undefined {
   return appStore.getState().sessionMeta[sessionId]
-}
-
-export function syncPanelToMeta(): void {
-  const s = appStore.getState()
-  if (!s.activeSessionId) return
-  upsertSessionMeta(s.activeSessionId, { panelGroups: s.panelGroups })
-}
-
-export function loadPanelForSession(sessionId: string): void {
-  const meta = appStore.getState().sessionMeta[sessionId]
-  appStore.setState({ panelGroups: meta?.panelGroups ? JSON.parse(JSON.stringify(meta.panelGroups)) : [] })
 }
 
 export async function runThreadReview(sessionID: string, target: string): Promise<void> {
@@ -366,25 +572,36 @@ export async function loadMessages(sessionID: string): Promise<void> {
   }
 }
 
-export function refreshStreaming(): void {
+export function refreshStreaming(sessionId?: string): void {
   const s = appStore.getState()
-  const sid = s.activeSessionId
-  if (!sid) return
-  if (s.streamingLocked[sid]) {
-    if (s.streaming[sid]) appStore.setState((st) => ({ streaming: { ...st.streaming, [sid]: false } }))
-    return
+  const ids = sessionId
+    ? [sessionId]
+    : [...new Set([s.activeSessionId, ...Object.keys(s.messages), ...Object.keys(s.sessionBusy)].filter(Boolean) as string[])]
+  if (ids.length === 0) return
+  const streaming = { ...s.streaming }
+  let changed = false
+  for (const sid of ids) {
+    if (s.streamingLocked[sid]) {
+      if (streaming[sid]) {
+        streaming[sid] = false
+        changed = true
+      }
+      continue
+    }
+    const msgs = s.messages[sid] ?? []
+    const parts = msgs.flatMap((m) => m.parts)
+    const runningPart = parts.some((p) => p.state?.status === 'running' || p.state?.status === 'pending')
+    const last = msgs[msgs.length - 1]
+    const awaiting =
+      last !== undefined && (last.info.role === 'user' || (last.info.role === 'assistant' && !last.info.time?.completed))
+    const busy = Boolean(s.sessionBusy[sid]) || Boolean(s.compacting[sid])
+    const working = runningPart || awaiting || busy
+    if (working !== Boolean(streaming[sid])) {
+      streaming[sid] = working
+      changed = true
+    }
   }
-  const msgs = s.messages[sid] ?? []
-  const parts = msgs.flatMap((m) => m.parts)
-  const runningPart = parts.some((p) => p.state?.status === 'running' || p.state?.status === 'pending')
-  const last = msgs[msgs.length - 1]
-  const awaiting =
-    last !== undefined && (last.info.role === 'user' || (last.info.role === 'assistant' && !last.info.time?.completed))
-  const busy = Boolean(s.sessionBusy[sid]) || Boolean(s.compacting[sid])
-  const working = runningPart || awaiting || busy
-  if (working !== s.streaming[sid]) {
-    appStore.setState((st) => ({ streaming: { ...st.streaming, [sid]: working } }))
-  }
+  if (changed) appStore.setState({ streaming })
 }
 
 export async function loadTodos(sessionID: string): Promise<void> {
@@ -416,13 +633,22 @@ export async function refreshFiles(): Promise<void> {
   }
 }
 
-export function selectSession(id: string): void {
+export function selectSession(id: string, bindWorkspace = true): void {
   const cur = appStore.getState()
-  if (cur.activeSessionId === id) return
   const session = cur.sessions.find((s) => s.id === id)
+  const sessionPath = session?.directory || session?.path || ''
+  const inProject = Boolean(sessionPath && sessionPath !== '/')
+  if (bindWorkspace && inProject && cur.projectWorkspace?.projectKey === sessionPath) {
+    openSessionInWorkspace(id)
+  }
+  if (cur.activeSessionId === id) {
+    appStore.setState({ activePage: inProject ? 'project' : 'chat' })
+    return
+  }
   if (session?.model?.id) setModel(session.model.id)
   appStore.setState({
     activeSessionId: id,
+    activePage: inProject ? 'project' : 'chat',
     diffs: null,
     fileContent: null
   })
@@ -452,22 +678,37 @@ export async function openProject(path: string): Promise<void> {
   }
   appStore.setState({
     projectPath: info.path,
+    activePage: 'project',
     activeSessionId: null,
     sessions: [],
     messages: {},
     diffs: null,
     fileContent: null,
     files: null,
-    panelOpen: true
   })
   await refreshSessions()
   await refreshProjects()
   await refreshFiles()
+  const preferred = appStore.getState().sessions.find((session) => (session.directory || session.path) === info.path)?.id
+  loadProjectWorkspace(info.path, preferred)
 }
 
 export async function deleteSession(id: string): Promise<void> {
   try {
     await OpenCode.deleteSession(id)
+    const workspace = currentWorkspace()
+    if (workspace) {
+      updateWorkspace((item) => {
+        let root = item.root
+        let found = findSessionTab(root, id)
+        while (found) {
+          root = closeTab(root, found.group.id, found.tab.id)
+          found = findSessionTab(root, id)
+        }
+        const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
+        return { ...item, root, focusedGroupId }
+      })
+    }
     const cur = appStore.getState()
     if (cur.activeSessionId === id) {
       appStore.setState({ activeSessionId: null, messages: {}, diffs: null, todos: {} })
@@ -753,98 +994,11 @@ export async function refreshComputerUsePermissions(promptIfMissing = false): Pr
   }
 }
 
-let panelCounter = 0
-
-function defaultPanelWidth(): number {
-  try {
-    const saved = Number(localStorage.getItem('ralf.panelWidth'))
-    if (Number.isFinite(saved) && saved >= 300) return Math.min(saved, 900)
-  } catch {
-    /* ignore */
-  }
-  return 460
-}
-
-export function addPanelGroup(): void {
-  appStore.setState((s) => ({
-    panelOpen: true,
-    panelGroups: [...s.panelGroups, { id: `grp-${Date.now()}-${panelCounter++}`, tabs: [], activeTabId: null, width: defaultPanelWidth() }]
-  }))
-}
-
-export async function openPanelTab(kind: PanelKind, groupId?: string): Promise<void> {
-  const s = appStore.getState()
-  const single = kind === 'review' || kind === 'browse'
-  if (single) {
-    for (const g of s.panelGroups) {
-      const existing = g.tabs.find((t) => t.kind === kind)
-      if (existing) {
-        appStore.setState({
-          panelOpen: true,
-          panelGroups: s.panelGroups.map((gg) => (gg.id === g.id ? { ...gg, activeTabId: existing.id } : gg))
-        })
-        return
-      }
-    }
-  }
-  let target = groupId ? s.panelGroups.find((g) => g.id === groupId) : s.panelGroups[s.panelGroups.length - 1]
-  if (!target) {
-    addPanelGroup()
-    target = appStore.getState().panelGroups[appStore.getState().panelGroups.length - 1]
-  }
-  const tab: PanelTab = { id: `tab-${Date.now()}-${panelCounter++}`, kind }
-  if (kind === 'chat') {
-    try {
-      const session = await OpenCode.createSession()
-      tab.sessionId = session.id
-      upsertSessionMeta(session.id, { kind: 'side', projectPath: appStore.getState().projectPath })
-    } catch (err) {
-      const sid = appStore.getState().activeSessionId
-      if (sid) setSessionError(sid, 'Couldn’t create side chat: ' + errorSummary(err))
-      return
-    }
-  }
-  appStore.setState((prev) => ({
-    panelOpen: true,
-    panelGroups: prev.panelGroups.map((g) =>
-      g.id === target!.id ? { ...g, tabs: [...g.tabs, tab], activeTabId: tab.id } : g
-    )
-  }))
-}
-
-export function closePanelTab(groupId: string, tabId: string): void {
-  appStore.setState((prev) => ({
-    panelGroups: prev.panelGroups.map((g) => {
-      if (g.id !== groupId) return g
-      const tabs = g.tabs.filter((t) => t.id !== tabId)
-      let activeTabId = g.activeTabId
-      if (g.activeTabId === tabId) {
-        const idx = g.tabs.findIndex((t) => t.id === tabId)
-        activeTabId = (tabs[idx] ?? tabs[idx - 1] ?? tabs[0] ?? null)?.id ?? null
-      }
-      return { ...g, tabs, activeTabId }
-    })
-  }))
-}
-
-export function closePanelGroup(groupId: string): void {
-  appStore.setState((prev) => ({ panelGroups: prev.panelGroups.filter((g) => g.id !== groupId) }))
-}
-
-export function setPanelWidth(groupId: string, width: number): void {
-  appStore.setState((prev) => ({
-    panelGroups: prev.panelGroups.map((g) => (g.id === groupId ? { ...g, width } : g))
-  }))
-  try {
-    localStorage.setItem('ralf.panelWidth', String(width))
-  } catch {
-    /* ignore */
-  }
-}
-
 export async function openReviewFile(path: string): Promise<void> {
   appStore.setState({ reviewFile: path })
-  await openPanelTab('review')
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  addWorkspaceTab(workspace.focusedGroupId, 'review')
 }
 
 export async function refreshProject(): Promise<void> {
@@ -860,10 +1014,12 @@ export async function openProjectFolder(): Promise<void> {
   try {
     const path = await window.ralf.projectChoose()
     if (!path) return
-    appStore.setState({ projectPath: path, activeSessionId: null, sessions: [], messages: {}, diffs: null })
+    appStore.setState({ projectPath: path, activePage: 'project', activeSessionId: null, sessions: [], messages: {}, diffs: null })
     await window.ralf.projectSet(path)
     await refreshSessions()
     await refreshProjects()
+    const preferred = appStore.getState().sessions.find((session) => (session.directory || session.path) === path)?.id
+    loadProjectWorkspace(path, preferred)
   } catch (err) {
     console.error('open project folder:', err)
   }

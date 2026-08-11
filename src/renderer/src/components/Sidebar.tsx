@@ -12,9 +12,10 @@ import {
   openProjectFolder,
   selectSession,
   sessionMetaFor,
+  showPage,
   toggleArchive
 } from '../lib/actions'
-import { ChatIcon, ChevronIcon, FolderIcon, GearIcon, PlusIcon } from './icons'
+import { ChatIcon, ChevronIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
 
 interface CtxMenu {
   x: number
@@ -77,6 +78,7 @@ export function Sidebar(): React.JSX.Element {
   const projects = useStore(appStore, (s) => s.projects)
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const projectPath = useStore(appStore, (s) => s.projectPath)
+  const activePage = useStore(appStore, (s) => s.activePage)
   const archived = useStore(appStore, (s) => s.archived)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
@@ -146,6 +148,7 @@ export function Sidebar(): React.JSX.Element {
     else next.add(path)
     setExpanded(next)
     if (path !== activePath) void openProject(path)
+    else showPage('project')
   }
 
   const onDividerDown = (e: React.MouseEvent): void => {
@@ -203,10 +206,18 @@ export function Sidebar(): React.JSX.Element {
           <span>Ralf</span>
         </div>
       </div>
-      <button className="btn-new" onClick={() => void newSession()}>
-        <PlusIcon size={15} />
-        <span>New chat</span>
-      </button>
+      <nav className="sidebar-primary" aria-label="Primary navigation">
+        <button className={`sidebar-primary-item ${activePage === 'command-center' ? 'active' : ''}`} onClick={() => showPage('command-center')}>
+          <PanelIcon size={15} /><span>Command Center</span>
+        </button>
+        <button className={`sidebar-primary-item ${activePage === 'automations' ? 'active' : ''}`} onClick={() => showPage('automations')}>
+          <ReviewIcon size={15} /><span>Automations</span>
+        </button>
+        <button className={`sidebar-primary-item ${activePage === 'sites' ? 'active' : ''}`} onClick={() => showPage('sites')}>
+          <GlobeIcon size={15} /><span>Sites</span>
+        </button>
+      </nav>
+      <div className="sidebar-section-rule" />
 
       <div className="sidebar-section projects" style={projectsH ? { height: projectsH } : undefined}>
         <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="Add a project folder" />

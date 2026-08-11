@@ -1,0 +1,522 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import type { DropPosition, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
+import { useStore, appStore } from '../state/AppState'
+import { ChatView } from './ChatView'
+import { BrowseTab } from './BrowseTab'
+import { TerminalTab } from './TerminalTab'
+import { ReviewTab } from './ReviewTab'
+import { FilesTab } from './FilesTab'
+import {
+  activateWorkspaceTab,
+  addWorkspaceTab,
+  applyLayoutTemplate,
+  closeWorkspaceGroup,
+  closeWorkspaceTab,
+  createThreadInGroup,
+  focusWorkspaceGroup,
+  loadMessages,
+  loadTodos,
+  moveWorkspaceTab,
+  removeLayoutTemplate,
+  reorderWorkspaceTab,
+  saveCurrentLayoutTemplate,
+  setNativeViewsSuspended,
+  setWorkspaceSplitRatio,
+  splitWorkspaceGroup
+} from '../lib/actions'
+import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+
+const TAB_DRAG_TYPE = 'application/x-ralf-workspace-tab'
+
+const TAB_TYPES: Array<{
+  kind: WorkspaceTabKind
+  label: string
+  icon: (props: { size?: number }) => React.JSX.Element
+}> = [
+  { kind: 'thread', label: 'Thread', icon: ChatIcon },
+  { kind: 'browser', label: 'Browser', icon: GlobeIcon },
+  { kind: 'terminal', label: 'Terminal', icon: TerminalIcon },
+  { kind: 'review', label: 'Review', icon: ReviewIcon },
+  { kind: 'files', label: 'Files', icon: FilesIcon }
+]
+
+function shortProject(path?: string): string {
+  if (!path) return 'Project'
+  return path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) ?? path
+}
+
+function tabIcon(kind: WorkspaceTabKind): (props: { size?: number }) => React.JSX.Element {
+  return TAB_TYPES.find((item) => item.kind === kind)?.icon ?? ChatIcon
+}
+
+function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
+  const sessionTitle = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.title)
+  const browserTitle = useStore(appStore, (state) => state.browse[`workspace-${item.id}`]?.title)
+  const sameKindIndex = group.tabs.filter((candidate) => candidate.kind === item.kind).findIndex((candidate) => candidate.id === item.id)
+  const suffix = sameKindIndex > 0 ? ` ${sameKindIndex + 1}` : ''
+  if (item.kind === 'thread') return sessionTitle || 'Untitled thread'
+  if (item.kind === 'browser') return browserTitle || `Browser${suffix}`
+  return `${TAB_TYPES.find((candidate) => candidate.kind === item.kind)?.label ?? item.kind}${suffix}`
+}
+
+function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }): React.JSX.Element {
+  const label = useTabLabel(item, group)
+  const Icon = tabIcon(item.kind)
+  const busy = useStore(appStore, (state) => Boolean(item.sessionId && state.streaming[item.sessionId]))
+  const permission = useStore(appStore, (state) => Boolean(item.sessionId && state.permissions[item.sessionId]))
+  const failed = useStore(appStore, (state) => Boolean(item.sessionId && state.lastErrorBySession[item.sessionId]))
+
+  return (
+    <>
+      <span className={`workspace-tab-icon ${busy ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
+        <Icon size={12} />
+      </span>
+      <span className="workspace-tab-label" title={label}>{label}</span>
+    </>
+  )
+}
+
+function ThreadPicker({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
+  const sessions = useStore(appStore, (state) =>
+    [...state.sessions]
+      .filter((session) => !session.parentID)
+      .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
+  )
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const openIds = useMemo(() => {
+    const ids = new Set<string>()
+    const walk = (node: WorkspaceNode): void => {
+      if (node.type === 'split') {
+        walk(node.first)
+        walk(node.second)
+      } else {
+        node.tabs.forEach((item) => {
+          if (item.kind === 'thread' && item.sessionId) ids.add(item.sessionId)
+        })
+      }
+    }
+    if (workspace) walk(workspace.root)
+    return ids
+  }, [workspace])
+
+  return (
+    <div className="workspace-add-menu thread-picker">
+      <div className="workspace-menu-title">Add thread</div>
+      <button
+        className="workspace-add-menu-item primary"
+        onClick={() => {
+          close()
+          void createThreadInGroup(groupId)
+        }}
+      >
+        <PlusIcon size={14} />
+        <span>New thread</span>
+      </button>
+      <div className="workspace-menu-rule" />
+      <div className="workspace-thread-options">
+        {sessions.map((session) => (
+          <button
+            key={session.id}
+            className="workspace-add-menu-item"
+            onClick={() => {
+              addWorkspaceTab(groupId, 'thread', session.id)
+              close()
+            }}
+          >
+            <ChatIcon size={13} />
+            <span>{session.title || 'Untitled'}</span>
+            {openIds.has(session.id) ? <small>open</small> : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AddMenu({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
+  const [threadPicker, setThreadPicker] = useState(false)
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const existingKinds = useMemo(() => {
+    const result = new Set<WorkspaceTabKind>()
+    const walk = (node: WorkspaceNode): void => {
+      if (node.type === 'split') {
+        walk(node.first)
+        walk(node.second)
+      } else {
+        node.tabs.forEach((item) => result.add(item.kind))
+      }
+    }
+    if (workspace) walk(workspace.root)
+    return result
+  }, [workspace])
+
+  if (threadPicker) return <ThreadPicker groupId={groupId} close={close} />
+
+  return (
+    <div className="workspace-add-menu">
+      <div className="workspace-menu-title">Add to group</div>
+      {TAB_TYPES.map(({ kind, label, icon: Icon }) => {
+        const existing = (kind === 'review' || kind === 'files') && existingKinds.has(kind)
+        return (
+          <button
+            key={kind}
+            className="workspace-add-menu-item"
+            onClick={() => {
+              if (kind === 'thread') {
+                setThreadPicker(true)
+              } else {
+                addWorkspaceTab(groupId, kind)
+                close()
+              }
+            }}
+          >
+            <Icon size={14} />
+            <span>{label}</span>
+            {existing ? <small>focus open tab</small> : null}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function TabContent({ item, active, overlayOpen }: { item: WorkspaceTab; active: boolean; overlayOpen: boolean }): React.JSX.Element {
+  useEffect(() => {
+    if (item.kind !== 'thread' || !item.sessionId) return
+    void loadMessages(item.sessionId)
+    void loadTodos(item.sessionId)
+  }, [item.kind, item.sessionId])
+
+  let content: React.JSX.Element
+  switch (item.kind) {
+    case 'thread':
+      content = item.sessionId ? <ChatView sessionId={item.sessionId} /> : <div className="workspace-unbound">Choose a thread for this tab.</div>
+      break
+    case 'browser':
+      content = <BrowseTab id={`workspace-${item.id}`} visible={active && !overlayOpen} />
+      break
+    case 'terminal':
+      content = <TerminalTab />
+      break
+    case 'review':
+      content = <ReviewTab />
+      break
+    case 'files':
+      content = <FilesTab />
+      break
+  }
+  return <div className="workspace-tab-content" hidden={!active}>{content}</div>
+}
+
+function dropPosition(event: React.DragEvent, element: HTMLElement): DropPosition {
+  const rect = element.getBoundingClientRect()
+  const x = (event.clientX - rect.left) / rect.width
+  const y = (event.clientY - rect.top) / rect.height
+  const edge = 0.24
+  if (x < edge) return 'left'
+  if (x > 1 - edge) return 'right'
+  if (y < edge) return 'top'
+  if (y > 1 - edge) return 'bottom'
+  return 'center'
+}
+
+function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const focused = workspace?.focusedGroupId === group.id
+  const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
+  const [dropTarget, setDropTarget] = useState<DropPosition | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const activeId = group.tabs.some((item) => item.id === group.activeTabId) ? group.activeTabId : group.tabs[0]?.id ?? null
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (event: MouseEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false)
+    }
+    const key = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', key)
+    }
+  }, [menuOpen])
+
+  useEffect(() => {
+    const reason = `workspace-group-${group.id}`
+    const suspended = menuOpen || Boolean(dropTarget)
+    setNativeViewsSuspended(reason, suspended)
+    return () => setNativeViewsSuspended(reason, false)
+  }, [group.id, menuOpen, dropTarget])
+
+  const onDrop = (event: React.DragEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
+    if (tabId) moveWorkspaceTab(tabId, group.id, dropTarget ?? 'center')
+    setDropTarget(null)
+  }
+
+  return (
+    <section
+      className={`workspace-group ${focused ? 'focused' : ''}`}
+      data-workspace-group={group.id}
+      onMouseDown={() => focusWorkspaceGroup(group.id)}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
+        event.preventDefault()
+        setDropTarget(dropPosition(event, event.currentTarget))
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null)
+      }}
+      onDrop={onDrop}
+    >
+      <header className="workspace-group-tabs">
+        <div className="workspace-tabs" role="tablist">
+          {group.tabs.map((item) => (
+            <button
+              key={item.id}
+              className={`workspace-tab ${item.id === activeId ? 'active' : ''}`}
+              role="tab"
+              aria-selected={item.id === activeId}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'move'
+                event.dataTransfer.setData(TAB_DRAG_TYPE, item.id)
+                event.currentTarget.classList.add('dragging')
+              }}
+              onDragEnd={(event) => event.currentTarget.classList.remove('dragging')}
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
+                if (tabId) {
+                  moveWorkspaceTab(tabId, group.id, 'center')
+                  reorderWorkspaceTab(group.id, tabId, item.id)
+                }
+              }}
+              onClick={() => activateWorkspaceTab(group.id, item.id)}
+            >
+              <TabLabel item={item} group={group} />
+              <span
+                className="workspace-tab-close"
+                role="button"
+                title="Close tab"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  closeWorkspaceTab(group.id, item.id)
+                }}
+              >×</span>
+            </button>
+          ))}
+          <button
+            className="workspace-tab-add"
+            title="Add tab"
+            onClick={(event) => {
+              event.stopPropagation()
+              setMenuOpen((open) => !open)
+            }}
+          >
+            <PlusIcon size={13} />
+          </button>
+        </div>
+        <div className="workspace-group-actions">
+          <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>
+          <button onClick={() => splitWorkspaceGroup(group.id, 'vertical')} title="Split top and bottom">↕</button>
+          <button onClick={() => closeWorkspaceGroup(group.id)} title="Close group">×</button>
+        </div>
+      </header>
+
+      <div className="workspace-group-content">
+        {group.tabs.length === 0 ? (
+          <button className="workspace-empty-group" onClick={() => setMenuOpen(true)}>
+            <PlusIcon size={18} />
+            <span>Add a thread or tool</span>
+          </button>
+        ) : null}
+        {group.tabs.map((item) => (
+          <TabContent key={item.id} item={item} active={item.id === activeId} overlayOpen={menuOpen || Boolean(dropTarget)} />
+        ))}
+      </div>
+
+      {menuOpen ? <div ref={menuRef}><AddMenu groupId={group.id} close={() => setMenuOpen(false)} /></div> : null}
+      {dropTarget ? <div className={`workspace-drop-target ${dropTarget}`}><span>{dropTarget === 'center' ? 'Add to group' : `Split ${dropTarget}`}</span></div> : null}
+    </section>
+  )
+}
+
+function SplitView({ node }: { node: WorkspaceSplit }): React.JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  const onMouseDown = (event: React.MouseEvent): void => {
+    event.preventDefault()
+    const move = (next: MouseEvent): void => {
+      const rect = ref.current?.getBoundingClientRect()
+      if (!rect) return
+      const ratio = node.direction === 'horizontal'
+        ? (next.clientX - rect.left) / rect.width
+        : (next.clientY - rect.top) / rect.height
+      setWorkspaceSplitRatio(node.id, ratio)
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.classList.remove('workspace-resizing')
+    }
+    document.body.classList.add('workspace-resizing')
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+  return (
+    <div ref={ref} className={`workspace-split ${node.direction}`}>
+      <div className="workspace-split-child" style={{ flexBasis: `${node.ratio * 100}%` }}><WorkspaceNodeView node={node.first} /></div>
+      <div className="workspace-splitter" onMouseDown={onMouseDown} />
+      <div className="workspace-split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}><WorkspaceNodeView node={node.second} /></div>
+    </div>
+  )
+}
+
+function WorkspaceNodeView({ node }: { node: WorkspaceNode }): React.JSX.Element {
+  return node.type === 'group' ? <GroupView group={node} /> : <SplitView node={node} />
+}
+
+function WorkspaceBar(): React.JSX.Element {
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const templates = useStore(appStore, (state) => state.layoutTemplates)
+  const [formatsOpen, setFormatsOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!formatsOpen) return
+    const close = (event: MouseEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setFormatsOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [formatsOpen])
+
+  useEffect(() => {
+    setNativeViewsSuspended('workspace-formats', formatsOpen)
+    return () => setNativeViewsSuspended('workspace-formats', false)
+  }, [formatsOpen])
+
+  const apply = (id: string): void => {
+    setFormatsOpen(false)
+    appStore.setState({
+      confirm: {
+        title: 'Apply workspace format?',
+        message: 'This replaces the current group arrangement. Threads and their history are not deleted.',
+        confirmLabel: 'Apply format',
+        action: () => applyLayoutTemplate(id)
+      }
+    })
+  }
+
+  const saveFormat = (): void => {
+    const name = window.prompt('Name this workspace format')?.trim()
+    if (name) saveCurrentLayoutTemplate(name)
+  }
+
+  return (
+    <div className="workspace-bar">
+      <div className="workspace-identity">
+        <span className="workspace-project-dot" />
+        <div><strong>{shortProject(workspace?.projectKey)}</strong><small>{workspace?.projectKey}</small></div>
+      </div>
+      <div className="workspace-bar-spacer" />
+      <div className="workspace-format-control" ref={menuRef}>
+        <button className="workspace-bar-button" onClick={() => setFormatsOpen((open) => !open)}>Formats <span>⌄</span></button>
+        {formatsOpen ? (
+          <div className="workspace-format-menu">
+            <div className="workspace-menu-title">Favourite formats</div>
+            {templates.filter((item) => item.favorite).map((template) => (
+              <div className="workspace-format-row" key={template.id}>
+                <button onClick={() => apply(template.id)}>
+                  <span>{template.name}</span><small>{template.builtIn ? 'Built in' : 'Custom'}</small>
+                </button>
+                {!template.builtIn ? (
+                  <button className="workspace-format-delete" title="Delete format" onClick={() => removeLayoutTemplate(template.id)}>×</button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <button className="workspace-bar-button" onClick={saveFormat}>Save format</button>
+    </div>
+  )
+}
+
+function focusNeighbor(direction: 'left' | 'right' | 'up' | 'down'): void {
+  const state = appStore.getState()
+  const currentId = state.projectWorkspace?.focusedGroupId
+  if (!currentId) return
+  const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-group]'))
+  const current = elements.find((item) => item.dataset.workspaceGroup === currentId)
+  if (!current) return
+  const source = current.getBoundingClientRect()
+  const sx = source.left + source.width / 2
+  const sy = source.top + source.height / 2
+  const candidates = elements.flatMap((item) => {
+    if (item === current) return []
+    const rect = item.getBoundingClientRect()
+    const x = rect.left + rect.width / 2
+    const y = rect.top + rect.height / 2
+    const valid = direction === 'left' ? x < sx : direction === 'right' ? x > sx : direction === 'up' ? y < sy : y > sy
+    if (!valid) return []
+    const primary = direction === 'left' || direction === 'right' ? Math.abs(x - sx) : Math.abs(y - sy)
+    const secondary = direction === 'left' || direction === 'right' ? Math.abs(y - sy) : Math.abs(x - sx)
+    return [{ id: item.dataset.workspaceGroup!, score: primary + secondary * 0.4 }]
+  }).sort((a, b) => a.score - b.score)
+  if (candidates[0]) focusWorkspaceGroup(candidates[0].id)
+}
+
+export function Workspace(): React.JSX.Element {
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+
+  useEffect(() => {
+    const key = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey)) return
+      const target = event.target as HTMLElement | null
+      if (target?.matches('input, textarea, [contenteditable="true"]')) return
+      const state = appStore.getState()
+      const current = state.projectWorkspace
+      if (!current) return
+      const focused = findGroupForKeyboard(current.root, current.focusedGroupId)
+      if (!focused) return
+      if (event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        splitWorkspaceGroup(focused.id, event.shiftKey ? 'vertical' : 'horizontal')
+      } else if (event.key.toLowerCase() === 'w' && focused.activeTabId) {
+        event.preventDefault()
+        closeWorkspaceTab(focused.id, focused.activeTabId)
+      } else if (event.key.startsWith('Arrow')) {
+        event.preventDefault()
+        const direction = event.key.replace('Arrow', '').toLowerCase() as 'left' | 'right' | 'up' | 'down'
+        focusNeighbor(direction)
+      }
+    }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [])
+
+  if (!workspace) return <div className="workspace-loading">Open a project to load its workspace.</div>
+  return (
+    <div className="workspace-shell">
+      <WorkspaceBar />
+      <div className="workspace-canvas"><WorkspaceNodeView node={workspace.root} /></div>
+    </div>
+  )
+}
+
+function findGroupForKeyboard(node: WorkspaceNode, id: string): WorkspaceGroup | undefined {
+  if (node.type === 'group') return node.id === id ? node : undefined
+  return findGroupForKeyboard(node.first, id) ?? findGroupForKeyboard(node.second, id)
+}
