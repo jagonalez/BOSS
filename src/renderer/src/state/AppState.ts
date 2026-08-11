@@ -12,28 +12,22 @@ import type {
   QuestionRequest,
   SessionInfo,
   SessionMeta,
-  PanelGroup,
-  PanelKind,
-  PanelTab,
   Todo
 } from '@shared/opencode'
 import type {
   BrowseNavigationState,
+  ComputerUsePermissions,
   ComputerUseStatus,
   OptionalComponentId,
   OptionalComponentInfo,
   OptionalDownloadEvent
 } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
+import type { AppPage, LayoutTemplate, ProjectWorkspace } from '@shared/workspace'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
 
 export { useStore } from '../lib/store'
-
-export type { PanelKind, PanelTab, PanelGroup }
-
-export const MAIN_MIN_WIDTH = 420
-export const SIDEBAR_FALLBACK_WIDTH = 280
 
 export interface Attachment {
   id: string
@@ -43,6 +37,10 @@ export interface Attachment {
 }
 
 export interface AppState {
+  activePage: AppPage
+  projectWorkspace: ProjectWorkspace | null
+  layoutTemplates: LayoutTemplate[]
+  nativeViewSuspensions: string[]
   serverUrl: string
   serverVersion: string
   serverHealthy: boolean
@@ -57,29 +55,30 @@ export interface AppState {
   files: FileNode[] | null
   fileContent: { path: string; content: string } | null
   todos: Record<string, Todo[]>
-  permission: PermissionRequest | null
-  question: QuestionRequest | null
+  permissions: Record<string, PermissionRequest>
+  questions: Record<string, QuestionRequest>
   modelSwitch: { to: string } | null
   commitPath: string | null
   renameTarget: string | null
   confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; action: () => void } | null
-  panelOpen: boolean
-  panelGroups: PanelGroup[]
   reviewFile: string | null
   browse: Record<string, BrowseNavigationState>
   optional: OptionalComponentInfo[]
   optionalProgress: Partial<Record<OptionalComponentId, OptionalDownloadEvent>>
   computerUse: ComputerUseStatus
-  streaming: boolean
-  streamingLocked: boolean
+  computerUsePerms: ComputerUsePermissions
+  streaming: Record<string, boolean>
+  streamingLocked: Record<string, boolean>
   sessionBusy: Record<string, boolean>
   compacting: Record<string, boolean>
   model: string | null
   variant: string | null
   mode: 'auto' | 'ask' | 'plan'
   agent: string
+  engine: 'opencode' | 'pi'
   projectPath: string
   lastError: string | null
+  lastErrorBySession: Record<string, string>
   drafts: Record<string, string>
   attachments: Record<string, Attachment[]>
   history: Record<string, string[]>
@@ -107,6 +106,10 @@ export const initialBrowseState: BrowseNavigationState = {
 }
 
 export const initialState: AppState = {
+  activePage: 'command-center',
+  projectWorkspace: null,
+  layoutTemplates: [],
+  nativeViewSuspensions: [],
   serverUrl: '',
   serverVersion: '',
   serverHealthy: false,
@@ -121,29 +124,30 @@ export const initialState: AppState = {
   files: null,
   fileContent: null,
   todos: {},
-  permission: null,
-  question: null,
+  permissions: {},
+  questions: {},
   modelSwitch: null,
   commitPath: null,
   renameTarget: null,
   confirm: null,
-  panelOpen: false,
-  panelGroups: [],
   reviewFile: null,
   browse: {},
   optional: [],
   optionalProgress: {},
-  computerUse: { enabled: false, running: false },
-  streaming: false,
-  streamingLocked: false,
+  computerUse: { supported: false, enabled: false, running: false },
+  computerUsePerms: { available: false, accessibility: false, screenRecording: false },
+  streaming: {},
+  streamingLocked: {},
   sessionBusy: {},
   compacting: {},
   model: null,
   variant: null,
   mode: 'ask',
   agent: 'build',
+  engine: 'opencode',
   projectPath: '',
   lastError: null,
+  lastErrorBySession: {},
   drafts: {},
   attachments: {},
   history: {},
@@ -246,16 +250,31 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       return sid && todos ? { todos: { ...state.todos, [sid]: todos } } : {}
     }
     case 'permission.asked':
-    case 'permission.updated':
-      return { permission: (props as unknown as PermissionRequest) ?? null }
-    case 'permission.replied':
-      return { permission: null }
-    case 'question.asked':
-      return { question: (props as unknown as QuestionRequest) ?? null }
+    case 'permission.updated': {
+      const perm = (props as unknown as PermissionRequest) ?? null
+      if (!perm?.sessionID) return {}
+      return { permissions: { ...state.permissions, [perm.sessionID]: perm } }
+    }
+    case 'permission.replied': {
+      const sid = props.sessionID as string | undefined
+      if (!sid) return {}
+      const next = { ...state.permissions }
+      delete next[sid]
+      return { permissions: next }
+    }
+    case 'question.asked': {
+      const question = (props as unknown as QuestionRequest) ?? null
+      if (!question?.sessionID) return {}
+      return { questions: { ...state.questions, [question.sessionID]: question } }
+    }
     case 'question.replied':
     case 'question.rejected': {
+      const sid = props.sessionID as string | undefined
       const requestID = props.requestID as string | undefined
-      return requestID && state.question?.id === requestID ? { question: null } : {}
+      if (!sid || !requestID || state.questions[sid]?.id !== requestID) return {}
+      const next = { ...state.questions }
+      delete next[sid]
+      return { questions: next }
     }
     case 'session.status': {
       const sid = props.sessionID as string | undefined
@@ -274,8 +293,12 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       if (!sid) return {}
       return { compacting: { ...state.compacting, [sid]: false } }
     }
-    case 'session.error':
-      return { lastError: errorSummary(props.error ?? props.message ?? 'opencode error') }
+    case 'session.error': {
+      const sid = props.sessionID as string | undefined
+      const msg = errorSummary(props.error ?? props.message ?? 'opencode error')
+      if (!sid) return { lastError: msg }
+      return { lastErrorBySession: { ...(state as { lastErrorBySession?: Record<string, string> }).lastErrorBySession, [sid]: msg } }
+    }
     case 'config.updated':
       return {}
     default:

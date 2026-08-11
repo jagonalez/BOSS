@@ -4,6 +4,7 @@ import {
   IpcChannels,
   type ApiRequest,
   type BrowseBounds,
+  type PrivacyPane,
   type ServerInfo
 } from '@shared/ipc'
 import type { OpenCodeServer } from './opencode-server'
@@ -133,6 +134,21 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.ComputerUseStatus, () => deps.computerUse.status)
 
   ipcMain.handle(IpcChannels.ComputerUseSetEnabled, (_e, on: boolean) => deps.computerUse.setEnabled(on))
+
+  ipcMain.handle(IpcChannels.ComputerUsePermissions, () => deps.computerUse.permissions())
+
+  ipcMain.handle(IpcChannels.ComputerUseRequestPermission, (_e, pane: PrivacyPane) =>
+    deps.computerUse.requestPermission(pane)
+  )
+
+  ipcMain.handle(IpcChannels.OpenPrivacyPane, (_e, pane: PrivacyPane) => {
+    const url =
+      pane === 'screenRecording'
+        ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+        : 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+    void shell.openExternal(url)
+    return true
+  })
 
   ipcMain.handle(IpcChannels.ProjectCurrent, () => ({
     path: deps.server.projectPath,

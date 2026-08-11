@@ -5,3 +5,5 @@ dist
 *.log
 resources/opencode/*
 !resources/opencode/.gitkeep
+resources/cua-driver/*
+!resources/cua-driver/.gitkeep
