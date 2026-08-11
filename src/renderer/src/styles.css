@@ -271,17 +271,9 @@ button {
 .logo {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.logo-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  object-fit: cover;
+  letter-spacing: 0.08em;
 }
 
 .btn-new {
@@ -4293,20 +4285,6 @@ select:hover {
   padding: 6px 10px;
   outline: none;
   cursor: pointer;
-}
-
-.hero-mark {
-  width: 52px;
-  height: 52px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, var(--accent), var(--purple));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 26px;
-  font-weight: 800;
-  box-shadow: 0 8px 30px rgba(79, 140, 255, 0.25);
 }
 
 .two-pane {

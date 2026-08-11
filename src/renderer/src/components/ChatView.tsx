@@ -1163,7 +1163,6 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
     return (
       <div className="chat">
         <div className="empty">
-          <img className="hero-mark" src="./icon.png" alt="R.A.L.F." />
           <h2>How can I help you today?</h2>
           <div className="launcher-composer">
             <div className="launcher-project-row">
