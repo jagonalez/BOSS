@@ -128,12 +128,13 @@ export class ClaudeBackend implements Backend {
       }))
   }
 
-  async sessionCreate(title?: string): Promise<SessionInfo> {
+  async sessionCreate(title?: string, directory?: string): Promise<SessionInfo> {
     const id = randomUUID()
     const time = Date.now()
-    this.store.sessions[id] = { title, projectPath: this.projectPath, createdAt: time, updatedAt: time, messages: [] }
+    const projectPath = directory || this.projectPath
+    this.store.sessions[id] = { title, projectPath, createdAt: time, updatedAt: time, messages: [] }
     this.save()
-    return { id, title, directory: this.projectPath, time: { created: time, updated: time } }
+    return { id, title, directory: projectPath, time: { created: time, updated: time } }
   }
 
   async sessionDelete(id: string): Promise<void> {
@@ -238,7 +239,8 @@ export class ClaudeBackend implements Backend {
       'mcp__ralf_thread_bus__ralf_threads_list',
       'mcp__ralf_thread_bus__ralf_threads_read',
       'mcp__ralf_thread_bus__ralf_threads_send',
-      'mcp__ralf_thread_bus__ralf_threads_reply'
+      'mcp__ralf_thread_bus__ralf_threads_reply',
+      'mcp__ralf_thread_bus__ralf_threads_spawn_worktree'
     ].join(',')
     const args = [
       '-p',

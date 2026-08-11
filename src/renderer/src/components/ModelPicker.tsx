@@ -6,13 +6,15 @@ import { ChevronIcon } from './icons'
 function ModelSection({
   title,
   items,
-  current,
+  currentId,
+  currentProvider,
   onPick
 }: {
   title: string
   items: ModelOption[]
-  current: string | null
-  onPick: (id: string) => void
+  currentId: string | null
+  currentProvider: string | null
+  onPick: (model: ModelOption) => void
 }): React.JSX.Element | null {
   if (items.length === 0) return null
   return (
@@ -20,22 +22,23 @@ function ModelSection({
       <div className="model-section-title">{title}</div>
       {items.map((m) => (
         <button
-          key={m.id}
-          className={`model-row ${m.id === current ? 'active' : ''}`}
-          onClick={() => onPick(m.id)}
+          key={`${m.providerID}:${m.id}`}
+          className={`model-row ${m.id === currentId && (!currentProvider || m.providerID === currentProvider) ? 'active' : ''}`}
+          onClick={() => onPick(m)}
           title={m.id}
         >
           <span className="model-row-name">{m.name || m.id}</span>
           {m.free ? <span className="model-free-tag">FREE</span> : null}
-          {m.id === current ? <span className="model-check">✓</span> : null}
+          {m.id === currentId && (!currentProvider || m.providerID === currentProvider) ? <span className="model-check">✓</span> : null}
         </button>
       ))}
     </div>
   )
 }
 
-export function ModelPicker({ onPick, sessionId }: { onPick: (id: string) => void; sessionId?: string }): React.JSX.Element {
+export function ModelPicker({ onPick, sessionId }: { onPick: (id: string, providerID: string) => void; sessionId?: string }): React.JSX.Element {
   const model = useStore(appStore, (s) => (sessionId && s.modelsBySession[sessionId]) || s.model)
+  const modelProvider = useStore(appStore, (s) => (sessionId && s.modelProvidersBySession?.[sessionId]) || s.modelProvider)
   const providers = useStore(appStore, (s) => (sessionId && s.providersBySession[sessionId]) || s.providers)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -50,7 +53,7 @@ export function ModelPicker({ onPick, sessionId }: { onPick: (id: string) => voi
   }, [])
 
   const all = providers.flatMap((p) => providerModels(p))
-  const current = all.find((m) => m.id === model)
+  const current = all.find((m) => m.id === model && (!modelProvider || m.providerID === modelProvider))
 
   const freeMap = new Map<string, ModelOption>()
   const paid: Array<{ provider: string; items: ModelOption[] }> = []
@@ -59,7 +62,8 @@ export function ModelPicker({ onPick, sessionId }: { onPick: (id: string) => voi
     const nonFree: ModelOption[] = []
     for (const m of items) {
       if (m.free) {
-        if (!freeMap.has(m.id)) freeMap.set(m.id, m)
+        const key = `${m.providerID}:${m.id}`
+        if (!freeMap.has(key)) freeMap.set(key, m)
       } else {
         nonFree.push(m)
       }
@@ -70,10 +74,10 @@ export function ModelPicker({ onPick, sessionId }: { onPick: (id: string) => voi
   const matches = (m: ModelOption): boolean =>
     !query || `${m.name ?? ''} ${m.id}`.toLowerCase().includes(query.toLowerCase())
 
-  const pick = (id: string): void => {
+  const pick = (model: ModelOption): void => {
     setOpen(false)
     setQuery('')
-    onPick(id)
+    onPick(model.id, model.providerID)
   }
 
   return (
@@ -99,11 +103,12 @@ export function ModelPicker({ onPick, sessionId }: { onPick: (id: string) => voi
             <ModelSection
               title="Free models"
               items={[...freeMap.values()].filter(matches)}
-              current={model}
+              currentId={model}
+              currentProvider={modelProvider}
               onPick={pick}
             />
             {paid.map((g) => (
-              <ModelSection key={g.provider} title={g.provider} items={g.items.filter(matches)} current={model} onPick={pick} />
+              <ModelSection key={g.provider} title={g.provider} items={g.items.filter(matches)} currentId={model} currentProvider={modelProvider} onPick={pick} />
             ))}
             {all.filter(matches).length === 0 ? <div className="model-section-empty">No models match</div> : null}
           </div>

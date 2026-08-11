@@ -33,6 +33,7 @@ export interface ThreadBusHost {
   threadList(projectId: string): ThreadBusThread[]
   threadMessages(threadId: string, limit: number): Promise<MessageWithParts[]>
   deliverThreadMessage(threadId: string, body: string): Promise<void>
+  spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
 }
 
@@ -162,7 +163,7 @@ export class ThreadBus {
     if (!caller) throw new Error('R.A.L.F. could not identify the calling thread.')
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
-    if (!['ralf_threads_list', 'ralf_threads_read', 'ralf_threads_send', 'ralf_threads_reply'].includes(tool)) {
+    if (!['ralf_threads_list', 'ralf_threads_read', 'ralf_threads_send', 'ralf_threads_reply', 'ralf_threads_spawn_worktree'].includes(tool)) {
       throw new Error('Unknown R.A.L.F. thread tool.')
     }
 
@@ -202,6 +203,13 @@ export class ThreadBus {
           rootId: replyTo.rootId,
           hopCount: replyTo.hopCount + 1
         })
+      }
+      case 'ralf_threads_spawn_worktree': {
+        if (policy !== 'collaborate') throw new Error('This project does not allow agents to create worktree threads.')
+        const instruction = stringArg(args, 'instruction')
+        if (!instruction) throw new Error('An implementation instruction is required.')
+        if (instruction.length > MAX_BODY) throw new Error(`Instructions are limited to ${MAX_BODY.toLocaleString()} characters.`)
+        return this.host.spawnWorktreeThread(caller.id, instruction)
       }
     }
   }
@@ -406,6 +414,18 @@ export class ThreadBus {
             expectsReply: { type: 'boolean', default: false }
           },
           required: ['messageId', 'message'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'ralf_threads_spawn_worktree',
+        description: 'Fork this conversation into a new R.A.L.F. thread running in an isolated Git worktree.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            instruction: { type: 'string', description: 'The concrete task the new worktree thread should implement.' }
+          },
+          required: ['instruction'],
           additionalProperties: false
         }
       }

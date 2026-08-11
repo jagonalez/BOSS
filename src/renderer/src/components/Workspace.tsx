@@ -99,10 +99,15 @@ function requestCloseWorkspaceGroup(group: WorkspaceGroup): void {
 function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   const sessionTitle = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.title)
   const browserTitle = useStore(appStore, (state) => state.browse[`workspace-${item.id}`]?.title)
+  const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
   const sameKindIndex = group.tabs.filter((candidate) => candidate.kind === item.kind).findIndex((candidate) => candidate.id === item.id)
   const suffix = sameKindIndex > 0 ? ` ${sameKindIndex + 1}` : ''
   if (item.kind === 'thread') return sessionTitle || 'Untitled thread'
   if (item.kind === 'browser') return browserTitle || `Browser${suffix}`
+  if (item.kind === 'terminal' && authBackendId) {
+    const label = { opencode: 'OpenCode', pi: 'Pi', codex: 'Codex', claude: 'Claude' }[authBackendId]
+    return `Connect ${label}`
+  }
   return `${TAB_TYPES.find((candidate) => candidate.kind === item.kind)?.label ?? item.kind}${suffix}`
 }
 
@@ -243,6 +248,7 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
 }
 
 function TabContent({ item, active, overlayOpen }: { item: WorkspaceTab; active: boolean; overlayOpen: boolean }): React.JSX.Element {
+  const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
   useEffect(() => {
     if (item.kind !== 'thread' || !item.sessionId) return
     void loadMessages(item.sessionId)
@@ -258,7 +264,7 @@ function TabContent({ item, active, overlayOpen }: { item: WorkspaceTab; active:
       content = <BrowseTab id={`workspace-${item.id}`} visible={active && !overlayOpen} />
       break
     case 'terminal':
-      content = <TerminalTab />
+      content = <TerminalTab authBackendId={authBackendId} />
       break
     case 'review':
       content = <ReviewTab />

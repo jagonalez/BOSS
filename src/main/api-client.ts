@@ -17,7 +17,8 @@ export class ApiClient {
         method: req.method,
         headers: {
           Authorization: this.server.authHeader,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(req.directory ? { 'x-opencode-directory': req.directory } : {})
         },
         body: req.body !== undefined ? JSON.stringify(req.body) : undefined
       })

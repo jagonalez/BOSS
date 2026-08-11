@@ -1,5 +1,6 @@
 export type BackendId = 'opencode' | 'pi' | 'codex' | 'claude'
 export type BackendModeId = 'ask' | 'auto' | 'plan' | 'accept-edits'
+export type ThreadCreationScope = 'current' | 'global'
 
 export interface BackendModeDescriptor {
   id: BackendModeId
@@ -30,6 +31,25 @@ export interface BackendDescriptor {
   modes: BackendModeDescriptor[]
 }
 
+export interface BackendAuthStatus {
+  backendId: BackendId
+  state: 'connected' | 'not-connected' | 'unknown'
+  detail: string
+  accounts?: string[]
+}
+
+export interface BackendModelDescriptor {
+  id: string
+  name?: string
+  provider?: string
+  variants?: string[]
+}
+
+export interface BackendModelPreference {
+  modelID: string
+  providerID: string
+}
+
 export interface BackendMessageOptions {
   model?: { providerID: string; modelID: string; variant?: string }
   agent?: string
@@ -38,8 +58,9 @@ export interface BackendMessageOptions {
 
 export type BackendRequest =
   | { type: 'backend.list' }
+  | { type: 'backend.auth.status' }
   | { type: 'thread.list' }
-  | { type: 'thread.create'; backendId: BackendId; title?: string }
+  | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope }
   | { type: 'thread.import-native'; backendId: BackendId }
   | { type: 'thread.get'; threadId: string }
   | { type: 'thread.delete'; threadId: string }
@@ -56,7 +77,12 @@ export type BackendRequest =
   | { type: 'thread.command'; threadId: string; command: string; arguments: string; options?: BackendMessageOptions }
   | { type: 'thread.compact'; threadId: string; model?: { providerID: string; modelID: string } }
   | { type: 'thread.models'; threadId?: string; backendId?: BackendId }
-  | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string }
+  | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }
+  | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string; options?: BackendMessageOptions }
+  | { type: 'worktree.list'; threadId?: string }
+  | { type: 'worktree.settings.get' }
+  | { type: 'worktree.settings.set'; autoCleanupEnabled?: boolean; cleanupAfterDays?: number }
+  | { type: 'worktree.remove'; worktreeId: string }
   | { type: 'thread.relay'; sourceThreadId: string; targetThreadId: string; instruction?: string }
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
