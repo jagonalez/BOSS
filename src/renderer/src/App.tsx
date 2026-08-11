@@ -21,6 +21,7 @@ import {
   refreshProjects,
   refreshProviders,
   refreshSessions,
+  refreshThreadBus,
   refreshStreaming,
   loadMode,
   loadThreadPreferences,
@@ -49,6 +50,7 @@ async function refreshAll(): Promise<void> {
   void refreshProviders()
   void refreshAgents()
   void refreshConfig()
+  void refreshThreadBus()
   const id = appStore.getState().activeSessionId
   if (id) {
     void loadMessages(id)
@@ -82,6 +84,10 @@ export function App(): React.JSX.Element {
     const preferred = sessions.find((session) => (session.directory || session.path) === projectPath)?.id
     loadProjectWorkspace(projectPath, preferred)
   }, [projectPath, sessions, workspaceProjectKey])
+
+  useEffect(() => {
+    if (projectPath) void refreshThreadBus()
+  }, [projectPath])
 
   useEffect(() => {
     setNativeViewsSuspended('app-modal', modalOpen)

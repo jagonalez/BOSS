@@ -13,6 +13,7 @@ import { registerIpc, type IpcDeps } from './ipc'
 import { loadState } from './state-store'
 import { BackendManager } from './backend/manager'
 import { createBackend } from './backend/factory'
+import { ThreadBus } from './thread-bus'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -33,6 +34,8 @@ const backendMgr = new BackendManager({
   codex: createBackend('codex', { server, api, events }),
   claude: createBackend('claude', { server, api, events })
 })
+const threadBus = new ThreadBus(backendMgr)
+backendMgr.attachThreadBus(threadBus)
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
@@ -152,7 +155,15 @@ app.whenReady().then(() => {
   loadRenderer()
   const saved = loadState()
   if (saved.projectPath) server.setInitialCwd(saved.projectPath)
-  void backendMgr.start(saved.projectPath)
+  void threadBus.start()
+    .then((connection) => {
+      server.configureThreadBus(connection)
+      return backendMgr.start(saved.projectPath)
+    })
+    .catch((error) => {
+      process.stderr.write(`[thread-bus] ${error instanceof Error ? error.message : String(error)}\n`)
+      return backendMgr.start(saved.projectPath)
+    })
 })
 
 app.on('activate', () => {

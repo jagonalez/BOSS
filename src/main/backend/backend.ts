@@ -1,4 +1,5 @@
 import type { BackendId, BackendMessageOptions } from '@shared/backend'
+import type { ThreadBusToolCall } from '@shared/thread-bus'
 
 export interface BackendInfo {
   id: BackendId
@@ -49,6 +50,9 @@ export interface Backend {
   supportsMcp(): boolean
   registerMcpServer(name: string, config: McpServerConfig): Promise<boolean>
   unregisterMcpServer(name: string): Promise<void>
+
+  /** Optional trusted host tools. The backend supplies the native caller thread id. */
+  setThreadBusHandler?(handler: (call: ThreadBusToolCall) => Promise<unknown>): void
 
   /** Events */
   onEvent(cb: (ev: EventMessage) => void): () => void

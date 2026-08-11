@@ -13,6 +13,7 @@ import type {
   Todo
 } from '@shared/opencode'
 import type { BackendDescriptor, BackendId, BackendMessageOptions, BackendRequest } from '@shared/backend'
+import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 
 export class ApiError extends Error {
   constructor(
@@ -141,6 +142,12 @@ export const OpenCode = {
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction }),
   relayToThread: (sourceThreadId: string, targetThreadId: string, instruction?: string) =>
     backendRequest<SessionInfo>({ type: 'thread.relay', sourceThreadId, targetThreadId, instruction }),
+  threadBus: (threadId?: string) =>
+    backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.get', threadId }),
+  setThreadBusPolicy: (policy: CollaborationPolicy, threadId?: string) =>
+    backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.policy', policy, threadId }),
+  clearThreadBusFailures: (threadId?: string) =>
+    backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.clear-failures', threadId }),
   fileTree: (path = '') => request<FileNode[]>('GET', '/file', { query: { path } }),
   fileContent: (path: string) => request<FileContent>('GET', '/file/content', { query: { path } }),
   projectList: () => request<Project[]>('GET', '/project'),

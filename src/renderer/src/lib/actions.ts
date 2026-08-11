@@ -4,6 +4,7 @@ import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId } from '@shared/backend'
+import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
 import {
@@ -438,6 +439,30 @@ export async function refreshSessions(): Promise<void> {
     appStore.setState({ sessions: await OpenCode.listSessions() })
   } catch {
     /* ignore */
+  }
+}
+
+export async function refreshThreadBus(threadId?: string): Promise<void> {
+  try {
+    appStore.setState({ threadBus: await OpenCode.threadBus(threadId) })
+  } catch {
+    /* Thread bus may still be starting during the first renderer refresh. */
+  }
+}
+
+export async function setThreadBusPolicy(policy: CollaborationPolicy): Promise<void> {
+  try {
+    appStore.setState({ threadBus: await OpenCode.setThreadBusPolicy(policy) })
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+  }
+}
+
+export async function clearThreadBusFailures(): Promise<void> {
+  try {
+    appStore.setState({ threadBus: await OpenCode.clearThreadBusFailures() })
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
   }
 }
 

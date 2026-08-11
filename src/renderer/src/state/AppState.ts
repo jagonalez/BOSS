@@ -15,6 +15,7 @@ import type {
   Todo
 } from '@shared/opencode'
 import type { BackendDescriptor, BackendId, BackendModeId } from '@shared/backend'
+import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type {
   BrowseNavigationState,
   ComputerUsePermissions,
@@ -82,6 +83,7 @@ export interface AppState {
   agent: string
   engine: BackendId
   backends: BackendDescriptor[]
+  threadBus: ThreadBusSnapshot | null
   projectPath: string
   lastError: string | null
   lastErrorBySession: Record<string, string>
@@ -156,6 +158,7 @@ export const initialState: AppState = {
   agent: 'build',
   engine: 'opencode',
   backends: [],
+  threadBus: null,
   projectPath: '',
   lastError: null,
   lastErrorBySession: {},
@@ -312,6 +315,10 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
     }
     case 'config.updated':
       return {}
+    case 'thread.bus.updated': {
+      const snapshot = props.snapshot as ThreadBusSnapshot | undefined
+      return snapshot && (!state.projectPath || snapshot.projectPath === state.projectPath) ? { threadBus: snapshot } : {}
+    }
     default:
       return {}
   }
