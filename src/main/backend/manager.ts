@@ -1,31 +1,529 @@
+import { app } from 'electron'
+import { randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Backend } from './backend'
+import type {
+  BackendDescriptor,
+  BackendId,
+  BackendRequest,
+  BackendCapabilities,
+  BackendMessageOptions
+} from '@shared/backend'
+import type { EventMessage, MessageWithParts, SessionInfo } from '@shared/opencode'
 
-export class BackendManager {
-  private backend: Backend
-  private engine: 'opencode' | 'pi'
+interface ThreadBinding {
+  id: string
+  backendId: BackendId
+  nativeSessionId: string
+  projectPath: string
+  title?: string
+  createdAt: number
+  updatedAt: number
+  parentID?: string
+  lineage?: SessionInfo['lineage']
+}
 
-  constructor(
-    private readonly createOpenCode: () => Backend,
-    private readonly createPi: (cwd?: string) => Backend,
-    initial: 'opencode' | 'pi' = 'opencode'
-  ) {
-    this.engine = initial
-    this.backend = initial === 'opencode' ? this.createOpenCode() : this.createPi()
-  }
+interface StoredBackendState {
+  version: 1
+  threads: ThreadBinding[]
+}
 
-  get current(): Backend {
-    return this.backend
-  }
+interface BackendDefinition {
+  label: string
+  description: string
+  command?: string
+  capabilities: BackendCapabilities
+  modes: BackendDescriptor['modes']
+}
 
-  get engineName(): 'opencode' | 'pi' {
-    return this.engine
-  }
-
-  async setEngine(engine: 'opencode' | 'pi', cwd?: string): Promise<void> {
-    if (engine === this.engine) return
-    await this.backend.stop().catch(() => {})
-    this.engine = engine
-    this.backend = engine === 'opencode' ? this.createOpenCode() : this.createPi(cwd)
-    await this.backend.start()
+const DEFINITIONS: Record<BackendId, BackendDefinition> = {
+  opencode: {
+    label: 'OpenCode',
+    description: 'OpenCode server with native sessions, permissions, tools, and providers.',
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, images: true, mcp: true, interactiveQuestions: true },
+    modes: [
+      { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
+      { id: 'auto', label: 'Auto', description: 'approve supported actions automatically' },
+      { id: 'plan', label: 'Plan', description: 'read-only planning agent' }
+    ]
+  },
+  pi: {
+    label: 'Pi',
+    description: 'Pi coding agent over its native JSONL RPC protocol.',
+    command: 'pi',
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, images: true, mcp: false, interactiveQuestions: false },
+    modes: [{ id: 'auto', label: 'Approved', description: 'Pi RPC runs with its approved tool policy' }]
+  },
+  codex: {
+    label: 'Codex',
+    description: 'Codex CLI through the supported app-server JSON-RPC protocol.',
+    command: 'codex',
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, images: true, mcp: false, interactiveQuestions: false },
+    modes: [
+      { id: 'ask', label: 'Ask', description: 'request approval when Codex needs to leave its sandbox' },
+      { id: 'auto', label: 'Auto', description: 'run inside the workspace sandbox without approval prompts' },
+      { id: 'plan', label: 'Plan', description: 'read-only filesystem sandbox' }
+    ]
+  },
+  claude: {
+    label: 'Claude Code',
+    description: 'Claude Code through its streaming non-interactive protocol.',
+    command: 'claude',
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: false, images: false, mcp: false, interactiveQuestions: false },
+    modes: [
+      { id: 'ask', label: 'Ask', description: 'use Claude default permissions; unavailable approvals stop the run' },
+      { id: 'accept-edits', label: 'Edit automatically', description: 'approve edits and common filesystem operations' },
+      { id: 'plan', label: 'Plan', description: 'read-only planning mode' }
+    ]
   }
 }
+
+function stateFile(): string {
+  return join(app.getPath('userData'), 'backend-threads.json')
+}
+
+function now(): number {
+  return Date.now()
+}
+
+function probeVersion(command: string): { available: boolean; version?: string; reason?: string } {
+  try {
+    const output = execFileSync(command, ['--version'], {
+      encoding: 'utf8',
+      timeout: 2500,
+      stdio: ['ignore', 'pipe', 'pipe']
+    }).trim()
+    return { available: true, version: output.split('\n')[0] }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    return {
+      available: false,
+      reason: code === 'ENOENT' ? `${command} is not installed or is not on PATH.` : `${command} could not be started.`
+    }
+  }
+}
+
+function textFromParts(parts: unknown[]): string {
+  return parts
+    .map((part) => {
+      if (!part || typeof part !== 'object') return ''
+      const item = part as { type?: string; text?: string; filename?: string; mime?: string }
+      if (item.type === 'text') return item.text ?? ''
+      if (item.type === 'file') return `[Attached file: ${item.filename ?? item.mime ?? 'file'}]`
+      return item.text ?? ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function transcript(messages: MessageWithParts[], maxChars = 48_000): string {
+  const rendered = messages.slice(-30).map((message) => {
+    const body = message.parts
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text ?? '')
+      .filter(Boolean)
+      .join('\n')
+    return `${message.info.role === 'user' ? 'USER' : 'ASSISTANT'}:\n${body}`
+  }).filter((item) => !item.endsWith(':\n'))
+  let result = rendered.join('\n\n')
+  if (result.length > maxChars) result = `[…earlier context omitted…]\n\n${result.slice(-maxChars)}`
+  return result
+}
+
+export class BackendManager {
+  private projectPath = ''
+  private readonly bindings = new Map<string, ThreadBinding>()
+  private readonly started = new Set<BackendId>()
+  private readonly starting = new Map<BackendId, Promise<Backend>>()
+  private readonly unsubscribers = new Map<BackendId, () => void>()
+  private eventCb?: (event: Record<string, unknown>) => void
+  private loaded = false
+
+  constructor(private readonly backends: Record<BackendId, Backend>) {}
+
+  get currentProject(): string {
+    return this.projectPath
+  }
+
+  onEvent(callback: (event: Record<string, unknown>) => void): () => void {
+    this.eventCb = callback
+    return () => {
+      if (this.eventCb === callback) this.eventCb = undefined
+    }
+  }
+
+  async start(projectPath?: string): Promise<void> {
+    this.load()
+    if (projectPath) this.projectPath = projectPath
+    await this.ensureStarted('opencode')
+  }
+
+  async stop(): Promise<void> {
+    await Promise.all((Object.keys(this.backends) as BackendId[]).map((id) => this.backends[id].stop().catch(() => {})))
+    this.started.clear()
+    for (const off of this.unsubscribers.values()) off()
+    this.unsubscribers.clear()
+  }
+
+  async setProject(path: string): Promise<void> {
+    this.projectPath = path
+    for (const id of this.started) await this.backends[id].setProject(path)
+  }
+
+  private load(): void {
+    if (this.loaded) return
+    this.loaded = true
+    try {
+      const parsed = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredBackendState
+      if (parsed.version === 1 && Array.isArray(parsed.threads)) {
+        for (const binding of parsed.threads) this.bindings.set(binding.id, binding)
+      }
+    } catch {
+      /* First launch or an unreadable cache starts with native OpenCode discovery. */
+    }
+  }
+
+  private save(): void {
+    const state: StoredBackendState = { version: 1, threads: [...this.bindings.values()] }
+    try {
+      writeFileSync(stateFile(), JSON.stringify(state, null, 2))
+    } catch {
+      /* Threads keep working in memory if persistence is unavailable. */
+    }
+  }
+
+  private async ensureStarted(id: BackendId): Promise<Backend> {
+    const backend = this.backends[id]
+    if (!backend) throw new Error(`Unknown backend: ${id}`)
+    if (!this.unsubscribers.has(id)) {
+      this.unsubscribers.set(id, backend.onEvent((event) => this.forwardEvent(id, event)))
+    }
+    if (this.started.has(id)) return backend
+    const pending = this.starting.get(id)
+    if (pending) return pending
+    const start = (async () => {
+      try {
+        await backend.start()
+        if (this.projectPath) await backend.setProject(this.projectPath)
+        this.started.add(id)
+        return backend
+      } catch (error) {
+        await backend.stop().catch(() => {})
+        throw error
+      }
+    })()
+    this.starting.set(id, start)
+    try {
+      return await start
+    } finally {
+      this.starting.delete(id)
+    }
+  }
+
+  private binding(threadId: string): ThreadBinding {
+    const binding = this.bindings.get(threadId)
+    if (!binding) throw new Error(`R.A.L.F. thread not found: ${threadId}`)
+    return binding
+  }
+
+  private bindingForNative(backendId: BackendId, nativeSessionId?: string): ThreadBinding | undefined {
+    if (!nativeSessionId) return undefined
+    return [...this.bindings.values()].find(
+      (binding) => binding.backendId === backendId && binding.nativeSessionId === nativeSessionId
+    )
+  }
+
+  private session(binding: ThreadBinding, native?: SessionInfo): SessionInfo {
+    return {
+      ...native,
+      id: binding.id,
+      backendId: binding.backendId,
+      nativeSessionId: binding.nativeSessionId,
+      title: binding.title ?? native?.title,
+      directory: binding.projectPath || native?.directory,
+      path: binding.projectPath || native?.path,
+      parentID: binding.parentID,
+      lineage: binding.lineage,
+      time: native?.time ?? { created: binding.createdAt, updated: binding.updatedAt }
+    }
+  }
+
+  private registerNative(backendId: BackendId, native: SessionInfo, lineage?: SessionInfo['lineage']): ThreadBinding {
+    const existing = this.bindingForNative(backendId, native.id)
+    if (existing) {
+      existing.title = native.title ?? existing.title
+      existing.updatedAt = native.time?.updated ?? now()
+      existing.projectPath = native.directory || native.path || existing.projectPath || this.projectPath
+      this.bindings.set(existing.id, existing)
+      return existing
+    }
+    const id = backendId === 'opencode' ? native.id : randomUUID()
+    const binding: ThreadBinding = {
+      id,
+      backendId,
+      nativeSessionId: native.id,
+      projectPath: native.directory || native.path || this.projectPath,
+      title: native.title,
+      createdAt: native.time?.created ?? now(),
+      updatedAt: native.time?.updated ?? now(),
+      lineage
+    }
+    this.bindings.set(id, binding)
+    return binding
+  }
+
+  private normalizeEvent(event: EventMessage | Record<string, unknown>): Record<string, unknown> {
+    const value = event as Record<string, unknown>
+    if (value.properties && typeof value.properties === 'object') return value
+    switch (value.type) {
+      case 'message.updated': return { type: value.type, properties: { info: value.message } }
+      case 'message.part.updated':
+      case 'message.part.created': return { type: value.type, properties: { part: value.part } }
+      case 'session.updated':
+      case 'session.created':
+      case 'session.deleted': return { type: value.type, properties: { info: value.session } }
+      case 'session.todo.updated': return { type: 'todo.updated', properties: { sessionID: value.sessionID, todos: value.todos } }
+      case 'permission.asked':
+      case 'permission.updated': return { type: value.type, properties: value.permission ?? {} }
+      case 'permission.replied': return { type: value.type, properties: { sessionID: value.sessionID, permissionID: value.permissionID, response: value.response } }
+      case 'session.status': return { type: value.type, properties: { sessionID: value.sessionID, status: value.status } }
+      case 'session.idle':
+      case 'session.compacted': return { type: value.type, properties: { sessionID: value.sessionID } }
+      case 'session.error': return { type: value.type, properties: { sessionID: value.sessionID, error: value.error } }
+      default: return value
+    }
+  }
+
+  private forwardEvent(backendId: BackendId, raw: EventMessage | Record<string, unknown>): void {
+    const event = this.normalizeEvent(raw)
+    const properties = { ...((event.properties as Record<string, unknown> | undefined) ?? {}) }
+    const eventType = String(event.type ?? '')
+    const info = (properties.info ?? properties.session) as SessionInfo | undefined
+    const sessionInfo = eventType === 'session.updated' || eventType === 'session.created' || eventType === 'session.deleted'
+      ? info
+      : undefined
+    const messageInfo = eventType === 'message.updated'
+      ? info as unknown as { sessionID?: string }
+      : undefined
+    const part = properties.part as { sessionID?: string; messageID?: string } | undefined
+    const nativeId = (properties.sessionID as string | undefined) ?? sessionInfo?.id ?? messageInfo?.sessionID ?? part?.sessionID
+    const binding = this.bindingForNative(backendId, nativeId)
+    if (!binding && nativeId) return
+    if (binding) {
+      if (sessionInfo) {
+        properties.info = this.session(binding, sessionInfo)
+        binding.title = sessionInfo.title ?? binding.title
+        binding.updatedAt = sessionInfo.time?.updated ?? now()
+        this.save()
+      }
+      if (properties.sessionID) properties.sessionID = binding.id
+      if (part) properties.part = { ...part, sessionID: binding.id }
+      if (messageInfo?.sessionID) properties.info = { ...messageInfo, sessionID: binding.id }
+    }
+    this.eventCb?.({ ...event, properties, backendId })
+  }
+
+  async descriptors(): Promise<BackendDescriptor[]> {
+    return (Object.keys(DEFINITIONS) as BackendId[]).map((id) => {
+      const definition = DEFINITIONS[id]
+      const probe = definition.command ? probeVersion(definition.command) : { available: true }
+      const info = this.backends[id].info()
+      return {
+        id,
+        label: definition.label,
+        description: definition.description,
+        command: definition.command,
+        available: probe.available,
+        healthy: this.started.has(id) ? info.healthy : probe.available,
+        version: info.version || probe.version,
+        unavailableReason: probe.reason,
+        capabilities: definition.capabilities,
+        modes: definition.modes
+      }
+    })
+  }
+
+  async sessionsList(): Promise<SessionInfo[]> {
+    this.load()
+    const openCode = await this.ensureStarted('opencode')
+    const nativeSessions = await openCode.sessionsList().catch(() => [])
+    for (const native of nativeSessions) this.registerNative('opencode', native)
+    this.save()
+
+    const current = [...this.bindings.values()].filter((binding) => {
+      if (!this.projectPath) return true
+      return !binding.projectPath || binding.projectPath === this.projectPath
+    })
+    return current
+      .map((binding) => {
+        const native = binding.backendId === 'opencode'
+          ? nativeSessions.find((session) => session.id === binding.nativeSessionId)
+          : undefined
+        return this.session(binding, native)
+      })
+      .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
+  }
+
+  async sessionCreate(backendId: BackendId, title?: string, lineage?: SessionInfo['lineage']): Promise<SessionInfo> {
+    const backend = await this.ensureStarted(backendId)
+    const native = await backend.sessionCreate(title)
+    const binding = this.registerNative(backendId, native, lineage)
+    binding.title = title ?? native.title
+    binding.projectPath = this.projectPath
+    this.bindings.set(binding.id, binding)
+    this.save()
+    const session = this.session(binding, native)
+    this.eventCb?.({ type: 'session.created', properties: { info: session }, backendId })
+    return session
+  }
+
+  async sessionGet(threadId: string): Promise<SessionInfo> {
+    const binding = this.binding(threadId)
+    const backend = await this.ensureStarted(binding.backendId)
+    const native = await backend.sessionGet(binding.nativeSessionId).catch(() => ({ id: binding.nativeSessionId }))
+    return this.session(binding, native)
+  }
+
+  async sessionDelete(threadId: string): Promise<void> {
+    const binding = this.binding(threadId)
+    const backend = await this.ensureStarted(binding.backendId)
+    await backend.sessionDelete(binding.nativeSessionId)
+    this.bindings.delete(threadId)
+    this.save()
+    this.eventCb?.({ type: 'session.deleted', properties: { info: this.session(binding) }, backendId: binding.backendId })
+  }
+
+  async sessionRename(threadId: string, title: string): Promise<SessionInfo> {
+    const binding = this.binding(threadId)
+    const backend = await this.ensureStarted(binding.backendId)
+    const native = await backend.sessionRename(binding.nativeSessionId, title).catch(() => ({ id: binding.nativeSessionId, title }))
+    binding.title = title
+    binding.updatedAt = now()
+    this.save()
+    const session = this.session(binding, native)
+    this.eventCb?.({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
+    return session
+  }
+
+  async messagesList(threadId: string, limit?: number): Promise<MessageWithParts[]> {
+    const binding = this.binding(threadId)
+    const backend = await this.ensureStarted(binding.backendId)
+    const messages = await backend.messagesList(binding.nativeSessionId, limit)
+    return messages.map((message) => ({
+      info: { ...message.info, sessionID: threadId },
+      parts: message.parts.map((part) => ({ ...part, sessionID: threadId }))
+    }))
+  }
+
+  async sendMessage(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
+    const binding = this.binding(threadId)
+    const backend = await this.ensureStarted(binding.backendId)
+    binding.updatedAt = now()
+    this.save()
+    await backend.sendMessage(binding.nativeSessionId, parts, options)
+  }
+
+  async abort(threadId: string): Promise<void> {
+    const binding = this.binding(threadId)
+    const backend = await this.ensureStarted(binding.backendId)
+    await backend.abort(binding.nativeSessionId)
+  }
+
+  async fork(threadId: string, messageId?: string): Promise<SessionInfo> {
+    const source = this.binding(threadId)
+    const backend = await this.ensureStarted(source.backendId)
+    const native = await backend.fork(source.nativeSessionId, messageId)
+    if (native.id === source.nativeSessionId) return this.clone(threadId, source.backendId)
+    const binding = this.registerNative(source.backendId, native, {
+      kind: 'fork',
+      sourceThreadId: threadId,
+      sourceBackendId: source.backendId
+    })
+    binding.parentID = threadId
+    this.save()
+    return this.session(binding, native)
+  }
+
+  private async contextPacket(sourceThreadId: string, instruction?: string): Promise<string> {
+    const source = this.binding(sourceThreadId)
+    const sourceBackend = await this.ensureStarted(source.backendId)
+    const messages = await sourceBackend.messagesList(source.nativeSessionId)
+    const diffs = await sourceBackend.diffGet(source.nativeSessionId).catch(() => [])
+    const diffSummary = diffs.slice(0, 30).map((diff) => `- ${diff.path}: ${diff.status ?? 'changed'}`).join('\n')
+    return [
+      '[R.A.L.F. CROSS-BACKEND HANDOFF]',
+      `Source thread: ${source.title ?? sourceThreadId}`,
+      `Source backend: ${source.backendId}`,
+      `Project: ${source.projectPath || this.projectPath}`,
+      instruction ? `User instruction: ${instruction}` : 'Continue from this context. First summarize your understanding, then wait for or follow the user’s latest request.',
+      diffSummary ? `Changed files reported by the source backend:\n${diffSummary}` : '',
+      'Conversation transcript:',
+      transcript(messages)
+    ].filter(Boolean).join('\n\n')
+  }
+
+  async clone(threadId: string, backendId: BackendId, instruction?: string): Promise<SessionInfo> {
+    const source = this.binding(threadId)
+    const packet = await this.contextPacket(threadId, instruction)
+    const title = `${source.title ?? 'Untitled'} · ${DEFINITIONS[backendId].label}`
+    const created = await this.sessionCreate(backendId, title, {
+      kind: 'clone',
+      sourceThreadId: threadId,
+      sourceBackendId: source.backendId
+    })
+    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { mode: 'ask' })
+    return created
+  }
+
+  async relay(sourceThreadId: string, targetThreadId: string, instruction?: string): Promise<SessionInfo> {
+    if (sourceThreadId === targetThreadId) throw new Error('Choose a different target thread.')
+    const packet = await this.contextPacket(sourceThreadId, instruction ?? 'Review this update and respond with anything the source thread should know.')
+    await this.sendMessage(targetThreadId, [{ type: 'text', text: packet }], { mode: 'ask' })
+    return this.sessionGet(targetThreadId)
+  }
+
+  async handle(request: BackendRequest): Promise<unknown> {
+    switch (request.type) {
+      case 'backend.list': return this.descriptors()
+      case 'thread.list': return this.sessionsList()
+      case 'thread.create': return this.sessionCreate(request.backendId, request.title)
+      case 'thread.get': return this.sessionGet(request.threadId)
+      case 'thread.delete': return this.sessionDelete(request.threadId)
+      case 'thread.rename': return this.sessionRename(request.threadId, request.title)
+      case 'thread.messages': return this.messagesList(request.threadId, request.limit)
+      case 'thread.send': return this.sendMessage(request.threadId, request.parts, request.options)
+      case 'thread.abort': return this.abort(request.threadId)
+      case 'thread.todos': {
+        const binding = this.binding(request.threadId)
+        return (await this.ensureStarted(binding.backendId)).todosGet(binding.nativeSessionId)
+      }
+      case 'thread.permission': {
+        const binding = this.binding(request.threadId)
+        return (await this.ensureStarted(binding.backendId)).permissionRespond(
+          binding.nativeSessionId,
+          request.permissionId,
+          request.response
+        )
+      }
+      case 'thread.diff': {
+        const binding = this.binding(request.threadId)
+        return (await this.ensureStarted(binding.backendId)).diffGet(binding.nativeSessionId, request.messageId)
+      }
+      case 'thread.fork': return this.fork(request.threadId, request.messageId)
+      case 'thread.compact': {
+        const binding = this.binding(request.threadId)
+        return (await this.ensureStarted(binding.backendId)).compact(binding.nativeSessionId, request.model)
+      }
+      case 'thread.models': {
+        const id = request.threadId ? this.binding(request.threadId).backendId : request.backendId ?? 'opencode'
+        return (await this.ensureStarted(id)).modelsList()
+      }
+      case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction)
+      case 'thread.relay': return this.relay(request.sourceThreadId, request.targetThreadId, request.instruction)
+    }
+  }
+}
+
+export { textFromParts }

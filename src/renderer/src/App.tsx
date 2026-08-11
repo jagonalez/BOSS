@@ -24,6 +24,7 @@ import {
   refreshSessions,
   refreshStreaming,
   loadMode,
+  loadThreadPreferences,
   loadAgent,
   loadVariant,
   loadArchived,
@@ -39,7 +40,8 @@ import {
   loadEngine,
   initializeWorkspaceState,
   loadProjectWorkspace,
-  setNativeViewsSuspended
+  setNativeViewsSuspended,
+  modeForSession
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -66,6 +68,7 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     loadArchived()
     loadMode()
+    loadThreadPreferences()
     loadAgent()
     loadSessionMeta()
     loadVariant()
@@ -138,8 +141,8 @@ export function App(): React.JSX.Element {
         }
         case 'permission.asked':
         case 'permission.updated': {
-          const mode = appStore.getState().mode
           const props = (ev.properties ?? {}) as { sessionID?: string; id?: string }
+          const mode = modeForSession(props.sessionID)
           if (mode !== 'ask') {
             if (props.sessionID) {
               appStore.setState((st) => {
@@ -281,8 +284,8 @@ export function App(): React.JSX.Element {
   const attention = useStore(appStore, (s) => s.attention)
   useEffect(() => {
     document.title = attention
-      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'error' ? '✕ ' : '✓ '}Ralf`
-      : 'Ralf'
+      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'error' ? '✕ ' : '✓ '}R.A.L.F.`
+      : 'R.A.L.F.'
   }, [attention])
 
   const page = (() => {

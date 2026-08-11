@@ -34,7 +34,8 @@ export class PTYManager {
   }
 
   resize(id: string, cols: number, rows: number): void {
-    this.sessions.get(id)?.pty.resize(Math.max(cols, 20), Math.max(rows, 5))
+    if (!Number.isFinite(cols) || !Number.isFinite(rows)) return
+    this.sessions.get(id)?.pty.resize(Math.max(Math.floor(cols), 20), Math.max(Math.floor(rows), 5))
   }
 
   dispose(id: string): void {

@@ -19,9 +19,11 @@ import type {
   TtsSpeakRequest
 } from './ipc'
 import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
+import type { BackendRequest } from './backend'
 
 export interface RalfApi {
   platform(): string
+  toggleMaximize(): Promise<boolean>
   serverInfo(): Promise<ServerInfo>
   onServerStatusChanged(cb: (info: ServerInfo) => void): () => void
 
@@ -74,8 +76,7 @@ export interface RalfApi {
 
   asrTranscribe(req: AsrTranscribeRequest): Promise<AsrTranscribeResult>
 
-  getBackendEngine(): Promise<'opencode' | 'pi'>
-  setBackendEngine(engine: 'opencode' | 'pi'): Promise<'opencode' | 'pi'>
+  backendRequest(req: BackendRequest): Promise<unknown>
 
   sitesList(): Promise<SiteInfo[]>
   sitesPublish(folder: string, name?: string): Promise<SiteInfo>
