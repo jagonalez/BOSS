@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, session, shell } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { OpenCodeServer } from './opencode-server'
@@ -10,7 +10,6 @@ import { ComputerUse } from './computer-use'
 import { PTYManager } from './pty-manager'
 import { SpeechManager } from './speech'
 import { registerIpc, type IpcDeps } from './ipc'
-import { IpcChannels } from '@shared/ipc'
 import { loadState } from './state-store'
 import { BackendManager } from './backend/manager'
 import { createBackend } from './backend/factory'
@@ -27,24 +26,17 @@ let mainWindow: BrowserWindow | null = null
 const server = new OpenCodeServer()
 const api = new ApiClient(server)
 const events = new EventStream(server)
-const backendMgr = new BackendManager(
-  () => createBackend('opencode', { server, api, events }),
-  (cwd?: string) => createBackend('pi', { server: server as any, api: api as any, events: events as any, cwd }),
-  (process.env.RALF_ENGINE as 'opencode'|'pi') ?? 'opencode'
-)
-const backend = backendMgr.current
-
-// Backend engine IPC
-ipcMain.handle(IpcChannels.BackendGetEngine, () => backendMgr.engineName)
-ipcMain.handle(IpcChannels.BackendSetEngine, async (_e, engine: 'opencode' | 'pi') => {
-  await backendMgr.setEngine(engine, server.projectPath)
-  computerUse.bind(backendMgr.current)
-  return backendMgr.engineName
+const openCodeBackend = createBackend('opencode', { server, api, events })
+const backendMgr = new BackendManager({
+  opencode: openCodeBackend,
+  pi: createBackend('pi', { server, api, events }),
+  codex: createBackend('codex', { server, api, events }),
+  claude: createBackend('claude', { server, api, events })
 })
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
-computerUse.bind(backendMgr.current)
+computerUse.bind(openCodeBackend)
 const pty = new PTYManager()
 const speech = new SpeechManager()
 
@@ -52,7 +44,7 @@ let browse: BrowseManager | null = null
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, browse: browse!, optional, computerUse, pty, speech }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech }
 }
 
 function registerIpcOnce(): void {
@@ -159,8 +151,7 @@ app.whenReady().then(() => {
   loadRenderer()
   const saved = loadState()
   if (saved.projectPath) server.setInitialCwd(saved.projectPath)
-  void backend.start()
-  // events.start() is handled by OpenCodeBackend.start()
+  void backendMgr.start(saved.projectPath)
 })
 
 app.on('activate', () => {
@@ -176,7 +167,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  void backend.stop()
+  void backendMgr.stop()
   void computerUse.dispose()
   speech.dispose()
 })

@@ -269,8 +269,8 @@ export function App(): React.JSX.Element {
   const attention = useStore(appStore, (s) => s.attention)
   useEffect(() => {
     document.title = attention
-      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'error' ? '✕ ' : '✓ '}Ralf`
-      : 'Ralf'
+      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'error' ? '✕ ' : '✓ '}R.A.L.F.`
+      : 'R.A.L.F.'
   }, [attention])
 
   const page = (() => {

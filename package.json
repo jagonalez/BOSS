@@ -1,8 +1,8 @@
 {
   "name": "ralf",
-  "productName": "Ralf",
+  "productName": "R.A.L.F.",
   "version": "0.1.0",
-  "description": "Codex-style desktop client for opencode",
+  "description": "Configurable multi-backend desktop workspace for coding agents",
   "main": "./out/main/index.js",
   "author": "jeremy",
   "license": "MIT",
@@ -43,7 +43,7 @@
   },
   "build": {
     "appId": "dev.ralf.app",
-    "productName": "Ralf",
+    "productName": "R.A.L.F.",
     "files": [
       "out/**/*",
       "resources/**/*"

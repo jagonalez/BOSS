@@ -14,6 +14,7 @@ import type {
   SessionMeta,
   Todo
 } from '@shared/opencode'
+import type { BackendDescriptor, BackendId } from '@shared/backend'
 import type {
   BrowseNavigationState,
   ComputerUsePermissions,
@@ -75,7 +76,8 @@ export interface AppState {
   variant: string | null
   mode: 'auto' | 'ask' | 'plan'
   agent: string
-  engine: 'opencode' | 'pi'
+  engine: BackendId
+  backends: BackendDescriptor[]
   projectPath: string
   lastError: string | null
   lastErrorBySession: Record<string, string>
@@ -145,6 +147,7 @@ export const initialState: AppState = {
   mode: 'ask',
   agent: 'build',
   engine: 'opencode',
+  backends: [],
   projectPath: '',
   lastError: null,
   lastErrorBySession: {},

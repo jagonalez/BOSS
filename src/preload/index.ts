@@ -70,8 +70,7 @@ const ralf: RalfApi = {
 
   asrTranscribe: (req) => ipcRenderer.invoke(IpcChannels.AsrTranscribe, req),
 
-  getBackendEngine: () => ipcRenderer.invoke(IpcChannels.BackendGetEngine),
-  setBackendEngine: (engine: 'opencode' | 'pi') => ipcRenderer.invoke(IpcChannels.BackendSetEngine, engine)
+  backendRequest: (req) => ipcRenderer.invoke(IpcChannels.BackendRequest, req)
 }
 
 contextBridge.exposeInMainWorld('ralf', ralf)

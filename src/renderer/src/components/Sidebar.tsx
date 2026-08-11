@@ -3,6 +3,7 @@ import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
 import {
   archiveAllInPath,
+  cloneThreadToBackend,
   deleteSession,
   forkSession,
   newChatInProject,
@@ -16,6 +17,7 @@ import {
   toggleArchive
 } from '../lib/actions'
 import { ChatIcon, ChevronIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
+import { BackendBadge, BACKEND_SHORT_LABELS } from './BackendControls'
 
 interface CtxMenu {
   x: number
@@ -64,6 +66,7 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
         <ChatIcon size={14} />
       </span>
       <span className="name">{session.title || 'Untitled'}</span>
+      <BackendBadge backendId={session.backendId} />
       {meta?.kind === 'fork' ? <span className="badge fork">fork</span> : null}
       {meta?.kind === 'side' ? <span className="badge side">side</span> : null}
       {compacting ? <span className="badge compacting">compacting</span> : null}
@@ -80,6 +83,7 @@ export function Sidebar(): React.JSX.Element {
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const activePage = useStore(appStore, (s) => s.activePage)
   const archived = useStore(appStore, (s) => s.archived)
+  const backends = useStore(appStore, (s) => s.backends)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -202,8 +206,8 @@ export function Sidebar(): React.JSX.Element {
     <aside className="sidebar">
       <div className="sidebar-head">
         <div className="logo">
-          <img className="logo-mark" src="./icon.png" alt="Ralf" />
-          <span>Ralf</span>
+          <img className="logo-mark" src="./icon.png" alt="R.A.L.F." />
+          <span>R.A.L.F.</span>
         </div>
       </div>
       <nav className="sidebar-primary" aria-label="Primary navigation">
@@ -337,6 +341,22 @@ export function Sidebar(): React.JSX.Element {
               {menuItem('Open', () => selectSession(ctx.session!.id))}
               {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Fork', () => void forkSession(ctx.session!.id))}
+              {backends
+                .filter((backend) => backend.available && backend.id !== (ctx.session!.backendId ?? 'opencode'))
+                .map((backend) => (
+                  <React.Fragment key={backend.id}>
+                    {menuItem(`Continue in ${BACKEND_SHORT_LABELS[backend.id]}`, () =>
+                      appStore.setState({
+                        confirm: {
+                          title: `Continue in ${BACKEND_SHORT_LABELS[backend.id]}?`,
+                          message: 'R.A.L.F. will create a new thread with a bounded context handoff. The original thread remains unchanged.',
+                          confirmLabel: `Continue in ${BACKEND_SHORT_LABELS[backend.id]}`,
+                          action: () => void cloneThreadToBackend(ctx.session!.id, backend.id)
+                        }
+                      })
+                    )}
+                  </React.Fragment>
+                ))}
               {archivedSet.has(ctx.session.id) ? (
                 menuItem('Unarchive', () => toggleArchive(ctx.session!.id))
               ) : (
@@ -354,9 +374,9 @@ export function Sidebar(): React.JSX.Element {
               {menuItem('Delete', () =>
                 appStore.setState({
                   confirm: {
-                    title: 'Delete chat?',
-                    message: 'This permanently deletes the chat and its history. This cannot be undone.',
-                    confirmLabel: 'Delete',
+                    title: 'Remove thread?',
+                    message: 'Remove this thread from R.A.L.F.? Some backends may retain their own native history.',
+                    confirmLabel: 'Remove',
                     destructive: true,
                     action: () => void deleteSession(ctx.session!.id)
                   }

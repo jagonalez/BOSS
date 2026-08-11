@@ -25,6 +25,7 @@ import {
   splitWorkspaceGroup
 } from '../lib/actions'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+import { BackendBadge } from './BackendControls'
 
 const TAB_DRAG_TYPE = 'application/x-ralf-workspace-tab'
 
@@ -61,6 +62,7 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
 
 function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }): React.JSX.Element {
   const label = useTabLabel(item, group)
+  const backendId = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.backendId)
   const Icon = tabIcon(item.kind)
   const busy = useStore(appStore, (state) => Boolean(item.sessionId && state.streaming[item.sessionId]))
   const permission = useStore(appStore, (state) => Boolean(item.sessionId && state.permissions[item.sessionId]))
@@ -72,6 +74,7 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
         <Icon size={12} />
       </span>
       <span className="workspace-tab-label" title={label}>{label}</span>
+      {item.kind === 'thread' ? <BackendBadge backendId={backendId} /> : null}
     </>
   )
 }
@@ -83,6 +86,7 @@ function ThreadPicker({ groupId, close }: { groupId: string; close: () => void }
       .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
   )
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const backends = useStore(appStore, (state) => state.backends)
   const openIds = useMemo(() => {
     const ids = new Set<string>()
     const walk = (node: WorkspaceNode): void => {
@@ -102,16 +106,23 @@ function ThreadPicker({ groupId, close }: { groupId: string; close: () => void }
   return (
     <div className="workspace-add-menu thread-picker">
       <div className="workspace-menu-title">Add thread</div>
-      <button
-        className="workspace-add-menu-item primary"
-        onClick={() => {
-          close()
-          void createThreadInGroup(groupId)
-        }}
-      >
-        <PlusIcon size={14} />
-        <span>New thread</span>
-      </button>
+      <div className="workspace-new-thread-backends">
+        {backends.map((backend) => (
+          <button
+            key={backend.id}
+            className="workspace-add-menu-item primary"
+            disabled={!backend.available}
+            title={backend.available ? `New ${backend.label} thread` : backend.unavailableReason}
+            onClick={() => {
+              close()
+              void createThreadInGroup(groupId, backend.id)
+            }}
+          >
+            <PlusIcon size={14} />
+            <BackendBadge backendId={backend.id} />
+          </button>
+        ))}
+      </div>
       <div className="workspace-menu-rule" />
       <div className="workspace-thread-options">
         {sessions.map((session) => (
@@ -125,6 +136,7 @@ function ThreadPicker({ groupId, close }: { groupId: string; close: () => void }
           >
             <ChatIcon size={13} />
             <span>{session.title || 'Untitled'}</span>
+            <BackendBadge backendId={session.backendId} />
             {openIds.has(session.id) ? <small>open</small> : null}
           </button>
         ))}

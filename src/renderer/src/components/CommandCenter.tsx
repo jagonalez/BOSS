@@ -59,7 +59,7 @@ export function CommandCenter(): React.JSX.Element {
         <div>
           <span className="command-eyebrow">Command Center</span>
           <h1>Here’s what’s happening.</h1>
-          <p>Status is based on live Ralf events. An optional AI briefing can be layered on later.</p>
+          <p>Status is based on live R.A.L.F. events. An optional AI briefing can be layered on later.</p>
         </div>
         <div className={`command-connection ${serverHealthy ? 'connected' : ''}`}>
           <span />{serverHealthy ? 'Connected' : 'Connecting'}
@@ -101,7 +101,7 @@ export function CommandCenter(): React.JSX.Element {
 export function EmptyProductPage({ title, description }: { title: string; description: string }): React.JSX.Element {
   return (
     <div className="product-empty-page">
-      <span className="command-eyebrow">Ralf</span>
+      <span className="command-eyebrow">R.A.L.F.</span>
       <h1>{title}</h1>
       <p>{description}</p>
     </div>
