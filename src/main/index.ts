@@ -60,6 +60,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    acceptFirstMouse: process.platform === 'darwin',
     backgroundColor: '#0b0d10',
     icon: join(app.getAppPath(), 'resources', 'icons', '512x512.png'),
     webPreferences: {
