@@ -1,9 +1,11 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
 import { clearThreadBusFailures, importNativeThreads, setEngine, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
+import { OpenCode } from '../lib/opencode'
+import type { WorktreeSettings } from '@shared/worktree'
 
 export function SettingsModal(): React.JSX.Element | null {
   const open = useStore(appStore, (s) => s.settingsOpen)
@@ -14,6 +16,11 @@ export function SettingsModal(): React.JSX.Element | null {
   const defaultBackend = useStore(appStore, (s) => s.engine)
   const threadBus = useStore(appStore, (s) => s.threadBus)
   const [importStatus, setImportStatus] = useState('')
+  const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
+  useEffect(() => {
+    if (!open) return
+    void OpenCode.worktreeSettings().then(setWorktreeSettings).catch(() => {})
+  }, [open])
   if (!open) return null
 
   const current = document.documentElement.dataset.theme ?? 'graphite'
@@ -83,6 +90,49 @@ export function SettingsModal(): React.JSX.Element | null {
         {threadBus?.messages.some((message) => message.status === 'failed') ? (
           <button className="btn-ghost" onClick={() => void clearThreadBusFailures()}>Clear failed messages</button>
         ) : null}
+        <div className="settings-section-title">Git worktrees</div>
+        <label className="settings-check">
+          <input
+            type="checkbox"
+            checked={worktreeSettings?.autoCleanupEnabled ?? true}
+            onChange={(event) => {
+              const autoCleanupEnabled = event.target.checked
+              setWorktreeSettings((current) => ({
+                autoCleanupEnabled,
+                cleanupAfterDays: current?.cleanupAfterDays ?? 30
+              }))
+              void OpenCode.setWorktreeSettings({ autoCleanupEnabled }).then(setWorktreeSettings)
+            }}
+          />
+          <span>
+            <span className="settings-row-label">Clean up inactive worktrees</span>
+            <span className="settings-row-hint">Only clean worktrees created by R.A.L.F. are eligible. Dirty or locked worktrees are always kept.</span>
+          </span>
+        </label>
+        <div className="settings-row">
+          <div className="settings-row-main">
+            <div className="settings-row-label">Inactive threshold</div>
+            <div className="settings-row-hint">Opening or using a worktree thread resets its timer.</div>
+          </div>
+          <select
+            className="settings-select"
+            value={worktreeSettings?.cleanupAfterDays ?? 30}
+            onChange={(event) => {
+              const cleanupAfterDays = Number(event.target.value)
+              setWorktreeSettings((current) => ({
+                autoCleanupEnabled: current?.autoCleanupEnabled ?? true,
+                cleanupAfterDays
+              }))
+              void OpenCode.setWorktreeSettings({ cleanupAfterDays }).then(setWorktreeSettings)
+            }}
+          >
+            <option value={7}>7 days</option>
+            <option value={14}>14 days</option>
+            <option value={30}>30 days</option>
+            <option value={60}>60 days</option>
+            <option value={90}>90 days</option>
+          </select>
+        </div>
         <div className="settings-section-title">Theme</div>
         <div className="theme-grid">
           {THEMES.map((t) => (

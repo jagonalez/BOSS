@@ -171,6 +171,14 @@ export const reply = tool({
   },
   execute(args, context) { return call("ralf_threads_reply", args, context) }
 })
+
+export const spawn_worktree = tool({
+  description: "Fork this conversation into a new R.A.L.F. thread in an isolated Git worktree.",
+  args: {
+    instruction: tool.schema.string().describe("Concrete implementation task for the new worktree thread")
+  },
+  execute(args, context) { return call("ralf_threads_spawn_worktree", args, context) }
+})
 `
   }
 

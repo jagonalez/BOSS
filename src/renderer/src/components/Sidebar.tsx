@@ -6,11 +6,13 @@ import {
   cloneThreadToBackend,
   deleteSession,
   forkSession,
+  forkSessionIntoWorktree,
   newGlobalChat,
   newChatInProject,
   openCommitDialog,
   openProject,
   openProjectFolder,
+  removeSessionWorktree,
   selectSession,
   sessionMetaFor,
   showPage,
@@ -68,6 +70,8 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
       <span className="name">{session.title || 'Untitled'}</span>
       <BackendBadge backendId={session.backendId} />
       {meta?.kind === 'fork' ? <span className="badge fork">fork</span> : null}
+      {session.worktree?.status === 'active' ? <span className="badge worktree" title={session.worktree.branch}>worktree</span> : null}
+      {session.worktree?.status === 'removed' ? <span className="badge worktree removed">cleaned</span> : null}
       {meta?.kind === 'side' ? <span className="badge side">side</span> : null}
       {compacting ? <span className="badge compacting">compacting</span> : null}
       {busy && !compacting ? <span className="spinner-sm" /> : null}
@@ -388,6 +392,27 @@ export function Sidebar(): React.JSX.Element {
               {menuItem('Open', () => selectSession(ctx.session!.id))}
               {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Fork', () => void forkSession(ctx.session!.id))}
+              {ctx.session.projectId !== 'global' ? menuItem('Fork into worktree…', () =>
+                appStore.setState({
+                  confirm: {
+                    title: 'Fork into a Git worktree?',
+                    message: 'R.A.L.F. will create an isolated branch from this thread\'s current HEAD and continue the conversation there. The original thread remains unchanged.',
+                    confirmLabel: 'Create worktree',
+                    action: () => void forkSessionIntoWorktree(ctx.session!.id)
+                  }
+                })
+              ) : null}
+              {ctx.session.worktree?.status === 'active' ? menuItem('Remove worktree…', () =>
+                appStore.setState({
+                  confirm: {
+                    title: 'Remove this worktree?',
+                    message: `R.A.L.F. will remove the worktree folder for ${ctx.session!.worktree!.branch}. Git refuses if it contains uncommitted or untracked work; the branch and conversation will be kept.`,
+                    confirmLabel: 'Remove worktree',
+                    destructive: true,
+                    action: () => void removeSessionWorktree(ctx.session!.id)
+                  }
+                })
+              ) : null}
               {backends
                 .filter((backend) => backend.available && backend.id !== (ctx.session!.backendId ?? 'opencode'))
                 .map((backend) => (
