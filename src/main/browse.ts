@@ -76,6 +76,7 @@ export class BrowseManager {
       return
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
+    entry.loadedOnce = true
     void entry.view.webContents.loadURL(url)
   }
 

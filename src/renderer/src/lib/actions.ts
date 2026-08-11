@@ -1232,7 +1232,7 @@ export async function publishSiteFromPicker(): Promise<void> {
     const folder = await window.ralf.sitesChooseFolder()
     if (!folder) return
     const site = await window.ralf.sitesPublish(folder)
-    appStore.setState((s) => ({ sites: [site, ...s.sites] }))
+    appStore.setState((s) => ({ sites: [site, ...s.sites.filter((item) => item.id !== site.id)] }))
   } catch (err) {
     appStore.setState({ lastError: errorSummary(err) })
   }
@@ -1264,11 +1264,13 @@ export async function deploySite(id: string): Promise<void> {
   }
 }
 
-export async function setCloudflareConfig(token: string, accountId: string): Promise<void> {
+export async function setCloudflareConfig(token: string, accountId: string): Promise<boolean> {
   try {
     appStore.setState({ cloudflare: await window.ralf.sitesCfSet(token, accountId) })
+    return true
   } catch (err) {
     appStore.setState({ lastError: errorSummary(err) })
+    return false
   }
 }
 

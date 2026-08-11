@@ -1,11 +1,15 @@
 import { app, safeStorage } from 'electron'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import {
+  chmodSync,
   createReadStream,
   existsSync,
+  lstatSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   statSync,
+  unlinkSync,
   writeFileSync
 } from 'node:fs'
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
@@ -119,8 +123,9 @@ function saveRegistry(sites: PersistedSite[]): void {
 
 function loadSecret(): CloudflareSecret {
   try {
+    if (!safeStorage.isEncryptionAvailable()) return {}
     const raw = readFileSync(secretFile())
-    const text = safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(raw) : raw.toString('utf8')
+    const text = safeStorage.decryptString(raw)
     const parsed = JSON.parse(text) as CloudflareSecret
     return { accountId: parsed.accountId, token: parsed.token }
   } catch {
@@ -129,12 +134,21 @@ function loadSecret(): CloudflareSecret {
 }
 
 function saveSecret(data: CloudflareSecret): void {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Secure credential storage is unavailable on this system')
+  }
   const text = JSON.stringify(data)
+  const path = secretFile()
+  const payload = safeStorage.encryptString(text)
+  writeFileSync(path, payload, { mode: 0o600 })
+  chmodSync(path, 0o600)
+}
+
+function clearSecret(): void {
   try {
-    const payload = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(text) : Buffer.from(text, 'utf8')
-    writeFileSync(secretFile(), payload)
-  } catch {
-    /* ignore */
+    unlinkSync(secretFile())
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
   }
 }
 
@@ -145,18 +159,46 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb)
 }
 
+function isWithin(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(root + sep)
+}
+
+function sendText(res: ServerResponse, status: number, text: string, headers?: Record<string, string>): void {
+  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8', ...headers })
+  res.end(text)
+}
+
 function createStaticServer(folder: string): Promise<HttpServer> {
-  const root = resolve(folder)
-  return new Promise((resolvePromise) => {
+  const root = realpathSync(folder)
+  return new Promise((resolvePromise, rejectPromise) => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      const url = new URL(req.url || '/', 'http://localhost')
-      let pathname = decodeURIComponent(url.pathname)
-      let filePath = join(root, pathname)
-      if (!filePath.startsWith(root + sep) && filePath !== root) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' })
-        res.end('Forbidden')
+      const port = portOf(server)
+      const host = (req.headers.host || '').toLowerCase()
+      if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) {
+        sendText(res, 403, 'Forbidden')
         return
       }
+
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        sendText(res, 405, 'Method not allowed', { Allow: 'GET, HEAD' })
+        return
+      }
+
+      let pathname: string
+      try {
+        const url = new URL(req.url || '/', `http://127.0.0.1:${port}`)
+        pathname = decodeURIComponent(url.pathname)
+      } catch {
+        sendText(res, 400, 'Bad request')
+        return
+      }
+
+      let filePath = resolve(root, `.${pathname}`)
+      if (!isWithin(root, filePath)) {
+        sendText(res, 403, 'Forbidden')
+        return
+      }
+
       try {
         if (statSync(filePath).isDirectory()) filePath = join(filePath, 'index.html')
       } catch {
@@ -165,21 +207,50 @@ function createStaticServer(folder: string): Promise<HttpServer> {
           if (existsSync(idx)) filePath = idx
         }
       }
+
       try {
+        filePath = realpathSync(filePath)
+        if (!isWithin(root, filePath)) {
+          sendText(res, 403, 'Forbidden')
+          return
+        }
         const st = statSync(filePath)
         if (st.isFile()) {
           const mime = MIME[extname(filePath).slice(1).toLowerCase()] || 'application/octet-stream'
-          res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache', 'Content-Length': st.size })
-          createReadStream(filePath).pipe(res)
+          const headers = {
+            'Content-Type': mime,
+            'Cache-Control': 'no-cache',
+            'Content-Length': String(st.size),
+            'Cross-Origin-Resource-Policy': 'same-origin',
+            'X-Content-Type-Options': 'nosniff'
+          }
+          if (req.method === 'HEAD') {
+            res.writeHead(200, headers)
+            res.end()
+            return
+          }
+          const stream = createReadStream(filePath)
+          stream.once('open', () => {
+            res.writeHead(200, headers)
+            stream.pipe(res)
+          })
+          stream.once('error', (err) => {
+            if (!res.headersSent) sendText(res, 404, 'Not found')
+            else res.destroy(err)
+          })
           return
         }
       } catch {
         /* fall through to 404 */
       }
-      res.writeHead(404, { 'Content-Type': 'text/plain' })
-      res.end('Not found')
+      sendText(res, 404, 'Not found')
     })
-    server.listen(0, '127.0.0.1', () => resolvePromise(server))
+    const onListenError = (err: Error): void => rejectPromise(err)
+    server.once('error', onListenError)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', onListenError)
+      resolvePromise(server)
+    })
   })
 }
 
@@ -233,7 +304,31 @@ function buildManifest(folder: string): ManifestBuild {
     }
   }
   walk(folder, '')
+  if (Object.keys(manifest).length === 0) throw new Error('The selected folder contains no deployable files')
   return { manifest, byHash }
+}
+
+function verificationFile(folder: string): { path: string; content: Buffer } {
+  const index = join(folder, 'index.html')
+  if (existsSync(index) && lstatSync(index).isFile()) {
+    return { path: 'index.html', content: readFileSync(index) }
+  }
+  const find = (dir: string, base: string): { path: string; content: Buffer } | null => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = join(dir, entry.name)
+      const rel = base ? `${base}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        const nested = find(abs, rel)
+        if (nested) return nested
+      } else if (entry.isFile()) {
+        return { path: rel, content: readFileSync(abs) }
+      }
+    }
+    return null
+  }
+  const result = find(folder, '')
+  if (!result) throw new Error('The selected folder contains no deployable files')
+  return result
 }
 
 export class SitesManager {
@@ -295,8 +390,9 @@ export class SitesManager {
   }
 
   async publish(folder: string, name?: string): Promise<SiteInfo> {
-    const abs = isAbsolute(folder) ? folder : resolve(this.projectPathProvider(), folder)
-    if (!isDirectory(abs)) throw new Error(`Folder not found: ${abs}`)
+    const requested = isAbsolute(folder) ? folder : resolve(this.projectPathProvider(), folder)
+    if (!isDirectory(requested)) throw new Error(`Folder not found: ${requested}`)
+    const abs = realpathSync(requested)
     const siteName = (name || '').trim() || basename(abs) || 'site'
     const server = await createStaticServer(abs)
     const site: ManagedSite = {
@@ -367,8 +463,21 @@ export class SitesManager {
   }
 
   async cloudflareClear(): Promise<CloudflareSettings> {
-    saveSecret({})
+    clearSecret()
     return { configured: false }
+  }
+
+  private async publishFromAgent(folder: string, name?: string): Promise<SiteInfo> {
+    const project = this.projectPathProvider()
+    if (!isDirectory(project)) throw new Error('No active project is available')
+    const projectRoot = realpathSync(project)
+    const requested = isAbsolute(folder) ? folder : resolve(projectRoot, folder)
+    if (!isDirectory(requested)) throw new Error(`Folder not found: ${requested}`)
+    const candidate = realpathSync(requested)
+    if (!isWithin(projectRoot, candidate)) {
+      throw new Error('publish_site can only publish folders inside the active project')
+    }
+    return this.publish(candidate, name)
   }
 
   private async registerMcp(): Promise<void> {
@@ -407,7 +516,7 @@ export class SitesManager {
 
   private startControlServer(): Promise<void> {
     this.controlSecret = randomBytes(32).toString('hex')
-    return new Promise((resolvePromise) => {
+    return new Promise((resolvePromise, rejectPromise) => {
       const server = createServer((req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'POST' || req.url !== '/publish') {
           res.writeHead(404, { 'Content-Type': 'application/json' })
@@ -421,8 +530,19 @@ export class SitesManager {
           return
         }
         let body = ''
-        req.on('data', (chunk) => (body += chunk))
+        let tooLarge = false
+        req.setEncoding('utf8')
+        req.on('data', (chunk: string) => {
+          if (tooLarge) return
+          body += chunk
+          if (Buffer.byteLength(body) > 64 * 1024) {
+            tooLarge = true
+            res.writeHead(413, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'request too large' }))
+          }
+        })
         req.on('end', () => {
+          if (tooLarge) return
           let payload: { folder?: string; name?: string }
           try {
             payload = JSON.parse(body || '{}')
@@ -431,7 +551,12 @@ export class SitesManager {
             res.end(JSON.stringify({ error: 'bad request' }))
             return
           }
-          this.publish(payload.folder || '', payload.name)
+          if (typeof payload.folder !== 'string' || (payload.name !== undefined && typeof payload.name !== 'string')) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'invalid arguments' }))
+            return
+          }
+          this.publishFromAgent(payload.folder, payload.name)
             .then((site) => {
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ id: site.id, name: site.name, url: site.localUrl }))
@@ -442,8 +567,10 @@ export class SitesManager {
             })
         })
       })
-      server.on('error', () => resolvePromise())
+      const onListenError = (err: Error): void => rejectPromise(err)
+      server.once('error', onListenError)
       server.listen(0, '127.0.0.1', () => {
+        server.off('error', onListenError)
         this.controlPort = portOf(server)
         this.controlServer = server
         resolvePromise()
@@ -504,30 +631,30 @@ export class SitesManager {
       body: form
     })
 
-    let subdomain = ''
-    try {
-      const sub = await cfRequest(token, `/accounts/${accountId}/workers/subdomain`)
-      subdomain = sub?.subdomain || ''
-    } catch {
-      /* workers.dev subdomain may not be enabled */
+    await cfRequest(token, `/accounts/${accountId}/workers/scripts/${site.scriptName}/subdomain`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, previews_enabled: false })
+    })
+    const sub = await cfRequest(token, `/accounts/${accountId}/workers/subdomain`)
+    const subdomain = typeof sub?.subdomain === 'string' ? sub.subdomain.trim() : ''
+    if (!subdomain) {
+      throw new Error('Worker deployed, but this account has no workers.dev subdomain configured')
     }
-    return subdomain
-      ? `https://${site.scriptName}.${subdomain}.workers.dev/`
-      : `https://${site.scriptName}.workers.dev/`
+    return `https://${site.scriptName}.${subdomain}.workers.dev/`
   }
 
   /** Cloudflare can report a successful deploy with an empty bucket; verify served content. */
   private async verifyDeploy(url: string, folder: string): Promise<void> {
-    const expected = existsSync(join(folder, 'index.html')) ? readFileSync(join(folder, 'index.html'), 'utf8') : null
+    const expected = verificationFile(folder)
+    const encodedPath = expected.path.split('/').map(encodeURIComponent).join('/')
+    const candidate = new URL(encodedPath, url).toString()
     for (let attempt = 0; attempt < 6; attempt += 1) {
       try {
-        const candidates = [url, `${url}index.html`]
-        for (const candidate of candidates) {
-          const res = await fetch(candidate)
-          if (res.ok) {
-            const body = await res.text()
-            if (expected === null ? body.length > 0 : body === expected) return
-          }
+        const res = await fetch(candidate)
+        if (res.ok) {
+          const body = Buffer.from(await res.arrayBuffer())
+          if (body.equals(expected.content)) return
         }
       } catch {
         /* not propagated yet */
