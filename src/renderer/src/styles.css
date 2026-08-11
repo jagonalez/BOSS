@@ -1582,7 +1582,8 @@ button {
   background: color-mix(in srgb, var(--red) 14%, transparent);
 }
 
-.site-badge.status-deploying {
+.site-badge.status-deploying,
+.site-badge.status-unpublishing {
   color: var(--yellow);
   background: color-mix(in srgb, var(--yellow) 14%, transparent);
 }

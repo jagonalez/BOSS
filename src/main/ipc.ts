@@ -232,6 +232,8 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.handle(IpcChannels.SitesDeploy, (_e, id: string) => deps.sites.deploy(id))
 
+  ipcMain.handle(IpcChannels.SitesUnpublish, (_e, id: string) => deps.sites.unpublish(id))
+
   ipcMain.handle(IpcChannels.SitesChooseFolder, async () => {
     const result = await dialog.showOpenDialog({
       title: 'Publish a site folder',

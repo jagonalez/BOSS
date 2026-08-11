@@ -66,6 +66,7 @@ interface PersistedSite {
   folder: string
   scriptName: string
   deployedUrl?: string
+  deploymentAccountId?: string
   lastPublishedAt: number
 }
 
@@ -277,6 +278,19 @@ async function cfRequest(token: string, path: string, init?: RequestInit): Promi
   return data.result
 }
 
+async function deleteCfWorker(token: string, accountId: string, scriptName: string): Promise<void> {
+  const res = await fetch(`${CF_API}/accounts/${accountId}/workers/scripts/${scriptName}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  if (res.status === 404) return
+  const data = (await res.json().catch(() => ({}))) as CfResponse
+  if (!res.ok || data.success === false) {
+    const msg = data.errors?.[0]?.message || `Cloudflare delete failed (${res.status})`
+    throw new Error(msg)
+  }
+}
+
 interface ManifestBuild {
   manifest: Record<string, { hash: string; size: number }>
   byHash: Map<string, { abs: string; mime: string }>
@@ -369,6 +383,7 @@ export class SitesManager {
           port: portOf(server),
           scriptName: persisted.scriptName,
           deployedUrl: persisted.deployedUrl,
+          deploymentAccountId: persisted.deploymentAccountId,
           lastPublishedAt: persisted.lastPublishedAt,
           status: persisted.deployedUrl ? 'live' : 'local',
           server
@@ -434,6 +449,7 @@ export class SitesManager {
     try {
       const deployedUrl = await this.deployToCloudflare(site, secret.token, secret.accountId)
       site.deployedUrl = deployedUrl
+      site.deploymentAccountId = secret.accountId
       this.persist()
       this.emit()
       await this.verifyDeploy(deployedUrl, site.folder)
@@ -442,6 +458,40 @@ export class SitesManager {
     } catch (err) {
       site.status = 'error'
       site.error = String((err as Error).message ?? err)
+      this.persist()
+      this.emit()
+      throw err
+    }
+    this.persist()
+    this.emit()
+    return this.toInfo(site)
+  }
+
+  async unpublish(id: string): Promise<SiteInfo> {
+    const site = this.sites.get(id)
+    if (!site) throw new Error('Site not found')
+    if (!site.deployedUrl) return this.toInfo(site)
+
+    const secret = loadSecret()
+    if (!secret.token || !secret.accountId) {
+      throw new Error('Cloudflare is not configured. Reconnect the account that owns this deployment.')
+    }
+    const deploymentAccountId = site.deploymentAccountId ?? secret.accountId
+    if (deploymentAccountId !== secret.accountId) {
+      throw new Error(`Reconnect Cloudflare account ${deploymentAccountId} to unpublish this site.`)
+    }
+
+    site.status = 'unpublishing'
+    site.error = undefined
+    this.emit()
+    try {
+      await deleteCfWorker(secret.token, deploymentAccountId, site.scriptName)
+      site.deployedUrl = undefined
+      site.deploymentAccountId = undefined
+      site.status = 'local'
+    } catch (err) {
+      site.status = 'error'
+      site.error = `Unpublish failed: ${String((err as Error).message ?? err)}`
       this.persist()
       this.emit()
       throw err
@@ -687,6 +737,7 @@ export class SitesManager {
       port: site.port,
       scriptName: site.scriptName,
       deployedUrl: site.deployedUrl,
+      deploymentAccountId: site.deploymentAccountId,
       lastPublishedAt: site.lastPublishedAt,
       status: site.status,
       error: site.error

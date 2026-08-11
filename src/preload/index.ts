@@ -77,6 +77,7 @@ const ralf: RalfApi = {
   sitesPublish: (folder: string, name?: string) => ipcRenderer.invoke(IpcChannels.SitesPublish, { folder, name }),
   sitesRemove: (id: string) => ipcRenderer.invoke(IpcChannels.SitesRemove, id),
   sitesDeploy: (id: string) => ipcRenderer.invoke(IpcChannels.SitesDeploy, id),
+  sitesUnpublish: (id: string) => ipcRenderer.invoke(IpcChannels.SitesUnpublish, id),
   sitesChooseFolder: () => ipcRenderer.invoke(IpcChannels.SitesChooseFolder),
   onSitesChanged: (cb) => subscribe(IpcChannels.SitesChanged, cb),
   sitesCfGet: () => ipcRenderer.invoke(IpcChannels.SitesCfGet),
