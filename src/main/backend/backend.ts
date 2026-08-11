@@ -12,6 +12,7 @@ export interface ModelInfo {
   id: string
   name?: string
   provider?: string
+  variants?: string[]
 }
 
 export interface ThinkingLevel {

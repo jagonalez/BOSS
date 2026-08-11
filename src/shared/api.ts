@@ -21,6 +21,7 @@ import type { BackendRequest } from './backend'
 
 export interface RalfApi {
   platform(): string
+  toggleMaximize(): Promise<boolean>
   serverInfo(): Promise<ServerInfo>
   onServerStatusChanged(cb: (info: ServerInfo) => void): () => void
 

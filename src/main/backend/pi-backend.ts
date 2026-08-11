@@ -443,12 +443,23 @@ export class PiBackend implements Backend {
 
   async abort(sessionId: string): Promise<void> { await (await this.runtime(sessionId)).send({ type: 'abort' }) }
 
-  async modelsList(): Promise<{ id: string; name?: string; provider?: string }[]> {
+  async modelsList(): Promise<{ id: string; name?: string; provider?: string; variants?: string[] }[]> {
     const runtime = this.sessions.values().next().value as PiRpcSession | undefined
     if (!runtime) return []
     const response = await runtime.send({ type: 'get_available_models' })
-    const data = response.data as { models?: Array<{ id: string; name?: string; provider?: string }> } | Array<{ id: string; name?: string; provider?: string }> | undefined
-    return Array.isArray(data) ? data : data?.models ?? []
+    const data = response.data as {
+      models?: Array<{ id: string; name?: string; provider?: string; reasoning?: boolean; thinkingLevelMap?: Record<string, unknown> }>
+    } | Array<{ id: string; name?: string; provider?: string; reasoning?: boolean; thinkingLevelMap?: Record<string, unknown> }> | undefined
+    const models = Array.isArray(data) ? data : data?.models ?? []
+    return models.map((model) => {
+      const explicit = Object.keys(model.thinkingLevelMap ?? {})
+      return {
+        id: model.id,
+        name: model.name,
+        provider: model.provider,
+        variants: explicit.length > 0 ? explicit : model.reasoning ? ['off', 'minimal', 'low', 'medium', 'high'] : []
+      }
+    })
   }
 
   async modelSelect(_providerId: string, _modelId: string): Promise<void> {}

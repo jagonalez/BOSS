@@ -88,6 +88,17 @@ export function Sidebar(): React.JSX.Element {
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const projectsRef = useRef<HTMLDivElement>(null)
+  const [sidebarHidden, setSidebarHidden] = useState(() => {
+    try { return localStorage.getItem('ralf.sidebarHidden') === 'true' } catch { return false }
+  })
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('ralf.sidebarWidth'))
+      return Number.isFinite(saved) && saved >= 210 ? saved : 268
+    } catch {
+      return 268
+    }
+  })
   const [projectsH, setProjectsH] = useState<number | null>(() => {
     try {
       const saved = Number(localStorage.getItem('ralf.sidebarProjectsH'))
@@ -178,6 +189,30 @@ export function Sidebar(): React.JSX.Element {
     window.addEventListener('mouseup', onUp)
   }
 
+  const setHidden = (hidden: boolean): void => {
+    setSidebarHidden(hidden)
+    try { localStorage.setItem('ralf.sidebarHidden', String(hidden)) } catch { /* ignore */ }
+  }
+
+  const onWidthDividerDown = (event: React.MouseEvent): void => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = sidebarWidth
+    const onMove = (next: MouseEvent): void => {
+      const width = Math.min(480, Math.max(210, startWidth + next.clientX - startX))
+      setSidebarWidth(width)
+      try { localStorage.setItem('ralf.sidebarWidth', String(width)) } catch { /* ignore */ }
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+    }
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   const onProjectCtx = (e: React.MouseEvent, path: string): void => {
     e.preventDefault()
     e.stopPropagation()
@@ -202,13 +237,28 @@ export function Sidebar(): React.JSX.Element {
     </button>
   )
 
+  if (sidebarHidden) {
+    return (
+      <div className="sidebar-collapsed">
+        <button title="Show sidebar" onClick={() => setHidden(false)}><PanelIcon size={15} /></button>
+      </div>
+    )
+  }
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar-head">
+    <>
+    <aside className="sidebar" style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
+      <div className="sidebar-head" onDoubleClick={(event) => {
+        if ((event.target as HTMLElement).closest('button')) return
+        void window.ralf.toggleMaximize()
+      }}>
         <div className="logo">
           <img className="logo-mark" src="./icon.png" alt="R.A.L.F." />
           <span>R.A.L.F.</span>
         </div>
+        <button className="sidebar-collapse" title="Hide sidebar" onClick={() => setHidden(true)}>
+          <PanelIcon size={14} />
+        </button>
       </div>
       <nav className="sidebar-primary" aria-label="Primary navigation">
         <button className={`sidebar-primary-item ${activePage === 'command-center' ? 'active' : ''}`} onClick={() => showPage('command-center')}>
@@ -388,5 +438,7 @@ export function Sidebar(): React.JSX.Element {
         </div>
       )}
     </aside>
+    <div className="sidebar-width-divider" onMouseDown={onWidthDividerDown} title="Drag to resize sidebar" />
+    </>
   )
 }

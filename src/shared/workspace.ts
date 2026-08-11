@@ -28,11 +28,18 @@ export interface WorkspaceSplit {
 
 export type WorkspaceNode = WorkspaceGroup | WorkspaceSplit
 
-export interface ProjectWorkspace {
-  version: 2
-  projectKey: string
+export interface WorkspaceView {
+  id: string
+  name: string
   root: WorkspaceNode
   focusedGroupId: string
+}
+
+export interface ProjectWorkspace {
+  version: 3
+  projectKey: string
+  views: WorkspaceView[]
+  activeViewId: string
   updatedAt: number
 }
 

@@ -34,9 +34,9 @@ function ModelSection({
   )
 }
 
-export function ModelPicker({ onPick }: { onPick: (id: string) => void }): React.JSX.Element {
-  const model = useStore(appStore, (s) => s.model)
-  const providers = useStore(appStore, (s) => s.providers)
+export function ModelPicker({ onPick, sessionId }: { onPick: (id: string) => void; sessionId?: string }): React.JSX.Element {
+  const model = useStore(appStore, (s) => (sessionId && s.modelsBySession[sessionId]) || s.model)
+  const providers = useStore(appStore, (s) => (sessionId && s.providersBySession[sessionId]) || s.providers)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)

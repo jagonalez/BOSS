@@ -7,23 +7,28 @@ import { TerminalTab } from './TerminalTab'
 import { ReviewTab } from './ReviewTab'
 import { FilesTab } from './FilesTab'
 import {
+  activateWorkspaceView,
   activateWorkspaceTab,
   addWorkspaceTab,
   applyLayoutTemplate,
+  closeWorkspaceView,
   closeWorkspaceGroup,
   closeWorkspaceTab,
+  createWorkspaceView,
   createThreadInGroup,
   focusWorkspaceGroup,
   loadMessages,
   loadTodos,
   moveWorkspaceTab,
   removeLayoutTemplate,
+  renameWorkspaceView,
   reorderWorkspaceTab,
   saveCurrentLayoutTemplate,
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
   splitWorkspaceGroup
 } from '../lib/actions'
+import { activeWorkspaceView, walkTabs } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -99,7 +104,7 @@ function ThreadPicker({ groupId, close }: { groupId: string; close: () => void }
         })
       }
     }
-    if (workspace) walk(workspace.root)
+    if (workspace) walk(activeWorkspaceView(workspace).root)
     return ids
   }, [workspace])
 
@@ -158,7 +163,7 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
         node.tabs.forEach((item) => result.add(item.kind))
       }
     }
-    if (workspace) walk(workspace.root)
+    if (workspace) walk(activeWorkspaceView(workspace).root)
     return result
   }, [workspace])
 
@@ -234,7 +239,9 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
 
 function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
-  const focused = workspace?.focusedGroupId === group.id
+  const view = workspace ? activeWorkspaceView(workspace) : null
+  const focused = view?.focusedGroupId === group.id
+  const movable = Boolean(view && walkTabs(view.root).length > 1)
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
   const [dropTarget, setDropTarget] = useState<DropPosition | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -278,6 +285,11 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
       onMouseDown={() => focusWorkspaceGroup(group.id)}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
+        const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
+        if (tabId && group.tabs.length === 1 && group.tabs[0]?.id === tabId) {
+          setDropTarget(null)
+          return
+        }
         event.preventDefault()
         setDropTarget(dropPosition(event, event.currentTarget))
       }}
@@ -294,7 +306,7 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
               className={`workspace-tab ${item.id === activeId ? 'active' : ''}`}
               role="tab"
               aria-selected={item.id === activeId}
-              draggable
+              draggable={movable}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move'
                 event.dataTransfer.setData(TAB_DRAG_TYPE, item.id)
@@ -310,7 +322,7 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
                 event.preventDefault()
                 event.stopPropagation()
                 const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
-                if (tabId) {
+                if (tabId && tabId !== item.id) {
                   moveWorkspaceTab(tabId, group.id, 'center')
                   reorderWorkspaceTab(group.id, tabId, item.id)
                 }
@@ -321,12 +333,12 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
               <span
                 className="workspace-tab-close"
                 role="button"
-                title="Close tab"
+                title="Hide this surface (the thread is not deleted)"
                 onClick={(event) => {
                   event.stopPropagation()
                   closeWorkspaceTab(group.id, item.id)
                 }}
-              >×</span>
+              >−</span>
             </button>
           ))}
           <button
@@ -343,7 +355,7 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
         <div className="workspace-group-actions">
           <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>
           <button onClick={() => splitWorkspaceGroup(group.id, 'vertical')} title="Split top and bottom">↕</button>
-          <button onClick={() => closeWorkspaceGroup(group.id)} title="Close group">×</button>
+          <button onClick={() => closeWorkspaceGroup(group.id)} title="Close pane (threads are not deleted)">−</button>
         </div>
       </header>
 
@@ -360,7 +372,7 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
       </div>
 
       {menuOpen ? <div ref={menuRef}><AddMenu groupId={group.id} close={() => setMenuOpen(false)} /></div> : null}
-      {dropTarget ? <div className={`workspace-drop-target ${dropTarget}`}><span>{dropTarget === 'center' ? 'Add to group' : `Split ${dropTarget}`}</span></div> : null}
+      {dropTarget ? <div className={`workspace-drop-target ${dropTarget}`}><span>{dropTarget === 'center' ? 'Move into pane' : `Split ${dropTarget}`}</span></div> : null}
     </section>
   )
 }
@@ -436,11 +448,48 @@ function WorkspaceBar(): React.JSX.Element {
     if (name) saveCurrentLayoutTemplate(name)
   }
 
+  const rename = (viewId: string, current: string): void => {
+    const name = window.prompt('Name this workspace', current)?.trim()
+    if (name) renameWorkspaceView(viewId, name)
+  }
+
   return (
-    <div className="workspace-bar">
+    <div className="workspace-bar" onDoubleClick={(event) => {
+      if ((event.target as HTMLElement).closest('button, input')) return
+      void window.ralf.toggleMaximize()
+    }}>
       <div className="workspace-identity">
         <span className="workspace-project-dot" />
         <div><strong>{shortProject(workspace?.projectKey)}</strong><small>{workspace?.projectKey}</small></div>
+      </div>
+      <div className="workspace-view-tabs" role="tablist" aria-label="Project workspaces">
+        {workspace?.views.map((view) => (
+          <button
+            key={view.id}
+            className={`workspace-view-tab ${view.id === workspace.activeViewId ? 'active' : ''}`}
+            role="tab"
+            aria-selected={view.id === workspace.activeViewId}
+            title={`${view.name} — double-click to rename`}
+            onClick={() => activateWorkspaceView(view.id)}
+            onDoubleClick={() => rename(view.id, view.name)}
+          >
+            <span>{view.name}</span>
+            {workspace.views.length > 1 ? (
+              <span
+                className="workspace-view-close"
+                role="button"
+                title="Close workspace view (threads remain available)"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  closeWorkspaceView(view.id)
+                }}
+              >−</span>
+            ) : null}
+          </button>
+        ))}
+        <button className="workspace-view-add" title="New workspace view" onClick={createWorkspaceView}>
+          <PlusIcon size={13} />
+        </button>
       </div>
       <div className="workspace-bar-spacer" />
       <div className="workspace-format-control" ref={menuRef}>
@@ -468,7 +517,7 @@ function WorkspaceBar(): React.JSX.Element {
 
 function focusNeighbor(direction: 'left' | 'right' | 'up' | 'down'): void {
   const state = appStore.getState()
-  const currentId = state.projectWorkspace?.focusedGroupId
+  const currentId = state.projectWorkspace ? activeWorkspaceView(state.projectWorkspace).focusedGroupId : undefined
   if (!currentId) return
   const elements = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-group]'))
   const current = elements.find((item) => item.dataset.workspaceGroup === currentId)
@@ -501,7 +550,8 @@ export function Workspace(): React.JSX.Element {
       const state = appStore.getState()
       const current = state.projectWorkspace
       if (!current) return
-      const focused = findGroupForKeyboard(current.root, current.focusedGroupId)
+      const view = activeWorkspaceView(current)
+      const focused = findGroupForKeyboard(view.root, view.focusedGroupId)
       if (!focused) return
       if (event.key.toLowerCase() === 'd') {
         event.preventDefault()
@@ -520,10 +570,11 @@ export function Workspace(): React.JSX.Element {
   }, [])
 
   if (!workspace) return <div className="workspace-loading">Open a project to load its workspace.</div>
+  const view = activeWorkspaceView(workspace)
   return (
     <div className="workspace-shell">
       <WorkspaceBar />
-      <div className="workspace-canvas"><WorkspaceNodeView node={workspace.root} /></div>
+      <div className="workspace-canvas"><WorkspaceNodeView node={view.root} /></div>
     </div>
   )
 }

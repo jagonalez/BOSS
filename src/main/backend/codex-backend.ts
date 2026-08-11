@@ -431,8 +431,19 @@ export class CodexBackend implements Backend {
   }
 
   async modelsList(): Promise<ModelInfo[]> {
-    const result = await this.request('model/list', { limit: 100, includeHidden: false }) as { data?: Array<{ id: string; displayName?: string }> }
-    return (result.data ?? []).map((model) => ({ id: model.id, name: model.displayName, provider: 'openai' }))
+    const result = await this.request('model/list', { limit: 100, includeHidden: false }) as {
+      data?: Array<{
+        id: string
+        displayName?: string
+        supportedReasoningEfforts?: Array<{ reasoningEffort?: string }>
+      }>
+    }
+    return (result.data ?? []).map((model) => ({
+      id: model.id,
+      name: model.displayName,
+      provider: 'openai',
+      variants: model.supportedReasoningEfforts?.map((item) => item.reasoningEffort).filter((item): item is string => Boolean(item)) ?? []
+    }))
   }
 
   async modelSelect(_providerId: string, _modelId: string): Promise<void> {}

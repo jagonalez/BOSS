@@ -1,4 +1,4 @@
-import { dialog, ipcMain, shell, type WebContents } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { execFile } from 'node:child_process'
 import {
   IpcChannels,
@@ -48,6 +48,14 @@ export function registerIpc(deps: IpcDeps): void {
   deps.pty.onData = (id, data) => broadcast(IpcChannels.TerminalData, { id, data })
   deps.pty.onExit = (id, code) => broadcast(IpcChannels.TerminalExit, { id, code })
   deps.speech.onStatusChange = (status) => broadcast(IpcChannels.SpeechStatusChanged, status)
+
+  ipcMain.handle(IpcChannels.WindowToggleMaximize, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return false
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+    return win.isMaximized()
+  })
 
   ipcMain.handle(IpcChannels.ServerGetInfo, () => deps.server.info)
 
