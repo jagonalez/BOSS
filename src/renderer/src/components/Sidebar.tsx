@@ -19,7 +19,8 @@ import {
   toggleArchive
 } from '../lib/actions'
 import { ChatIcon, ChevronIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
-import { BackendBadge, BACKEND_SHORT_LABELS } from './BackendControls'
+import { BACKEND_SHORT_LABELS } from './BackendControls'
+import { IconButton } from './ui'
 
 interface CtxMenu {
   x: number
@@ -32,9 +33,9 @@ function SectionHeader({ label, onAdd, addTitle }: { label: string; onAdd: () =>
   return (
     <div className="section-head">
       <span className="section-label">{label}</span>
-      <button className="section-add" onClick={onAdd} title={addTitle}>
+      <IconButton size="small" className="section-add" onClick={onAdd} label={addTitle}>
         <PlusIcon size={12} />
-      </button>
+      </IconButton>
     </div>
   )
 }
@@ -57,24 +58,32 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
   const meta = sessionMetaFor(session.id)
   const busy = useStore(appStore, (s) => Boolean(s.sessionBusy[session.id]))
   const compacting = useStore(appStore, (s) => Boolean(s.compacting[session.id]))
+  const preferredModel = useStore(appStore, (s) => s.modelsBySession[session.id])
+  const model = preferredModel ?? session.model?.id
+  const backend = BACKEND_SHORT_LABELS[session.backendId ?? 'opencode']
+  const details = [
+    backend,
+    model?.split('/').pop(),
+    session.worktree?.status === 'active' ? session.worktree.branch : undefined,
+    session.worktree?.status === 'removed' ? 'Worktree cleaned' : undefined,
+    meta?.kind === 'fork' ? 'Fork' : undefined,
+    meta?.kind === 'side' ? 'Side chat' : undefined,
+    compacting ? 'Compacting' : busy ? 'Working' : undefined
+  ].filter(Boolean)
   return (
     <div
-      className={`item sub ${active ? 'active' : ''}`}
+      className={`item sub session-row ${active ? 'active' : ''}`}
       onClick={() => selectSession(session.id)}
       onContextMenu={(e) => onCtx(e, session)}
       title={meta?.forkedFrom ? `Forked from ${meta.forkedFrom.sessionId.slice(0, 12)}` : meta?.kind === 'side' ? 'Side chat' : session.title}
     >
-      <span className="icon">
-        <ChatIcon size={14} />
+      <span className={`session-state ${compacting ? 'compacting' : busy ? 'busy' : 'idle'}`} title={compacting ? 'Compacting' : busy ? 'Agent is working' : 'Idle'}>
+        <span />
       </span>
-      <span className="name">{session.title || 'Untitled'}</span>
-      <BackendBadge backendId={session.backendId} />
-      {meta?.kind === 'fork' ? <span className="badge fork">fork</span> : null}
-      {session.worktree?.status === 'active' ? <span className="badge worktree" title={session.worktree.branch}>worktree</span> : null}
-      {session.worktree?.status === 'removed' ? <span className="badge worktree removed">cleaned</span> : null}
-      {meta?.kind === 'side' ? <span className="badge side">side</span> : null}
-      {compacting ? <span className="badge compacting">compacting</span> : null}
-      {busy && !compacting ? <span className="spinner-sm" /> : null}
+      <span className="session-copy">
+        <span className="name">{session.title || 'Untitled'}</span>
+        <span className="session-details">{details.join(' · ')}</span>
+      </span>
       <span className="meta">{timeAgo(session.time?.updated)}</span>
     </div>
   )
@@ -244,7 +253,7 @@ export function Sidebar(): React.JSX.Element {
   if (sidebarHidden) {
     return (
       <div className="sidebar-collapsed">
-        <button title="Show sidebar" onClick={() => setHidden(false)}><PanelIcon size={15} /></button>
+        <IconButton label="Show sidebar" onClick={() => setHidden(false)}><PanelIcon size={15} /></IconButton>
       </div>
     )
   }
@@ -256,9 +265,9 @@ export function Sidebar(): React.JSX.Element {
         <div className="logo">
           <span>R.A.L.F.</span>
         </div>
-        <button className="sidebar-collapse" title="Hide sidebar" onClick={() => setHidden(true)}>
+        <IconButton className="sidebar-collapse" label="Hide sidebar" onClick={() => setHidden(true)}>
           <PanelIcon size={14} />
-        </button>
+        </IconButton>
       </div>
       <nav className="sidebar-primary" aria-label="Primary navigation">
         <button className={`sidebar-primary-item ${activePage === 'command-center' ? 'active' : ''}`} onClick={() => showPage('command-center')}>
@@ -293,7 +302,7 @@ export function Sidebar(): React.JSX.Element {
           return (
             <div key={path}>
               <div
-                className={`item dir ${isActive ? 'active' : ''}`}
+                className={`item dir project-row ${isActive ? 'active' : ''}`}
                 onClick={() => open(path)}
                 onContextMenu={(e) => onProjectCtx(e, path)}
                 title={path}
@@ -304,7 +313,10 @@ export function Sidebar(): React.JSX.Element {
                 <span className="icon">
                   <FolderIcon size={15} />
                 </span>
-                <span className="name">{projectName(path)}</span>
+                <span className="project-row-copy">
+                  <span className="name">{projectName(path)}</span>
+                  {isExpanded ? <span className="project-row-path">{path}</span> : null}
+                </span>
                 <span className="meta">{pathSessions.length || ''}</span>
               </div>
               {isExpanded &&
@@ -313,7 +325,7 @@ export function Sidebar(): React.JSX.Element {
                     <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
                   ))
                 ) : (
-                  <div style={{ padding: '4px 8px 4px 46px', fontSize: 12, color: 'var(--text-faint)' }}>
+                  <div className="sidebar-empty nested">
                     {isActive ? 'No chats yet' : 'Open project to load chats'}
                   </div>
                 ))}
@@ -321,7 +333,7 @@ export function Sidebar(): React.JSX.Element {
           )
         })}
         {projectPaths.length === 0 && (
-          <div style={{ padding: '4px 8px', fontSize: 12, color: 'var(--text-faint)' }}>No projects yet</div>
+          <div className="sidebar-empty">No projects yet</div>
         )}
         <div className="item" onClick={() => void openProjectFolder()}>
           <span className="icon">
@@ -339,7 +351,7 @@ export function Sidebar(): React.JSX.Element {
           <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
         ))}
         {looseChats.length === 0 && (
-          <div style={{ padding: '4px 8px', fontSize: 12, color: 'var(--text-faint)' }}>No chats yet</div>
+          <div className="sidebar-empty">No chats yet</div>
         )}
       </div>
 
@@ -362,9 +374,9 @@ export function Sidebar(): React.JSX.Element {
       <div className="footer">
         <span className="right" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 11 }}>{projectName(activePath) || ''}</span>
-          <button className="footer-gear" onClick={() => appStore.setState({ settingsOpen: true })} title="Settings">
+          <IconButton size="small" className="footer-gear" onClick={() => appStore.setState({ settingsOpen: true })} label="Settings">
             <GearIcon size={18} />
-          </button>
+          </IconButton>
         </span>
       </div>
 
