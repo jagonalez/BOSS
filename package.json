@@ -63,6 +63,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "resources/sites-mcp",
+        "to": "sites-mcp",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {

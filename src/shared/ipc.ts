@@ -69,6 +69,25 @@ export interface ProjectInfo {
   healthy: boolean
 }
 
+export interface SiteInfo {
+  id: string
+  name: string
+  folder: string
+  localUrl: string
+  port: number
+  scriptName: string
+  deployedUrl?: string
+  deploymentAccountId?: string
+  lastPublishedAt: number
+  status: 'local' | 'deploying' | 'unpublishing' | 'live' | 'error'
+  error?: string
+}
+
+export interface CloudflareSettings {
+  configured: boolean
+  accountId?: string
+}
+
 export interface TerminalDataEvent {
   id: string
   data: string
@@ -145,7 +164,17 @@ export const IpcChannels = {
   AsrTranscribe: 'asr:transcribe',
   BackendRequest: 'backend:request',
   BackendInfo: 'backend:info',
-  WindowToggleMaximize: 'window:toggle-maximize'
+  WindowToggleMaximize: 'window:toggle-maximize',
+  SitesList: 'sites:list',
+  SitesPublish: 'sites:publish',
+  SitesRemove: 'sites:remove',
+  SitesDeploy: 'sites:deploy',
+  SitesUnpublish: 'sites:unpublish',
+  SitesChooseFolder: 'sites:choose-folder',
+  SitesChanged: 'sites:changed',
+  SitesCfGet: 'sites:cf:get',
+  SitesCfSet: 'sites:cf:set',
+  SitesCfClear: 'sites:cf:clear'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

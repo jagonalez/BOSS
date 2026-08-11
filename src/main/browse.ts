@@ -64,8 +64,11 @@ export class BrowseManager {
   }
 
   navigate(id: string, url: string): void {
-    const entry = this.views.get(id)
-    if (!entry) return
+    let entry = this.views.get(id)
+    if (!entry) {
+      entry = this.createView(id)
+      this.views.set(id, entry)
+    }
     let parsed: URL
     try {
       parsed = new URL(url)
@@ -73,6 +76,7 @@ export class BrowseManager {
       return
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
+    entry.loadedOnce = true
     void entry.view.webContents.loadURL(url)
   }
 
