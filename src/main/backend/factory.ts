@@ -1,6 +1,9 @@
 import type { Backend } from './backend'
 import { OpenCodeBackend } from './opencode-backend'
 import { PiBackend } from './pi-backend'
+import { CodexBackend } from './codex-backend'
+import { ClaudeBackend } from './claude-backend'
+import type { BackendId } from '@shared/backend'
 import type { OpenCodeServer } from '../opencode-server'
 import type { ApiClient } from '../api-client'
 import type { EventStream } from '../event-stream'
@@ -13,14 +16,24 @@ export function createPiBackend(cwd?: string): Backend {
   return new PiBackend(cwd)
 }
 
-export type BackendEngine = 'opencode' | 'pi'
+export function createCodexBackend(cwd?: string): Backend {
+  return new CodexBackend(cwd)
+}
 
-export function createBackend(engine: BackendEngine, deps: { server: OpenCodeServer; api: ApiClient; events: EventStream; cwd?: string }): Backend {
+export function createClaudeBackend(cwd?: string): Backend {
+  return new ClaudeBackend(cwd)
+}
+
+export function createBackend(engine: BackendId, deps: { server: OpenCodeServer; api: ApiClient; events: EventStream; cwd?: string }): Backend {
   switch (engine) {
     case 'opencode':
       return createOpenCodeBackend(deps.server, deps.api, deps.events)
     case 'pi':
       return createPiBackend(deps.cwd)
+    case 'codex':
+      return createCodexBackend(deps.cwd)
+    case 'claude':
+      return createClaudeBackend(deps.cwd)
     default:
       throw new Error(`Unsupported backend ${engine}`)
   }

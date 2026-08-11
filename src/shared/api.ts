@@ -17,6 +17,7 @@ import type {
   TtsSpeakRequest
 } from './ipc'
 import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
+import type { BackendRequest } from './backend'
 
 export interface RalfApi {
   platform(): string
@@ -72,6 +73,5 @@ export interface RalfApi {
 
   asrTranscribe(req: AsrTranscribeRequest): Promise<AsrTranscribeResult>
 
-  getBackendEngine(): Promise<'opencode' | 'pi'>
-  setBackendEngine(engine: 'opencode' | 'pi'): Promise<'opencode' | 'pi'>
+  backendRequest(req: BackendRequest): Promise<unknown>
 }

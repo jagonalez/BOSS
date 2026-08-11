@@ -1,4 +1,4 @@
-export type BackendId = 'opencode' | 'pi' | 'claude'
+import type { BackendId, BackendMessageOptions } from '@shared/backend'
 
 export interface BackendInfo {
   id: BackendId
@@ -64,7 +64,7 @@ export interface Backend {
   sendMessage(
     sessionId: string,
     parts: unknown[],
-    opts?: { model?: { providerID: string; modelID: string; variant?: string }; agent?: string }
+    opts?: BackendMessageOptions
   ): Promise<void>
   abort(sessionId: string): Promise<void>
 
@@ -89,4 +89,7 @@ export interface Backend {
   fork(sessionId: string, messageId?: string): Promise<SessionInfo>
   revert(sessionId: string, messageId: string): Promise<void>
   unrevert(sessionId: string): Promise<void>
+
+  /** Optional native compaction. Implementations may safely no-op. */
+  compact(sessionId: string, model?: { providerID: string; modelID: string }): Promise<void>
 }

@@ -3,6 +3,7 @@ import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
+import type { BackendId } from '@shared/backend'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
 import {
@@ -122,9 +123,9 @@ export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, session
   if (kind === 'thread' && sessionId) selectSession(sessionId, false)
 }
 
-export async function createThreadInGroup(groupId: string): Promise<void> {
+export async function createThreadInGroup(groupId: string, backendId: BackendId = appStore.getState().engine): Promise<void> {
   try {
-    const session = await OpenCode.createSession()
+    const session = await OpenCode.createSession(undefined, backendId)
     upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
     await refreshSessions()
     addWorkspaceTab(groupId, 'thread', session.id)
@@ -338,7 +339,7 @@ export async function runThreadReview(sessionID: string, target: string): Promis
     }
   ]
   try {
-    await OpenCode.sendMessageAsync(sessionID, parts, { model: modelKey, agent })
+    await OpenCode.sendMessageAsync(sessionID, parts, { model: modelKey, agent, mode: cur.mode })
   } catch (err) {
     setSessionError(sessionID, errorSummary(err))
   }
@@ -384,8 +385,22 @@ export async function refreshProjects(): Promise<void> {
   }
 }
 
-export async function refreshProviders(): Promise<void> {
+export async function refreshProviders(sessionId?: string): Promise<void> {
+  const state = appStore.getState()
+  const id = sessionId ?? state.activeSessionId ?? undefined
+  const backendId = state.sessions.find((session) => session.id === id)?.backendId ?? 'opencode'
   try {
+    if (backendId !== 'opencode') {
+      const models = await OpenCode.backendModels(id, backendId)
+      const grouped = new Map<string, Array<{ id: string; name?: string }>>()
+      for (const model of models) {
+        const provider = model.provider || backendId
+        grouped.set(provider, [...(grouped.get(provider) ?? []), { id: model.id, name: model.name }])
+      }
+      appStore.setState({ providers: [...grouped].map(([provider, entries]) => ({ id: provider, name: provider, models: entries })) })
+      resolveDefaultModel()
+      return
+    }
     const { all, connected } = await OpenCode.providers()
     const connectedSet = new Set(connected ?? [])
     const filtered = (all ?? []).filter((p) => connectedSet.has(p.id))
@@ -442,24 +457,21 @@ export function loadMode(): void {
 }
 
 export async function loadEngine(): Promise<void> {
-  // Main is the source of truth for the running engine (RALF_ENGINE / engine switch).
   try {
-    const engine = await window.ralf.getBackendEngine()
-    if (engine === 'opencode' || engine === 'pi') {
-      appStore.setState({ engine })
-      try {
-        localStorage.setItem('ralf.engine', engine)
-      } catch {
-        /* ignore */
-      }
-      return
-    }
+    const backends = await OpenCode.listBackends()
+    const saved = localStorage.getItem('ralf.engine') as BackendId | null
+    const engine = backends.some((backend) => backend.id === saved && backend.available)
+      ? saved!
+      : backends.find((backend) => backend.available)?.id ?? 'opencode'
+    appStore.setState({ backends, engine })
+    localStorage.setItem('ralf.engine', engine)
+    return
   } catch {
     /* main unreachable; fall back to saved preference below */
   }
   try {
-    const saved = localStorage.getItem('ralf.engine')
-    if (saved === 'opencode' || saved === 'pi') appStore.setState({ engine: saved })
+    const saved = localStorage.getItem('ralf.engine') as BackendId | null
+    if (saved && ['opencode', 'pi', 'codex', 'claude'].includes(saved)) appStore.setState({ engine: saved })
   } catch {
     /* ignore */
   }
@@ -474,13 +486,39 @@ export function setMode(id: 'auto' | 'ask' | 'plan'): void {
   }
 }
 
-export async function setEngine(id: 'opencode' | 'pi'): Promise<void> {
+export async function setEngine(id: BackendId): Promise<void> {
   try {
-    await window.ralf.setBackendEngine(id)
     appStore.setState({ engine: id })
     localStorage.setItem('ralf.engine', id)
   } catch {
     /* ignore */
+  }
+}
+
+export async function cloneThreadToBackend(threadId: string, backendId: BackendId): Promise<void> {
+  const source = appStore.getState().sessions.find((session) => session.id === threadId)
+  if (!source || (source.backendId ?? 'opencode') === backendId) return
+  try {
+    const session = await OpenCode.cloneToBackend(threadId, backendId)
+    upsertSessionMeta(session.id, {
+      kind: 'fork',
+      projectPath: appStore.getState().projectPath,
+      forkedFrom: { sessionId: threadId }
+    })
+    await refreshSessions()
+    if (!openSessionInWorkspace(session.id)) selectSession(session.id)
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+  }
+}
+
+export async function relayThreadToThread(sourceThreadId: string, targetThreadId: string): Promise<void> {
+  try {
+    await OpenCode.relayToThread(sourceThreadId, targetThreadId)
+    await refreshSessions()
+    selectSession(targetThreadId)
+  } catch (error) {
+    setSessionError(sourceThreadId, errorSummary(error))
   }
 }
 
@@ -549,8 +587,9 @@ export function pushHistory(sessionId: string, text: string): void {
 
 export function resolveDefaultModel(): void {
   const s = appStore.getState()
-  if (s.model) return
   const valid = (id: string): boolean => s.providers.some((p) => providerModels(p).some((m) => m.id === id))
+  if (s.model && valid(s.model)) return
+  if (s.model) appStore.setState({ model: null, variant: null })
   try {
     const saved = localStorage.getItem('ralf.model')
     if (saved && valid(saved)) {
@@ -671,6 +710,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
   }
   if (cur.activeSessionId === id) {
     appStore.setState({ activePage: inProject ? 'project' : 'chat' })
+    void refreshProviders(id)
     return
   }
   if (session?.model?.id) setModel(session.model.id)
@@ -683,10 +723,11 @@ export function selectSession(id: string, bindWorkspace = true): void {
   void loadMessages(id)
   void loadTodos(id)
   void refreshDiff(id)
+  void refreshProviders(id)
 }
 export async function newSession(): Promise<void> {
   try {
-    const session = await OpenCode.createSession()
+    const session = await OpenCode.createSession(undefined, appStore.getState().engine)
     upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
     await refreshSessions()
     selectSession(session.id)
@@ -863,7 +904,16 @@ export async function runCommand(sessionID: string, command: string, args: strin
   const modelKey = cur.model ? modelKeyWithVariant(cur.model) : undefined
   const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
-    await OpenCode.runCommand(sessionID, command, args, { agent, model: modelKey })
+    const backendId = cur.sessions.find((session) => session.id === sessionID)?.backendId ?? 'opencode'
+    if (backendId === 'opencode') {
+      await OpenCode.runCommand(sessionID, command, args, { agent, model: modelKey })
+    } else {
+      await OpenCode.sendMessageAsync(sessionID, [{ type: 'text', text: `/${command}${args ? ` ${args}` : ''}` }], {
+        model: modelKey,
+        agent,
+        mode: cur.mode
+      })
+    }
   } catch (err) {
     setSessionError(sessionID, errorSummary(err))
   }
@@ -919,13 +969,14 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   try {
     await OpenCode.sendMessageAsync(sessionID, parts, {
       model: modelKey,
-      agent
+      agent,
+      mode: cur.mode
     })
   } catch (err) {
     const raw = String((err as Error).message ?? err)
     const isNetwork = /-> 0:|fetch failed|ECONNREFUSED/i.test(raw)
     const msg = isNetwork
-      ? 'Couldn’t reach the opencode server — it may be restarting. Your message was not sent; please try again.'
+      ? 'Couldn’t reach the selected backend. Your message was not sent; please try again.'
       : errorSummary(err)
     const providerID = modelKey?.providerID
     const noAccess = /no access|subscription|upgrade|credits|401|403/i.test(msg)
@@ -955,7 +1006,8 @@ export function setSessionError(sessionID: string, msg: string): void {
 export async function compactSession(sessionID: string): Promise<void> {
   const cur = appStore.getState()
   const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
-  if (!modelKey) {
+  const backendId = cur.sessions.find((session) => session.id === sessionID)?.backendId ?? 'opencode'
+  if (!modelKey && backendId === 'opencode') {
     setSessionError(sessionID, 'Select a model first to compact the session.')
     return
   }

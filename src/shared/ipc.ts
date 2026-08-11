@@ -143,8 +143,7 @@ export const IpcChannels = {
   TtsSpeak: 'tts:speak',
   SpeechStatusChanged: 'speech:status-changed',
   AsrTranscribe: 'asr:transcribe',
-  BackendGetEngine: 'backend:get-engine',
-  BackendSetEngine: 'backend:set-engine',
+  BackendRequest: 'backend:request',
   BackendInfo: 'backend:info'
 } as const
 

@@ -8,6 +8,7 @@ import { MessageText } from '../lib/text'
 import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, SendIcon, StopIcon, MicIcon, MicOffIcon, VolumeIcon } from './icons'
 import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
+import { BackendControls, BACKEND_SHORT_LABELS } from './BackendControls'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -319,7 +320,7 @@ function MessageView({
         </button>
       ) : null}
       <div className="msg-role">
-        <span>{isUser ? 'You' : 'opencode'}</span>
+        <span>{isUser ? 'You' : 'Agent'}</span>
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
       </div>
       <MessageError error={item.info.error} />
@@ -341,7 +342,7 @@ function MessageView({
   )
 }
 
-function ModePicker(): React.JSX.Element {
+function ModePicker({ backendId }: { backendId: 'opencode' | 'pi' | 'codex' | 'claude' }): React.JSX.Element {
   const mode = useStore(appStore, (s) => s.mode)
   const agent = useStore(appStore, (s) => s.agent)
   const agents = useStore(appStore, (s) => s.agents)
@@ -357,7 +358,7 @@ function ModePicker(): React.JSX.Element {
   }, [])
 
   const INTERNAL_AGENTS = new Set(['build', 'plan', 'compaction', 'title', 'summary'])
-  const otherAgents = agents.filter((a) => a.id && !INTERNAL_AGENTS.has(a.id))
+  const otherAgents = backendId === 'opencode' ? agents.filter((a) => a.id && !INTERNAL_AGENTS.has(a.id)) : []
   const label =
     mode === 'auto' ? 'Auto' : mode === 'plan' ? 'Plan' : agent && agent !== 'build' ? agent : 'Ask'
 
@@ -367,7 +368,7 @@ function ModePicker(): React.JSX.Element {
         confirm: {
           title: 'Enable auto-approve?',
           message:
-            'Auto mode auto-approves every permission (file edits, shell commands, web access, etc.) without asking. opencode may run destructive commands or modify any file without confirmation. Use with caution.',
+            'Auto mode allows the selected backend to approve supported actions without asking. An agent may run destructive commands or modify files. Use with caution.',
           confirmLabel: 'Enable Auto',
           destructive: true,
           action: () => {
@@ -389,6 +390,16 @@ function ModePicker(): React.JSX.Element {
     setOpen(false)
   }
 
+  if (backendId === 'pi') {
+    return (
+      <div className="model-picker">
+        <button className="model-picker-btn" disabled title="Pi RPC currently uses Pi's configured tool policy; Ask and Plan are not enforced by R.A.L.F.">
+          <span className="model-picker-name">Pi policy</span>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="model-picker" ref={ref}>
       <button className="model-picker-btn" onClick={() => setOpen((o) => !o)} title="Mode / agent">
@@ -403,11 +414,11 @@ function ModePicker(): React.JSX.Element {
             <div className="model-section-title">Mode</div>
             <button className={`model-row ${mode === 'auto' ? 'active' : ''}`} onClick={() => pickMode('auto')}>
               <span className="model-row-name">Auto</span>
-              <span className="model-row-desc">auto-approve all permissions</span>
+              <span className="model-row-desc">run without interactive approval prompts</span>
             </button>
             <button className={`model-row ${mode === 'ask' && agent === 'build' ? 'active' : ''}`} onClick={() => pickMode('ask')}>
               <span className="model-row-name">Ask</span>
-              <span className="model-row-desc">prompt before sensitive actions</span>
+              <span className="model-row-desc">{backendId === 'claude' ? 'deny actions that need an interactive prompt' : 'prompt before sensitive actions'}</span>
             </button>
             <button className={`model-row ${mode === 'plan' ? 'active' : ''}`} onClick={() => pickMode('plan')}>
               <span className="model-row-name">Plan</span>
@@ -491,7 +502,12 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const hasSession = useStore(appStore, (s) => Boolean(sessionId ?? s.activeSessionId))
   const effectiveSession = useStore(appStore, (s) => sessionId ?? s.activeSessionId)
   const sessions = useStore(appStore, (s) => s.sessions)
+  const backends = useStore(appStore, (s) => s.backends)
+  const defaultBackendId = useStore(appStore, (s) => s.engine)
   const activeSession = effectiveSession ? sessions.find((s) => s.id === effectiveSession) : undefined
+  const backendId = activeSession?.backendId ?? defaultBackendId
+  const backendLabel = BACKEND_SHORT_LABELS[backendId]
+  const supportsAttachments = backends.find((backend) => backend.id === backendId)?.capabilities.images ?? backendId === 'opencode'
   const composerEpoch = useStore(appStore, (s) => s.composerEpoch)
   const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? [] : []))
   const [text, setText] = useState('')
@@ -592,7 +608,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const addFiles = async (files: File[]): Promise<void> => {
-    if (!effectiveSession || files.length === 0) return
+    if (!effectiveSession || !supportsAttachments || files.length === 0) return
     const loaded: Attachment[] = []
     for (const f of files) {
       if (f.size > 25 * 1024 * 1024) continue
@@ -607,6 +623,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const onPaste = (e: React.ClipboardEvent): void => {
+    if (!supportsAttachments) return
     const items = e.clipboardData?.items
     if (!items) return
     const files = Array.from(items)
@@ -621,6 +638,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
 
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault()
+    if (!supportsAttachments) return
     if (e.dataTransfer?.files?.length) void addFiles(Array.from(e.dataTransfer.files))
   }
 
@@ -800,7 +818,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         <div className="composer-input">
           <textarea
             ref={textareaRef}
-            placeholder={hasSession ? 'Ask opencode…' : 'Start a chat to ask opencode'}
+            placeholder={hasSession ? `Ask ${backendLabel}…` : 'Start a thread'}
             value={text}
             onChange={(e) => {
               setText(e.target.value)
@@ -837,11 +855,17 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         </div>
         <div className="composer-controls">
           <div className="row">
-            <button className="composer-attach" onClick={() => fileInputRef.current?.click()} title="Attach file or image">
+            <button
+              className="composer-attach"
+              disabled={!supportsAttachments}
+              onClick={() => fileInputRef.current?.click()}
+              title={supportsAttachments ? 'Attach file or image' : `${backendLabel} attachments are not wired into R.A.L.F. yet`}
+            >
               <AttachmentIcon size={16} />
             </button>
             <MicToggle />
-            <ModePicker />
+            {effectiveSession ? <BackendControls sessionId={effectiveSession} /> : null}
+            <ModePicker backendId={backendId} />
             <ModelPicker onPick={onModelChange} />
             <EffortPicker />
             {hasSession && effectiveSession && !streaming ? (
@@ -989,6 +1013,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
+  const backendId = useStore(appStore, (s) => s.sessions.find((session) => session.id === effectiveId)?.backendId ?? 'opencode')
   const projects = useStore(appStore, (s) => s.projects)
   const revertedList = useStore(appStore, (s) => (effectiveId ? s.reverted[effectiveId] : undefined))
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1130,7 +1155,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
     return (
       <div className="chat">
         <div className="empty">
-          <img className="hero-mark" src="./icon.png" alt="Ralf" />
+          <img className="hero-mark" src="./icon.png" alt="R.A.L.F." />
           <h2>How can I help you today?</h2>
           <div className="launcher-composer">
             <div className="launcher-project-row">
@@ -1191,7 +1216,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   return (
     <div className="chat">
-      {revertedIds.size > 0 && (
+      {backendId === 'opencode' && revertedIds.size > 0 && (
         <div className="reverted-banner">
           <span>{revertedIds.size} message{revertedIds.size === 1 ? '' : 's'} reverted — file changes undone.</span>
           <button className="btn-ghost" onClick={() => effectiveId && void unrevertSession(effectiveId)}>
@@ -1226,34 +1251,38 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
       </div>
       {msgCtx && (
         <div ref={msgCtxRef} className="ctx-menu" style={{ left: Math.min(msgCtx.x, window.innerWidth - 220), top: msgCtx.y }}>
-          <button
-            className="ctx-item"
-            onClick={() => {
-              if (effectiveId) {
-                appStore.setState({
-                  confirm: {
-                    title: 'Revert message?',
-                    message: 'This removes this message and everything after it.',
-                    confirmLabel: 'Revert',
-                    destructive: true,
-                    action: () => void revertMessage(effectiveId, msgCtx.message.info.id)
+          {backendId === 'opencode' ? (
+            <>
+              <button
+                className="ctx-item"
+                onClick={() => {
+                  if (effectiveId) {
+                    appStore.setState({
+                      confirm: {
+                        title: 'Revert message?',
+                        message: 'This removes this message and everything after it.',
+                        confirmLabel: 'Revert',
+                        destructive: true,
+                        action: () => void revertMessage(effectiveId, msgCtx.message.info.id)
+                      }
+                    })
                   }
-                })
-              }
-              setMsgCtx(null)
-            }}
-          >
-            Revert
-          </button>
-          <button
-            className="ctx-item"
-            onClick={() => {
-              if (effectiveId) void editMessage(effectiveId, msgCtx.message.info.id, menuText)
-              setMsgCtx(null)
-            }}
-          >
-            Rewrite
-          </button>
+                  setMsgCtx(null)
+                }}
+              >
+                Revert
+              </button>
+              <button
+                className="ctx-item"
+                onClick={() => {
+                  if (effectiveId) void editMessage(effectiveId, msgCtx.message.info.id, menuText)
+                  setMsgCtx(null)
+                }}
+              >
+                Rewrite
+              </button>
+            </>
+          ) : null}
           <button
             className="ctx-item"
             onClick={() => {
@@ -1261,7 +1290,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
               setMsgCtx(null)
             }}
           >
-            Fork from here
+            {backendId === 'opencode' ? 'Fork from here' : 'Fork thread'}
           </button>
           <button
             className="ctx-item"
