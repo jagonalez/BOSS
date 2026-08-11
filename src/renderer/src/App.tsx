@@ -6,6 +6,7 @@ import { ChatView } from './components/ChatView'
 import { Footer } from './components/Footer'
 import { Workspace } from './components/Workspace'
 import { CommandCenter, EmptyProductPage } from './components/CommandCenter'
+import { SitesPage } from './components/SitesPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme } from './lib/themes'
 import { CommitDialog } from './components/CommitDialog'
@@ -220,6 +221,16 @@ export function App(): React.JSX.Element {
 
     const offSpeech = window.ralf.onSpeechStatusChanged(applySpeechStatus)
 
+    const offSites = window.ralf.onSitesChanged((sites) => appStore.setState({ sites }))
+    void window.ralf
+      .sitesCfGet()
+      .then((cf) => appStore.setState({ cloudflare: cf }))
+      .catch(() => {})
+    void window.ralf
+      .sitesList()
+      .then((sites) => appStore.setState({ sites }))
+      .catch(() => {})
+
     void window.ralf.ttsStatus().then((st) => applySpeechStatus({ tts: st, asr: appStore.getState().asr }))
 
     void window.ralf
@@ -250,6 +261,7 @@ export function App(): React.JSX.Element {
       offStatus()
       offProgress()
       offSpeech()
+      offSites()
       window.clearTimeout(refreshTimer)
       void window.ralf.unsubscribeEvents()
     }
@@ -285,7 +297,7 @@ export function App(): React.JSX.Element {
   const page = (() => {
     if (activePage === 'command-center') return <CommandCenter />
     if (activePage === 'automations') return <EmptyProductPage title="Automations" description="Scheduled and recurring agent work will live here." />
-    if (activePage === 'sites') return <EmptyProductPage title="Sites" description="Published project surfaces will live here." />
+    if (activePage === 'sites') return <SitesPage />
     if (activePage === 'project') return <Workspace />
     return (
       <>

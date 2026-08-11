@@ -18,11 +18,13 @@ import type { BackendDescriptor, BackendId, BackendModeId } from '@shared/backen
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type {
   BrowseNavigationState,
+  CloudflareSettings,
   ComputerUsePermissions,
   ComputerUseStatus,
   OptionalComponentId,
   OptionalComponentInfo,
-  OptionalDownloadEvent
+  OptionalDownloadEvent,
+  SiteInfo
 } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, LayoutTemplate, ProjectWorkspace } from '@shared/workspace'
@@ -103,6 +105,10 @@ export interface AppState {
   asr: AsrStatus
   ttsVoice: string
   speakAloud: boolean
+  sites: SiteInfo[]
+  cloudflare: CloudflareSettings
+  siteDeploying: Record<string, boolean>
+  siteUnpublishing: Record<string, boolean>
 }
 
 export const initialBrowseState: BrowseNavigationState = {
@@ -177,7 +183,11 @@ export const initialState: AppState = {
   tts: { available: false, ready: false, speaking: false },
   asr: { available: false, listening: false },
   ttsVoice: 'af_heart',
-  speakAloud: false
+  speakAloud: false,
+  sites: [],
+  cloudflare: { configured: false },
+  siteDeploying: {},
+  siteUnpublishing: {}
 }
 
 export const appStore = new Store<AppState>(initialState)

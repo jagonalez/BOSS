@@ -71,7 +71,18 @@ const ralf: RalfApi = {
 
   asrTranscribe: (req) => ipcRenderer.invoke(IpcChannels.AsrTranscribe, req),
 
-  backendRequest: (req) => ipcRenderer.invoke(IpcChannels.BackendRequest, req)
+  backendRequest: (req) => ipcRenderer.invoke(IpcChannels.BackendRequest, req),
+
+  sitesList: () => ipcRenderer.invoke(IpcChannels.SitesList),
+  sitesPublish: (folder: string, name?: string) => ipcRenderer.invoke(IpcChannels.SitesPublish, { folder, name }),
+  sitesRemove: (id: string) => ipcRenderer.invoke(IpcChannels.SitesRemove, id),
+  sitesDeploy: (id: string) => ipcRenderer.invoke(IpcChannels.SitesDeploy, id),
+  sitesUnpublish: (id: string) => ipcRenderer.invoke(IpcChannels.SitesUnpublish, id),
+  sitesChooseFolder: () => ipcRenderer.invoke(IpcChannels.SitesChooseFolder),
+  onSitesChanged: (cb) => subscribe(IpcChannels.SitesChanged, cb),
+  sitesCfGet: () => ipcRenderer.invoke(IpcChannels.SitesCfGet),
+  sitesCfSet: (token: string, accountId: string) => ipcRenderer.invoke(IpcChannels.SitesCfSet, { token, accountId }),
+  sitesCfClear: () => ipcRenderer.invoke(IpcChannels.SitesCfClear)
 }
 
 contextBridge.exposeInMainWorld('ralf', ralf)

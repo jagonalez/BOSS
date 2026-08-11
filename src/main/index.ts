@@ -9,6 +9,7 @@ import { OptionalDeps } from './optional-deps'
 import { ComputerUse } from './computer-use'
 import { PTYManager } from './pty-manager'
 import { SpeechManager } from './speech'
+import { SitesManager } from './sites'
 import { registerIpc, type IpcDeps } from './ipc'
 import { loadState } from './state-store'
 import { BackendManager } from './backend/manager'
@@ -42,12 +43,13 @@ const computerUse = new ComputerUse()
 computerUse.bind(openCodeBackend)
 const pty = new PTYManager()
 const speech = new SpeechManager()
+const sites = new SitesManager(() => backendMgr.currentProject || server.projectPath)
 
 let browse: BrowseManager | null = null
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites }
 }
 
 function registerIpcOnce(): void {
@@ -155,16 +157,18 @@ app.whenReady().then(() => {
   loadRenderer()
   const saved = loadState()
   if (saved.projectPath) server.setInitialCwd(saved.projectPath)
-  void threadBus.start()
-    .then((connection) => {
+  void (async () => {
+    await sites.start()
+    try {
+      const connection = await threadBus.start()
       server.configureThreadBus(connection)
       backendMgr.configureThreadBus(connection)
-      return backendMgr.start(saved.projectPath)
-    })
-    .catch((error) => {
+    } catch (error) {
       process.stderr.write(`[thread-bus] ${error instanceof Error ? error.message : String(error)}\n`)
-      return backendMgr.start(saved.projectPath)
-    })
+    }
+    await backendMgr.start(saved.projectPath)
+    sites.bind(openCodeBackend)
+  })()
 })
 
 app.on('activate', () => {
@@ -182,5 +186,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   void backendMgr.stop()
   void computerUse.dispose()
+  void sites.stop()
   speech.dispose()
 })
