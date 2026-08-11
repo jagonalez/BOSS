@@ -43,7 +43,7 @@ ipcMain.handle(IpcChannels.BackendSetEngine, async (_e, engine: 'opencode' | 'pi
 })
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
-const computerUse = new ComputerUse(join(mainDir, 'computer-use-helper.js'))
+const computerUse = new ComputerUse()
 computerUse.bind(backendMgr.current)
 const pty = new PTYManager()
 const speech = new SpeechManager()

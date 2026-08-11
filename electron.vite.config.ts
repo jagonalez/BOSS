@@ -8,8 +8,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         input: {
-          index: resolve(__dirname, 'src/main/index.ts'),
-          'computer-use-helper': resolve(__dirname, 'src/main/computer-use-helper.ts')
+          index: resolve(__dirname, 'src/main/index.ts')
         }
       }
     },

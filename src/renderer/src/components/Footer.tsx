@@ -1,6 +1,6 @@
 import React from 'react'
 import { useStore, appStore } from '../state/AppState'
-import { toggleComputerUse } from '../lib/actions'
+import { refreshComputerUsePermissions, toggleComputerUse } from '../lib/actions'
 
 export function Footer(): React.JSX.Element {
   const computerUse = useStore(appStore, (s) => s.computerUse)
@@ -10,17 +10,6 @@ export function Footer(): React.JSX.Element {
   if (perms.available) {
     if (!perms.accessibility) missing.push({ id: 'accessibility', label: 'Accessibility' })
     if (!perms.screenRecording) missing.push({ id: 'screenRecording', label: 'Screen Recording' })
-  }
-
-  async function fixPermissions(): Promise<void> {
-    for (const m of missing) {
-      await window.ralf.requestComputerUsePermission(m.id).catch(() => {})
-    }
-    const next = await window.ralf.computerUsePermissions().catch(() => perms)
-    appStore.setState({ computerUsePerms: next })
-    if (!next.accessibility || !next.screenRecording) {
-      await window.ralf.openPrivacyPane(next.accessibility ? 'screenRecording' : 'accessibility').catch(() => {})
-    }
   }
 
   return (
@@ -41,13 +30,13 @@ export function Footer(): React.JSX.Element {
           </span>
         ) : computerUse.enabled && perms.available && missing.length > 0 ? (
           <>
-            <span className="perm-hint warn" title="Grant these in System Settings → Privacy & Security">
+            <span className="perm-hint warn" title="Grant these to CuaDriver in System Settings → Privacy & Security">
               needs {missing.map((m) => m.label).join(' + ')} permission
             </span>
             <button
               className="btn-ghost"
-              onClick={() => void fixPermissions()}
-              title="Prompt macOS to grant permission"
+              onClick={() => void refreshComputerUsePermissions(true)}
+              title="Prompt macOS to grant permission to CuaDriver"
             >
               Fix
             </button>
