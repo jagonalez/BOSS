@@ -38,11 +38,13 @@ const backend = backendMgr.current
 ipcMain.handle(IpcChannels.BackendGetEngine, () => backendMgr.engineName)
 ipcMain.handle(IpcChannels.BackendSetEngine, async (_e, engine: 'opencode' | 'pi') => {
   await backendMgr.setEngine(engine, server.projectPath)
+  computerUse.bind(backendMgr.current)
   return backendMgr.engineName
 })
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
-const computerUse = new ComputerUse(api, join(mainDir, 'computer-use-helper.js'))
+const computerUse = new ComputerUse(join(mainDir, 'computer-use-helper.js'))
+computerUse.bind(backendMgr.current)
 const pty = new PTYManager()
 const speech = new SpeechManager()
 

@@ -18,6 +18,7 @@ import type {
 } from '@shared/opencode'
 import type {
   BrowseNavigationState,
+  ComputerUsePermissions,
   ComputerUseStatus,
   OptionalComponentId,
   OptionalComponentInfo,
@@ -68,6 +69,7 @@ export interface AppState {
   optional: OptionalComponentInfo[]
   optionalProgress: Partial<Record<OptionalComponentId, OptionalDownloadEvent>>
   computerUse: ComputerUseStatus
+  computerUsePerms: ComputerUsePermissions
   streaming: boolean
   streamingLocked: boolean
   sessionBusy: Record<string, boolean>
@@ -131,7 +133,8 @@ export const initialState: AppState = {
   browse: {},
   optional: [],
   optionalProgress: {},
-  computerUse: { enabled: false, running: false },
+  computerUse: { supported: false, enabled: false, running: false },
+  computerUsePerms: { available: false, accessibility: false, screenRecording: false },
   streaming: false,
   streamingLocked: false,
   sessionBusy: {},
