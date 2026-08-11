@@ -75,8 +75,8 @@ export class OpenCodeBackend implements Backend {
     return res.body as SessionInfo[]
   }
 
-  async sessionCreate(title?: string): Promise<SessionInfo> {
-    const res = await this.api.request({ method: 'POST', path: '/session', body: title ? { title } : {} })
+  async sessionCreate(title?: string, directory?: string): Promise<SessionInfo> {
+    const res = await this.api.request({ method: 'POST', path: '/session', body: title ? { title } : {}, directory })
     return res.body as SessionInfo
   }
 

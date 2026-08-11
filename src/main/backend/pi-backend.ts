@@ -212,6 +212,7 @@ export class PiBackend implements Backend {
   private projectPath = ''
   private eventCb?: (event: EventMessage) => void
   private sessions = new Map<string, PiRpcSession>()
+  private sessionDirectories = new Map<string, string>()
   private messageIds = new Map<string, string>()
   private liveText = new Map<string, string>()
   private version = ''
@@ -244,6 +245,10 @@ export class PiBackend implements Backend {
     for (const session of this.sessions.values()) session.stop()
     this.sessions.clear()
     this.projectPath = path
+  }
+
+  setSessionDirectory(id: string, directory: string): void {
+    this.sessionDirectories.set(id, directory)
   }
 
   info() {
@@ -341,7 +346,7 @@ export default function (pi: ExtensionAPI) {
     if (existing) return existing
     const runtime = new PiRpcSession(
       sessionId,
-      this.projectPath,
+      this.sessionDirectories.get(sessionId) || this.projectPath,
       (activeSessionId, event) => this.mapEvent(activeSessionId, event),
       this.threadBus,
       this.threadBusExtension || undefined
@@ -467,11 +472,13 @@ export default function (pi: ExtensionAPI) {
     return Promise.all([...this.sessions.keys()].map((id) => this.sessionGet(id)))
   }
 
-  async sessionCreate(title?: string): Promise<SessionInfo> {
+  async sessionCreate(title?: string, directory?: string): Promise<SessionInfo> {
     const id = randomUUID()
+    const sessionDirectory = directory || this.projectPath
+    this.sessionDirectories.set(id, sessionDirectory)
     const runtime = await this.runtime(id)
     if (title) await runtime.send({ type: 'set_session_name', name: title })
-    return { id, title, directory: this.projectPath, time: { created: Date.now(), updated: Date.now() } }
+    return { id, title, directory: sessionDirectory, time: { created: Date.now(), updated: Date.now() } }
   }
 
   async sessionDelete(id: string): Promise<void> {
@@ -479,6 +486,7 @@ export default function (pi: ExtensionAPI) {
     const state = (await runtime.send({ type: 'get_state' })).data as PiState | undefined
     runtime.stop()
     this.sessions.delete(id)
+    this.sessionDirectories.delete(id)
     if (state?.sessionFile) {
       try { unlinkSync(state.sessionFile) } catch { /* already gone or managed externally */ }
     }
@@ -494,7 +502,7 @@ export default function (pi: ExtensionAPI) {
     return {
       id,
       title: state?.sessionName,
-      directory: this.projectPath,
+      directory: this.sessionDirectories.get(id) || this.projectPath,
       path: state?.sessionFile,
       model: state?.model?.id ? { id: state.model.id, provider: state.model.provider } : undefined,
       time: { updated: Date.now() }
@@ -576,10 +584,13 @@ export default function (pi: ExtensionAPI) {
     const state = (await runtime.send({ type: 'get_state' })).data as PiState | undefined
     const newId = state?.sessionId
     if (!newId || newId === sessionId) return { id: sessionId }
+    const directory = this.sessionDirectories.get(sessionId) || this.projectPath
     this.sessions.delete(sessionId)
+    this.sessionDirectories.delete(sessionId)
     runtime.sessionId = newId
     this.sessions.set(newId, runtime)
-    return { id: newId, title: state.sessionName, directory: this.projectPath, path: state.sessionFile }
+    this.sessionDirectories.set(newId, directory)
+    return { id: newId, title: state.sessionName, directory, path: state.sessionFile }
   }
 
   async revert(_sessionId: string, _messageId: string): Promise<void> {}

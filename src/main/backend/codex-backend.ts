@@ -446,9 +446,9 @@ export class CodexBackend implements Backend {
     return (result.data ?? []).map(threadInfo)
   }
 
-  async sessionCreate(title?: string): Promise<SessionInfo> {
+  async sessionCreate(title?: string, directory?: string): Promise<SessionInfo> {
     const params = {
-      cwd: this.projectPath || undefined,
+      cwd: directory || this.projectPath || undefined,
       approvalPolicy: 'on-request',
       sandbox: 'workspace-write',
       dynamicTools: THREAD_BUS_TOOLS

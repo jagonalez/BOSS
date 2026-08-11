@@ -1,5 +1,6 @@
 export type BackendId = 'opencode' | 'pi' | 'codex' | 'claude'
 export type BackendModeId = 'ask' | 'auto' | 'plan' | 'accept-edits'
+export type ThreadCreationScope = 'current' | 'global'
 
 export interface BackendModeDescriptor {
   id: BackendModeId
@@ -39,7 +40,7 @@ export interface BackendMessageOptions {
 export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'thread.list' }
-  | { type: 'thread.create'; backendId: BackendId; title?: string }
+  | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope }
   | { type: 'thread.import-native'; backendId: BackendId }
   | { type: 'thread.get'; threadId: string }
   | { type: 'thread.delete'; threadId: string }

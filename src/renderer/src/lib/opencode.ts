@@ -12,7 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendDescriptor, BackendId, BackendMessageOptions, BackendRequest } from '@shared/backend'
+import type { BackendDescriptor, BackendId, BackendMessageOptions, BackendRequest, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 
 export class ApiError extends Error {
@@ -106,8 +106,8 @@ function modelVariants(variants?: unknown): string[] {
 export const OpenCode = {
   listBackends: () => backendRequest<BackendDescriptor[]>({ type: 'backend.list' }),
   listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
-  createSession: (title?: string, backendId: BackendId = 'opencode') =>
-    backendRequest<SessionInfo>({ type: 'thread.create', backendId, title }),
+  createSession: (title?: string, backendId: BackendId = 'opencode', scope: ThreadCreationScope = 'current') =>
+    backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, scope }),
   importNativeSessions: (backendId: BackendId) =>
     backendRequest<SessionInfo[]>({ type: 'thread.import-native', backendId }),
   deleteSession: (id: string) => backendRequest<void>({ type: 'thread.delete', threadId: id }),

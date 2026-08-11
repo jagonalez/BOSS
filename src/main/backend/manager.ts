@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend } from './backend'
 import type {
@@ -9,7 +9,8 @@ import type {
   BackendId,
   BackendRequest,
   BackendCapabilities,
-  BackendMessageOptions
+  BackendMessageOptions,
+  ThreadCreationScope
 } from '@shared/backend'
 import type { EventMessage, MessageWithParts, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
@@ -179,6 +180,12 @@ export class BackendManager {
     return projectScope(this.projectPath)
   }
 
+  private get globalScope(): ProjectScope {
+    const executionPath = join(app.getPath('userData'), 'chats')
+    mkdirSync(executionPath, { recursive: true })
+    return { projectId: 'global', projectPath: '', executionPath }
+  }
+
   onEvent(callback: (event: Record<string, unknown>) => void): () => void {
     this.eventCb = callback
     return () => {
@@ -283,6 +290,7 @@ export class BackendManager {
   private binding(threadId: string): ThreadBinding {
     const binding = this.bindings.get(threadId)
     if (!binding) throw new Error(`R.A.L.F. thread not found: ${threadId}`)
+    this.backends[binding.backendId].setSessionDirectory?.(binding.nativeSessionId, binding.executionPath)
     return binding
   }
 
@@ -439,7 +447,7 @@ export class BackendManager {
 
     const current = [...this.bindings.values()].filter((binding) => {
       if (!this.projectPath) return true
-      return binding.projectId === currentProjectId
+      return binding.projectId === currentProjectId || binding.projectId === 'global'
     })
     return current
       .map((binding) => {
@@ -464,11 +472,16 @@ export class BackendManager {
     return imported
   }
 
-  async sessionCreate(backendId: BackendId, title?: string, lineage?: SessionInfo['lineage']): Promise<SessionInfo> {
+  async sessionCreate(
+    backendId: BackendId,
+    title?: string,
+    lineage?: SessionInfo['lineage'],
+    creationScope: ThreadCreationScope = 'current'
+  ): Promise<SessionInfo> {
     const backend = await this.ensureStarted(backendId)
-    const native = await backend.sessionCreate(title)
+    const scope = creationScope === 'global' ? this.globalScope : this.currentScope
+    const native = await backend.sessionCreate(title, scope.executionPath || undefined)
     const binding = this.registerNative(backendId, native, 'ralf', lineage)
-    const scope = this.currentScope
     binding.title = title ?? native.title
     binding.projectId = scope.projectId
     binding.projectPath = scope.projectPath
@@ -619,7 +632,7 @@ export class BackendManager {
       '[R.A.L.F. CROSS-BACKEND HANDOFF]',
       `Source thread: ${source.title ?? sourceThreadId}`,
       `Source backend: ${source.backendId}`,
-      `Project: ${source.projectPath || this.projectPath}`,
+      `Project: ${source.projectId === 'global' ? 'Global chat' : source.projectPath}`,
       instruction ? `User instruction: ${instruction}` : 'Continue from this context. First summarize your understanding, then wait for or follow the user’s latest request.',
       diffSummary ? `Changed files reported by the source backend:\n${diffSummary}` : '',
       'Conversation transcript:',
@@ -635,7 +648,7 @@ export class BackendManager {
       kind: 'clone',
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
-    })
+    }, source.projectId === 'global' ? 'global' : 'current')
     await this.sendMessage(created.id, [{ type: 'text', text: packet }], { mode: 'ask' })
     return created
   }
@@ -651,7 +664,7 @@ export class BackendManager {
     switch (request.type) {
       case 'backend.list': return this.descriptors()
       case 'thread.list': return this.sessionsList()
-      case 'thread.create': return this.sessionCreate(request.backendId, request.title)
+      case 'thread.create': return this.sessionCreate(request.backendId, request.title, undefined, request.scope)
       case 'thread.import-native': return this.importNativeSessions(request.backendId)
       case 'thread.get': return this.sessionGet(request.threadId)
       case 'thread.delete': return this.sessionDelete(request.threadId)
