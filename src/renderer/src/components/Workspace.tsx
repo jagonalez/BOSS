@@ -29,7 +29,7 @@ import {
   splitWorkspaceGroup
 } from '../lib/actions'
 import { activeWorkspaceView, walkTabs } from '../lib/workspaces'
-import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, RenameIcon, ReviewIcon, TerminalIcon } from './icons'
+import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
 const TAB_DRAG_TYPE = 'application/x-ralf-workspace-tab'
@@ -518,15 +518,6 @@ function WorkspaceBar(): React.JSX.Element {
             onDoubleClick={() => rename(view.id, view.name)}
           >
             <span>{view.name}</span>
-            <span
-              className="workspace-view-rename"
-              role="button"
-              title="Rename view"
-              onClick={(event) => {
-                event.stopPropagation()
-                rename(view.id, view.name)
-              }}
-            ><RenameIcon size={12} /></span>
             {workspace.views.length > 1 ? (
               <span
                 className="workspace-view-close"
