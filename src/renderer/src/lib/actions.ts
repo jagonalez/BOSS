@@ -3,9 +3,11 @@ import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
+import type { BackendId, BackendModeId } from '@shared/backend'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
 import {
+  activeWorkspaceView,
   activateTab,
   addTab,
   bindTemplate,
@@ -24,8 +26,10 @@ import {
   splitGroup,
   tab,
   templateFromWorkspace,
+  updateActiveWorkspaceView,
   walkGroups,
-  walkTabs
+  walkTabs,
+  workspaceView
 } from './workspaces'
 
 export function initializeWorkspaceState(): void {
@@ -50,6 +54,46 @@ export function loadProjectWorkspace(projectKey: string, preferredSessionId?: st
   appStore.setState({ projectWorkspace: workspace })
 }
 
+export function createWorkspaceView(): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  const created = workspaceView(`View ${workspace.views.length + 1}`)
+  updateWorkspace((item) => ({
+    ...item,
+    views: [...item.views, created],
+    activeViewId: created.id
+  }))
+}
+
+export function activateWorkspaceView(viewId: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace?.views.some((view) => view.id === viewId) || workspace.activeViewId === viewId) return
+  const next = updateWorkspace((item) => ({ ...item, activeViewId: viewId }))
+  if (next) syncFocusedThread()
+}
+
+export function renameWorkspaceView(viewId: string, name: string): void {
+  const clean = name.trim()
+  if (!clean) return
+  updateWorkspace((item) => ({
+    ...item,
+    views: item.views.map((view) => view.id === viewId ? { ...view, name: clean } : view)
+  }))
+}
+
+export function closeWorkspaceView(viewId: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace || workspace.views.length <= 1) return
+  const index = workspace.views.findIndex((view) => view.id === viewId)
+  if (index < 0) return
+  const views = workspace.views.filter((view) => view.id !== viewId)
+  const activeViewId = workspace.activeViewId === viewId
+    ? (views[index] ?? views[index - 1] ?? views[0]).id
+    : workspace.activeViewId
+  const next = updateWorkspace((item) => ({ ...item, views, activeViewId }))
+  if (next) syncFocusedThread()
+}
+
 function updateWorkspace(
   update: (workspace: NonNullable<ReturnType<typeof currentWorkspace>>) => NonNullable<ReturnType<typeof currentWorkspace>>
 ): NonNullable<ReturnType<typeof currentWorkspace>> | null {
@@ -65,10 +109,20 @@ function currentWorkspace() {
   return appStore.getState().projectWorkspace
 }
 
+function currentView() {
+  const workspace = currentWorkspace()
+  return workspace ? activeWorkspaceView(workspace) : null
+}
+
+function updateWorkspaceView(update: (view: NonNullable<ReturnType<typeof currentView>>) => NonNullable<ReturnType<typeof currentView>>) {
+  return updateWorkspace((workspace) => updateActiveWorkspaceView(workspace, update))
+}
+
 function activeTabInFocusedGroup() {
   const workspace = currentWorkspace()
   if (!workspace) return undefined
-  const target = findGroup(workspace.root, workspace.focusedGroupId)
+  const view = activeWorkspaceView(workspace)
+  const target = findGroup(view.root, view.focusedGroupId)
   return target?.tabs.find((item) => item.id === target.activeTabId)
 }
 
@@ -79,18 +133,20 @@ function syncFocusedThread(): void {
 
 export function focusWorkspaceGroup(groupId: string): void {
   const workspace = currentWorkspace()
-  if (!workspace || !findGroup(workspace.root, groupId)) return
-  if (workspace.focusedGroupId !== groupId) updateWorkspace((item) => ({ ...item, focusedGroupId: groupId }))
+  if (!workspace) return
+  const view = activeWorkspaceView(workspace)
+  if (!findGroup(view.root, groupId)) return
+  if (view.focusedGroupId !== groupId) updateWorkspaceView((item) => ({ ...item, focusedGroupId: groupId }))
   syncFocusedThread()
 }
 
 export function activateWorkspaceTab(groupId: string, tabId: string): void {
-  const next = updateWorkspace((item) => ({
+  const next = updateWorkspaceView((item) => ({
     ...item,
     root: activateTab(item.root, groupId, tabId),
     focusedGroupId: groupId
   }))
-  const active = next ? findTab(next.root, tabId)?.tab : undefined
+  const active = next ? findTab(activeWorkspaceView(next).root, tabId)?.tab : undefined
   if (active?.kind === 'thread' && active.sessionId) selectSession(active.sessionId, false)
   if (active?.kind === 'review') void refreshDiff(appStore.getState().activeSessionId)
 }
@@ -98,23 +154,24 @@ export function activateWorkspaceTab(groupId: string, tabId: string): void {
 export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, sessionId?: string): void {
   const workspace = currentWorkspace()
   if (!workspace) return
+  const view = activeWorkspaceView(workspace)
   if (kind === 'thread' && sessionId) {
-    const existing = findSessionTab(workspace.root, sessionId)
+    const existing = findSessionTab(view.root, sessionId)
     if (existing) {
       activateWorkspaceTab(existing.group.id, existing.tab.id)
       return
     }
   }
   if (kind === 'review' || kind === 'files') {
-    const existing = walkTabs(workspace.root).find((item) => item.kind === kind)
+    const existing = walkTabs(view.root).find((item) => item.kind === kind)
     if (existing) {
-      const location = findTab(workspace.root, existing.id)
+      const location = findTab(view.root, existing.id)
       if (location) activateWorkspaceTab(location.group.id, existing.id)
       return
     }
   }
   const created = tab(kind, sessionId)
-  updateWorkspace((item) => ({
+  updateWorkspaceView((item) => ({
     ...item,
     root: addTab(item.root, groupId, created),
     focusedGroupId: groupId
@@ -122,11 +179,14 @@ export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, session
   if (kind === 'thread' && sessionId) selectSession(sessionId, false)
 }
 
-export async function createThreadInGroup(groupId: string): Promise<void> {
+export async function createThreadInGroup(groupId: string, backendId: BackendId = appStore.getState().engine): Promise<void> {
   try {
-    const session = await OpenCode.createSession()
+    const session = await OpenCode.createSession(undefined, backendId)
     upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
     await refreshSessions()
+    const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
+    setMode(defaultMode, session.id)
+    await refreshProviders(session.id)
     addWorkspaceTab(groupId, 'thread', session.id)
   } catch {
     /* ignore */
@@ -134,14 +194,14 @@ export async function createThreadInGroup(groupId: string): Promise<void> {
 }
 
 export function splitWorkspaceGroup(groupId: string, direction: SplitDirection): void {
-  updateWorkspace((item) => {
+  updateWorkspaceView((item) => {
     const result = splitGroup(item.root, groupId, direction)
     return { ...item, root: result.root, focusedGroupId: result.groupId }
   })
 }
 
 export function closeWorkspaceTab(groupId: string, tabId: string): void {
-  const next = updateWorkspace((item) => {
+  const next = updateWorkspaceView((item) => {
     const root = closeTab(item.root, groupId, tabId)
     const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
     return { ...item, root, focusedGroupId }
@@ -150,7 +210,7 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
 }
 
 export function closeWorkspaceGroup(groupId: string): void {
-  const next = updateWorkspace((item) => {
+  const next = updateWorkspaceView((item) => {
     const root = closeGroup(item.root, groupId)
     return { ...item, root, focusedGroupId: walkGroups(root)[0].id }
   })
@@ -158,11 +218,11 @@ export function closeWorkspaceGroup(groupId: string): void {
 }
 
 export function setWorkspaceSplitRatio(splitId: string, ratio: number): void {
-  updateWorkspace((item) => ({ ...item, root: resizeSplit(item.root, splitId, ratio) }))
+  updateWorkspaceView((item) => ({ ...item, root: resizeSplit(item.root, splitId, ratio) }))
 }
 
 export function moveWorkspaceTab(tabId: string, targetGroupId: string, position: DropPosition): void {
-  const next = updateWorkspace((item) => {
+  const next = updateWorkspaceView((item) => {
     const moved = moveTab(item.root, tabId, targetGroupId, position)
     return { ...item, root: moved.root, focusedGroupId: moved.focusedGroupId }
   })
@@ -170,18 +230,19 @@ export function moveWorkspaceTab(tabId: string, targetGroupId: string, position:
 }
 
 export function reorderWorkspaceTab(groupId: string, tabId: string, beforeTabId?: string): void {
-  updateWorkspace((item) => ({ ...item, root: reorderTab(item.root, groupId, tabId, beforeTabId) }))
+  updateWorkspaceView((item) => ({ ...item, root: reorderTab(item.root, groupId, tabId, beforeTabId) }))
 }
 
 export function openSessionInWorkspace(sessionId: string): boolean {
   const workspace = currentWorkspace()
   if (!workspace) return false
-  const existing = findSessionTab(workspace.root, sessionId)
+  const view = activeWorkspaceView(workspace)
+  const existing = findSessionTab(view.root, sessionId)
   if (existing) {
     activateWorkspaceTab(existing.group.id, existing.tab.id)
     return true
   }
-  const groupId = findGroup(workspace.root, workspace.focusedGroupId)?.id ?? walkGroups(workspace.root)[0].id
+  const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
   addWorkspaceTab(groupId, 'thread', sessionId)
   return true
 }
@@ -191,23 +252,25 @@ export function applyLayoutTemplate(templateId: string): void {
   const workspace = state.projectWorkspace
   const template = state.layoutTemplates.find((item) => item.id === templateId)
   if (!workspace || !template) return
-  const focusedGroup = findGroup(workspace.root, workspace.focusedGroupId)
+  const view = activeWorkspaceView(workspace)
+  const focusedGroup = findGroup(view.root, view.focusedGroupId)
   const focusedTab = focusedGroup?.tabs.find((item) => item.id === focusedGroup.activeTabId)
   const focused = focusedTab?.kind === 'thread' ? focusedTab.sessionId : undefined
   const sessions = [focused, ...state.sessions.map((item) => item.id)].filter(
     (id, index, all): id is string => Boolean(id) && all.indexOf(id) === index
   )
-  const next = bindTemplate(template, workspace.projectKey, sessions)
+  const nextView = bindTemplate(template, view.name, sessions)
+  const next = updateActiveWorkspaceView(workspace, () => ({ ...nextView, id: view.id, name: view.name }))
   saveWorkspace(next)
   appStore.setState({ projectWorkspace: next })
-  const firstThread = walkTabs(next.root).find((item) => item.kind === 'thread' && item.sessionId)
+  const firstThread = walkTabs(activeWorkspaceView(next).root).find((item) => item.kind === 'thread' && item.sessionId)
   if (firstThread?.sessionId) selectSession(firstThread.sessionId, false)
 }
 
 export function saveCurrentLayoutTemplate(name: string): void {
   const state = appStore.getState()
   if (!state.projectWorkspace) return
-  const template = templateFromWorkspace(state.projectWorkspace, name)
+  const template = templateFromWorkspace(activeWorkspaceView(state.projectWorkspace), name)
   const templates = [...state.layoutTemplates, template]
   saveCustomTemplates(templates)
   appStore.setState({ layoutTemplates: templates })
@@ -329,8 +392,10 @@ export async function runThreadReview(sessionID: string, target: string): Promis
     return { sessionMeta: meta }
   })
   const cur = appStore.getState()
-  const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
-  const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
+  const model = modelForSession(sessionID)
+  const mode = modeForSession(sessionID)
+  const modelKey = model ? resolveModelKey(model, sessionID) : undefined
+  const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
   const parts = [
     {
       type: 'text',
@@ -338,7 +403,7 @@ export async function runThreadReview(sessionID: string, target: string): Promis
     }
   ]
   try {
-    await OpenCode.sendMessageAsync(sessionID, parts, { model: modelKey, agent })
+    await OpenCode.sendMessageAsync(sessionID, parts, { model: modelKey, agent, mode })
   } catch (err) {
     setSessionError(sessionID, errorSummary(err))
   }
@@ -384,25 +449,93 @@ export async function refreshProjects(): Promise<void> {
   }
 }
 
-export async function refreshProviders(): Promise<void> {
+export async function refreshProviders(sessionId?: string): Promise<void> {
+  const state = appStore.getState()
+  const id = sessionId ?? state.activeSessionId ?? undefined
+  const backendId = state.sessions.find((session) => session.id === id)?.backendId ?? 'opencode'
   try {
+    if (backendId !== 'opencode') {
+      const models = await OpenCode.backendModels(id, backendId)
+      const grouped = new Map<string, Array<{ id: string; name?: string; variants?: Record<string, object> }>>()
+      for (const model of models) {
+        const provider = model.provider || backendId
+        const variants = model.variants?.length
+          ? Object.fromEntries(model.variants.map((variant) => [variant, {}]))
+          : undefined
+        grouped.set(provider, [...(grouped.get(provider) ?? []), { id: model.id, name: model.name, variants }])
+      }
+      const providers = [...grouped].map(([provider, entries]) => ({ id: provider, name: provider, models: entries }))
+      appStore.setState((current) => id
+        ? { providers: providers, providersBySession: { ...current.providersBySession, [id]: providers } }
+        : { providers })
+      resolveDefaultModel(id)
+      return
+    }
     const { all, connected } = await OpenCode.providers()
     const connectedSet = new Set(connected ?? [])
     const filtered = (all ?? []).filter((p) => connectedSet.has(p.id))
-    appStore.setState({ providers: filtered.length > 0 ? filtered : all ?? [] })
-    resolveDefaultModel()
+    const providers = filtered.length > 0 ? filtered : all ?? []
+    appStore.setState((current) => id
+      ? { providers, providersBySession: { ...current.providersBySession, [id]: providers } }
+      : { providers })
+    resolveDefaultModel(id)
   } catch {
     /* ignore */
   }
 }
 
-export function setModel(id: string): void {
-  appStore.setState({ model: id, variant: null })
+function persistThreadPreference(key: string, value: unknown): void {
   try {
-    localStorage.setItem('ralf.model', id)
+    localStorage.setItem(key, JSON.stringify(value))
   } catch {
     /* ignore */
   }
+}
+
+export function loadThreadPreferences(): void {
+  try {
+    const modelsBySession = JSON.parse(localStorage.getItem('ralf.modelsBySession') ?? '{}') as Record<string, string>
+    const variantsBySession = JSON.parse(localStorage.getItem('ralf.variantsBySession') ?? '{}') as Record<string, string | null>
+    const modesBySession = JSON.parse(localStorage.getItem('ralf.modesBySession') ?? '{}') as Record<string, BackendModeId>
+    appStore.setState({ modelsBySession, variantsBySession, modesBySession })
+  } catch {
+    /* Ignore malformed preferences and retain safe defaults. */
+  }
+}
+
+export function modelForSession(sessionId?: string): string | null {
+  const state = appStore.getState()
+  return (sessionId && state.modelsBySession[sessionId]) || state.model
+}
+
+export function variantForSession(sessionId?: string): string | null {
+  const state = appStore.getState()
+  return sessionId && Object.prototype.hasOwnProperty.call(state.variantsBySession, sessionId)
+    ? state.variantsBySession[sessionId]
+    : state.variant
+}
+
+export function modeForSession(sessionId?: string): BackendModeId {
+  const state = appStore.getState()
+  const requested = (sessionId && state.modesBySession[sessionId]) || state.mode
+  const backendId = sessionId ? state.sessions.find((session) => session.id === sessionId)?.backendId : state.engine
+  const descriptor = state.backends.find((backend) => backend.id === backendId)
+  return descriptor?.modes.some((mode) => mode.id === requested) ? requested : descriptor?.modes[0]?.id ?? requested
+}
+
+export function setModel(id: string, sessionId: string | null = appStore.getState().activeSessionId): void {
+  if (sessionId) {
+    appStore.setState((state) => {
+      const modelsBySession = { ...state.modelsBySession, [sessionId]: id }
+      const variantsBySession = { ...state.variantsBySession, [sessionId]: null }
+      persistThreadPreference('ralf.modelsBySession', modelsBySession)
+      persistThreadPreference('ralf.variantsBySession', variantsBySession)
+      return { modelsBySession, variantsBySession }
+    })
+    return
+  }
+  appStore.setState({ model: id, variant: null })
+  try { localStorage.setItem('ralf.model', id) } catch { /* ignore */ }
 }
 
 export function loadVariant(): void {
@@ -414,7 +547,15 @@ export function loadVariant(): void {
   }
 }
 
-export function setVariant(v: string | null): void {
+export function setVariant(v: string | null, sessionId: string | null = appStore.getState().activeSessionId): void {
+  if (sessionId) {
+    appStore.setState((state) => {
+      const variantsBySession = { ...state.variantsBySession, [sessionId]: v }
+      persistThreadPreference('ralf.variantsBySession', variantsBySession)
+      return { variantsBySession }
+    })
+    return
+  }
   appStore.setState({ variant: v })
   try {
     if (v) localStorage.setItem('ralf.variant', v)
@@ -424,10 +565,10 @@ export function setVariant(v: string | null): void {
   }
 }
 
-function modelKeyWithVariant(model: string | null): { providerID: string; modelID: string; variant?: string } | undefined {
-  const key = model ? resolveModelKey(model) : undefined
+function modelKeyWithVariant(model: string | null, sessionId?: string): { providerID: string; modelID: string; variant?: string } | undefined {
+  const key = model ? resolveModelKey(model, sessionId) : undefined
   if (!key) return undefined
-  const variant = appStore.getState().variant
+  const variant = variantForSession(sessionId)
   if (variant) return { ...key, variant }
   return key
 }
@@ -435,37 +576,42 @@ function modelKeyWithVariant(model: string | null): { providerID: string; modelI
 export function loadMode(): void {
   try {
     const saved = localStorage.getItem('ralf.mode')
-    if (saved === 'auto' || saved === 'ask' || saved === 'plan') appStore.setState({ mode: saved })
+    if (saved === 'auto' || saved === 'ask' || saved === 'plan' || saved === 'accept-edits') appStore.setState({ mode: saved })
   } catch {
     /* ignore */
   }
 }
 
 export async function loadEngine(): Promise<void> {
-  // Main is the source of truth for the running engine (RALF_ENGINE / engine switch).
   try {
-    const engine = await window.ralf.getBackendEngine()
-    if (engine === 'opencode' || engine === 'pi') {
-      appStore.setState({ engine })
-      try {
-        localStorage.setItem('ralf.engine', engine)
-      } catch {
-        /* ignore */
-      }
-      return
-    }
+    const backends = await OpenCode.listBackends()
+    const saved = localStorage.getItem('ralf.engine') as BackendId | null
+    const engine = backends.some((backend) => backend.id === saved && backend.available)
+      ? saved!
+      : backends.find((backend) => backend.available)?.id ?? 'opencode'
+    appStore.setState({ backends, engine })
+    localStorage.setItem('ralf.engine', engine)
+    return
   } catch {
     /* main unreachable; fall back to saved preference below */
   }
   try {
-    const saved = localStorage.getItem('ralf.engine')
-    if (saved === 'opencode' || saved === 'pi') appStore.setState({ engine: saved })
+    const saved = localStorage.getItem('ralf.engine') as BackendId | null
+    if (saved && ['opencode', 'pi', 'codex', 'claude'].includes(saved)) appStore.setState({ engine: saved })
   } catch {
     /* ignore */
   }
 }
 
-export function setMode(id: 'auto' | 'ask' | 'plan'): void {
+export function setMode(id: BackendModeId, sessionId: string | null = appStore.getState().activeSessionId): void {
+  if (sessionId) {
+    appStore.setState((state) => {
+      const modesBySession = { ...state.modesBySession, [sessionId]: id }
+      persistThreadPreference('ralf.modesBySession', modesBySession)
+      return { modesBySession }
+    })
+    return
+  }
   appStore.setState({ mode: id })
   try {
     localStorage.setItem('ralf.mode', id)
@@ -474,13 +620,39 @@ export function setMode(id: 'auto' | 'ask' | 'plan'): void {
   }
 }
 
-export async function setEngine(id: 'opencode' | 'pi'): Promise<void> {
+export async function setEngine(id: BackendId): Promise<void> {
   try {
-    await window.ralf.setBackendEngine(id)
     appStore.setState({ engine: id })
     localStorage.setItem('ralf.engine', id)
   } catch {
     /* ignore */
+  }
+}
+
+export async function cloneThreadToBackend(threadId: string, backendId: BackendId): Promise<void> {
+  const source = appStore.getState().sessions.find((session) => session.id === threadId)
+  if (!source || (source.backendId ?? 'opencode') === backendId) return
+  try {
+    const session = await OpenCode.cloneToBackend(threadId, backendId)
+    upsertSessionMeta(session.id, {
+      kind: 'fork',
+      projectPath: appStore.getState().projectPath,
+      forkedFrom: { sessionId: threadId }
+    })
+    await refreshSessions()
+    if (!openSessionInWorkspace(session.id)) selectSession(session.id)
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+  }
+}
+
+export async function relayThreadToThread(sourceThreadId: string, targetThreadId: string): Promise<void> {
+  try {
+    await OpenCode.relayToThread(sourceThreadId, targetThreadId)
+    await refreshSessions()
+    selectSession(targetThreadId)
+  } catch (error) {
+    setSessionError(sourceThreadId, errorSummary(error))
   }
 }
 
@@ -547,14 +719,27 @@ export function pushHistory(sessionId: string, text: string): void {
   })
 }
 
-export function resolveDefaultModel(): void {
+export function resolveDefaultModel(sessionId?: string): void {
   const s = appStore.getState()
-  if (s.model) return
-  const valid = (id: string): boolean => s.providers.some((p) => providerModels(p).some((m) => m.id === id))
+  const providers = sessionId ? s.providersBySession[sessionId] ?? s.providers : s.providers
+  const valid = (id: string): boolean => providers.some((p) => providerModels(p).some((m) => m.id === id))
+  const current = modelForSession(sessionId)
+  if (current && valid(current)) return
+  if (sessionId && current) {
+    appStore.setState((state) => {
+      const modelsBySession = { ...state.modelsBySession }
+      const variantsBySession = { ...state.variantsBySession }
+      delete modelsBySession[sessionId]
+      delete variantsBySession[sessionId]
+      return { modelsBySession, variantsBySession }
+    })
+  } else if (current) {
+    appStore.setState({ model: null, variant: null })
+  }
   try {
     const saved = localStorage.getItem('ralf.model')
     if (saved && valid(saved)) {
-      appStore.setState({ model: saved })
+      setModel(saved, sessionId ?? null)
       return
     }
   } catch {
@@ -562,13 +747,13 @@ export function resolveDefaultModel(): void {
   }
   const recent = [...s.sessions].sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0]
   if (recent?.model?.id && valid(recent.model.id) && !isHighVariant(recent.model.id)) {
-    setModel(recent.model.id)
+    setModel(recent.model.id, sessionId ?? null)
     return
   }
-  const first = s.providers[0]
+  const first = providers[0]
   if (first) {
     const m = providerModels(first).find((mm) => !isHighVariant(mm.id)) ?? providerModels(first)[0]
-    if (m) setModel(m.id)
+    if (m) setModel(m.id, sessionId ?? null)
   }
 }
 
@@ -671,9 +856,10 @@ export function selectSession(id: string, bindWorkspace = true): void {
   }
   if (cur.activeSessionId === id) {
     appStore.setState({ activePage: inProject ? 'project' : 'chat' })
+    void refreshProviders(id)
     return
   }
-  if (session?.model?.id) setModel(session.model.id)
+  if (session?.model?.id && !cur.modelsBySession[id]) setModel(session.model.id, id)
   appStore.setState({
     activeSessionId: id,
     activePage: inProject ? 'project' : 'chat',
@@ -683,12 +869,17 @@ export function selectSession(id: string, bindWorkspace = true): void {
   void loadMessages(id)
   void loadTodos(id)
   void refreshDiff(id)
+  void refreshProviders(id)
 }
 export async function newSession(): Promise<void> {
   try {
-    const session = await OpenCode.createSession()
+    const backendId = appStore.getState().engine
+    const session = await OpenCode.createSession(undefined, backendId)
     upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
     await refreshSessions()
+    const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
+    setMode(defaultMode, session.id)
+    await refreshProviders(session.id)
     selectSession(session.id)
   } catch {
     /* ignore */
@@ -727,21 +918,43 @@ export async function deleteSession(id: string): Promise<void> {
     const workspace = currentWorkspace()
     if (workspace) {
       updateWorkspace((item) => {
-        let root = item.root
-        let found = findSessionTab(root, id)
-        while (found) {
-          root = closeTab(root, found.group.id, found.tab.id)
-          found = findSessionTab(root, id)
-        }
-        const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
-        return { ...item, root, focusedGroupId }
+        const views = item.views.map((view) => {
+          let root = view.root
+          let found = findSessionTab(root, id)
+          while (found) {
+            root = closeTab(root, found.group.id, found.tab.id)
+            found = findSessionTab(root, id)
+          }
+          const focusedGroupId = findGroup(root, view.focusedGroupId)?.id ?? walkGroups(root)[0].id
+          return { ...view, root, focusedGroupId }
+        })
+        return { ...item, views }
       })
     }
     const cur = appStore.getState()
     if (cur.activeSessionId === id) {
       appStore.setState({ activeSessionId: null, messages: {}, diffs: null, todos: {} })
     }
-    appStore.setState((s) => ({ archived: s.archived.filter((x) => x !== id) }))
+    appStore.setState((s) => {
+      const modelsBySession = { ...s.modelsBySession }
+      const variantsBySession = { ...s.variantsBySession }
+      const modesBySession = { ...s.modesBySession }
+      const providersBySession = { ...s.providersBySession }
+      delete modelsBySession[id]
+      delete variantsBySession[id]
+      delete modesBySession[id]
+      delete providersBySession[id]
+      persistThreadPreference('ralf.modelsBySession', modelsBySession)
+      persistThreadPreference('ralf.variantsBySession', variantsBySession)
+      persistThreadPreference('ralf.modesBySession', modesBySession)
+      return {
+        archived: s.archived.filter((x) => x !== id),
+        modelsBySession,
+        variantsBySession,
+        modesBySession,
+        providersBySession
+      }
+    })
     await refreshSessions()
   } catch {
     /* ignore */
@@ -860,10 +1073,21 @@ export async function runCommand(sessionID: string, command: string, args: strin
     streamingLocked: { ...st.streamingLocked, [sessionID]: false }
   }))
   const cur = appStore.getState()
-  const modelKey = cur.model ? modelKeyWithVariant(cur.model) : undefined
-  const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
+  const model = modelForSession(sessionID)
+  const mode = modeForSession(sessionID)
+  const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
+  const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
-    await OpenCode.runCommand(sessionID, command, args, { agent, model: modelKey })
+    const backendId = cur.sessions.find((session) => session.id === sessionID)?.backendId ?? 'opencode'
+    if (backendId === 'opencode') {
+      await OpenCode.runCommand(sessionID, command, args, { agent, model: modelKey })
+    } else {
+      await OpenCode.sendMessageAsync(sessionID, [{ type: 'text', text: `/${command}${args ? ` ${args}` : ''}` }], {
+        model: modelKey,
+        agent,
+        mode
+      })
+    }
   } catch (err) {
     setSessionError(sessionID, errorSummary(err))
   }
@@ -888,9 +1112,10 @@ export async function renameSessionById(id: string, title: string): Promise<void
   }
 }
 
-export function resolveModelKey(id: string): { providerID: string; modelID: string } | undefined {
+export function resolveModelKey(id: string, sessionId?: string): { providerID: string; modelID: string } | undefined {
   const s = appStore.getState()
-  for (const p of s.providers) {
+  const providers = sessionId ? s.providersBySession[sessionId] ?? s.providers : s.providers
+  for (const p of providers) {
     if (providerModels(p).some((m) => m.id === id)) {
       return { providerID: p.id, modelID: id }
     }
@@ -914,27 +1139,30 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     lastErrorBySession: { ...st.lastErrorBySession, [sessionID]: '' },
     streamingLocked: { ...st.streamingLocked, [sessionID]: false }
   }))
-  const modelKey = cur.model ? modelKeyWithVariant(cur.model) : undefined
-  const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
+  const model = modelForSession(sessionID)
+  const mode = modeForSession(sessionID)
+  const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
+  const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
     await OpenCode.sendMessageAsync(sessionID, parts, {
       model: modelKey,
-      agent
+      agent,
+      mode
     })
   } catch (err) {
     const raw = String((err as Error).message ?? err)
     const isNetwork = /-> 0:|fetch failed|ECONNREFUSED/i.test(raw)
     const msg = isNetwork
-      ? 'Couldn’t reach the opencode server — it may be restarting. Your message was not sent; please try again.'
+      ? 'Couldn’t reach the selected backend. Your message was not sent; please try again.'
       : errorSummary(err)
     const providerID = modelKey?.providerID
     const noAccess = /no access|subscription|upgrade|credits|401|403/i.test(msg)
     if (noAccess && providerID) {
       const provider = appStore.getState().providers.find((p) => p.id === providerID)
       const base = provider ? providerModels(provider).find((m) => !isHighVariant(m.id)) : undefined
-      if (base && base.id !== cur.model) {
-        setModel(base.id)
-        setSessionError(sessionID, `No access to “${cur.model}” — switched to ${base.name ?? base.id}.`)
+      if (base && base.id !== model) {
+        setModel(base.id, sessionID)
+        setSessionError(sessionID, `No access to “${model}” — switched to ${base.name ?? base.id}.`)
       } else {
         setSessionError(sessionID, msg)
       }
@@ -954,8 +1182,10 @@ export function setSessionError(sessionID: string, msg: string): void {
 
 export async function compactSession(sessionID: string): Promise<void> {
   const cur = appStore.getState()
-  const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
-  if (!modelKey) {
+  const model = modelForSession(sessionID)
+  const modelKey = model ? resolveModelKey(model, sessionID) : undefined
+  const backendId = cur.sessions.find((session) => session.id === sessionID)?.backendId ?? 'opencode'
+  if (!modelKey && backendId === 'opencode') {
     setSessionError(sessionID, 'Select a model first to compact the session.')
     return
   }
@@ -1026,7 +1256,7 @@ export async function openReviewFile(path: string): Promise<void> {
   appStore.setState({ reviewFile: path })
   const workspace = currentWorkspace()
   if (!workspace) return
-  addWorkspaceTab(workspace.focusedGroupId, 'review')
+  addWorkspaceTab(activeWorkspaceView(workspace).focusedGroupId, 'review')
 }
 
 export async function refreshProject(): Promise<void> {

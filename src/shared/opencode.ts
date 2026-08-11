@@ -1,13 +1,23 @@
+import type { BackendId } from './backend'
+
 export type ProviderID = 'anthropic' | 'openai' | 'google' | 'groq' | string
 
 export interface SessionInfo {
   id: string
+  /** Stable R.A.L.F. thread id. Native ids are deliberately kept behind this binding. */
+  backendId?: BackendId
+  nativeSessionId?: string
   title?: string
   time?: SessionTime
   path?: string
   directory?: string
   model?: SessionModel
   parentID?: string
+  lineage?: {
+    kind: 'fork' | 'clone' | 'relay'
+    sourceThreadId: string
+    sourceBackendId?: BackendId
+  }
 }
 
 export interface SessionTime {
