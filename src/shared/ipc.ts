@@ -77,8 +77,9 @@ export interface SiteInfo {
   port: number
   scriptName: string
   deployedUrl?: string
+  deploymentAccountId?: string
   lastPublishedAt: number
-  status: 'local' | 'deploying' | 'live' | 'error'
+  status: 'local' | 'deploying' | 'unpublishing' | 'live' | 'error'
   error?: string
 }
 
@@ -168,6 +169,7 @@ export const IpcChannels = {
   SitesPublish: 'sites:publish',
   SitesRemove: 'sites:remove',
   SitesDeploy: 'sites:deploy',
+  SitesUnpublish: 'sites:unpublish',
   SitesChooseFolder: 'sites:choose-folder',
   SitesChanged: 'sites:changed',
   SitesCfGet: 'sites:cf:get',

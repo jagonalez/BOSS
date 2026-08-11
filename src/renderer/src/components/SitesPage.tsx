@@ -8,9 +8,10 @@ import {
   publishSiteFromPicker,
   refreshSites,
   removeSite,
-  setCloudflareConfig
+  setCloudflareConfig,
+  unpublishSite
 } from '../lib/actions'
-import { CopyIcon, ExternalIcon, GlobeIcon, PlusIcon, ReloadIcon, TrashIcon, UploadIcon } from './icons'
+import { CopyIcon, ExternalIcon, GlobeIcon, PlusIcon, ReloadIcon, StopIcon, TrashIcon, UploadIcon } from './icons'
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts
@@ -26,15 +27,19 @@ function copy(text: string): void {
 
 function SiteRow({ site }: { site: SiteInfo }): React.JSX.Element {
   const deploying = useStore(appStore, (s) => Boolean(s.siteDeploying[site.id]))
+  const unpublishing = useStore(appStore, (s) => Boolean(s.siteUnpublishing[site.id]))
+  const busy = deploying || unpublishing
   const [copied, setCopied] = useState(false)
   const url = site.deployedUrl ?? site.localUrl
   const label = deploying
     ? 'Deploying…'
-    : site.status === 'live'
-      ? 'Live'
-      : site.status === 'error'
-        ? 'Deploy failed'
-        : 'Local'
+    : unpublishing || site.status === 'unpublishing'
+      ? 'Unpublishing…'
+      : site.status === 'live'
+        ? 'Live'
+        : site.status === 'error'
+          ? 'Error'
+          : 'Local'
 
   const doCopy = (): void => {
     copy(url)
@@ -71,12 +76,32 @@ function SiteRow({ site }: { site: SiteInfo }): React.JSX.Element {
         </button>
         <button
           className="btn-ghost"
-          disabled={deploying}
+          disabled={busy}
           onClick={() => void deploySite(site.id)}
           title="Deploy to Cloudflare Workers"
         >
           <UploadIcon size={13} /> {site.deployedUrl ? 'Redeploy' : 'Deploy'}
         </button>
+        {site.deployedUrl ? (
+          <button
+            className="btn-ghost"
+            disabled={busy}
+            onClick={() =>
+              appStore.setState({
+                confirm: {
+                  title: 'Unpublish site?',
+                  message: `Delete the public Cloudflare deployment for "${site.name}" at ${site.deployedUrl}? The local preview will keep running.`,
+                  confirmLabel: 'Unpublish',
+                  destructive: true,
+                  action: () => void unpublishSite(site.id)
+                }
+              })
+            }
+            title="Delete the Cloudflare deployment"
+          >
+            <StopIcon size={13} /> Unpublish
+          </button>
+        ) : null}
         <button className="btn-ghost" onClick={() => void refreshSites()} title="Refresh">
           <ReloadIcon size={13} /> Refresh
         </button>

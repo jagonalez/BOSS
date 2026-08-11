@@ -106,6 +106,7 @@ export interface AppState {
   sites: SiteInfo[]
   cloudflare: CloudflareSettings
   siteDeploying: Record<string, boolean>
+  siteUnpublishing: Record<string, boolean>
 }
 
 export const initialBrowseState: BrowseNavigationState = {
@@ -182,7 +183,8 @@ export const initialState: AppState = {
   speakAloud: false,
   sites: [],
   cloudflare: { configured: false },
-  siteDeploying: {}
+  siteDeploying: {},
+  siteUnpublishing: {}
 }
 
 export const appStore = new Store<AppState>(initialState)

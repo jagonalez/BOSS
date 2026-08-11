@@ -1494,6 +1494,23 @@ export async function deploySite(id: string): Promise<void> {
   }
 }
 
+export async function unpublishSite(id: string): Promise<void> {
+  appStore.setState((s) => ({ siteUnpublishing: { ...s.siteUnpublishing, [id]: true } }))
+  try {
+    const site = await window.ralf.sitesUnpublish(id)
+    appStore.setState((s) => ({
+      sites: s.sites.map((item) => (item.id === id ? site : item)),
+      siteUnpublishing: { ...s.siteUnpublishing, [id]: false }
+    }))
+  } catch (err) {
+    appStore.setState((s) => ({
+      siteUnpublishing: { ...s.siteUnpublishing, [id]: false },
+      lastError: errorSummary(err)
+    }))
+    await refreshSites()
+  }
+}
+
 export async function setCloudflareConfig(token: string, accountId: string): Promise<boolean> {
   try {
     appStore.setState({ cloudflare: await window.ralf.sitesCfSet(token, accountId) })

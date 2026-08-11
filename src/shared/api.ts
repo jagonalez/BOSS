@@ -82,6 +82,7 @@ export interface RalfApi {
   sitesPublish(folder: string, name?: string): Promise<SiteInfo>
   sitesRemove(id: string): Promise<void>
   sitesDeploy(id: string): Promise<SiteInfo>
+  sitesUnpublish(id: string): Promise<SiteInfo>
   sitesChooseFolder(): Promise<string | null>
   onSitesChanged(cb: (sites: SiteInfo[]) => void): () => void
   sitesCfGet(): Promise<CloudflareSettings>
