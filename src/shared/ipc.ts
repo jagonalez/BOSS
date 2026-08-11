@@ -130,7 +130,10 @@ export const IpcChannels = {
   TtsStatus: 'tts:status',
   TtsSpeak: 'tts:speak',
   SpeechStatusChanged: 'speech:status-changed',
-  AsrTranscribe: 'asr:transcribe'
+  AsrTranscribe: 'asr:transcribe',
+  BackendGetEngine: 'backend:get-engine',
+  BackendSetEngine: 'backend:set-engine',
+  BackendInfo: 'backend:info'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

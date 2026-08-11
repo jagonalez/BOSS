@@ -67,4 +67,7 @@ export interface RalfApi {
   onSpeechStatusChanged(cb: (status: SpeechStatus) => void): () => void
 
   asrTranscribe(req: AsrTranscribeRequest): Promise<AsrTranscribeResult>
+
+  getBackendEngine(): Promise<'opencode' | 'pi'>
+  setBackendEngine(engine: 'opencode' | 'pi'): Promise<'opencode' | 'pi'>
 }

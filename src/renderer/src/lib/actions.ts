@@ -235,10 +235,29 @@ export function loadMode(): void {
   }
 }
 
+export function loadEngine(): void {
+  try {
+    const saved = localStorage.getItem('ralf.engine')
+    if (saved === 'opencode' || saved === 'pi') appStore.setState({ engine: saved })
+  } catch {
+    /* ignore */
+  }
+}
+
 export function setMode(id: 'auto' | 'ask' | 'plan'): void {
   appStore.setState({ mode: id })
   try {
     localStorage.setItem('ralf.mode', id)
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function setEngine(id: 'opencode' | 'pi'): Promise<void> {
+  try {
+    await window.ralf.setBackendEngine(id)
+    appStore.setState({ engine: id })
+    localStorage.setItem('ralf.engine', id)
   } catch {
     /* ignore */
   }

@@ -64,7 +64,10 @@ const ralf: RalfApi = {
   ttsSpeak: (req) => ipcRenderer.invoke(IpcChannels.TtsSpeak, req),
   onSpeechStatusChanged: (cb) => subscribe(IpcChannels.SpeechStatusChanged, cb),
 
-  asrTranscribe: (req) => ipcRenderer.invoke(IpcChannels.AsrTranscribe, req)
+  asrTranscribe: (req) => ipcRenderer.invoke(IpcChannels.AsrTranscribe, req),
+
+  getBackendEngine: () => ipcRenderer.invoke(IpcChannels.BackendGetEngine),
+  setBackendEngine: (engine: 'opencode' | 'pi') => ipcRenderer.invoke(IpcChannels.BackendSetEngine, engine)
 }
 
 contextBridge.exposeInMainWorld('ralf', ralf)
