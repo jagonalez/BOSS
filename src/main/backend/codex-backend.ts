@@ -100,6 +100,19 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
       required: ['messageId', 'message'],
       additionalProperties: false
     }
+  },
+  {
+    type: 'function',
+    name: 'ralf_threads_spawn_worktree',
+    description: 'Fork this conversation into a new R.A.L.F. thread running in an isolated Git worktree.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instruction: { type: 'string', description: 'Concrete implementation task for the new worktree thread.' }
+      },
+      required: ['instruction'],
+      additionalProperties: false
+    }
   }
 ]
 

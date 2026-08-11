@@ -58,6 +58,11 @@ export type BackendRequest =
   | { type: 'thread.compact'; threadId: string; model?: { providerID: string; modelID: string } }
   | { type: 'thread.models'; threadId?: string; backendId?: BackendId }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string }
+  | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string }
+  | { type: 'worktree.list'; threadId?: string }
+  | { type: 'worktree.settings.get' }
+  | { type: 'worktree.settings.set'; autoCleanupEnabled?: boolean; cleanupAfterDays?: number }
+  | { type: 'worktree.remove'; worktreeId: string }
   | { type: 'thread.relay'; sourceThreadId: string; targetThreadId: string; instruction?: string }
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }

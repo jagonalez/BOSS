@@ -15,6 +15,7 @@ import { loadState } from './state-store'
 import { BackendManager } from './backend/manager'
 import { createBackend } from './backend/factory'
 import { ThreadBus } from './thread-bus'
+import { WorktreeManager } from './worktree-manager'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -29,12 +30,16 @@ const server = new OpenCodeServer()
 const api = new ApiClient(server)
 const events = new EventStream(server)
 const openCodeBackend = createBackend('opencode', { server, api, events })
+const worktrees = new WorktreeManager({
+  stateFile: join(app.getPath('userData'), 'worktrees.json'),
+  root: join(app.getPath('userData'), 'worktrees')
+})
 const backendMgr = new BackendManager({
   opencode: openCodeBackend,
   pi: createBackend('pi', { server, api, events }),
   codex: createBackend('codex', { server, api, events }),
   claude: createBackend('claude', { server, api, events })
-})
+}, worktrees)
 const threadBus = new ThreadBus(backendMgr)
 backendMgr.attachThreadBus(threadBus)
 

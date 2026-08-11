@@ -328,6 +328,15 @@ export default function (pi: ExtensionAPI) {
     }),
     execute: (_id, args, signal) => call("ralf_threads_reply", args, signal)
   })
+  pi.registerTool({
+    name: "ralf_threads_spawn_worktree",
+    label: "Spawn R.A.L.F. worktree thread",
+    description: "Fork this conversation into a new thread in an isolated Git worktree.",
+    parameters: Type.Object({
+      instruction: Type.String({ description: "Concrete implementation task for the new worktree thread." })
+    }),
+    execute: (_id, args, signal) => call("ralf_threads_spawn_worktree", args, signal)
+  })
 }
 `
   }

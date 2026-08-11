@@ -1958,6 +1958,16 @@ button {
   background: rgba(137, 87, 229, 0.15);
 }
 
+.item .badge.worktree {
+  color: var(--green);
+  background: rgba(61, 184, 122, 0.14);
+}
+
+.item .badge.worktree.removed {
+  color: var(--text-faint);
+  background: var(--surface-hover);
+}
+
 .item .badge.side {
   color: var(--accent);
   background: var(--accent-soft);

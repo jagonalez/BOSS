@@ -1046,6 +1046,33 @@ export async function forkSession(id: string): Promise<void> {
   }
 }
 
+export async function forkSessionIntoWorktree(id: string): Promise<void> {
+  try {
+    const session = await OpenCode.forkIntoWorktree(id)
+    upsertSessionMeta(session.id, {
+      kind: 'fork',
+      projectPath: session.projectPath,
+      gitBranch: session.worktree?.branch,
+      forkedFrom: { sessionId: id }
+    })
+    await refreshSessions()
+    if (!openSessionInWorkspace(session.id)) selectSession(session.id)
+  } catch (error) {
+    setSessionError(id, errorSummary(error))
+  }
+}
+
+export async function removeSessionWorktree(id: string): Promise<void> {
+  const session = appStore.getState().sessions.find((item) => item.id === id)
+  if (!session?.worktree || session.worktree.status !== 'active') return
+  try {
+    await OpenCode.removeWorktree(session.worktree.id)
+    await refreshSessions()
+  } catch (error) {
+    setSessionError(id, errorSummary(error))
+  }
+}
+
 export async function revertMessage(sessionID: string, messageID: string): Promise<void> {
   try {
     await OpenCode.revertMessage(sessionID, messageID)

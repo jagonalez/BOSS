@@ -14,6 +14,7 @@ import type {
 } from '@shared/opencode'
 import type { BackendDescriptor, BackendId, BackendMessageOptions, BackendRequest, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
+import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 
 export class ApiError extends Error {
   constructor(
@@ -138,6 +139,16 @@ export const OpenCode = {
     backendRequest<Array<{ id: string; name?: string; provider?: string; variants?: string[] }>>({ type: 'thread.models', threadId, backendId }),
   cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string) =>
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction }),
+  forkIntoWorktree: (threadId: string, instruction?: string) =>
+    backendRequest<SessionInfo>({ type: 'thread.worktree.create', threadId, instruction }),
+  listWorktrees: (threadId?: string) =>
+    backendRequest<WorktreeInfo[]>({ type: 'worktree.list', threadId }),
+  worktreeSettings: () =>
+    backendRequest<WorktreeSettings>({ type: 'worktree.settings.get' }),
+  setWorktreeSettings: (patch: Partial<WorktreeSettings>) =>
+    backendRequest<WorktreeSettings>({ type: 'worktree.settings.set', ...patch }),
+  removeWorktree: (worktreeId: string) =>
+    backendRequest<WorktreeInfo>({ type: 'worktree.remove', worktreeId }),
   relayToThread: (sourceThreadId: string, targetThreadId: string, instruction?: string) =>
     backendRequest<SessionInfo>({ type: 'thread.relay', sourceThreadId, targetThreadId, instruction }),
   threadBus: (threadId?: string) =>

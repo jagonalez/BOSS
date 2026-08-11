@@ -16,6 +16,8 @@ import type { EventMessage, MessageWithParts, SessionInfo } from '@shared/openco
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 import { projectScope, type ProjectScope } from '../project-identity'
+import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
+import type { WorktreeManager } from '../worktree-manager'
 
 interface ThreadBinding {
   id: string
@@ -30,6 +32,7 @@ interface ThreadBinding {
   updatedAt: number
   parentID?: string
   lineage?: SessionInfo['lineage']
+  worktree?: WorktreeInfo
 }
 
 type LegacyThreadBinding = Omit<ThreadBinding, 'nativeSessionOwnership' | 'projectId' | 'executionPath'>
@@ -158,8 +161,12 @@ export class BackendManager {
   private eventCb?: (event: Record<string, unknown>) => void
   private loaded = false
   private legacyOpenCodeImportPending = false
+  private worktreeCleanupTimer?: NodeJS.Timeout
 
-  constructor(private readonly backends: Record<BackendId, Backend>) {}
+  constructor(
+    private readonly backends: Record<BackendId, Backend>,
+    private readonly worktrees?: WorktreeManager
+  ) {}
 
   attachThreadBus(threadBus: ThreadBus): void {
     this.threadBus = threadBus
@@ -203,6 +210,9 @@ export class BackendManager {
       this.save()
     }
     await this.threadBus?.resume()
+    await this.cleanupWorktrees()
+    this.worktreeCleanupTimer = setInterval(() => void this.cleanupWorktrees(), 6 * 60 * 60 * 1_000)
+    this.worktreeCleanupTimer.unref()
   }
 
   async stop(): Promise<void> {
@@ -211,6 +221,8 @@ export class BackendManager {
     for (const off of this.unsubscribers.values()) off()
     this.unsubscribers.clear()
     await this.threadBus?.stop()
+    if (this.worktreeCleanupTimer) clearInterval(this.worktreeCleanupTimer)
+    this.worktreeCleanupTimer = undefined
   }
 
   async setProject(path: string): Promise<void> {
@@ -291,6 +303,7 @@ export class BackendManager {
     const binding = this.bindings.get(threadId)
     if (!binding) throw new Error(`R.A.L.F. thread not found: ${threadId}`)
     this.backends[binding.backendId].setSessionDirectory?.(binding.nativeSessionId, binding.executionPath)
+    if (binding.worktree?.status === 'active') void this.worktrees?.touch(binding.worktree.id)
     return binding
   }
 
@@ -316,6 +329,7 @@ export class BackendManager {
       path: binding.executionPath || native?.path,
       parentID: binding.parentID,
       lineage: binding.lineage,
+      worktree: binding.worktree,
       time: native?.time ?? { created: binding.createdAt, updated: binding.updatedAt }
     }
   }
@@ -478,14 +492,25 @@ export class BackendManager {
     lineage?: SessionInfo['lineage'],
     creationScope: ThreadCreationScope = 'current'
   ): Promise<SessionInfo> {
-    const backend = await this.ensureStarted(backendId)
     const scope = creationScope === 'global' ? this.globalScope : this.currentScope
+    return this.sessionCreateInScope(backendId, scope, title, lineage)
+  }
+
+  private async sessionCreateInScope(
+    backendId: BackendId,
+    scope: ProjectScope,
+    title?: string,
+    lineage?: SessionInfo['lineage'],
+    worktree?: WorktreeInfo
+  ): Promise<SessionInfo> {
+    const backend = await this.ensureStarted(backendId)
     const native = await backend.sessionCreate(title, scope.executionPath || undefined)
     const binding = this.registerNative(backendId, native, 'ralf', lineage)
     binding.title = title ?? native.title
     binding.projectId = scope.projectId
     binding.projectPath = scope.projectPath
     binding.executionPath = scope.executionPath
+    binding.worktree = worktree
     this.bindings.set(binding.id, binding)
     this.save()
     const session = this.session(binding, native)
@@ -535,6 +560,9 @@ export class BackendManager {
 
   async sendMessage(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
     const binding = this.binding(threadId)
+    if (binding.worktree?.status === 'removed') {
+      throw new Error('This thread\'s worktree was cleaned up. Fork it into a new worktree before continuing.')
+    }
     const backend = await this.ensureStarted(binding.backendId)
     binding.updatedAt = now()
     this.save()
@@ -576,6 +604,13 @@ export class BackendManager {
 
   async deliverThreadMessage(threadId: string, body: string): Promise<void> {
     await this.sendMessage(threadId, [{ type: 'text', text: body }], { mode: 'ask' })
+  }
+
+  async spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread> {
+    const created = await this.forkIntoWorktree(threadId, instruction)
+    const info = this.threadInfo(created.id)
+    if (!info) throw new Error('The worktree thread was created but could not be registered.')
+    return info
   }
 
   private async runCommand(
@@ -629,7 +664,7 @@ export class BackendManager {
     const diffs = await sourceBackend.diffGet(source.nativeSessionId).catch(() => [])
     const diffSummary = diffs.slice(0, 30).map((diff) => `- ${diff.path}: ${diff.status ?? 'changed'}`).join('\n')
     return [
-      '[R.A.L.F. CROSS-BACKEND HANDOFF]',
+      '[R.A.L.F. CONTEXT HANDOFF]',
       `Source thread: ${source.title ?? sourceThreadId}`,
       `Source backend: ${source.backendId}`,
       `Project: ${source.projectId === 'global' ? 'Global chat' : source.projectPath}`,
@@ -651,6 +686,77 @@ export class BackendManager {
     }, source.projectId === 'global' ? 'global' : 'current')
     await this.sendMessage(created.id, [{ type: 'text', text: packet }], { mode: 'ask' })
     return created
+  }
+
+  async forkIntoWorktree(threadId: string, instruction?: string): Promise<SessionInfo> {
+    if (!this.worktrees) throw new Error('Git worktrees are not available.')
+    const source = this.binding(threadId)
+    if (source.projectId === 'global' || !source.projectPath) throw new Error('Projectless chats cannot create Git worktrees.')
+    const worktree = await this.worktrees.create({
+      projectId: source.projectId,
+      projectPath: source.projectPath,
+      sourcePath: source.executionPath || source.projectPath,
+      title: source.title,
+      ownerThreadId: undefined
+    })
+    let packet: string
+    let created: SessionInfo
+    try {
+      packet = await this.contextPacket(
+        threadId,
+        instruction ?? `Continue this conversation in the new Git worktree on branch ${worktree.branch}.`
+      )
+      created = await this.sessionCreateInScope(
+        source.backendId,
+        { projectId: source.projectId, projectPath: source.projectPath, executionPath: worktree.path },
+        `${source.title ?? 'Untitled'} · worktree`,
+        { kind: 'fork', sourceThreadId: threadId, sourceBackendId: source.backendId },
+        worktree
+      )
+    } catch (error) {
+      await this.worktrees.remove(worktree.id).catch(() => {})
+      throw error
+    }
+    const binding = this.binding(created.id)
+    await this.worktrees.setOwner(worktree.id, created.id)
+    binding.worktree = { ...worktree, ownerThreadId: created.id }
+    this.save()
+    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { mode: 'ask' })
+    return this.session(binding)
+  }
+
+  private async cleanupWorktrees(): Promise<void> {
+    if (!this.worktrees) return
+    const result = await this.worktrees.cleanup().catch(() => undefined)
+    if (!result) return
+    const all = await this.worktrees.list()
+    const worktrees = new Map(all.map((item) => [item.id, item]))
+    let changed = false
+    for (const binding of this.bindings.values()) {
+      const current = binding.worktree ? worktrees.get(binding.worktree.id) : undefined
+      if (current && current.status !== binding.worktree?.status) {
+        binding.worktree = current
+        changed = true
+      }
+    }
+    if (changed) this.save()
+  }
+
+  async worktreeSettings(patch?: Partial<WorktreeSettings>): Promise<WorktreeSettings> {
+    if (!this.worktrees) throw new Error('Git worktrees are not available.')
+    return patch ? this.worktrees.setSettings(patch) : this.worktrees.settings()
+  }
+
+  async removeWorktree(id: string): Promise<WorktreeInfo> {
+    if (!this.worktrees) throw new Error('Git worktrees are not available.')
+    const owner = [...this.bindings.values()].find((binding) => binding.worktree?.id === id)
+    if (owner && this.busyThreads.has(owner.id)) throw new Error('Stop the running agent before removing its worktree.')
+    const removed = await this.worktrees.remove(id)
+    for (const binding of this.bindings.values()) {
+      if (binding.worktree?.id === id) binding.worktree = removed
+    }
+    this.save()
+    return removed
   }
 
   async relay(sourceThreadId: string, targetThreadId: string, instruction?: string): Promise<SessionInfo> {
@@ -707,6 +813,18 @@ export class BackendManager {
         return (await this.ensureStarted(id)).modelsList()
       }
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction)
+      case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction)
+      case 'worktree.list': {
+        if (!this.worktrees) return []
+        const projectId = request.threadId ? this.binding(request.threadId).projectId : this.currentScope.projectId
+        return this.worktrees.list(projectId)
+      }
+      case 'worktree.settings.get': return this.worktreeSettings()
+      case 'worktree.settings.set': return this.worktreeSettings({
+        autoCleanupEnabled: request.autoCleanupEnabled,
+        cleanupAfterDays: request.cleanupAfterDays
+      })
+      case 'worktree.remove': return this.removeWorktree(request.worktreeId)
       case 'thread.relay': return this.relay(request.sourceThreadId, request.targetThreadId, request.instruction)
       case 'thread.bus.get': {
         if (!this.threadBus) throw new Error('Thread collaboration is not available.')
