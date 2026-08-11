@@ -179,9 +179,11 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 4px 8px 10px;
+  user-select: none;
   -webkit-app-region: drag;
 }
 
+.sidebar-head .logo,
 .sidebar-head button,
 .sidebar-head img {
   -webkit-app-region: no-drag;
@@ -466,6 +468,7 @@ button {
   padding: 7px 12px;
   border-bottom: 1px solid var(--line-subtle);
   background: var(--surface-app);
+  user-select: none;
   -webkit-app-region: drag;
 }
 
@@ -474,6 +477,7 @@ button {
   align-items: center;
   gap: 9px;
   min-width: 0;
+  -webkit-app-region: no-drag;
 }
 
 .workspace-identity > div {
@@ -1307,7 +1311,12 @@ button {
   gap: 24px;
   max-width: 1040px;
   margin: 0 auto 32px;
+  user-select: none;
   -webkit-app-region: drag;
+}
+
+.command-header > div {
+  -webkit-app-region: no-drag;
 }
 
 .command-header h1,
@@ -1823,6 +1832,7 @@ button {
   gap: 6px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
   -webkit-app-region: drag;
 }
 
