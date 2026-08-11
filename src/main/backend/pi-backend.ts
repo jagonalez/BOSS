@@ -1,8 +1,11 @@
+import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
-import { unlinkSync } from 'node:fs'
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Backend, McpServerConfig, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
+import type { ThreadBusConnection } from '@shared/thread-bus'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 
 type RpcRequest = { id?: string; type: string; [key: string]: unknown }
@@ -110,14 +113,29 @@ class PiRpcSession {
   constructor(
     public sessionId: string,
     private readonly cwd: string,
-    private readonly onEvent: (sessionId: string, event: Record<string, unknown>) => void
+    private readonly onEvent: (sessionId: string, event: Record<string, unknown>) => void,
+    private readonly threadBus?: ThreadBusConnection,
+    private readonly extensionPath?: string
   ) {}
 
   async start(): Promise<void> {
     if (this.process) return
-    this.process = spawn('pi', ['--mode', 'rpc', '--session-id', this.sessionId, '--approve'], {
+    this.process = spawn('pi', [
+      '--mode', 'rpc',
+      '--session-id', this.sessionId,
+      '--approve',
+      ...(this.extensionPath ? ['--extension', this.extensionPath] : [])
+    ], {
       cwd: this.cwd || process.cwd(),
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        ...(this.threadBus ? {
+          RALF_THREAD_BUS_URL: this.threadBus.url,
+          RALF_THREAD_BUS_TOKEN: this.threadBus.tokenFor('pi', this.sessionId),
+          RALF_NATIVE_THREAD_ID: this.sessionId
+        } : {})
+      }
     })
     const decoder = new TextDecoder()
     this.process.stdout?.on('data', (chunk: Buffer) => {
@@ -198,6 +216,8 @@ export class PiBackend implements Backend {
   private liveText = new Map<string, string>()
   private version = ''
   private healthy = false
+  private threadBus?: ThreadBusConnection
+  private threadBusExtension = ''
 
   constructor(cwd?: string) {
     this.projectPath = cwd ?? ''
@@ -234,6 +254,79 @@ export class PiBackend implements Backend {
   async registerMcpServer(_name: string, _config: McpServerConfig): Promise<boolean> { return false }
   async unregisterMcpServer(_name: string): Promise<void> {}
 
+  configureThreadBus(connection: ThreadBusConnection): void {
+    this.threadBus = connection
+    const directory = join(app.getPath('userData'), 'pi-ralf')
+    mkdirSync(directory, { recursive: true })
+    this.threadBusExtension = join(directory, 'ralf_threads.ts')
+    writeFileSync(this.threadBusExtension, this.threadToolSource())
+  }
+
+  private threadToolSource(): string {
+    return `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import { Type } from "typebox"
+
+async function call(name, args, signal) {
+  const url = process.env.RALF_THREAD_BUS_URL
+  const token = process.env.RALF_THREAD_BUS_TOKEN
+  const nativeThreadId = process.env.RALF_NATIVE_THREAD_ID
+  if (!url || !token || !nativeThreadId) throw new Error("R.A.L.F. thread collaboration is unavailable.")
+  const response = await fetch(url + "/agent-call", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ backendId: "pi", nativeThreadId, tool: name, arguments: args }),
+    signal
+  })
+  const payload = await response.json()
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. thread tool failed.")
+  return { content: [{ type: "text", text: JSON.stringify(payload.result, null, 2) }], details: payload.result }
+}
+
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "ralf_threads_list",
+    label: "List R.A.L.F. threads",
+    description: "List other threads in this project that use the same backend.",
+    parameters: Type.Object({}),
+    execute: (_id, args, signal) => call("ralf_threads_list", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_threads_read",
+    label: "Read R.A.L.F. thread",
+    description: "Read recent messages from another same-project, same-backend thread.",
+    parameters: Type.Object({
+      threadId: Type.String({ description: "R.A.L.F. thread id returned by ralf_threads_list." }),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 8 }))
+    }),
+    execute: (_id, args, signal) => call("ralf_threads_read", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_threads_send",
+    label: "Send R.A.L.F. thread message",
+    description: "Send a bounded message to another same-project, same-backend thread.",
+    parameters: Type.Object({
+      threadId: Type.String({ description: "R.A.L.F. thread id returned by ralf_threads_list." }),
+      message: Type.String({ description: "Message to send to the other agent." }),
+      expectsReply: Type.Optional(Type.Boolean({ default: true })),
+      maxTurns: Type.Optional(Type.Integer({ minimum: 1, maximum: 8, default: 4 }))
+    }),
+    execute: (_id, args, signal) => call("ralf_threads_send", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_threads_reply",
+    label: "Reply to R.A.L.F. thread message",
+    description: "Reply once to a R.A.L.F. thread message addressed to this thread.",
+    parameters: Type.Object({
+      messageId: Type.String({ description: "Message id from the incoming R.A.L.F. thread message." }),
+      message: Type.String({ description: "Reply to send to the other agent." }),
+      expectsReply: Type.Optional(Type.Boolean({ default: false }))
+    }),
+    execute: (_id, args, signal) => call("ralf_threads_reply", args, signal)
+  })
+}
+`
+  }
+
   onEvent(callback: (event: EventMessage) => void): () => void {
     this.eventCb = callback
     return () => { if (this.eventCb === callback) this.eventCb = undefined }
@@ -246,7 +339,13 @@ export class PiBackend implements Backend {
   private async runtime(sessionId: string): Promise<PiRpcSession> {
     const existing = this.sessions.get(sessionId)
     if (existing) return existing
-    const runtime = new PiRpcSession(sessionId, this.projectPath, (activeSessionId, event) => this.mapEvent(activeSessionId, event))
+    const runtime = new PiRpcSession(
+      sessionId,
+      this.projectPath,
+      (activeSessionId, event) => this.mapEvent(activeSessionId, event),
+      this.threadBus,
+      this.threadBusExtension || undefined
+    )
     this.sessions.set(sessionId, runtime)
     try {
       await runtime.start()

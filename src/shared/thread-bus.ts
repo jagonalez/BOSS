@@ -37,6 +37,12 @@ export interface ThreadBusSnapshot {
   toolBackends: BackendId[]
 }
 
+export interface ThreadBusConnection {
+  url: string
+  token: string
+  tokenFor(backendId: BackendId, nativeThreadId: string): string
+}
+
 export type ThreadBusAgentTool =
   | 'ralf_threads_list'
   | 'ralf_threads_read'

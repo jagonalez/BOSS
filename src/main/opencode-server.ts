@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { ServerInfo } from '@shared/ipc'
 import { saveState } from './state-store'
-import type { ThreadBusConnection } from './thread-bus'
+import type { ThreadBusConnection } from '@shared/thread-bus'
 
 interface Health {
   healthy: boolean

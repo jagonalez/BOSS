@@ -43,7 +43,7 @@ export function SettingsModal(): React.JSX.Element | null {
           <div className="settings-row-main">
             <div className="settings-row-label">Agent access</div>
             <div className="settings-row-hint">
-              Scoped to this project. OpenCode and newly created Codex threads can use the thread tools.
+              Scoped to this project. OpenCode, Pi, Codex CLI, and Claude Code threads can use the thread tools.
             </div>
           </div>
           <select
