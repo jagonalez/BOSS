@@ -26,7 +26,7 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   },
   connections: {
     title: 'Connections',
-    description: 'Connect agent backends and choose the model each one uses for new threads.'
+    description: 'See what each agent can use, add cloud accounts, and choose defaults for new threads.'
   },
   collaboration: {
     title: 'Collaboration',
@@ -48,6 +48,16 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
 
 function modelValue(providerID: string, modelID: string): string {
   return JSON.stringify([providerID, modelID])
+}
+
+const LOCAL_PROVIDER_IDS = new Set(['ollama', 'llama.cpp', 'llamacpp', 'lmstudio', 'lm-studio', 'vllm', 'sglang'])
+
+function modelIsLocal(model: BackendModelDescriptor, backendId: BackendId): boolean {
+  return model.source === 'local' || LOCAL_PROVIDER_IDS.has((model.provider || backendId).toLowerCase())
+}
+
+function providerIsLocal(provider: string, models: BackendModelDescriptor[], backendId: BackendId): boolean {
+  return models.some((model) => (model.provider || backendId) === provider && modelIsLocal(model, backendId))
 }
 
 function DefaultModelPicker({
@@ -109,7 +119,7 @@ function DefaultModelPicker({
       >
         <span>
           <strong>{loading ? 'Loading models…' : selectedModel?.name || selected?.modelID || (models.length ? 'Automatic' : 'No models available')}</strong>
-          {selected ? <small>{selected.providerID}</small> : null}
+          {selected ? <small>{selected.providerID}{selectedModel && modelIsLocal(selectedModel, backendId) ? ' · Local' : ''}</small> : null}
         </span>
         <span className="settings-model-picker-chevron">⌄</span>
       </button>
@@ -142,9 +152,18 @@ function DefaultModelPicker({
                 <em>Clear</em>
               </button>
             ) : null}
-            {[...grouped].map(([provider, items]) => (
+            {[...grouped].sort(([providerA, itemsA], [providerB, itemsB]) => {
+              if (providerA === selected?.providerID) return -1
+              if (providerB === selected?.providerID) return 1
+              const localA = itemsA.some((model) => modelIsLocal(model, backendId))
+              const localB = itemsB.some((model) => modelIsLocal(model, backendId))
+              return localA === localB ? providerA.localeCompare(providerB) : localA ? -1 : 1
+            }).map(([provider, items]) => (
               <div className="settings-model-provider" key={provider}>
-                <div>{provider}</div>
+                <div className="settings-model-provider-heading">
+                  <span>{provider}</span>
+                  {items.some((model) => modelIsLocal(model, backendId)) ? <em>Local</em> : null}
+                </div>
                 {[...items].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((model) => {
                   const active = selected?.modelID === model.id && selected.providerID === provider
                   return (
@@ -275,30 +294,56 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {section === 'connections' ? (
               <div className="settings-group-stack">
-                <div className="settings-connection-grid">
+                <div className="settings-connections-explainer">
+                  <div>
+                    <strong>Backends own their model access</strong>
+                    <p>R.A.L.F. discovers the providers already configured in each agent. Local models stay on your machine; credentials remain in the backend's own store.</p>
+                  </div>
+                </div>
+                <section className="settings-connections-panel">
+                  <div className="settings-connections-table-head" aria-hidden="true">
+                    <span>Agent runtime</span>
+                    <span>Model access</span>
+                    <span>New threads</span>
+                    <span />
+                  </div>
                   {backends.map((backend) => {
                     const auth = (backendAuth ?? []).find((item) => item.backendId === backend.id)
                     const models = backendModels[backend.id] ?? []
                     const selected = defaultModels[backend.id]
+                    const providers = [...new Set(models.map((model) => model.provider || backend.id))]
+                    const localProviders = providers.filter((provider) => providerIsLocal(provider, models, backend.id))
+                    const hasCloudAccount = auth?.state === 'connected'
+                    const accessDetail = localProviders.length
+                      ? `${localProviders.join(', ')} available locally${hasCloudAccount ? ` · ${auth.detail}` : ''}`
+                      : hasCloudAccount
+                        ? `${auth.detail}${auth.accounts?.length ? ` · ${auth.accounts.join(', ')}` : ''}`
+                        : providers.length
+                          ? `${providers.length} model provider${providers.length === 1 ? '' : 's'} available through ${backend.label}`
+                          : auth?.detail ?? 'Checking model access…'
                     return (
-                      <section className="settings-connection-card" key={backend.id}>
-                        <div className="settings-connection-header">
+                      <div className="settings-connection-row" key={backend.id}>
+                        <div className="settings-runtime">
                           <BackendBadge backendId={backend.id} />
-                          <div>
+                          <div className="settings-runtime-copy">
                             <h2>{backend.label}</h2>
-                            <span className={`connection-state ${auth?.state ?? 'unknown'}`}>
-                              {auth?.state === 'connected' ? 'Connected' : auth?.state === 'not-connected' ? 'Not connected' : 'Checking…'}
-                            </span>
+                            <small>{backend.available ? backend.version || 'CLI available' : backend.unavailableReason}</small>
                           </div>
                         </div>
 
-                        <p className="settings-connection-detail">
-                          {auth?.detail ?? 'Checking the CLI credential store…'}
-                          {auth?.accounts?.length ? ` · ${auth.accounts.join(', ')}` : ''}
-                        </p>
+                        <div className="settings-access">
+                          <div className="settings-access-badges">
+                            <span className={`settings-access-badge ${backend.available ? 'ready' : 'unavailable'}`}>
+                              {backend.available ? 'Runtime ready' : 'Unavailable'}
+                            </span>
+                            {localProviders.length ? <span className="settings-access-badge local">Local · {localProviders.join(', ')}</span> : null}
+                            {hasCloudAccount ? <span className="settings-access-badge cloud">Cloud connected</span> : null}
+                          </div>
+                          <p>{accessDetail}</p>
+                        </div>
 
-                        <div className="settings-field">
-                          <span>Default model for new threads</span>
+                        <div className="settings-connection-model">
+                          <span>Default model</span>
                           <DefaultModelPicker
                             backendId={backend.id}
                             models={models}
@@ -308,17 +353,13 @@ export function SettingsModal(): React.JSX.Element | null {
                           />
                         </div>
 
-                        <div className="settings-connection-actions">
-                          <span>{backend.available ? backend.version || 'CLI available' : backend.unavailableReason}</span>
-                          <button className="btn-ghost" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
-                            {auth?.state === 'connected' ? 'Re-authenticate' : 'Connect'}
-                          </button>
-                        </div>
-                      </section>
+                        <button className="settings-connection-manage" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
+                          {hasCloudAccount ? 'Manage' : 'Add account'}
+                        </button>
+                      </div>
                     )
                   })}
-                </div>
-                <p className="settings-page-note">R.A.L.F. launches each agent's own login flow and uses its existing credential store. Credentials are never copied into R.A.L.F.</p>
+                </section>
               </div>
             ) : null}
 

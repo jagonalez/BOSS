@@ -1,9 +1,10 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { Backend, McpServerConfig, ThinkingLevel } from './backend'
+import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
@@ -31,6 +32,39 @@ interface PiMessage {
   toolCallId?: string
   toolName?: string
   isError?: boolean
+}
+
+type ModelSource = 'local' | 'cloud' | 'custom'
+
+const LOCAL_PROVIDER_IDS = new Set(['ollama', 'llama.cpp', 'llamacpp', 'lmstudio', 'lm-studio', 'vllm', 'sglang'])
+
+function isLocalEndpoint(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase()
+    if (hostname === 'localhost' || hostname === '::1' || hostname.endsWith('.local')) return true
+    if (hostname.startsWith('127.') || hostname.startsWith('10.') || hostname.startsWith('192.168.')) return true
+    const private172 = /^172\.(\d+)\./.exec(hostname)
+    return private172 ? Number(private172[1]) >= 16 && Number(private172[1]) <= 31 : false
+  } catch {
+    return false
+  }
+}
+
+function piProviderSources(): Map<string, ModelSource> {
+  const sources = new Map<string, ModelSource>()
+  for (const provider of LOCAL_PROVIDER_IDS) sources.set(provider, 'local')
+  try {
+    const config = JSON.parse(readFileSync(join(homedir(), '.pi', 'agent', 'models.json'), 'utf8')) as {
+      providers?: Record<string, { baseUrl?: unknown }>
+    }
+    for (const [provider, value] of Object.entries(config.providers ?? {})) {
+      const baseUrl = typeof value.baseUrl === 'string' ? value.baseUrl : ''
+      sources.set(provider, baseUrl && isLocalEndpoint(baseUrl) ? 'local' : 'custom')
+    }
+  } catch {
+    /* Pi works without custom models.json configuration. */
+  }
+  return sources
 }
 
 function promptContent(parts: unknown[]): { message: string; images: Array<{ type: 'image'; data: string; mimeType: string }> } {
@@ -559,7 +593,8 @@ export default function (pi: ExtensionAPI) {
 
   async abort(sessionId: string): Promise<void> { await (await this.runtime(sessionId)).send({ type: 'abort' }) }
 
-  async modelsList(): Promise<{ id: string; name?: string; provider?: string; variants?: string[] }[]> {
+  async modelsList(): Promise<ModelInfo[]> {
+    const providerSources = piProviderSources()
     const runtime = this.sessions.values().next().value as PiRpcSession | undefined
     if (!runtime) {
       try {
@@ -572,7 +607,8 @@ export default function (pi: ExtensionAPI) {
             id,
             name: id,
             provider,
-            variants: thinking === 'yes' ? ['off', 'minimal', 'low', 'medium', 'high'] : []
+            variants: thinking === 'yes' ? ['off', 'minimal', 'low', 'medium', 'high'] : [],
+            source: providerSources.get(provider) ?? 'cloud'
           }]
         })
       } catch {
@@ -590,7 +626,8 @@ export default function (pi: ExtensionAPI) {
         id: model.id,
         name: model.name,
         provider: model.provider,
-        variants: explicit.length > 0 ? explicit : model.reasoning ? ['off', 'minimal', 'low', 'medium', 'high'] : []
+        variants: explicit.length > 0 ? explicit : model.reasoning ? ['off', 'minimal', 'low', 'medium', 'high'] : [],
+        source: model.provider ? providerSources.get(model.provider) ?? 'cloud' : undefined
       }
     })
   }
