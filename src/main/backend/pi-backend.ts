@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { join } from 'node:path'
-import type { Backend } from './backend'
+import type { Backend, McpServerConfig, ThinkingLevel } from './backend'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent } from '@shared/opencode'
 
 type RpcRequest = { id?: string; type: string; [k: string]: unknown }
@@ -11,7 +10,6 @@ type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void }
 export class PiBackend implements Backend {
   readonly id = 'pi' as const
   private proc: ChildProcess | null = null
-  private buffer = ''
   private nextId = 1
   private pending = new Map<string, Pending>()
   private projectPath = ''
@@ -66,13 +64,23 @@ export class PiBackend implements Backend {
 
   info() {
     return {
-      id: this.id as const,
+      id: this.id,
       engine: 'pi',
       version: this.infoState.version,
       healthy: this.infoState.healthy,
       projectPath: this.projectPath,
     }
   }
+
+  supportsMcp(): boolean {
+    return false
+  }
+
+  async registerMcpServer(_name: string, _config: McpServerConfig): Promise<boolean> {
+    return false
+  }
+
+  async unregisterMcpServer(_name: string): Promise<void> {}
 
   onEvent(cb: (ev: EventMessage) => void): () => void {
     this.eventCb = cb
@@ -136,30 +144,30 @@ export class PiBackend implements Backend {
 
   /* Sessions */
   async sessionsList(): Promise<SessionInfo[]> { return [] }
-  async sessionCreate(title?: string): Promise<SessionInfo> {
+  async sessionCreate(_title?: string): Promise<SessionInfo> {
     await this.send({ type: 'new_session' })
     // stub
     return { id: 'pi-' + Math.random().toString(36).slice(2) }
   }
-  async sessionDelete(id: string): Promise<void> { /* stub */ }
-  async sessionRename(id: string, title: string): Promise<SessionInfo> { return { id } }
+  async sessionDelete(_id: string): Promise<void> { /* stub */ }
+  async sessionRename(_id: string, title: string): Promise<SessionInfo> { return { id: _id, title } }
   async sessionGet(id: string): Promise<SessionInfo> { return { id } }
 
   /* Messages */
-  async messagesList(sessionId: string, limit?: number): Promise<MessageWithParts[]> {
-    const res = await this.send({ type: 'get_messages' })
+  async messagesList(_sessionId: string, _limit?: number): Promise<MessageWithParts[]> {
+    await this.send({ type: 'get_messages' })
     // map to MessageWithParts
     return []
   }
-  async sendMessage(sessionId: string, parts: unknown[], opts?: any): Promise<void> {
+  async sendMessage(_sessionId: string, parts: unknown[], _opts?: unknown): Promise<void> {
     // switch session then prompt
-    await this.send({ type: 'prompt', message: parts.map(p => (p as any).text || '').join('\n') })
+    await this.send({ type: 'prompt', message: parts.map(p => (p as { text?: string }).text || '').join('\n') })
   }
-  async abort(sessionId: string): Promise<void> { await this.send({ type: 'abort' }) }
+  async abort(_sessionId: string): Promise<void> { await this.send({ type: 'abort' }) }
 
   /* Models */
-  async modelsList(): Promise<{id:string}[]> {
-    const res = await this.send({ type: 'get_available_models' })
+  async modelsList(): Promise<{ id: string; name?: string; provider?: string }[]> {
+    await this.send({ type: 'get_available_models' })
     return []
   }
   async modelSelect(providerId: string, modelId: string): Promise<void> {
@@ -167,23 +175,22 @@ export class PiBackend implements Backend {
   }
 
   /* Thinking */
-  async thinkingGet(): Promise<{level:string}> { return { level: 'medium' } }
-  async thinkingSet(level: string): Promise<void> { await this.send({ type: 'set_thinking_level', level }) }
+  async thinkingGet(): Promise<ThinkingLevel> { return { level: 'medium' } }
+  async thinkingSet(level: ThinkingLevel['level']): Promise<void> { await this.send({ type: 'set_thinking_level', level }) }
 
   /* Todos / Permissions */
-  async todosGet(sessionId: string): Promise<Todo[]> { return [] }
-  async permissionRespond(sessionId: string, permissionId: string, response: 'once'|'always'|'reject'): Promise<void> { /* pi has no direct mapping */ }
+  async todosGet(_sessionId: string): Promise<Todo[]> { return [] }
+  async permissionRespond(_sessionId: string, _permissionId: string, _response: 'once'|'always'|'reject'): Promise<void> { /* pi has no direct mapping */ }
 
   /* Files / Diff */
-  async diffGet(sessionId: string, messageId?: string): Promise<FileDiff[]> { return [] }
-  async fileTree(path?: string): Promise<FileNode[]> { return [] }
+  async diffGet(_sessionId: string, _messageId?: string): Promise<FileDiff[]> { return [] }
+  async fileTree(_path?: string): Promise<FileNode[]> { return [] }
   async fileContent(path: string): Promise<FileContent> { return { path, content: '' } }
 
   /* Fork / Revert */
-  async fork(sessionId: string, messageId?: string): Promise<SessionInfo> {
-    await this.send({ type: 'fork', entryId: messageId })
+  async fork(sessionId: string, _messageId?: string): Promise<SessionInfo> {
     return { id: sessionId }
   }
-  async revert(sessionId: string, messageId: string): Promise<void> { /* stub */ }
-  async unrevert(sessionId: string): Promise<void> { /* stub */ }
+  async revert(_sessionId: string, _messageId: string): Promise<void> { /* stub */ }
+  async unrevert(_sessionId: string): Promise<void> { /* stub */ }
 }

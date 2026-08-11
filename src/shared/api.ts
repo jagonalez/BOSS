@@ -5,6 +5,7 @@ import type {
   AsrTranscribeResult,
   BrowseBounds,
   BrowseNavEvent,
+  ComputerUsePermissions,
   ComputerUseStatus,
   OptionalComponentId,
   OptionalComponentInfo,
@@ -48,6 +49,9 @@ export interface RalfApi {
 
   computerUseStatus(): Promise<ComputerUseStatus>
   setComputerUse(on: boolean): Promise<ComputerUseStatus>
+  computerUsePermissions(): Promise<ComputerUsePermissions>
+  requestComputerUsePermission(pane: 'accessibility' | 'screenRecording'): Promise<boolean>
+  openPrivacyPane(pane: 'accessibility' | 'screenRecording'): Promise<boolean>
 
   projectCurrent(): Promise<ProjectInfo>
   projectSet(path: string): Promise<ProjectInfo>

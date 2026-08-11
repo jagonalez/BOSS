@@ -209,6 +209,10 @@ export function App(): React.JSX.Element {
       .computerUseStatus()
       .then((st) => appStore.setState({ computerUse: st }))
       .catch(() => {})
+    void window.ralf
+      .computerUsePermissions()
+      .then((perms) => appStore.setState({ computerUsePerms: perms }))
+      .catch(() => {})
 
     return () => {
       offEvent()
@@ -227,7 +231,10 @@ export function App(): React.JSX.Element {
         if (s.streaming && s.activeSessionId) void abortRun()
       }
     }
-    const onFocus = (): void => clearAttention()
+    const onFocus = (): void => {
+      clearAttention()
+      void window.ralf.computerUsePermissions().then((perms) => appStore.setState({ computerUsePerms: perms }))
+    }
     window.addEventListener('keydown', onKey)
     window.addEventListener('focus', onFocus)
     return () => {

@@ -28,6 +28,12 @@ import type {
 } from '@shared/opencode'
 import type { EventMessage } from '@shared/opencode'
 
+export interface McpServerConfig {
+  type: 'local'
+  command: string[]
+  environment?: Record<string, string>
+}
+
 export interface Backend {
   readonly id: BackendId
 
@@ -37,6 +43,11 @@ export interface Backend {
 
   setProject(path: string): Promise<void>
   info(): BackendInfo
+
+  /** MCP tool servers (computer use, etc.). Returns false if the backend can't host MCP. */
+  supportsMcp(): boolean
+  registerMcpServer(name: string, config: McpServerConfig): Promise<boolean>
+  unregisterMcpServer(name: string): Promise<void>
 
   /** Events */
   onEvent(cb: (ev: EventMessage) => void): () => void

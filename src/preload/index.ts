@@ -45,6 +45,10 @@ const ralf: RalfApi = {
 
   computerUseStatus: () => ipcRenderer.invoke(IpcChannels.ComputerUseStatus),
   setComputerUse: (on: boolean) => ipcRenderer.invoke(IpcChannels.ComputerUseSetEnabled, on),
+  computerUsePermissions: () => ipcRenderer.invoke(IpcChannels.ComputerUsePermissions),
+  requestComputerUsePermission: (pane: 'accessibility' | 'screenRecording') =>
+    ipcRenderer.invoke(IpcChannels.ComputerUseRequestPermission, pane),
+  openPrivacyPane: (pane: 'accessibility' | 'screenRecording') => ipcRenderer.invoke(IpcChannels.OpenPrivacyPane, pane),
 
   projectCurrent: () => ipcRenderer.invoke(IpcChannels.ProjectCurrent),
   projectSet: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectSet, path),

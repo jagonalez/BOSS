@@ -50,10 +50,19 @@ export interface OptionalDownloadEvent {
 }
 
 export interface ComputerUseStatus {
+  supported: boolean
   enabled: boolean
   running: boolean
   error?: string
 }
+
+export interface ComputerUsePermissions {
+  available: boolean
+  accessibility: boolean
+  screenRecording: boolean
+}
+
+export type PrivacyPane = 'accessibility' | 'screenRecording'
 
 export interface ProjectInfo {
   path: string
@@ -117,6 +126,9 @@ export const IpcChannels = {
   OptionalProgress: 'optional:progress',
   ComputerUseStatus: 'computer-use:status',
   ComputerUseSetEnabled: 'computer-use:set-enabled',
+  ComputerUsePermissions: 'computer-use:permissions',
+  ComputerUseRequestPermission: 'computer-use:request-permission',
+  OpenPrivacyPane: 'open-privacy-pane',
   ProjectCurrent: 'project:current',
   ProjectSet: 'project:set',
   ProjectChoose: 'project:choose',

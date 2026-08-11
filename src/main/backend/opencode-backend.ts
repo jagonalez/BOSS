@@ -1,7 +1,7 @@
 import { OpenCodeServer } from '../opencode-server'
 import { ApiClient } from '../api-client'
 import { EventStream } from '../event-stream'
-import type { Backend, ModelInfo } from './backend'
+import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, EventMessage } from '@shared/opencode'
 
 export class OpenCodeBackend implements Backend {
@@ -48,6 +48,19 @@ export class OpenCodeBackend implements Backend {
       healthy: s.healthy,
       projectPath: this.server.projectPath,
     }
+  }
+
+  supportsMcp(): boolean {
+    return true
+  }
+
+  async registerMcpServer(name: string, config: McpServerConfig): Promise<boolean> {
+    const res = await this.api.request({ method: 'POST', path: '/mcp', body: { name, config } })
+    return res.status >= 200 && res.status < 300
+  }
+
+  async unregisterMcpServer(_name: string): Promise<void> {
+    // opencode has no MCP remove endpoint; leave the server registered
   }
 
   onEvent(cb: (ev: EventMessage) => void): () => void {
@@ -105,17 +118,20 @@ export class OpenCodeBackend implements Backend {
   /* Models */
   async modelsList(): Promise<ModelInfo[]> {
     const res = await this.api.request({ method: 'GET', path: '/provider' })
-    // adapt Provider[] -> ModelInfo[]
-    return []
+    // adapt { all: Provider[] } -> ModelInfo[]
+    const body = res.body as { all?: Array<{ id: string; models?: Array<{ id: string; name?: string }> }> }
+    return (body.all ?? []).flatMap((p) =>
+      (p.models ?? []).map((m) => ({ id: m.id, name: m.name, provider: p.id }))
+    )
   }
 
-  async modelSelect(providerId: string, modelId: string): Promise<void> {
+  async modelSelect(_providerId: string, _modelId: string): Promise<void> {
     // opencode has no global select; per-message. Stub.
   }
 
   /* Thinking */
-  async thinkingGet(): Promise<{level:string}> { return { level: 'medium' } }
-  async thinkingSet(level: string): Promise<void> { /* opencode config */ }
+  async thinkingGet(): Promise<ThinkingLevel> { return { level: 'medium' } }
+  async thinkingSet(_level: ThinkingLevel['level']): Promise<void> { /* opencode config */ }
 
   /* Todos / Permissions */
   async todosGet(sessionId: string): Promise<Todo[]> {
