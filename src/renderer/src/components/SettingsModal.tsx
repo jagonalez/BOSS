@@ -62,6 +62,8 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   }
 }
 
+const THEME_CATEGORIES = ['R.A.L.F.', 'Community', 'Accessibility'] as const
+
 function modelValue(providerID: string, modelID: string): string {
   return JSON.stringify([providerID, modelID])
 }
@@ -472,24 +474,34 @@ export function SettingsModal(): React.JSX.Element | null {
                     <p>Applied immediately across every R.A.L.F. window.</p>
                   </div>
                 </div>
-                <div className="theme-grid settings-theme-grid">
-                  {THEMES.map((theme) => (
-                    <button
-                      key={theme.id}
-                      className={`theme-swatch ${theme.id === currentTheme ? 'active' : ''}`}
-                      onClick={() => applyTheme(theme.id)}
-                      title={theme.label}
-                    >
-                      <span className="theme-swatch-preview" style={{ background: theme.colors.canvas }}>
-                        <span style={{ background: theme.colors.sidebar }} />
-                        <span style={{ background: theme.colors.surface }}>
-                          <i style={{ background: theme.colors.accent }} />
-                          <i style={{ background: theme.colors.textMuted }} />
-                          <i style={{ background: theme.colors.success }} />
-                        </span>
-                      </span>
-                      <span className="theme-swatch-copy"><strong>{theme.label}</strong><small>{theme.description}</small></span>
-                    </button>
+                <div className="settings-theme-families">
+                  {THEME_CATEGORIES.map((category) => (
+                    <div className="settings-theme-family" key={category}>
+                      <div className="settings-theme-family-label">{category}</div>
+                      <div className="theme-grid settings-theme-grid">
+                        {THEMES.filter((theme) => theme.category === category).map((theme) => (
+                          <button
+                            key={theme.id}
+                            className={`theme-swatch ${theme.id === currentTheme ? 'active' : ''}`}
+                            onClick={() => applyTheme(theme.id)}
+                            title={theme.label}
+                          >
+                            <span className="theme-swatch-preview" style={{ background: theme.colors.canvas }}>
+                              <span style={{ background: theme.colors.sidebar }} />
+                              <span style={{ background: theme.colors.surface }}>
+                                <i style={{ background: theme.colors.accent }} />
+                                <i style={{ background: theme.colors.textMuted }} />
+                                <i style={{ background: theme.colors.success }} />
+                              </span>
+                            </span>
+                            <span className="theme-swatch-copy">
+                              <span><strong>{theme.label}</strong><em>{theme.appearance}</em></span>
+                              <small>{theme.description}</small>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </section>

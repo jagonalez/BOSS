@@ -63,119 +63,129 @@ export interface ThemeDef {
   id: string
   label: string
   description: string
+  category: 'R.A.L.F.' | 'Community' | 'Accessibility'
   appearance: 'dark' | 'light'
   colors: ThemeColors
   syntax: SyntaxPalette
   terminal: TerminalPalette
 }
 
-const carbonColors: ThemeColors = {
-  canvas: '#0b0d10', sidebar: '#0f1216', surface: '#13171c', surfaceRaised: '#181d24', inset: '#080a0d', hover: '#1c222b', selected: '#222a35',
-  border: '#252c36', borderStrong: '#35404e', text: '#eef2f7', textMuted: '#a8b1bd', textSubtle: '#707b89', accent: '#77a7ff', accentHover: '#9bc0ff',
-  accentSoft: 'rgba(119, 167, 255, 0.15)', success: '#63d297', successSoft: 'rgba(99, 210, 151, 0.14)', warning: '#e7b760', warningSoft: 'rgba(231, 183, 96, 0.14)',
-  danger: '#f27b85', dangerSoft: 'rgba(242, 123, 133, 0.14)', purple: '#b59aff', cyan: '#62d4dc', shadow: 'rgba(0, 0, 0, 0.58)'
-}
-
+// Community palettes follow their upstream projects so R.A.L.F., Highlight.js,
+// and xterm share one visual source of truth:
+// - Tokyo Night Moon: github.com/folke/tokyonight.nvim (Apache-2.0)
+// - Catppuccin: github.com/catppuccin/palette (MIT)
+// - Rosé Pine: github.com/rose-pine/palette (MIT)
 export const THEMES: ThemeDef[] = [
   {
-    id: 'carbon',
-    label: 'Carbon',
-    description: 'Neutral and focused',
-    appearance: 'dark',
-    colors: carbonColors,
-    syntax: {
-      foreground: '#dbe2ea', comment: '#697482', keyword: '#c9a7ff', string: '#a6d189', number: '#efb785', title: '#82b6ff', variable: '#eaa3ad',
-      type: '#74d4cf', literal: '#e7c66f', meta: '#9aa7ff', addition: '#8bd5a8', deletion: '#ef8b96'
-    },
-    terminal: {
-      black: '#161a20', red: '#e5747e', green: '#65c98f', yellow: '#d9ad5b', blue: '#73a7f5', magenta: '#ae8ee6', cyan: '#5bc3ca', white: '#cbd2da',
-      brightBlack: '#66717e', brightRed: '#f08a94', brightGreen: '#7bdca4', brightYellow: '#ebc46d', brightBlue: '#91b9ff', brightMagenta: '#c1a5fa', brightCyan: '#74d9df', brightWhite: '#f4f7fa'
-    }
-  },
-  {
-    id: 'ink',
-    label: 'Ink',
-    description: 'Deep navy and electric blue',
+    id: 'ralf-dark',
+    label: 'R.A.L.F. Dark',
+    description: 'Neutral developer UI',
+    category: 'R.A.L.F.',
     appearance: 'dark',
     colors: {
-      canvas: '#080b12', sidebar: '#0b101a', surface: '#101724', surfaceRaised: '#151e2e', inset: '#060910', hover: '#19253a', selected: '#1d2c45',
-      border: '#223047', borderStrong: '#344966', text: '#edf4ff', textMuted: '#9eacc2', textSubtle: '#65748c', accent: '#70a5ff', accentHover: '#9bc0ff',
-      accentSoft: 'rgba(112, 165, 255, 0.16)', success: '#5ed1a0', successSoft: 'rgba(94, 209, 160, 0.14)', warning: '#e9b75d', warningSoft: 'rgba(233, 183, 93, 0.14)',
-      danger: '#f17887', dangerSoft: 'rgba(241, 120, 135, 0.14)', purple: '#a899ff', cyan: '#56d4e5', shadow: 'rgba(0, 3, 10, 0.68)'
+      canvas: '#0d1117', sidebar: '#090d13', surface: '#161b22', surfaceRaised: '#21262d', inset: '#010409', hover: '#1f252d', selected: '#252d38',
+      border: '#30363d', borderStrong: '#484f58', text: '#f0f6fc', textMuted: '#b1bac4', textSubtle: '#7d8590', accent: '#58a6ff', accentHover: '#79c0ff',
+      accentSoft: 'rgba(56, 139, 253, 0.17)', success: '#3fb950', successSoft: 'rgba(46, 160, 67, 0.16)', warning: '#d29922', warningSoft: 'rgba(187, 128, 9, 0.16)',
+      danger: '#f85149', dangerSoft: 'rgba(248, 81, 73, 0.16)', purple: '#bc8cff', cyan: '#39c5cf', shadow: 'rgba(1, 4, 9, 0.7)'
     },
     syntax: {
-      foreground: '#d8e5f7', comment: '#5f718c', keyword: '#b8a6ff', string: '#8ed8b0', number: '#f0b878', title: '#7eb0ff', variable: '#f096a6',
-      type: '#64d5de', literal: '#f1cf74', meta: '#9ab4ff', addition: '#77d5a4', deletion: '#f1808e'
+      foreground: '#e6edf3', comment: '#8b949e', keyword: '#ff7b72', string: '#a5d6ff', number: '#79c0ff', title: '#d2a8ff', variable: '#ffa657',
+      type: '#7ee787', literal: '#79c0ff', meta: '#d2a8ff', addition: '#3fb950', deletion: '#f85149'
     },
     terminal: {
-      black: '#111827', red: '#e66f7f', green: '#5bc997', yellow: '#dda94e', blue: '#6b9ff3', magenta: '#9b87e6', cyan: '#4fc5d3', white: '#cad7e9',
-      brightBlack: '#5f6f87', brightRed: '#f38796', brightGreen: '#73d9ab', brightYellow: '#edc16a', brightBlue: '#8bb7ff', brightMagenta: '#b3a0f7', brightCyan: '#6ddbe6', brightWhite: '#f1f6ff'
+      black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922', blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
+      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364', brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff', brightCyan: '#56d4dd', brightWhite: '#f0f6fc'
     }
   },
   {
-    id: 'orchid',
-    label: 'Orchid',
-    description: 'Soft plum with lilac accents',
-    appearance: 'dark',
-    colors: {
-      canvas: '#100d15', sidebar: '#15101c', surface: '#1a1422', surfaceRaised: '#21192b', inset: '#0c0910', hover: '#291f35', selected: '#322640',
-      border: '#34283f', borderStrong: '#4b3959', text: '#f5eff8', textMuted: '#b9aabd', textSubtle: '#7d6d84', accent: '#c099ed', accentHover: '#d5b5f6',
-      accentSoft: 'rgba(192, 153, 237, 0.16)', success: '#70cf9f', successSoft: 'rgba(112, 207, 159, 0.14)', warning: '#e3b96b', warningSoft: 'rgba(227, 185, 107, 0.14)',
-      danger: '#ef8294', dangerSoft: 'rgba(239, 130, 148, 0.14)', purple: '#c099ed', cyan: '#6ecbd0', shadow: 'rgba(5, 2, 8, 0.65)'
-    },
-    syntax: {
-      foreground: '#e7dfea', comment: '#806f86', keyword: '#d6a9f0', string: '#a8cf8a', number: '#e6b77d', title: '#91b8ee', variable: '#ed9ca9',
-      type: '#7ed0cb', literal: '#ebca78', meta: '#baa2e5', addition: '#8bd0a5', deletion: '#ef8c9b'
-    },
-    terminal: {
-      black: '#1a1420', red: '#df7488', green: '#68c494', yellow: '#d6ab62', blue: '#84a9de', magenta: '#b58bd6', cyan: '#64bdc1', white: '#d8ccd9',
-      brightBlack: '#77697c', brightRed: '#ee8b9c', brightGreen: '#80d4a7', brightYellow: '#e5bf7b', brightBlue: '#9dbfea', brightMagenta: '#ca9fea', brightCyan: '#7bd0d3', brightWhite: '#f5eef6'
-    }
-  },
-  {
-    id: 'ember',
-    label: 'Ember',
-    description: 'Warm charcoal and amber',
-    appearance: 'dark',
-    colors: {
-      canvas: '#100e0c', sidebar: '#15120f', surface: '#1a1612', surfaceRaised: '#211b16', inset: '#0c0a08', hover: '#2a221b', selected: '#342920',
-      border: '#382d23', borderStrong: '#514031', text: '#f5f0e8', textMuted: '#b9ac9d', textSubtle: '#7f7265', accent: '#e6a75f', accentHover: '#f0bf82',
-      accentSoft: 'rgba(230, 167, 95, 0.16)', success: '#82c997', successSoft: 'rgba(130, 201, 151, 0.14)', warning: '#e7b15c', warningSoft: 'rgba(231, 177, 92, 0.14)',
-      danger: '#ed7d75', dangerSoft: 'rgba(237, 125, 117, 0.14)', purple: '#be9bd2', cyan: '#72c4c0', shadow: 'rgba(5, 3, 1, 0.66)'
-    },
-    syntax: {
-      foreground: '#e8dfd3', comment: '#7e7165', keyword: '#d7a0c2', string: '#a8c98b', number: '#eab36f', title: '#8eb7d2', variable: '#e49a87',
-      type: '#7fc7bb', literal: '#e5c171', meta: '#bd9fc7', addition: '#8bc79a', deletion: '#e8877f'
-    },
-    terminal: {
-      black: '#1a1612', red: '#d97069', green: '#78bd8d', yellow: '#d9a553', blue: '#7fa9c6', magenta: '#ae8cc0', cyan: '#69b7b3', white: '#d8cec1',
-      brightBlack: '#776b60', brightRed: '#e88982', brightGreen: '#90ce9f', brightYellow: '#e9bc70', brightBlue: '#97bed5', brightMagenta: '#c3a2d2', brightCyan: '#82cac5', brightWhite: '#f5eee5'
-    }
-  },
-  {
-    id: 'paper',
-    label: 'Paper',
-    description: 'Quiet warm light',
+    id: 'ralf-light',
+    label: 'R.A.L.F. Light',
+    description: 'Crisp and understated',
+    category: 'R.A.L.F.',
     appearance: 'light',
     colors: {
-      canvas: '#f6f5f2', sidebar: '#efeee9', surface: '#ffffff', surfaceRaised: '#f1f0ec', inset: '#ebeae5', hover: '#e8e7e1', selected: '#dfe4ec',
-      border: '#d8d6cf', borderStrong: '#bdbab1', text: '#25272b', textMuted: '#5e636b', textSubtle: '#898e95', accent: '#3d6fba', accentHover: '#2f5f9f',
-      accentSoft: 'rgba(61, 111, 186, 0.12)', success: '#2f855a', successSoft: 'rgba(47, 133, 90, 0.11)', warning: '#a96816', warningSoft: 'rgba(169, 104, 22, 0.11)',
-      danger: '#c44550', dangerSoft: 'rgba(196, 69, 80, 0.10)', purple: '#7656a8', cyan: '#237f87', shadow: 'rgba(38, 37, 33, 0.18)'
+      canvas: '#f6f8fa', sidebar: '#f0f3f6', surface: '#ffffff', surfaceRaised: '#f3f4f6', inset: '#eef1f4', hover: '#eaeef2', selected: '#dbeafe',
+      border: '#d0d7de', borderStrong: '#afb8c1', text: '#1f2328', textMuted: '#59636e', textSubtle: '#818b98', accent: '#0969da', accentHover: '#0550ae',
+      accentSoft: 'rgba(9, 105, 218, 0.11)', success: '#1a7f37', successSoft: 'rgba(26, 127, 55, 0.11)', warning: '#9a6700', warningSoft: 'rgba(154, 103, 0, 0.11)',
+      danger: '#cf222e', dangerSoft: 'rgba(207, 34, 46, 0.10)', purple: '#8250df', cyan: '#1b7c83', shadow: 'rgba(31, 35, 40, 0.18)'
     },
     syntax: {
-      foreground: '#30343a', comment: '#8a8f96', keyword: '#7352a3', string: '#3f7d45', number: '#9d5b2d', title: '#315f9e', variable: '#a84150',
-      type: '#1d7478', literal: '#9a6b12', meta: '#5c66a7', addition: '#327a4e', deletion: '#b43c49'
+      foreground: '#24292f', comment: '#6e7781', keyword: '#cf222e', string: '#0a3069', number: '#0550ae', title: '#8250df', variable: '#953800',
+      type: '#116329', literal: '#0550ae', meta: '#8250df', addition: '#1a7f37', deletion: '#cf222e'
     },
     terminal: {
-      black: '#303238', red: '#b94952', green: '#367c50', yellow: '#9a681c', blue: '#3f6da9', magenta: '#74539c', cyan: '#287980', white: '#d8d7d2',
-      brightBlack: '#777b82', brightRed: '#c95b64', brightGreen: '#478f61', brightYellow: '#ad7b2c', brightBlue: '#5684bd', brightMagenta: '#896ab0', brightCyan: '#3b8e95', brightWhite: '#faf9f6'
+      black: '#24292f', red: '#cf222e', green: '#1a7f37', yellow: '#9a6700', blue: '#0969da', magenta: '#8250df', cyan: '#1b7c83', white: '#d0d7de',
+      brightBlack: '#57606a', brightRed: '#a40e26', brightGreen: '#116329', brightYellow: '#7d4e00', brightBlue: '#0550ae', brightMagenta: '#6639ba', brightCyan: '#12666c', brightWhite: '#ffffff'
     }
   },
   {
-    id: 'signal',
-    label: 'Signal',
-    description: 'High contrast and crisp',
+    id: 'tokyo-night-moon',
+    label: 'Tokyo Night Moon',
+    description: 'Official Moon palette',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#222436', sidebar: '#1e2030', surface: '#282a3f', surfaceRaised: '#2f334d', inset: '#191b29', hover: '#2f334d', selected: '#394b70',
+      border: '#3b4261', borderStrong: '#545c7e', text: '#c8d3f5', textMuted: '#a9b8e8', textSubtle: '#737aa2', accent: '#82aaff', accentHover: '#65bcff',
+      accentSoft: 'rgba(130, 170, 255, 0.17)', success: '#c3e88d', successSoft: 'rgba(195, 232, 141, 0.13)', warning: '#ffc777', warningSoft: 'rgba(255, 199, 119, 0.13)',
+      danger: '#ff757f', dangerSoft: 'rgba(255, 117, 127, 0.14)', purple: '#c099ff', cyan: '#86e1fc', shadow: 'rgba(17, 18, 30, 0.66)'
+    },
+    syntax: {
+      foreground: '#c8d3f5', comment: '#636da6', keyword: '#c099ff', string: '#c3e88d', number: '#ff966c', title: '#82aaff', variable: '#fca7ea',
+      type: '#86e1fc', literal: '#ffc777', meta: '#89ddff', addition: '#b8db87', deletion: '#e26a75'
+    },
+    terminal: {
+      black: '#444a73', red: '#ff757f', green: '#c3e88d', yellow: '#ffc777', blue: '#82aaff', magenta: '#c099ff', cyan: '#86e1fc', white: '#c8d3f5',
+      brightBlack: '#737aa2', brightRed: '#ff98a4', brightGreen: '#d5f3a6', brightYellow: '#ffdc97', brightBlue: '#a3bdff', brightMagenta: '#d2b6ff', brightCyan: '#b4f9f8', brightWhite: '#ffffff'
+    }
+  },
+  {
+    id: 'catppuccin-mocha',
+    label: 'Catppuccin Mocha',
+    description: 'Soothing pastel dark',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#1e1e2e', sidebar: '#181825', surface: '#252536', surfaceRaised: '#313244', inset: '#11111b', hover: '#313244', selected: '#3b3c52',
+      border: '#45475a', borderStrong: '#585b70', text: '#cdd6f4', textMuted: '#bac2de', textSubtle: '#7f849c', accent: '#89b4fa', accentHover: '#b4befe',
+      accentSoft: 'rgba(137, 180, 250, 0.16)', success: '#a6e3a1', successSoft: 'rgba(166, 227, 161, 0.13)', warning: '#f9e2af', warningSoft: 'rgba(249, 226, 175, 0.13)',
+      danger: '#f38ba8', dangerSoft: 'rgba(243, 139, 168, 0.14)', purple: '#cba6f7', cyan: '#94e2d5', shadow: 'rgba(10, 10, 16, 0.66)'
+    },
+    syntax: {
+      foreground: '#cdd6f4', comment: '#6c7086', keyword: '#cba6f7', string: '#a6e3a1', number: '#fab387', title: '#89b4fa', variable: '#f5c2e7',
+      type: '#94e2d5', literal: '#f9e2af', meta: '#b4befe', addition: '#a6e3a1', deletion: '#f38ba8'
+    },
+    terminal: {
+      black: '#45475a', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af', blue: '#89b4fa', magenta: '#f5c2e7', cyan: '#94e2d5', white: '#bac2de',
+      brightBlack: '#585b70', brightRed: '#f38ba8', brightGreen: '#a6e3a1', brightYellow: '#f9e2af', brightBlue: '#89b4fa', brightMagenta: '#f5c2e7', brightCyan: '#94e2d5', brightWhite: '#a6adc8'
+    }
+  },
+  {
+    id: 'rose-pine-moon',
+    label: 'Rosé Pine Moon',
+    description: 'Warm, quiet contrast',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#232136', sidebar: '#1f1d2e', surface: '#2a273f', surfaceRaised: '#393552', inset: '#191724', hover: '#312e49', selected: '#393552',
+      border: '#44405f', borderStrong: '#56516f', text: '#e0def4', textMuted: '#b5b1cc', textSubtle: '#908caa', accent: '#c4a7e7', accentHover: '#d7c2ee',
+      accentSoft: 'rgba(196, 167, 231, 0.16)', success: '#9ccfd8', successSoft: 'rgba(156, 207, 216, 0.13)', warning: '#f6c177', warningSoft: 'rgba(246, 193, 119, 0.13)',
+      danger: '#eb6f92', dangerSoft: 'rgba(235, 111, 146, 0.14)', purple: '#c4a7e7', cyan: '#9ccfd8', shadow: 'rgba(15, 13, 25, 0.65)'
+    },
+    syntax: {
+      foreground: '#e0def4', comment: '#6e6a86', keyword: '#c4a7e7', string: '#f6c177', number: '#ea9a97', title: '#9ccfd8', variable: '#ebbcba',
+      type: '#9ccfd8', literal: '#f6c177', meta: '#c4a7e7', addition: '#9ccfd8', deletion: '#eb6f92'
+    },
+    terminal: {
+      black: '#393552', red: '#eb6f92', green: '#3e8fb0', yellow: '#f6c177', blue: '#9ccfd8', magenta: '#c4a7e7', cyan: '#ea9a97', white: '#e0def4',
+      brightBlack: '#6e6a86', brightRed: '#eb6f92', brightGreen: '#9ccfd8', brightYellow: '#f6c177', brightBlue: '#9ccfd8', brightMagenta: '#c4a7e7', brightCyan: '#ebbcba', brightWhite: '#ffffff'
+    }
+  },
+  {
+    id: 'high-contrast',
+    label: 'High Contrast',
+    description: 'Maximum separation',
+    category: 'Accessibility',
     appearance: 'dark',
     colors: {
       canvas: '#050607', sidebar: '#090b0d', surface: '#0e1114', surfaceRaised: '#15191e', inset: '#020304', hover: '#1b2026', selected: '#222a32',
@@ -195,11 +205,17 @@ export const THEMES: ThemeDef[] = [
 ]
 
 const LEGACY_THEME_IDS: Record<string, string> = {
-  graphite: 'carbon',
-  'midnight-purple': 'orchid',
-  dracula: 'orchid',
-  'solarized-dark': 'ink',
-  'solarized-light': 'paper'
+  graphite: 'ralf-dark',
+  carbon: 'ralf-dark',
+  ink: 'tokyo-night-moon',
+  'midnight-purple': 'rose-pine-moon',
+  dracula: 'rose-pine-moon',
+  orchid: 'rose-pine-moon',
+  ember: 'ralf-dark',
+  paper: 'ralf-light',
+  signal: 'high-contrast',
+  'solarized-dark': 'ralf-dark',
+  'solarized-light': 'ralf-light'
 }
 
 function resolveTheme(id: string): ThemeDef {
@@ -270,7 +286,7 @@ function syntaxCss(theme: ThemeDef): string {
 }
 
 export function getTheme(id?: string): ThemeDef {
-  return resolveTheme(id ?? document.documentElement.dataset.theme ?? 'carbon')
+  return resolveTheme(id ?? document.documentElement.dataset.theme ?? 'ralf-dark')
 }
 
 export function getXtermTheme(id?: string): Record<string, string> {
@@ -316,5 +332,5 @@ export function loadTheme(): string {
   } catch {
     /* ignore */
   }
-  return 'carbon'
+  return 'ralf-dark'
 }
