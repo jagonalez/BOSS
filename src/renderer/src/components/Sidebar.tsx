@@ -3,6 +3,7 @@ import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
 import {
   archiveAllInPath,
+  cloneThreadToBackend,
   deleteSession,
   forkSession,
   newChatInProject,
@@ -16,6 +17,7 @@ import {
   toggleArchive
 } from '../lib/actions'
 import { ChatIcon, ChevronIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
+import { BackendBadge, BACKEND_SHORT_LABELS } from './BackendControls'
 
 interface CtxMenu {
   x: number
@@ -64,6 +66,7 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
         <ChatIcon size={14} />
       </span>
       <span className="name">{session.title || 'Untitled'}</span>
+      <BackendBadge backendId={session.backendId} />
       {meta?.kind === 'fork' ? <span className="badge fork">fork</span> : null}
       {meta?.kind === 'side' ? <span className="badge side">side</span> : null}
       {compacting ? <span className="badge compacting">compacting</span> : null}
@@ -80,10 +83,22 @@ export function Sidebar(): React.JSX.Element {
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const activePage = useStore(appStore, (s) => s.activePage)
   const archived = useStore(appStore, (s) => s.archived)
+  const backends = useStore(appStore, (s) => s.backends)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const projectsRef = useRef<HTMLDivElement>(null)
+  const [sidebarHidden, setSidebarHidden] = useState(() => {
+    try { return localStorage.getItem('ralf.sidebarHidden') === 'true' } catch { return false }
+  })
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem('ralf.sidebarWidth'))
+      return Number.isFinite(saved) && saved >= 210 ? saved : 268
+    } catch {
+      return 268
+    }
+  })
   const [projectsH, setProjectsH] = useState<number | null>(() => {
     try {
       const saved = Number(localStorage.getItem('ralf.sidebarProjectsH'))
@@ -174,6 +189,30 @@ export function Sidebar(): React.JSX.Element {
     window.addEventListener('mouseup', onUp)
   }
 
+  const setHidden = (hidden: boolean): void => {
+    setSidebarHidden(hidden)
+    try { localStorage.setItem('ralf.sidebarHidden', String(hidden)) } catch { /* ignore */ }
+  }
+
+  const onWidthDividerDown = (event: React.MouseEvent): void => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = sidebarWidth
+    const onMove = (next: MouseEvent): void => {
+      const width = Math.min(480, Math.max(210, startWidth + next.clientX - startX))
+      setSidebarWidth(width)
+      try { localStorage.setItem('ralf.sidebarWidth', String(width)) } catch { /* ignore */ }
+    }
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      document.body.style.userSelect = ''
+    }
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   const onProjectCtx = (e: React.MouseEvent, path: string): void => {
     e.preventDefault()
     e.stopPropagation()
@@ -198,13 +237,28 @@ export function Sidebar(): React.JSX.Element {
     </button>
   )
 
+  if (sidebarHidden) {
+    return (
+      <div className="sidebar-collapsed">
+        <button title="Show sidebar" onClick={() => setHidden(false)}><PanelIcon size={15} /></button>
+      </div>
+    )
+  }
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar-head">
+    <>
+    <aside className="sidebar" style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
+      <div className="sidebar-head" onDoubleClick={(event) => {
+        if ((event.target as HTMLElement).closest('button')) return
+        void window.ralf.toggleMaximize()
+      }}>
         <div className="logo">
-          <img className="logo-mark" src="./icon.png" alt="Ralf" />
-          <span>Ralf</span>
+          <img className="logo-mark" src="./icon.png" alt="R.A.L.F." />
+          <span>R.A.L.F.</span>
         </div>
+        <button className="sidebar-collapse" title="Hide sidebar" onClick={() => setHidden(true)}>
+          <PanelIcon size={14} />
+        </button>
       </div>
       <nav className="sidebar-primary" aria-label="Primary navigation">
         <button className={`sidebar-primary-item ${activePage === 'command-center' ? 'active' : ''}`} onClick={() => showPage('command-center')}>
@@ -337,6 +391,22 @@ export function Sidebar(): React.JSX.Element {
               {menuItem('Open', () => selectSession(ctx.session!.id))}
               {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Fork', () => void forkSession(ctx.session!.id))}
+              {backends
+                .filter((backend) => backend.available && backend.id !== (ctx.session!.backendId ?? 'opencode'))
+                .map((backend) => (
+                  <React.Fragment key={backend.id}>
+                    {menuItem(`Continue in ${BACKEND_SHORT_LABELS[backend.id]}`, () =>
+                      appStore.setState({
+                        confirm: {
+                          title: `Continue in ${BACKEND_SHORT_LABELS[backend.id]}?`,
+                          message: 'R.A.L.F. will create a new thread with a bounded context handoff. The original thread remains unchanged.',
+                          confirmLabel: `Continue in ${BACKEND_SHORT_LABELS[backend.id]}`,
+                          action: () => void cloneThreadToBackend(ctx.session!.id, backend.id)
+                        }
+                      })
+                    )}
+                  </React.Fragment>
+                ))}
               {archivedSet.has(ctx.session.id) ? (
                 menuItem('Unarchive', () => toggleArchive(ctx.session!.id))
               ) : (
@@ -354,9 +424,9 @@ export function Sidebar(): React.JSX.Element {
               {menuItem('Delete', () =>
                 appStore.setState({
                   confirm: {
-                    title: 'Delete chat?',
-                    message: 'This permanently deletes the chat and its history. This cannot be undone.',
-                    confirmLabel: 'Delete',
+                    title: 'Remove thread?',
+                    message: 'Remove this thread from R.A.L.F.? Some backends may retain their own native history.',
+                    confirmLabel: 'Remove',
                     destructive: true,
                     action: () => void deleteSession(ctx.session!.id)
                   }
@@ -368,5 +438,7 @@ export function Sidebar(): React.JSX.Element {
         </div>
       )}
     </aside>
+    <div className="sidebar-width-divider" onMouseDown={onWidthDividerDown} title="Drag to resize sidebar" />
+    </>
   )
 }

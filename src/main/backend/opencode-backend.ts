@@ -184,4 +184,9 @@ export class OpenCodeBackend implements Backend {
   async unrevert(sessionId: string): Promise<void> {
     await this.api.request({ method: 'POST', path: `/session/${sessionId}/unrevert` })
   }
+
+  async compact(sessionId: string, model?: { providerID: string; modelID: string }): Promise<void> {
+    if (!model) throw new Error('OpenCode compaction requires a model selection.')
+    await this.api.request({ method: 'POST', path: `/session/${sessionId}/summarize`, body: model })
+  }
 }

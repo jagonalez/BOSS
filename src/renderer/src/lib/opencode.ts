@@ -12,6 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
+import type { BackendDescriptor, BackendId, BackendMessageOptions, BackendRequest } from '@shared/backend'
 
 export class ApiError extends Error {
   constructor(
@@ -37,6 +38,10 @@ async function request<T>(method: HttpMethod, path: string, opts?: { query?: Rec
     throw new ApiError(res.status, path, res.body)
   }
   return res.body as T
+}
+
+async function backendRequest<T>(req: BackendRequest): Promise<T> {
+  return window.ralf.backendRequest(req) as Promise<T>
 }
 
 export interface ModelOption {
@@ -98,37 +103,44 @@ function modelVariants(variants?: unknown): string[] {
 }
 
 export const OpenCode = {
-  listSessions: () => request<SessionInfo[]>('GET', '/session'),
-  createSession: (title?: string) =>
-    request<SessionInfo>('POST', '/session', { body: title ? { title } : {} }),
-  deleteSession: (id: string) => request<boolean>('DELETE', `/session/${id}`),
-  getSession: (id: string) => request<SessionInfo>('GET', `/session/${id}`),
+  listBackends: () => backendRequest<BackendDescriptor[]>({ type: 'backend.list' }),
+  listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
+  createSession: (title?: string, backendId: BackendId = 'opencode') =>
+    backendRequest<SessionInfo>({ type: 'thread.create', backendId, title }),
+  deleteSession: (id: string) => backendRequest<void>({ type: 'thread.delete', threadId: id }),
+  getSession: (id: string) => backendRequest<SessionInfo>({ type: 'thread.get', threadId: id }),
   renameSession: (id: string, title: string) =>
-    request<SessionInfo>('PATCH', `/session/${id}`, { body: { title } }),
+    backendRequest<SessionInfo>({ type: 'thread.rename', threadId: id, title }),
   listMessages: (id: string, limit?: number) =>
-    request<MessageWithParts[]>('GET', `/session/${id}/message`, { query: { limit } }),
+    backendRequest<MessageWithParts[]>({ type: 'thread.messages', threadId: id, limit }),
   sendMessage: (id: string, parts: unknown[], opts?: { model?: string; agent?: string }) =>
     request<MessageWithParts>('POST', `/session/${id}/message`, { body: { parts, ...opts } }),
-  sendMessageAsync: (id: string, parts: unknown[], opts?: { model?: { providerID: string; modelID: string; variant?: string }; agent?: string }) =>
-    request<unknown>('POST', `/session/${id}/prompt_async`, { body: { parts, ...opts } }),
-  abort: (id: string) => request<boolean>('POST', `/session/${id}/abort`),
+  sendMessageAsync: (id: string, parts: unknown[], opts?: BackendMessageOptions) =>
+    backendRequest<void>({ type: 'thread.send', threadId: id, parts, options: opts }),
+  abort: (id: string) => backendRequest<void>({ type: 'thread.abort', threadId: id }),
   revertMessage: (id: string, messageID: string) =>
     request<SessionInfo>('POST', `/session/${id}/revert`, { body: { messageID } }),
   unrevert: (id: string) => request<SessionInfo>('POST', `/session/${id}/unrevert`),
   fork: (id: string, messageID?: string) =>
-    request<SessionInfo>('POST', `/session/${id}/fork`, { body: messageID ? { messageID } : {} }),
+    backendRequest<SessionInfo>({ type: 'thread.fork', threadId: id, messageId: messageID }),
   diff: (id: string, messageID?: string) =>
-    request<FileDiff[]>('GET', `/session/${id}/diff`, { query: { messageID } }),
-  todos: (id: string) => request<Todo[]>('GET', `/session/${id}/todo`),
+    backendRequest<FileDiff[]>({ type: 'thread.diff', threadId: id, messageId: messageID }),
+  todos: (id: string) => backendRequest<Todo[]>({ type: 'thread.todos', threadId: id }),
   respondPermission: (sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject') =>
-    request<boolean>('POST', `/session/${sessionID}/permissions/${permissionID}`, { body: { response } }),
+    backendRequest<void>({ type: 'thread.permission', threadId: sessionID, permissionId: permissionID, response }),
   replyQuestion: (requestID: string, answers: string[][]) =>
     request<boolean>('POST', `/question/${requestID}/reply`, { body: { answers } }),
   rejectQuestion: (requestID: string) => request<boolean>('POST', `/question/${requestID}/reject`),
   shell: (id: string, command: string, opts?: { model?: string; agent?: string }) =>
     request<MessageWithParts>('POST', `/session/${id}/shell`, { body: { command, ...opts } }),
-  summarize: (id: string, model: { providerID: string; modelID: string }) =>
-    request<boolean>('POST', `/session/${id}/summarize`, { body: model }),
+  summarize: (id: string, model?: { providerID: string; modelID: string }) =>
+    backendRequest<void>({ type: 'thread.compact', threadId: id, model }),
+  backendModels: (threadId?: string, backendId?: BackendId) =>
+    backendRequest<Array<{ id: string; name?: string; provider?: string; variants?: string[] }>>({ type: 'thread.models', threadId, backendId }),
+  cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string) =>
+    backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction }),
+  relayToThread: (sourceThreadId: string, targetThreadId: string, instruction?: string) =>
+    backendRequest<SessionInfo>({ type: 'thread.relay', sourceThreadId, targetThreadId, instruction }),
   fileTree: (path = '') => request<FileNode[]>('GET', '/file', { query: { path } }),
   fileContent: (path: string) => request<FileContent>('GET', '/file/content', { query: { path } }),
   projectList: () => request<Project[]>('GET', '/project'),

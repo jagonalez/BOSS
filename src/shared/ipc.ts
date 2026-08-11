@@ -143,9 +143,9 @@ export const IpcChannels = {
   TtsSpeak: 'tts:speak',
   SpeechStatusChanged: 'speech:status-changed',
   AsrTranscribe: 'asr:transcribe',
-  BackendGetEngine: 'backend:get-engine',
-  BackendSetEngine: 'backend:set-engine',
-  BackendInfo: 'backend:info'
+  BackendRequest: 'backend:request',
+  BackendInfo: 'backend:info',
+  WindowToggleMaximize: 'window:toggle-maximize'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

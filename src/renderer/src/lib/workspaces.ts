@@ -6,10 +6,12 @@ import type {
   WorkspaceGroup,
   WorkspaceNode,
   WorkspaceTab,
-  WorkspaceTabKind
+  WorkspaceTabKind,
+  WorkspaceView
 } from '@shared/workspace'
 
-const WORKSPACES_KEY = 'ralf.projectWorkspaces.v2'
+const WORKSPACES_KEY = 'ralf.projectWorkspaces.v3'
+const LEGACY_WORKSPACES_KEY = 'ralf.projectWorkspaces.v2'
 const TEMPLATES_KEY = 'ralf.layoutTemplates.v2'
 let sequence = 0
 
@@ -24,6 +26,11 @@ export function tab(kind: WorkspaceTabKind, sessionId?: string): WorkspaceTab {
 
 export function group(tabs: WorkspaceTab[] = []): WorkspaceGroup {
   return { id: workspaceId('group'), type: 'group', tabs, activeTabId: tabs[0]?.id ?? null }
+}
+
+export function workspaceView(name = 'Workspace', root: WorkspaceNode = group()): WorkspaceView {
+  const first = walkGroups(root)[0]
+  return { id: workspaceId('workspace'), name, root, focusedGroupId: first.id }
 }
 
 export function split(
@@ -137,9 +144,50 @@ export function saveWorkspace(workspace: ProjectWorkspace): void {
 
 export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWorkspace {
   const saved = readJson<Record<string, ProjectWorkspace>>(WORKSPACES_KEY, {})[projectKey]
-  if (saved?.version === 2 && isNode(saved.root)) return saved
+  if (
+    saved?.version === 3 &&
+    Array.isArray(saved.views) &&
+    saved.views.length > 0 &&
+    saved.views.every((view) => view && typeof view.id === 'string' && typeof view.name === 'string' && isNode(view.root))
+  ) {
+    const views = saved.views.map((view, index) => ({
+      ...view,
+      name: /^Workspace(?: \d+)?$/.test(view.name) ? (index === 0 ? 'Main' : `View ${index + 1}`) : view.name
+    }))
+    return { ...saved, views }
+  }
+
+  const legacy = readJson<Record<string, {
+    version?: number
+    projectKey?: string
+    root?: WorkspaceNode
+    focusedGroupId?: string
+    updatedAt?: number
+  }>>(LEGACY_WORKSPACES_KEY, {})[projectKey]
+  if (legacy?.version === 2 && legacy.root && isNode(legacy.root)) {
+    const view = workspaceView('Main', legacy.root)
+    if (legacy.focusedGroupId && findGroup(legacy.root, legacy.focusedGroupId)) view.focusedGroupId = legacy.focusedGroupId
+    return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: legacy.updatedAt ?? Date.now() }
+  }
   const root = group(sessionId ? [tab('thread', sessionId)] : [])
-  return { version: 2, projectKey, root, focusedGroupId: root.id, updatedAt: Date.now() }
+  const view = workspaceView('Main', root)
+  return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: Date.now() }
+}
+
+export function activeWorkspaceView(workspace: ProjectWorkspace): WorkspaceView {
+  return workspace.views.find((view) => view.id === workspace.activeViewId) ?? workspace.views[0]
+}
+
+export function updateActiveWorkspaceView(
+  workspace: ProjectWorkspace,
+  update: (view: WorkspaceView) => WorkspaceView
+): ProjectWorkspace {
+  const active = activeWorkspaceView(workspace)
+  return {
+    ...workspace,
+    activeViewId: active.id,
+    views: workspace.views.map((view) => view.id === active.id ? update(view) : view)
+  }
 }
 
 export function walkGroups(node: WorkspaceNode): WorkspaceGroup[] {
@@ -286,7 +334,7 @@ export function reorderTab(root: WorkspaceNode, groupId: string, tabId: string, 
   })
 }
 
-export function bindTemplate(template: LayoutTemplate, projectKey: string, sessionIds: string[]): ProjectWorkspace {
+export function bindTemplate(template: LayoutTemplate, name: string, sessionIds: string[]): WorkspaceView {
   const root = cloneLayout(template.root, true)
   let sessionIndex = 0
   let reviewBound = false
@@ -308,10 +356,10 @@ export function bindTemplate(template: LayoutTemplate, projectKey: string, sessi
   }
   const bound = bind(root)
   const first = walkGroups(bound)[0]
-  return { version: 2, projectKey, root: bound, focusedGroupId: first.id, updatedAt: Date.now() }
+  return { id: workspaceId('workspace'), name, root: bound, focusedGroupId: first.id }
 }
 
-export function templateFromWorkspace(workspace: ProjectWorkspace, name: string): LayoutTemplate {
+export function templateFromWorkspace(workspace: WorkspaceView, name: string): LayoutTemplate {
   return {
     id: workspaceId('format'),
     name: name.trim() || 'Untitled format',

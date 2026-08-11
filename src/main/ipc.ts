@@ -1,4 +1,4 @@
-import { dialog, ipcMain, shell, type WebContents } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { execFile } from 'node:child_process'
 import {
   IpcChannels,
@@ -15,12 +15,15 @@ import type { OptionalDeps } from './optional-deps'
 import type { ComputerUse } from './computer-use'
 import type { PTYManager } from './pty-manager'
 import type { SpeechManager } from './speech'
+import type { BackendManager } from './backend/manager'
+import type { BackendRequest } from '@shared/backend'
 import type { AsrTranscribeRequest, TtsSpeakRequest } from '@shared/ipc'
 
 export interface IpcDeps {
   server: OpenCodeServer
   api: ApiClient
   events: EventStream
+  backends: BackendManager
   browse: BrowseManager
   optional: OptionalDeps
   computerUse: ComputerUse
@@ -38,7 +41,7 @@ export function registerIpc(deps: IpcDeps): void {
   }
 
   deps.server.onStatusChange = (info: ServerInfo) => broadcast(IpcChannels.ServerStatusChanged, info)
-  deps.events.onEvent = (data: string) => broadcast(IpcChannels.EventData, data)
+  deps.backends.onEvent((event) => broadcast(IpcChannels.EventData, JSON.stringify(event)))
   deps.browse.onNavigation = (id, state) => broadcast(IpcChannels.BrowseNavigation, { id, state })
   deps.browse.onExternal = (url) => broadcast(IpcChannels.BrowseExternal, url)
   deps.computerUse.onStatusChange = (status) => broadcast(IpcChannels.ComputerUseStatus, status)
@@ -46,9 +49,19 @@ export function registerIpc(deps: IpcDeps): void {
   deps.pty.onExit = (id, code) => broadcast(IpcChannels.TerminalExit, { id, code })
   deps.speech.onStatusChange = (status) => broadcast(IpcChannels.SpeechStatusChanged, status)
 
+  ipcMain.handle(IpcChannels.WindowToggleMaximize, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return false
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+    return win.isMaximized()
+  })
+
   ipcMain.handle(IpcChannels.ServerGetInfo, () => deps.server.info)
 
   ipcMain.handle(IpcChannels.ApiRequest, (_e, req: ApiRequest) => deps.api.request(req))
+
+  ipcMain.handle(IpcChannels.BackendRequest, (_e, req: BackendRequest) => deps.backends.handle(req))
 
   ipcMain.handle(IpcChannels.EventSubscribe, (e) => {
     subscribers.add(e.sender)
@@ -151,12 +164,12 @@ export function registerIpc(deps: IpcDeps): void {
   })
 
   ipcMain.handle(IpcChannels.ProjectCurrent, () => ({
-    path: deps.server.projectPath,
+    path: deps.backends.currentProject || deps.server.projectPath,
     healthy: deps.server.info.healthy
   }))
 
   ipcMain.handle(IpcChannels.ProjectSet, async (_e, path: string) => {
-    await deps.server.setProject(path)
+    await deps.backends.setProject(path)
     return { path: deps.server.projectPath, healthy: deps.server.info.healthy }
   })
 
