@@ -182,6 +182,28 @@ export interface PermissionRequest {
   time?: { created?: number }
 }
 
+export interface QuestionOption {
+  label: string
+  description?: string
+}
+
+export interface QuestionInfo {
+  question: string
+  header?: string
+  options?: QuestionOption[]
+  multiple?: boolean
+  custom?: boolean
+}
+
+export interface QuestionRequest {
+  id: string
+  sessionID: string
+  questions: QuestionInfo[]
+  tool?: { messageID?: string; callID?: string }
+}
+
+export type QuestionAnswer = string[]
+
 export type EventMessage =
   | { type: 'session.updated'; session: SessionInfo }
   | { type: 'session.created'; session: SessionInfo }
@@ -194,6 +216,9 @@ export type EventMessage =
   | { type: 'permission.asked'; permission: PermissionRequest }
   | { type: 'permission.updated'; permission: PermissionRequest }
   | { type: 'permission.replied'; sessionID: string; permissionID: string; response: string }
+  | { type: 'question.asked'; question: QuestionRequest }
+  | { type: 'question.replied'; sessionID: string; requestID: string; answers: QuestionAnswer[] }
+  | { type: 'question.rejected'; sessionID: string; requestID: string }
   | { type: 'session.status'; sessionID: string; status: { type: 'idle' | 'busy' | 'retry' } }
   | { type: 'session.idle'; sessionID: string }
   | { type: 'session.compacted'; sessionID: string }
