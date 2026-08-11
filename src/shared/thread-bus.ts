@@ -7,7 +7,9 @@ export interface ThreadBusThread {
   id: string
   title: string
   backendId: BackendId
+  projectId: string
   projectPath: string
+  executionPath: string
   busy: boolean
 }
 
@@ -17,6 +19,7 @@ export interface ThreadBusMessage {
   fromThreadId: string
   toThreadId: string
   backendId: BackendId
+  projectId: string
   projectPath: string
   body: string
   createdAt: number
@@ -30,6 +33,7 @@ export interface ThreadBusMessage {
 }
 
 export interface ThreadBusSnapshot {
+  projectId: string
   projectPath: string
   policy: CollaborationPolicy
   threads: ThreadBusThread[]

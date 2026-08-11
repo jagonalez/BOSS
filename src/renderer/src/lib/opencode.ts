@@ -108,20 +108,20 @@ export const OpenCode = {
   listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
   createSession: (title?: string, backendId: BackendId = 'opencode') =>
     backendRequest<SessionInfo>({ type: 'thread.create', backendId, title }),
+  importNativeSessions: (backendId: BackendId) =>
+    backendRequest<SessionInfo[]>({ type: 'thread.import-native', backendId }),
   deleteSession: (id: string) => backendRequest<void>({ type: 'thread.delete', threadId: id }),
   getSession: (id: string) => backendRequest<SessionInfo>({ type: 'thread.get', threadId: id }),
   renameSession: (id: string, title: string) =>
     backendRequest<SessionInfo>({ type: 'thread.rename', threadId: id, title }),
   listMessages: (id: string, limit?: number) =>
     backendRequest<MessageWithParts[]>({ type: 'thread.messages', threadId: id, limit }),
-  sendMessage: (id: string, parts: unknown[], opts?: { model?: string; agent?: string }) =>
-    request<MessageWithParts>('POST', `/session/${id}/message`, { body: { parts, ...opts } }),
   sendMessageAsync: (id: string, parts: unknown[], opts?: BackendMessageOptions) =>
     backendRequest<void>({ type: 'thread.send', threadId: id, parts, options: opts }),
   abort: (id: string) => backendRequest<void>({ type: 'thread.abort', threadId: id }),
   revertMessage: (id: string, messageID: string) =>
-    request<SessionInfo>('POST', `/session/${id}/revert`, { body: { messageID } }),
-  unrevert: (id: string) => request<SessionInfo>('POST', `/session/${id}/unrevert`),
+    backendRequest<void>({ type: 'thread.revert', threadId: id, messageId: messageID }),
+  unrevert: (id: string) => backendRequest<void>({ type: 'thread.unrevert', threadId: id }),
   fork: (id: string, messageID?: string) =>
     backendRequest<SessionInfo>({ type: 'thread.fork', threadId: id, messageId: messageID }),
   diff: (id: string, messageID?: string) =>
@@ -132,8 +132,6 @@ export const OpenCode = {
   replyQuestion: (requestID: string, answers: string[][]) =>
     request<boolean>('POST', `/question/${requestID}/reply`, { body: { answers } }),
   rejectQuestion: (requestID: string) => request<boolean>('POST', `/question/${requestID}/reject`),
-  shell: (id: string, command: string, opts?: { model?: string; agent?: string }) =>
-    request<MessageWithParts>('POST', `/session/${id}/shell`, { body: { command, ...opts } }),
   summarize: (id: string, model?: { providerID: string; modelID: string }) =>
     backendRequest<void>({ type: 'thread.compact', threadId: id, model }),
   backendModels: (threadId?: string, backendId?: BackendId) =>
@@ -157,7 +155,7 @@ export const OpenCode = {
     request<{ all: Provider[]; default: Record<string, string>; connected?: string[] }>('GET', '/provider'),
   config: () => request<ConfigInfo>('GET', '/config'),
   listCommands: () => request<Command[]>('GET', '/command'),
-  runCommand: (id: string, command: string, args: string, opts?: { agent?: string; model?: { providerID: string; modelID: string; variant?: string } }) =>
-    request<MessageWithParts>('POST', `/session/${id}/command`, { body: { command, arguments: args, ...opts } }),
+  runCommand: (id: string, command: string, args: string, opts?: BackendMessageOptions) =>
+    backendRequest<MessageWithParts>({ type: 'thread.command', threadId: id, command, arguments: args, options: opts }),
   findFile: (q: string) => request<string[]>('GET', '/find/file', { query: { query: q } })
 }
