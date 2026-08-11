@@ -14,7 +14,7 @@ import type {
   SessionMeta,
   Todo
 } from '@shared/opencode'
-import type { BackendDescriptor, BackendId, BackendModeId } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId } from '@shared/backend'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type {
   BrowseNavigationState,
@@ -85,6 +85,8 @@ export interface AppState {
   agent: string
   engine: BackendId
   backends: BackendDescriptor[]
+  backendAuth: BackendAuthStatus[]
+  authTerminalBackends: Record<string, BackendId>
   threadBus: ThreadBusSnapshot | null
   projectPath: string
   lastError: string | null
@@ -165,6 +167,8 @@ export const initialState: AppState = {
   agent: 'build',
   engine: 'opencode',
   backends: [],
+  backendAuth: [],
+  authTerminalBackends: {},
   threadBus: null,
   projectPath: '',
   lastError: null,

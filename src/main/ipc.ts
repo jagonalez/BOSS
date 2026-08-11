@@ -185,8 +185,8 @@ export function registerIpc(deps: IpcDeps): void {
     return result.filePaths[0]
   })
 
-  ipcMain.handle(IpcChannels.TerminalCreate, (_e, body: { cwd?: string; cols?: number; rows?: number }) => {
-    return deps.pty.create(body.cwd, body.cols ?? 80, body.rows ?? 24)
+  ipcMain.handle(IpcChannels.TerminalCreate, (_e, body: { cwd?: string; cols?: number; rows?: number; authBackendId?: import('@shared/backend').BackendId }) => {
+    return deps.pty.create(body.cwd, body.cols ?? 80, body.rows ?? 24, body.authBackendId)
   })
 
   ipcMain.handle(IpcChannels.TerminalWrite, (_e, body: { id: string; data: string }) => {

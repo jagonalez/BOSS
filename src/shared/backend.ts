@@ -31,6 +31,13 @@ export interface BackendDescriptor {
   modes: BackendModeDescriptor[]
 }
 
+export interface BackendAuthStatus {
+  backendId: BackendId
+  state: 'connected' | 'not-connected' | 'unknown'
+  detail: string
+  accounts?: string[]
+}
+
 export interface BackendMessageOptions {
   model?: { providerID: string; modelID: string; variant?: string }
   agent?: string
@@ -39,6 +46,7 @@ export interface BackendMessageOptions {
 
 export type BackendRequest =
   | { type: 'backend.list' }
+  | { type: 'backend.auth.status' }
   | { type: 'thread.list' }
   | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope }
   | { type: 'thread.import-native'; backendId: BackendId }

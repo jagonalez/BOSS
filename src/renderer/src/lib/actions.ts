@@ -181,6 +181,35 @@ export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, session
   if (kind === 'thread' && sessionId) selectSession(sessionId, false)
 }
 
+export function openBackendLogin(backendId: BackendId): void {
+  let workspace = currentWorkspace()
+  if (!workspace) {
+    workspace = loadWorkspace('__connections__')
+    appStore.setState({ projectWorkspace: workspace })
+  }
+  const view = activeWorkspaceView(workspace)
+  const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
+  const created = tab('terminal')
+  updateWorkspaceView((item) => ({
+    ...item,
+    root: addTab(item.root, groupId, created),
+    focusedGroupId: groupId
+  }))
+  appStore.setState((state) => ({
+    authTerminalBackends: { ...(state.authTerminalBackends ?? {}), [created.id]: backendId },
+    settingsOpen: false,
+    activePage: 'project'
+  }))
+}
+
+export async function refreshBackendAuth(): Promise<void> {
+  try {
+    appStore.setState({ backendAuth: await OpenCode.backendAuthStatus() })
+  } catch {
+    /* Individual backend availability is already shown in Settings. */
+  }
+}
+
 export async function createThreadInGroup(groupId: string, backendId: BackendId = appStore.getState().engine): Promise<void> {
   try {
     const session = await OpenCode.createSession(undefined, backendId)
@@ -207,6 +236,11 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
     const root = closeTab(item.root, groupId, tabId)
     const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
     return { ...item, root, focusedGroupId }
+  })
+  appStore.setState((state) => {
+    const authTerminalBackends = { ...(state.authTerminalBackends ?? {}) }
+    delete authTerminalBackends[tabId]
+    return { authTerminalBackends }
   })
   if (next) syncFocusedThread()
 }

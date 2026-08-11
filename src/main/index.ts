@@ -1,7 +1,7 @@
 import { app, BrowserWindow, session, shell } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { OpenCodeServer } from './opencode-server'
+import { OpenCodeServer, resolveOpenCodeBin } from './opencode-server'
 import { ApiClient } from './api-client'
 import { EventStream } from './event-stream'
 import { BrowseManager } from './browse'
@@ -16,6 +16,7 @@ import { BackendManager } from './backend/manager'
 import { createBackend } from './backend/factory'
 import { ThreadBus } from './thread-bus'
 import { WorktreeManager } from './worktree-manager'
+import { BackendAuth } from './backend-auth'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -30,6 +31,7 @@ const server = new OpenCodeServer()
 const api = new ApiClient(server)
 const events = new EventStream(server)
 const openCodeBackend = createBackend('opencode', { server, api, events })
+const backendAuth = new BackendAuth(resolveOpenCodeBin)
 const worktrees = new WorktreeManager({
   stateFile: join(app.getPath('userData'), 'worktrees.json'),
   root: join(app.getPath('userData'), 'worktrees')
@@ -39,14 +41,14 @@ const backendMgr = new BackendManager({
   pi: createBackend('pi', { server, api, events }),
   codex: createBackend('codex', { server, api, events }),
   claude: createBackend('claude', { server, api, events })
-}, worktrees)
+}, worktrees, backendAuth)
 const threadBus = new ThreadBus(backendMgr)
 backendMgr.attachThreadBus(threadBus)
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
 computerUse.bind(openCodeBackend)
-const pty = new PTYManager()
+const pty = new PTYManager(backendAuth)
 const speech = new SpeechManager()
 const sites = new SitesManager(() => backendMgr.currentProject || server.projectPath)
 

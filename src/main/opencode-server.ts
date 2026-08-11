@@ -25,7 +25,7 @@ function getFreePort(): Promise<number> {
   })
 }
 
-function resolveOpenCodeBin(): string {
+export function resolveOpenCodeBin(): string {
   const exe = process.platform === 'win32' ? 'opencode.exe' : 'opencode'
   if (process.env.OPENCODE_BIN) return process.env.OPENCODE_BIN
   if (!app.isPackaged) return exe

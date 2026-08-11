@@ -18,6 +18,7 @@ import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@s
 import { projectScope, type ProjectScope } from '../project-identity'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
+import type { BackendAuth } from '../backend-auth'
 
 interface ThreadBinding {
   id: string
@@ -165,7 +166,8 @@ export class BackendManager {
 
   constructor(
     private readonly backends: Record<BackendId, Backend>,
-    private readonly worktrees?: WorktreeManager
+    private readonly worktrees?: WorktreeManager,
+    private readonly backendAuth?: BackendAuth
   ) {}
 
   attachThreadBus(threadBus: ThreadBus): void {
@@ -769,6 +771,7 @@ export class BackendManager {
   async handle(request: BackendRequest): Promise<unknown> {
     switch (request.type) {
       case 'backend.list': return this.descriptors()
+      case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return this.sessionCreate(request.backendId, request.title, undefined, request.scope)
       case 'thread.import-native': return this.importNativeSessions(request.backendId)
