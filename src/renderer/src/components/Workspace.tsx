@@ -463,7 +463,10 @@ function WorkspaceBar(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const templates = useStore(appStore, (state) => state.layoutTemplates)
   const [formatsOpen, setFormatsOpen] = useState(false)
+  const [editingViewId, setEditingViewId] = useState<string | null>(null)
+  const [viewNameDraft, setViewNameDraft] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
+  const viewNameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!formatsOpen) return
@@ -478,6 +481,12 @@ function WorkspaceBar(): React.JSX.Element {
     setNativeViewsSuspended('workspace-formats', formatsOpen)
     return () => setNativeViewsSuspended('workspace-formats', false)
   }, [formatsOpen])
+
+  useEffect(() => {
+    if (!editingViewId) return
+    viewNameRef.current?.focus()
+    viewNameRef.current?.select()
+  }, [editingViewId])
 
   const apply = (id: string): void => {
     setFormatsOpen(false)
@@ -496,32 +505,62 @@ function WorkspaceBar(): React.JSX.Element {
     if (name) saveCurrentLayoutTemplate(name)
   }
 
-  const rename = (viewId: string, current: string): void => {
-    const name = window.prompt('Name this view', current)?.trim()
-    if (name) renameWorkspaceView(viewId, name)
+  const beginRename = (viewId: string, current: string): void => {
+    setEditingViewId(viewId)
+    setViewNameDraft(current)
+  }
+
+  const finishRename = (): void => {
+    if (!editingViewId) return
+    const name = viewNameDraft.trim()
+    if (name) renameWorkspaceView(editingViewId, name)
+    setEditingViewId(null)
   }
 
   return (
-    <div className="workspace-bar" onDoubleClick={(event) => {
-      if ((event.target as HTMLElement).closest('button, input')) return
-      void window.ralf.toggleMaximize()
-    }}>
+    <div className="workspace-bar">
       <div className="workspace-identity">
         <span className="workspace-project-dot" />
         <div><strong>{shortProject(workspace?.projectKey)}</strong><small>{workspace?.projectKey}</small></div>
       </div>
       <div className="workspace-view-tabs" role="tablist" aria-label="Project views">
         {workspace?.views.map((view) => (
-          <button
+          <div
             key={view.id}
             className={`workspace-view-tab ${view.id === workspace.activeViewId ? 'active' : ''}`}
             role="tab"
+            tabIndex={0}
             aria-selected={view.id === workspace.activeViewId}
             title={`${view.name} — double-click to rename`}
-            onClick={() => activateWorkspaceView(view.id)}
-            onDoubleClick={() => rename(view.id, view.name)}
+            onClick={() => {
+              if (editingViewId !== view.id) activateWorkspaceView(view.id)
+            }}
+            onKeyDown={(event) => {
+              if (editingViewId || (event.key !== 'Enter' && event.key !== ' ')) return
+              event.preventDefault()
+              activateWorkspaceView(view.id)
+            }}
+            onDoubleClick={(event) => {
+              event.stopPropagation()
+              beginRename(view.id, view.name)
+            }}
           >
-            <span>{view.name}</span>
+            {editingViewId === view.id ? (
+              <input
+                ref={viewNameRef}
+                className="workspace-view-name-input"
+                value={viewNameDraft}
+                aria-label="View name"
+                onChange={(event) => setViewNameDraft(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onBlur={finishRename}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') finishRename()
+                  if (event.key === 'Escape') setEditingViewId(null)
+                }}
+              />
+            ) : <span>{view.name}</span>}
             {workspace.views.length > 1 ? (
               <span
                 className="workspace-view-close"
@@ -533,7 +572,7 @@ function WorkspaceBar(): React.JSX.Element {
                 }}
               >−</span>
             ) : null}
-          </button>
+          </div>
         ))}
         <button className="workspace-view-add" title="New view" onClick={createWorkspaceView}>
           <PlusIcon size={13} />

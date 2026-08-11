@@ -103,6 +103,7 @@ export interface AppState {
   attention: { kind: 'permission' | 'done' | 'error'; ts: number } | null
   tts: TtsStatus
   asr: AsrStatus
+  asrTargetId: string | null
   ttsVoice: string
   speakAloud: boolean
   sites: SiteInfo[]
@@ -182,6 +183,7 @@ export const initialState: AppState = {
   attention: null,
   tts: { available: false, ready: false, speaking: false },
   asr: { available: false, listening: false },
+  asrTargetId: null,
   ttsVoice: 'af_heart',
   speakAloud: false,
   sites: [],

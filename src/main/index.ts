@@ -65,8 +65,10 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 16, y: 16 } } : {}),
+    ...(process.platform === 'darwin' ? { vibrancy: 'menu' as const } : {}),
     acceptFirstMouse: process.platform === 'darwin',
-    backgroundColor: '#0b0d10',
+    backgroundColor: process.platform === 'darwin' ? '#00000000' : '#0b0d10',
     icon: join(app.getAppPath(), 'resources', 'icons', '512x512.png'),
     webPreferences: {
       preload: join(mainDir, '../preload/index.cjs'),

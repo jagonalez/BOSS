@@ -58,7 +58,7 @@ export function CommandCenter(): React.JSX.Element {
 
   return (
     <div className="command-center">
-      <header className="command-header" onDoubleClick={() => void window.ralf.toggleMaximize()}>
+      <header className="command-header">
         <div>
           <span className="command-eyebrow">Command Center</span>
           <h1>Here’s what’s happening.</h1>

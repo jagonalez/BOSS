@@ -248,10 +248,7 @@ export function Sidebar(): React.JSX.Element {
   return (
     <>
     <aside className="sidebar" style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
-      <div className="sidebar-head" onDoubleClick={(event) => {
-        if ((event.target as HTMLElement).closest('button')) return
-        void window.ralf.toggleMaximize()
-      }}>
+      <div className="sidebar-head">
         <div className="logo">
           <img className="logo-mark" src="./icon.png" alt="R.A.L.F." />
           <span>R.A.L.F.</span>

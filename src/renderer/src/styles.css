@@ -164,6 +164,7 @@ button {
 }
 
 .sidebar {
+  position: relative;
   width: 268px;
   min-width: 210px;
   max-width: 480px;
@@ -175,10 +176,24 @@ button {
   gap: 6px;
   padding: 12px 10px;
   overflow: hidden;
+  user-select: none;
 }
 
 [data-platform='darwin'] .sidebar {
-  padding-top: 38px;
+  padding-top: 46px;
+}
+
+[data-platform='darwin'] .sidebar::before,
+[data-platform='darwin'] .sidebar-collapsed::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 46px;
+  user-select: none;
+  -webkit-app-region: drag;
 }
 
 .sidebar-head {
@@ -187,13 +202,6 @@ button {
   justify-content: space-between;
   padding: 4px 8px 10px;
   user-select: none;
-  -webkit-app-region: drag;
-}
-
-.sidebar-head .logo,
-.sidebar-head button,
-.sidebar-head img {
-  -webkit-app-region: no-drag;
 }
 
 .sidebar-collapse,
@@ -242,15 +250,17 @@ button {
 }
 
 .sidebar-collapsed {
+  position: relative;
   width: 38px;
   flex: 0 0 38px;
   padding: 10px 6px;
   border-right: 1px solid var(--line-subtle);
   background: var(--surface-sidebar);
+  user-select: none;
 }
 
 [data-platform='darwin'] .sidebar-collapsed {
-  padding-top: 38px;
+  padding-top: 46px;
 }
 
 .sidebar-collapsed button {
@@ -484,7 +494,6 @@ button {
   align-items: center;
   gap: 9px;
   min-width: 0;
-  -webkit-app-region: no-drag;
 }
 
 .workspace-identity > div {
@@ -562,6 +571,19 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-view-name-input {
+  width: 100%;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+  color: var(--text);
+  background: var(--surface-pane);
+  font: inherit;
+  -webkit-app-region: no-drag;
 }
 
 .workspace-view-tab:hover,
@@ -1291,11 +1313,29 @@ button {
 /* ---------- Command Center ---------- */
 
 .command-center {
+  position: relative;
   flex: 1;
   min-height: 0;
   padding: 34px clamp(24px, 5vw, 72px) 48px;
   overflow-y: auto;
   background: var(--surface-app);
+}
+
+[data-platform='darwin'] .command-center {
+  padding-top: 46px;
+}
+
+[data-platform='darwin'] .command-center::before,
+[data-platform='darwin'] .product-empty-page::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 46px;
+  user-select: none;
+  -webkit-app-region: drag;
 }
 
 .command-header {
@@ -1305,11 +1345,6 @@ button {
   max-width: 1040px;
   margin: 0 auto 32px;
   user-select: none;
-  -webkit-app-region: drag;
-}
-
-.command-header > div {
-  -webkit-app-region: no-drag;
 }
 
 .command-header h1,
@@ -1490,6 +1525,7 @@ button {
 }
 
 .product-empty-page {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -3020,9 +3056,9 @@ button {
 }
 
 .composer-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: end;
   gap: 10px;
   border-top: 1px solid var(--border-subtle);
   padding-top: 8px;
@@ -3173,6 +3209,11 @@ button {
   color: #fff;
   background: var(--red);
   animation: mic-pulse 1.4s ease-in-out infinite;
+}
+
+.composer-mic:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 @keyframes mic-pulse {
@@ -3511,7 +3552,8 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 select {
@@ -3544,6 +3586,8 @@ select:hover {
   justify-content: center;
   width: 36px;
   height: 36px;
+  align-self: end;
+  flex: 0 0 36px;
   transition: background 0.12s ease, opacity 0.12s ease;
 }
 
