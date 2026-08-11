@@ -433,8 +433,10 @@ export class SitesManager {
     this.emit()
     try {
       const deployedUrl = await this.deployToCloudflare(site, secret.token, secret.accountId)
-      await this.verifyDeploy(deployedUrl, site.folder)
       site.deployedUrl = deployedUrl
+      this.persist()
+      this.emit()
+      await this.verifyDeploy(deployedUrl, site.folder)
       site.status = 'live'
       site.lastPublishedAt = Date.now()
     } catch (err) {
@@ -625,7 +627,7 @@ export class SitesManager {
     }
     const form = new FormData()
     form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }))
-    form.append('main.js', new Blob([WORKER_SCRIPT], { type: 'application/javascript+module' }))
+    form.append('main.js', new Blob([WORKER_SCRIPT], { type: 'application/javascript+module' }), 'main.js')
     await cfRequest(token, `/accounts/${accountId}/workers/scripts/${site.scriptName}`, {
       method: 'PUT',
       body: form
@@ -649,19 +651,27 @@ export class SitesManager {
     const expected = verificationFile(folder)
     const encodedPath = expected.path.split('/').map(encodeURIComponent).join('/')
     const candidate = new URL(encodedPath, url).toString()
+    const expectedHash = createHash('sha256').update(expected.content).digest('hex').slice(0, 12)
+    let lastResult = 'no response'
     for (let attempt = 0; attempt < 6; attempt += 1) {
       try {
         const res = await fetch(candidate)
         if (res.ok) {
           const body = Buffer.from(await res.arrayBuffer())
           if (body.equals(expected.content)) return
+          const bodyHash = createHash('sha256').update(body).digest('hex').slice(0, 12)
+          lastResult = `HTTP ${res.status}, ${body.length} bytes, sha256 ${bodyHash}`
+        } else {
+          lastResult = `HTTP ${res.status}`
         }
-      } catch {
-        /* not propagated yet */
+      } catch (err) {
+        lastResult = `request failed: ${String((err as Error).message ?? err)}`
       }
       await new Promise((r) => setTimeout(r, 1500))
     }
-    throw new Error('Deployment reported success but served content does not match. Retry the deploy.')
+    throw new Error(
+      `Deployment verification failed at ${candidate}: expected ${expected.content.length} bytes, sha256 ${expectedHash}; received ${lastResult}`
+    )
   }
 
   private persist(): void {
