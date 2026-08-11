@@ -7,10 +7,7 @@ export function Toolbar(): React.JSX.Element {
   const attention = useStore(appStore, (s) => s.attention)
 
   return (
-    <div className="toolbar" onDoubleClick={(event) => {
-      if ((event.target as HTMLElement).closest('button, [role="button"]')) return
-      void window.ralf.toggleMaximize()
-    }}>
+    <div className="toolbar">
       <div className="spacer" />
       {attention ? (
         <div className={`attention-pill ${attention.kind}`} title="R.A.L.F. needs your attention" onClick={() => appStore.setState({ attention: null })}>

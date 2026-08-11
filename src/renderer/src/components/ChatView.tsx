@@ -499,6 +499,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
+  const asrTargetId = React.useId()
   const streaming = useStore(appStore, (s) => (sessionId ?? s.activeSessionId ? Boolean(s.streaming[sessionId ?? s.activeSessionId ?? '']) : false))
   const hasSession = useStore(appStore, (s) => Boolean(sessionId ?? s.activeSessionId))
   const effectiveSession = useStore(appStore, (s) => sessionId ?? s.activeSessionId)
@@ -529,8 +530,8 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   // Live dictation: append ASR segments into the current text without
   // clobbering anything the user is typing/editing.
   useEffect(() => {
-    const off = onAsrText(({ sessionId, text }) => {
-      if (sessionId !== effectiveSession) return
+    const off = onAsrText(({ targetId, text }) => {
+      if (targetId !== asrTargetId) return
       setText((prev) => {
         const sep = prev && !prev.endsWith('\n') ? ' ' : ''
         return prev + sep + text
@@ -538,7 +539,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
       requestAnimationFrame(() => autoGrow())
     })
     return off
-  }, [effectiveSession])
+  }, [asrTargetId])
 
   useEffect(() => {
     setHistIdx(-1)
@@ -865,7 +866,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             >
               <AttachmentIcon size={16} />
             </button>
-            <MicToggle />
+            <MicToggle targetId={asrTargetId} />
             {effectiveSession ? <BackendControls sessionId={effectiveSession} /> : null}
             <ModePicker backendId={backendId} sessionId={effectiveSession ?? undefined} />
             <ModelPicker onPick={onModelChange} sessionId={effectiveSession ?? undefined} />
@@ -905,14 +906,17 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   )
 }
 
-function MicToggle(): React.JSX.Element {
+function MicToggle({ targetId }: { targetId: string }): React.JSX.Element {
   const asr = useStore(appStore, (s) => s.asr)
-  const listening = asr.listening
+  const activeTargetId = useStore(appStore, (s) => s.asrTargetId)
+  const listening = asr.listening && activeTargetId === targetId
+  const anotherComposerIsListening = asr.listening && !listening
   return (
     <button
       className={`composer-mic ${listening ? 'active' : ''}`}
-      onClick={() => void toggleAsr()}
-      title={listening ? 'Stop voice input' : 'Speak to type'}
+      disabled={anotherComposerIsListening}
+      onClick={() => void toggleAsr(targetId)}
+      title={listening ? 'Stop voice input' : anotherComposerIsListening ? 'Voice input is active in another composer' : 'Speak to type'}
     >
       {listening ? <MicOffIcon size={16} /> : <MicIcon size={16} />}
     </button>

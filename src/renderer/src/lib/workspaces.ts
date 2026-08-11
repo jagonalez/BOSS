@@ -33,6 +33,16 @@ export function workspaceView(name = 'Workspace', root: WorkspaceNode = group())
   return { id: workspaceId('workspace'), name, root, focusedGroupId: first.id }
 }
 
+export function nextWorkspaceViewName(views: Array<Pick<WorkspaceView, 'name'>>): string {
+  const highest = views.reduce((current, view) => {
+    const match = /^View (\d+)$/.exec(view.name)
+    if (!match) return current
+    const value = Number.parseInt(match[1], 10)
+    return Number.isFinite(value) ? Math.max(current, value) : current
+  }, 1)
+  return `View ${highest + 1}`
+}
+
 export function split(
   direction: SplitDirection,
   first: WorkspaceNode,

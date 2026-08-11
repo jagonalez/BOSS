@@ -20,6 +20,7 @@ import {
   loadTemplates,
   loadWorkspace,
   moveTab,
+  nextWorkspaceViewName,
   reorderTab,
   resizeSplit,
   saveCustomTemplates,
@@ -58,7 +59,7 @@ export function loadProjectWorkspace(projectKey: string, preferredSessionId?: st
 export function createWorkspaceView(): void {
   const workspace = currentWorkspace()
   if (!workspace) return
-  const created = workspaceView(`View ${workspace.views.length + 1}`)
+  const created = workspaceView(nextWorkspaceViewName(workspace.views))
   updateWorkspace((item) => ({
     ...item,
     views: [...item.views, created],
@@ -1372,10 +1373,10 @@ export function stopSpeaking(): void {
 let micSession: ReturnType<typeof startMicCapture> extends Promise<infer T> ? T | null : null = null
 let micDrainTimer: number | null = null
 let micTranscribing = false
-let micSessionId: string | null = null
+let micTargetId: string | null = null
 
 export interface AsrTextEvent {
-  sessionId: string
+  targetId: string
   text: string
 }
 
@@ -1388,22 +1389,22 @@ export function onAsrText(cb: (evt: AsrTextEvent) => void): () => void {
   }
 }
 
-function emitAsrText(sessionId: string, text: string): void {
+function emitAsrText(targetId: string, text: string): void {
   const trimmed = text.trim()
   if (!trimmed) return
-  for (const cb of asrTextListeners) cb({ sessionId, text: trimmed })
+  for (const cb of asrTextListeners) cb({ targetId, text: trimmed })
 }
 
-export async function toggleAsr(): Promise<void> {
+export async function toggleAsr(targetId: string): Promise<void> {
   const cur = appStore.getState()
   if (cur.asr.listening || micSession) {
     await stopAsrRecording()
     return
   }
-  micSessionId = cur.activeSessionId
+  micTargetId = targetId
   try {
     micSession = await startMicCapture()
-    appStore.setState((s) => ({ asr: { ...s.asr, listening: true } }))
+    appStore.setState((s) => ({ asr: { ...s.asr, listening: true }, asrTargetId: targetId }))
     // While recording, transcribe a rolling segment every ~2.2s so text
     // appears live instead of only when the button is released.
     micDrainTimer = window.setInterval(() => {
@@ -1411,7 +1412,8 @@ export async function toggleAsr(): Promise<void> {
     }, 2200)
   } catch (err) {
     micSession = null
-    appStore.setState({ lastError: `Mic: ${errorSummary(err)}` })
+    micTargetId = null
+    appStore.setState({ asrTargetId: null, lastError: `Mic: ${errorSummary(err)}` })
   }
 }
 
@@ -1426,7 +1428,7 @@ async function transcribeMicSegment(): Promise<void> {
       appStore.setState({ lastError: `Speech input: ${error}` })
       return
     }
-    if (micSessionId) emitAsrText(micSessionId, text)
+    if (micTargetId) emitAsrText(micTargetId, text)
   } catch (err) {
     appStore.setState({ lastError: `Speech input: ${errorSummary(err)}` })
   } finally {
@@ -1436,14 +1438,14 @@ async function transcribeMicSegment(): Promise<void> {
 
 async function stopAsrRecording(): Promise<void> {
   const session = micSession
-  const sessionId = micSessionId
+  const targetId = micTargetId
   micSession = null
-  micSessionId = null
+  micTargetId = null
   if (micDrainTimer !== null) {
     window.clearInterval(micDrainTimer)
     micDrainTimer = null
   }
-  appStore.setState((s) => ({ asr: { ...s.asr, listening: false } }))
+  appStore.setState((s) => ({ asr: { ...s.asr, listening: false }, asrTargetId: null }))
   if (!session) return
   let pcm: Float32Array
   try {
@@ -1462,7 +1464,7 @@ async function stopAsrRecording(): Promise<void> {
       appStore.setState({ lastError: `Speech input: ${error}` })
       return
     }
-    if (sessionId) emitAsrText(sessionId, text)
+    if (targetId) emitAsrText(targetId, text)
   } catch (err) {
     appStore.setState({ lastError: `Speech input: ${errorSummary(err)}` })
   }
