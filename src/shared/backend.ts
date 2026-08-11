@@ -43,6 +43,7 @@ export interface BackendModelDescriptor {
   name?: string
   provider?: string
   variants?: string[]
+  source?: 'local' | 'cloud' | 'custom'
 }
 
 export interface BackendModelPreference {

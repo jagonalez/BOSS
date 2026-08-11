@@ -14,6 +14,7 @@ export interface ModelInfo {
   name?: string
   provider?: string
   variants?: string[]
+  source?: 'local' | 'cloud' | 'custom'
 }
 
 export interface ThinkingLevel {
