@@ -27,12 +27,17 @@
   --surface-sidebar: var(--bg-elevated);
   --surface-pane: var(--bg-elevated);
   --surface-raised: var(--bg-hover);
+  --surface-hover: var(--bg-hover);
   --surface-inset: var(--bg-inset);
   --surface-selected: var(--bg-active);
   --surface-control: var(--bg-active);
+  --surface-overlay: var(--bg-elevated);
   --line-default: var(--border);
   --line-subtle: var(--border-subtle);
+  --line-soft: var(--border-subtle);
+  --line-strong: var(--border);
   --focus-ring: var(--accent);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
   --workspace-gap: 5px;
   --workspace-tab-height: 34px;
 }
@@ -569,7 +574,6 @@ button {
   box-shadow: inset 0 -2px var(--accent);
 }
 
-.workspace-view-rename,
 .workspace-view-close {
   width: 16px;
   height: 16px;
@@ -579,20 +583,6 @@ button {
   margin-left: auto;
   border-radius: 4px;
   color: var(--text-faint);
-}
-
-.workspace-view-rename {
-  display: none;
-}
-
-.workspace-view-tab:hover .workspace-view-rename,
-.workspace-view-tab.active .workspace-view-rename {
-  display: grid;
-}
-
-.workspace-view-rename:hover {
-  color: var(--text);
-  background: var(--surface-raised);
 }
 
 .workspace-view-close:hover {
@@ -2146,10 +2136,10 @@ button {
   max-height: 420px;
   display: flex;
   flex-direction: column;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  background: var(--surface-overlay);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-lg);
   z-index: 60;
   overflow: hidden;
 }
@@ -2182,7 +2172,7 @@ button {
   padding: 8px 8px 4px;
   position: sticky;
   top: 0;
-  background: var(--bg-elevated);
+  background: var(--surface-overlay);
 }
 
 .model-row {
