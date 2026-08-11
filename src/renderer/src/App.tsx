@@ -33,7 +33,8 @@ import {
   setAttention,
   clearAttention,
   loadSpeechPrefs,
-  applySpeechStatus
+  applySpeechStatus,
+  loadEngine
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -62,6 +63,7 @@ export function App(): React.JSX.Element {
     loadSessionMeta()
     loadVariant()
     loadSpeechPrefs()
+    loadEngine()
     applyTheme(loadTheme())
   }, [])
 

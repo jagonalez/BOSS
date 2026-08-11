@@ -76,6 +76,7 @@ export interface AppState {
   variant: string | null
   mode: 'auto' | 'ask' | 'plan'
   agent: string
+  engine: 'opencode' | 'pi'
   projectPath: string
   lastError: string | null
   drafts: Record<string, string>
@@ -139,6 +140,7 @@ export const initialState: AppState = {
   variant: null,
   mode: 'ask',
   agent: 'build',
+  engine: 'opencode',
   projectPath: '',
   lastError: null,
   drafts: {},
