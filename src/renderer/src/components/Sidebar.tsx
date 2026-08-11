@@ -373,7 +373,6 @@ export function Sidebar(): React.JSX.Element {
 
       <div className="footer">
         <span className="right" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 11 }}>{projectName(activePath) || ''}</span>
           <IconButton size="small" className="footer-gear" onClick={() => appStore.setState({ settingsOpen: true })} label="Settings">
             <GearIcon size={18} />
           </IconButton>
