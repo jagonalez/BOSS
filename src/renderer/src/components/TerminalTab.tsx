@@ -4,42 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useStore, appStore } from '../state/AppState'
 import type { BackendId } from '@shared/backend'
-
-function xtermTheme(): Record<string, string> {
-  const cs = getComputedStyle(document.documentElement)
-  const v = (name: string): string => cs.getPropertyValue(name).trim()
-  const bg = v('--bg') || '#0b0d10'
-  const text = v('--text') || '#f2f4f8'
-  const accent = v('--accent') || '#4f8cff'
-  const red = v('--red') || '#f85149'
-  const green = v('--green') || '#3fb950'
-  const yellow = v('--yellow') || '#d29922'
-  const purple = v('--purple') || '#8957e5'
-  const faint = v('--text-faint') || '#7d8590'
-  return {
-    background: bg,
-    foreground: text,
-    cursor: accent,
-    cursorAccent: bg,
-    selectionBackground: v('--accent-soft') || 'rgba(79,140,255,0.3)',
-    black: bg,
-    red,
-    green,
-    yellow,
-    blue: accent,
-    magenta: purple,
-    cyan: '#2dd4bf',
-    white: text,
-    brightBlack: faint,
-    brightRed: red,
-    brightGreen: green,
-    brightYellow: yellow,
-    brightBlue: accent,
-    brightMagenta: purple,
-    brightCyan: '#5eead4',
-    brightWhite: text
-  }
-}
+import { getXtermTheme } from '../lib/themes'
 
 export function TerminalTab({ authBackendId }: { authBackendId?: BackendId }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -54,7 +19,7 @@ export function TerminalTab({ authBackendId }: { authBackendId?: BackendId }): R
       fontSize: 13,
       lineHeight: 1.35,
       cursorBlink: true,
-      theme: xtermTheme(),
+      theme: getXtermTheme(),
       scrollback: 5000
     })
     const fit = new FitAddon()
@@ -102,12 +67,17 @@ export function TerminalTab({ authBackendId }: { authBackendId?: BackendId }): R
     window.addEventListener('resize', fitNow)
 
     const focusTimer = setTimeout(() => term.focus(), 50)
+    const onThemeChanged = (): void => {
+      term.options.theme = getXtermTheme()
+    }
+    window.addEventListener('ralf:theme-changed', onThemeChanged)
 
     return () => {
       cancelled = true
       clearTimeout(focusTimer)
       ro.disconnect()
       window.removeEventListener('resize', fitNow)
+      window.removeEventListener('ralf:theme-changed', onThemeChanged)
       offData()
       offExit()
       if (termId) window.ralf.terminalDispose(termId)

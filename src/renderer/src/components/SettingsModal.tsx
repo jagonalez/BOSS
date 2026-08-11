@@ -1,32 +1,48 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import { THEMES, applyTheme } from '../lib/themes'
+import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
 import { clearThreadBusFailures, importNativeThreads, openBackendLogin, refreshBackendAuth, refreshBackendModels, setDefaultModel, setEngine, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
 import type { WorktreeSettings } from '@shared/worktree'
+import { Button, Select, SettingsRow, StatusBadge } from './ui'
 
 type SettingsSection = 'agents' | 'connections' | 'collaboration' | 'worktrees' | 'appearance' | 'voice'
 
-const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string }> = [
-  { id: 'agents', label: 'Agents' },
-  { id: 'connections', label: 'Connections' },
-  { id: 'collaboration', label: 'Collaboration' },
-  { id: 'worktrees', label: 'Git worktrees' },
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'voice', label: 'Voice' }
+const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
+  {
+    label: 'R.A.L.F.',
+    items: [
+      { id: 'agents', label: 'Agent defaults' },
+      { id: 'connections', label: 'Models & connections' }
+    ]
+  },
+  {
+    label: 'Projects',
+    items: [
+      { id: 'collaboration', label: 'Collaboration' },
+      { id: 'worktrees', label: 'Git worktrees' }
+    ]
+  },
+  {
+    label: 'Personalize',
+    items: [
+      { id: 'appearance', label: 'Appearance' },
+      { id: 'voice', label: 'Voice' }
+    ]
+  }
 ]
 
 const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: string }> = {
   agents: {
-    title: 'Agents',
-    description: 'Choose how new work starts and bring existing agent sessions into R.A.L.F.'
+    title: 'Agent defaults',
+    description: 'Choose how new work starts and bring existing sessions into R.A.L.F.'
   },
   connections: {
-    title: 'Connections',
-    description: 'See what each agent can use, add cloud accounts, and choose defaults for new threads.'
+    title: 'Models & connections',
+    description: 'See what every agent can use, connect cloud accounts, and choose defaults for new threads.'
   },
   collaboration: {
     title: 'Collaboration',
@@ -196,6 +212,7 @@ export function SettingsModal(): React.JSX.Element | null {
   const backendModelsLoading = useStore(appStore, (s) => s.backendModelsLoading ?? false)
   const defaultModels = useStore(appStore, (s) => s.defaultModels ?? {})
   const [section, setSection] = useState<SettingsSection>('connections')
+  const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [importStatus, setImportStatus] = useState('')
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
 
@@ -206,31 +223,44 @@ export function SettingsModal(): React.JSX.Element | null {
     void refreshBackendModels()
   }, [open])
 
+  useEffect(() => {
+    const syncTheme = (event: Event): void => {
+      setCurrentTheme((event as CustomEvent<{ id?: string }>).detail?.id ?? loadTheme())
+    }
+    window.addEventListener('ralf:theme-changed', syncTheme)
+    return () => window.removeEventListener('ralf:theme-changed', syncTheme)
+  }, [])
+
   if (!open) return null
 
-  const currentTheme = document.documentElement.dataset.theme ?? 'graphite'
   const heading = SETTINGS_HEADINGS[section]
 
   return (
     <div className="settings-page">
       <header className="settings-page-titlebar">
-        <div className="settings-page-title">Settings</div>
-        <button className="settings-done-button" onClick={() => appStore.setState({ settingsOpen: false })}>
-          Done
-        </button>
+        <div className="settings-page-title">
+          <strong>Settings</strong>
+          <span>Configure R.A.L.F. across projects</span>
+        </div>
+        <Button variant="primary" size="small" onClick={() => appStore.setState({ settingsOpen: false })}>Done</Button>
       </header>
 
       <div className="settings-page-body">
         <aside className="settings-sidebar" aria-label="Settings categories">
           <nav>
-            {SETTINGS_SECTIONS.map((item) => (
-              <button
-                key={item.id}
-                className={section === item.id ? 'active' : ''}
-                onClick={() => setSection(item.id)}
-              >
-                {item.label}
-              </button>
+            {SETTINGS_GROUPS.map((group) => (
+              <div className="settings-nav-group" key={group.label}>
+                <div className="settings-nav-label">{group.label}</div>
+                {group.items.map((item) => (
+                  <button
+                    key={item.id}
+                    className={section === item.id ? 'active' : ''}
+                    onClick={() => setSection(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             ))}
           </nav>
         </aside>
@@ -271,23 +301,21 @@ export function SettingsModal(): React.JSX.Element | null {
                   </div>
                 </section>
 
-                <section className="settings-card settings-card-row">
-                  <div className="settings-row-main">
-                    <div className="settings-row-label">Existing OpenCode sessions</div>
-                    <div className="settings-row-hint">Import existing OpenCode sessions when you want them to appear as R.A.L.F. threads. R.A.L.F. only manages sessions it creates or imports.</div>
-                    {importStatus ? <div className="settings-inline-status">{importStatus}</div> : null}
-                  </div>
-                  <button
-                    className="btn-ghost"
+                <section className="settings-card settings-card-list">
+                  <SettingsRow
+                    title="Existing OpenCode sessions"
+                    description={<>Import native sessions when you want them to appear as R.A.L.F. threads.{importStatus ? <span className="settings-inline-status"> {importStatus}</span> : null}</>}
+                  >
+                  <Button
+                    size="small"
                     onClick={() => {
                       setImportStatus('Importing…')
                       void importNativeThreads('opencode')
                         .then((count) => setImportStatus(count ? `Imported ${count}` : 'Nothing new'))
                         .catch(() => setImportStatus('Import failed'))
                     }}
-                  >
-                    Import
-                  </button>
+                  >Import</Button>
+                  </SettingsRow>
                 </section>
               </div>
             ) : null}
@@ -333,11 +361,9 @@ export function SettingsModal(): React.JSX.Element | null {
 
                         <div className="settings-access">
                           <div className="settings-access-badges">
-                            <span className={`settings-access-badge ${backend.available ? 'ready' : 'unavailable'}`}>
-                              {backend.available ? 'Runtime ready' : 'Unavailable'}
-                            </span>
-                            {localProviders.length ? <span className="settings-access-badge local">Local · {localProviders.join(', ')}</span> : null}
-                            {hasCloudAccount ? <span className="settings-access-badge cloud">Cloud connected</span> : null}
+                            <StatusBadge tone={backend.available ? 'success' : 'danger'}>{backend.available ? 'Runtime ready' : 'Unavailable'}</StatusBadge>
+                            {localProviders.length ? <StatusBadge tone="local">Local · {localProviders.join(', ')}</StatusBadge> : null}
+                            {hasCloudAccount ? <StatusBadge tone="accent">Cloud connected</StatusBadge> : null}
                           </div>
                           <p>{accessDetail}</p>
                         </div>
@@ -353,9 +379,9 @@ export function SettingsModal(): React.JSX.Element | null {
                           />
                         </div>
 
-                        <button className="settings-connection-manage" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
+                        <Button size="small" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
                           {hasCloudAccount ? 'Manage' : 'Add account'}
-                        </button>
+                        </Button>
                       </div>
                     )
                   })}
@@ -365,33 +391,28 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {section === 'collaboration' ? (
               <div className="settings-group-stack">
-                <section className="settings-card settings-card-row">
-                  <div className="settings-row-main">
-                    <div className="settings-row-label">Agent access</div>
-                    <div className="settings-row-hint">Scoped to this project. OpenCode, Pi, Codex CLI, and Claude Code threads can use the thread tools.</div>
-                  </div>
-                  <select
-                    className="settings-select"
+                <section className="settings-card settings-card-list">
+                  <SettingsRow title="Agent access" description="Scoped to this project. OpenCode, Pi, Codex CLI, and Claude Code threads can use the thread tools.">
+                  <Select
                     value={threadBus?.policy ?? 'off'}
                     onChange={(event) => void setThreadBusPolicy(event.target.value as 'off' | 'read' | 'collaborate')}
                   >
                     <option value="off">Off</option>
                     <option value="read">Read-only</option>
                     <option value="collaborate">Read and send</option>
-                  </select>
-                </section>
-                <section className="settings-card settings-card-row">
-                  <div className="settings-row-main">
-                    <div className="settings-row-label">Recent agent messages</div>
-                    <div className="settings-row-hint">
+                  </Select>
+                  </SettingsRow>
+                  <SettingsRow title="Recent agent messages" description={
+                    <>
                       {threadBus?.messages.length
                         ? `${threadBus.messages.filter((message) => message.status === 'queued').length} queued · ${threadBus.messages.filter((message) => message.status === 'failed').length} failed · ${threadBus.messages.length} recent`
                         : 'No agent-to-agent messages in this project yet.'}
-                    </div>
-                  </div>
+                    </>
+                  }>
                   {threadBus?.messages.some((message) => message.status === 'failed') ? (
-                    <button className="btn-ghost" onClick={() => void clearThreadBusFailures()}>Clear failures</button>
+                    <Button size="small" onClick={() => void clearThreadBusFailures()}>Clear failures</Button>
                   ) : null}
+                  </SettingsRow>
                 </section>
               </div>
             ) : null}
@@ -418,13 +439,9 @@ export function SettingsModal(): React.JSX.Element | null {
                     </span>
                   </label>
                 </section>
-                <section className="settings-card settings-card-row">
-                  <div className="settings-row-main">
-                    <div className="settings-row-label">Inactive threshold</div>
-                    <div className="settings-row-hint">Opening or using a worktree thread resets its timer.</div>
-                  </div>
-                  <select
-                    className="settings-select"
+                <section className="settings-card settings-card-list">
+                  <SettingsRow title="Inactive threshold" description="Opening or using a worktree thread resets its timer.">
+                  <Select
                     value={worktreeSettings?.cleanupAfterDays ?? 30}
                     disabled={worktreeSettings?.autoCleanupEnabled === false}
                     onChange={(event) => {
@@ -441,7 +458,8 @@ export function SettingsModal(): React.JSX.Element | null {
                     <option value={30}>30 days</option>
                     <option value={60}>60 days</option>
                     <option value={90}>90 days</option>
-                  </select>
+                  </Select>
+                  </SettingsRow>
                 </section>
               </div>
             ) : null}
@@ -462,11 +480,15 @@ export function SettingsModal(): React.JSX.Element | null {
                       onClick={() => applyTheme(theme.id)}
                       title={theme.label}
                     >
-                      <span
-                        className="theme-swatch-preview"
-                        style={{ background: `linear-gradient(135deg, ${theme.bg} 0%, ${theme.bg} 55%, ${theme.accent} 100%)` }}
-                      />
-                      <span className="theme-swatch-label">{theme.label}</span>
+                      <span className="theme-swatch-preview" style={{ background: theme.colors.canvas }}>
+                        <span style={{ background: theme.colors.sidebar }} />
+                        <span style={{ background: theme.colors.surface }}>
+                          <i style={{ background: theme.colors.accent }} />
+                          <i style={{ background: theme.colors.textMuted }} />
+                          <i style={{ background: theme.colors.success }} />
+                        </span>
+                      </span>
+                      <span className="theme-swatch-copy"><strong>{theme.label}</strong><small>{theme.description}</small></span>
                     </button>
                   ))}
                 </div>
@@ -480,19 +502,17 @@ export function SettingsModal(): React.JSX.Element | null {
                     <div className="settings-row-label">Voice</div>
                     <div className="settings-row-hint">{tts.ready ? 'Ready' : tts.error ?? (tts.available ? 'Loading…' : 'Unavailable')}</div>
                   </div>
-                  <select className="settings-select" value={ttsVoice} onChange={(event) => setTtsVoice(event.target.value)}>
+                  <Select value={ttsVoice} onChange={(event) => setTtsVoice(event.target.value)}>
                     {KOKORO_VOICES.map((voice) => (
                       <option key={voice.id} value={voice.id}>{voice.label}</option>
                     ))}
-                  </select>
-                  <button
-                    className="btn-ghost"
+                  </Select>
+                  <Button
+                    size="small"
                     disabled={!tts.available || tts.speaking}
                     onClick={() => void speakText('This is the ' + ttsVoice + ' voice.')}
                     title="Preview this voice (first click downloads the model)"
-                  >
-                    {tts.speaking ? 'Loading…' : 'Preview'}
-                  </button>
+                  >{tts.speaking ? 'Loading…' : 'Preview'}</Button>
                 </section>
                 <section className="settings-card">
                   <label className="settings-check">
