@@ -11,14 +11,26 @@ function rectOf(el: HTMLElement): { x: number; y: number; width: number; height:
   }
 }
 
-export function BrowseTab({ id }: { id: string }): React.JSX.Element {
+export function BrowseTab({ id, visible = true }: { id: string; visible?: boolean }): React.JSX.Element {
   const viewRef = useRef<HTMLDivElement>(null)
+  const nativeViewsSuspended = useStore(appStore, (s) => s.nativeViewSuspensions.length > 0)
+  const actuallyVisible = visible && !nativeViewsSuspended
   const nav = useStore(appStore, (s) => s.browse[id] ?? { url: '', title: '', canGoBack: false, canGoForward: false, loading: false })
   const [urlInput, setUrlInput] = useState('')
 
   useEffect(() => {
+    return () => {
+      void window.ralf.browseDetach(id)
+      void window.ralf.browseDestroy(id)
+    }
+  }, [id])
+
+  useEffect(() => {
     const el = viewRef.current
-    if (!el) return
+    if (!el || !actuallyVisible) {
+      void window.ralf.browseDetach(id)
+      return
+    }
     void window.ralf.browseAttach(id, rectOf(el))
     const report = (): void => {
       void window.ralf.browseBounds(id, rectOf(el))
@@ -30,9 +42,8 @@ export function BrowseTab({ id }: { id: string }): React.JSX.Element {
       ro.disconnect()
       window.removeEventListener('resize', report)
       void window.ralf.browseDetach(id)
-      void window.ralf.browseDestroy(id)
     }
-  }, [id])
+  }, [id, actuallyVisible])
 
   useEffect(() => {
     const off = window.ralf.onBrowseNavigation((evt) => {

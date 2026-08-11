@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react'
-import { useStore, appStore, applyEvent, MAIN_MIN_WIDTH, SIDEBAR_FALLBACK_WIDTH } from './state/AppState'
+import { useStore, appStore, applyEvent } from './state/AppState'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { ChatView } from './components/ChatView'
-import { Panel, AddBar } from './components/Panel'
 import { Footer } from './components/Footer'
+import { Workspace } from './components/Workspace'
+import { CommandCenter, EmptyProductPage } from './components/CommandCenter'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme } from './lib/themes'
 import { CommitDialog } from './components/CommitDialog'
@@ -34,7 +35,10 @@ import {
   clearAttention,
   loadSpeechPrefs,
   applySpeechStatus,
-  loadEngine
+  loadEngine,
+  initializeWorkspaceState,
+  loadProjectWorkspace,
+  setNativeViewsSuspended
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -52,9 +56,11 @@ async function refreshAll(): Promise<void> {
 }
 
 export function App(): React.JSX.Element {
-  const panelOpen = useStore(appStore, (s) => s.panelOpen)
-  const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
-  const activeTabKind = useStore(appStore, (s) => s.panelGroups[0]?.tabs.find((t) => t.id === s.panelGroups[0]?.activeTabId)?.kind)
+  const activePage = useStore(appStore, (s) => s.activePage)
+  const projectPath = useStore(appStore, (s) => s.projectPath)
+  const sessions = useStore(appStore, (s) => s.sessions)
+  const workspaceProjectKey = useStore(appStore, (s) => s.projectWorkspace?.projectKey)
+  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget))
 
   useEffect(() => {
     loadArchived()
@@ -64,20 +70,20 @@ export function App(): React.JSX.Element {
     loadVariant()
     loadSpeechPrefs()
     loadEngine()
+    initializeWorkspaceState()
     applyTheme(loadTheme())
   }, [])
 
   useEffect(() => {
-    const onResize = (): void => {
-      const sidebarWidth = document.querySelector('.sidebar')?.getBoundingClientRect().width ?? SIDEBAR_FALLBACK_WIDTH
-      const max = Math.max(300, window.innerWidth - sidebarWidth - MAIN_MIN_WIDTH - 8)
-      appStore.setState((s) => ({
-        panelGroups: s.panelGroups.map((g) => (g.width > max ? { ...g, width: max } : g))
-      }))
-    }
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
+    if (!projectPath || workspaceProjectKey === projectPath) return
+    const preferred = sessions.find((session) => (session.directory || session.path) === projectPath)?.id
+    loadProjectWorkspace(projectPath, preferred)
+  }, [projectPath, sessions, workspaceProjectKey])
+
+  useEffect(() => {
+    setNativeViewsSuspended('app-modal', modalOpen)
+    return () => setNativeViewsSuspended('app-modal', false)
+  }, [modalOpen])
 
   useEffect(() => {
     let refreshTimer: number | undefined
@@ -114,7 +120,7 @@ export function App(): React.JSX.Element {
           const props = (ev.properties ?? {}) as { sessionID?: string }
           const sid = props.sessionID ?? appStore.getState().activeSessionId ?? ''
           const wasStreaming = Boolean(appStore.getState().streaming[sid])
-          refreshStreaming()
+          refreshStreaming(sid)
           if (wasStreaming && !appStore.getState().streaming[sid] && !document.hasFocus()) {
             setAttention('done')
           }
@@ -163,9 +169,11 @@ export function App(): React.JSX.Element {
         case 'message.part.updated':
         case 'message.part.created':
           window.clearTimeout(refreshTimer)
-          refreshStreaming()
+          const props = (ev.properties ?? {}) as { sessionID?: string; part?: { sessionID?: string } }
+          const eventSessionId = props.sessionID ?? props.part?.sessionID ?? appStore.getState().activeSessionId ?? undefined
+          refreshStreaming(eventSessionId)
           refreshTimer = window.setTimeout(() => {
-            const id = appStore.getState().activeSessionId
+            const id = eventSessionId
             if (id) {
               void loadMessages(id)
               void loadTodos(id)
@@ -259,20 +267,26 @@ export function App(): React.JSX.Element {
       : 'Ralf'
   }, [attention])
 
-  useEffect(() => {
-    if (activeTabKind === 'review' && panelOpen) void refreshDiff(activeSessionId)
-  }, [activeTabKind, panelOpen, activeSessionId])
+  const page = (() => {
+    if (activePage === 'command-center') return <CommandCenter />
+    if (activePage === 'automations') return <EmptyProductPage title="Automations" description="Scheduled and recurring agent work will live here." />
+    if (activePage === 'sites') return <EmptyProductPage title="Sites" description="Published project surfaces will live here." />
+    if (activePage === 'project') return <Workspace />
+    return (
+      <>
+        <Toolbar />
+        <div className="content"><ChatView /></div>
+      </>
+    )
+  })()
+
   return (
     <div className="app">
       <Sidebar />
       <div className="main">
-        <Toolbar />
-        <div className="content">
-          <ChatView />
-        </div>
+        {page}
         <Footer />
       </div>
-      {panelOpen ? <Panel /> : <AddBar />}
       <ModelSwitchModal />
       <CommitDialog />
       <RenameModal />
