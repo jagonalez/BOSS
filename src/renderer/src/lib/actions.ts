@@ -1210,3 +1210,107 @@ async function stopAsrRecording(): Promise<void> {
 export function applySpeechStatus(status: { tts: TtsStatus; asr: AsrStatus }): void {
   appStore.setState({ tts: status.tts, asr: status.asr })
 }
+
+export async function refreshSites(): Promise<void> {
+  try {
+    appStore.setState({ sites: await window.ralf.sitesList() })
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function refreshCloudflare(): Promise<void> {
+  try {
+    appStore.setState({ cloudflare: await window.ralf.sitesCfGet() })
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function publishSiteFromPicker(): Promise<void> {
+  try {
+    const folder = await window.ralf.sitesChooseFolder()
+    if (!folder) return
+    const site = await window.ralf.sitesPublish(folder)
+    appStore.setState((s) => ({ sites: [site, ...s.sites] }))
+  } catch (err) {
+    appStore.setState({ lastError: errorSummary(err) })
+  }
+}
+
+export async function removeSite(id: string): Promise<void> {
+  try {
+    await window.ralf.sitesRemove(id)
+    appStore.setState((s) => ({ sites: s.sites.filter((site) => site.id !== id) }))
+  } catch (err) {
+    appStore.setState({ lastError: errorSummary(err) })
+  }
+}
+
+export async function deploySite(id: string): Promise<void> {
+  appStore.setState((s) => ({ siteDeploying: { ...s.siteDeploying, [id]: true } }))
+  try {
+    const site = await window.ralf.sitesDeploy(id)
+    appStore.setState((s) => ({
+      sites: s.sites.map((item) => (item.id === id ? site : item)),
+      siteDeploying: { ...s.siteDeploying, [id]: false }
+    }))
+  } catch (err) {
+    appStore.setState((s) => ({
+      siteDeploying: { ...s.siteDeploying, [id]: false },
+      lastError: errorSummary(err)
+    }))
+    await refreshSites()
+  }
+}
+
+export async function setCloudflareConfig(token: string, accountId: string): Promise<void> {
+  try {
+    appStore.setState({ cloudflare: await window.ralf.sitesCfSet(token, accountId) })
+  } catch (err) {
+    appStore.setState({ lastError: errorSummary(err) })
+  }
+}
+
+export async function clearCloudflareConfig(): Promise<void> {
+  try {
+    appStore.setState({ cloudflare: await window.ralf.sitesCfClear() })
+  } catch (err) {
+    appStore.setState({ lastError: errorSummary(err) })
+  }
+}
+
+export async function openSiteInBrowser(url: string): Promise<void> {
+  showPage('project')
+  const state = appStore.getState()
+  let workspace = state.projectWorkspace
+  if (!workspace) {
+    if (!state.projectPath) {
+      void window.ralf.openExternal(url)
+      return
+    }
+    loadProjectWorkspace(state.projectPath)
+    workspace = appStore.getState().projectWorkspace
+  }
+  if (!workspace) {
+    void window.ralf.openExternal(url)
+    return
+  }
+  const groupId = workspace.focusedGroupId && findGroup(workspace.root, workspace.focusedGroupId)
+    ? workspace.focusedGroupId
+    : walkGroups(workspace.root)[0]?.id
+  if (!groupId) {
+    void window.ralf.openExternal(url)
+    return
+  }
+  const created = tab('browser')
+  updateWorkspace((item) => ({
+    ...item,
+    root: addTab(item.root, groupId, created),
+    focusedGroupId: groupId
+  }))
+  const browseId = `workspace-${created.id}`
+  setTimeout(() => {
+    void window.ralf.browseNavigate(browseId, url)
+  }, 120)
+}

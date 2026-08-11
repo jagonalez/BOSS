@@ -183,3 +183,15 @@ export const VolumeIcon = (p: IconProps): React.JSX.Element => (
     <path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8 8 0 0 1 0 12" />
   </Svg>
 )
+
+export const TrashIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14M10 11v6M14 11v6" />
+  </Svg>
+)
+
+export const UploadIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="M12 15V3M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+  </Svg>
+)

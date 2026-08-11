@@ -15,6 +15,7 @@ import type { OptionalDeps } from './optional-deps'
 import type { ComputerUse } from './computer-use'
 import type { PTYManager } from './pty-manager'
 import type { SpeechManager } from './speech'
+import type { SitesManager } from './sites'
 import type { AsrTranscribeRequest, TtsSpeakRequest } from '@shared/ipc'
 
 export interface IpcDeps {
@@ -26,6 +27,7 @@ export interface IpcDeps {
   computerUse: ComputerUse
   pty: PTYManager
   speech: SpeechManager
+  sites: SitesManager
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -45,6 +47,7 @@ export function registerIpc(deps: IpcDeps): void {
   deps.pty.onData = (id, data) => broadcast(IpcChannels.TerminalData, { id, data })
   deps.pty.onExit = (id, code) => broadcast(IpcChannels.TerminalExit, { id, code })
   deps.speech.onStatusChange = (status) => broadcast(IpcChannels.SpeechStatusChanged, status)
+  deps.sites.onChanged = (sites) => broadcast(IpcChannels.SitesChanged, sites)
 
   ipcMain.handle(IpcChannels.ServerGetInfo, () => deps.server.info)
 
@@ -205,4 +208,31 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.TtsSpeak, (_e, req: TtsSpeakRequest) => deps.speech.speak(req.text, req.voice))
 
   ipcMain.handle(IpcChannels.AsrTranscribe, (_e, req: AsrTranscribeRequest) => deps.speech.transcribe(req.pcm))
+
+  ipcMain.handle(IpcChannels.SitesList, () => deps.sites.list())
+
+  ipcMain.handle(IpcChannels.SitesPublish, (_e, body: { folder: string; name?: string }) =>
+    deps.sites.publish(body.folder, body.name)
+  )
+
+  ipcMain.handle(IpcChannels.SitesRemove, (_e, id: string) => deps.sites.remove(id))
+
+  ipcMain.handle(IpcChannels.SitesDeploy, (_e, id: string) => deps.sites.deploy(id))
+
+  ipcMain.handle(IpcChannels.SitesChooseFolder, async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Publish a site folder',
+      properties: ['openDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle(IpcChannels.SitesCfGet, () => deps.sites.cloudflareGet())
+
+  ipcMain.handle(IpcChannels.SitesCfSet, (_e, body: { token: string; accountId: string }) =>
+    deps.sites.cloudflareSet(body.token, body.accountId)
+  )
+
+  ipcMain.handle(IpcChannels.SitesCfClear, () => deps.sites.cloudflareClear())
 }

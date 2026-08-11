@@ -9,6 +9,7 @@ import { OptionalDeps } from './optional-deps'
 import { ComputerUse } from './computer-use'
 import { PTYManager } from './pty-manager'
 import { SpeechManager } from './speech'
+import { SitesManager } from './sites'
 import { registerIpc, type IpcDeps } from './ipc'
 import { IpcChannels } from '@shared/ipc'
 import { loadState } from './state-store'
@@ -39,6 +40,7 @@ ipcMain.handle(IpcChannels.BackendGetEngine, () => backendMgr.engineName)
 ipcMain.handle(IpcChannels.BackendSetEngine, async (_e, engine: 'opencode' | 'pi') => {
   await backendMgr.setEngine(engine, server.projectPath)
   computerUse.bind(backendMgr.current)
+  sites.bind(backendMgr.current)
   return backendMgr.engineName
 })
 
@@ -47,12 +49,13 @@ const computerUse = new ComputerUse()
 computerUse.bind(backendMgr.current)
 const pty = new PTYManager()
 const speech = new SpeechManager()
+const sites = new SitesManager(() => server.projectPath)
 
 let browse: BrowseManager | null = null
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, browse: browse!, optional, computerUse, pty, speech }
+  return { server, api, events, browse: browse!, optional, computerUse, pty, speech, sites }
 }
 
 function registerIpcOnce(): void {
@@ -159,7 +162,12 @@ app.whenReady().then(() => {
   loadRenderer()
   const saved = loadState()
   if (saved.projectPath) server.setInitialCwd(saved.projectPath)
-  void backend.start()
+  void (async () => {
+    await sites.start()
+    await backend.start()
+    computerUse.bind(backendMgr.current)
+    sites.bind(backendMgr.current)
+  })()
   // events.start() is handled by OpenCodeBackend.start()
 })
 
@@ -178,5 +186,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   void backend.stop()
   void computerUse.dispose()
+  void sites.stop()
   speech.dispose()
 })
