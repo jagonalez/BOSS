@@ -13,7 +13,7 @@ import type {
 } from '@shared/backend'
 import type { EventMessage, MessageWithParts, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
-import type { ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
+import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 
 interface ThreadBinding {
   id: string
@@ -152,6 +152,10 @@ export class BackendManager {
     for (const backend of Object.values(this.backends)) {
       backend.setThreadBusHandler?.((call) => threadBus.agentCall(backend.id, call.nativeThreadId, call.tool, call.arguments))
     }
+  }
+
+  configureThreadBus(connection: ThreadBusConnection): void {
+    for (const backend of Object.values(this.backends)) backend.configureThreadBus?.(connection)
   }
 
   get currentProject(): string {

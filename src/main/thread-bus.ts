@@ -1,6 +1,6 @@
 import { app } from 'electron'
-import { createServer, type Server } from 'node:http'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { BackendId } from '@shared/backend'
@@ -8,6 +8,7 @@ import type { MessageWithParts } from '@shared/opencode'
 import type {
   CollaborationPolicy,
   ThreadBusAgentTool,
+  ThreadBusConnection,
   ThreadBusMessage,
   ThreadBusSnapshot,
   ThreadBusThread
@@ -26,11 +27,6 @@ export interface ThreadBusHost {
   threadMessages(threadId: string, limit: number): Promise<MessageWithParts[]>
   deliverThreadMessage(threadId: string, body: string): Promise<void>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
-}
-
-export interface ThreadBusConnection {
-  url: string
-  token: string
 }
 
 const MAX_MESSAGES = 500
@@ -135,7 +131,7 @@ export class ThreadBus {
       policy: this.policy(path),
       threads: this.host.threadList(path),
       messages,
-      toolBackends: ['opencode', 'codex']
+      toolBackends: ['opencode', 'pi', 'codex', 'claude']
     }
   }
 
@@ -281,32 +277,207 @@ export class ThreadBus {
     for (const threadId of targets) await this.flush(threadId)
   }
 
-  async start(): Promise<ThreadBusConnection> {
-    if (this.server) return { url: `http://127.0.0.1:${this.port}`, token: this.token }
-    this.token = randomBytes(32).toString('hex')
-    this.server = createServer((request, response) => {
-      if (request.method !== 'POST' || request.url !== '/agent-call' || request.headers.authorization !== `Bearer ${this.token}`) {
-        response.writeHead(404).end()
-        return
-      }
+  private callerToken(backendId: BackendId, nativeThreadId: string): string {
+    return createHmac('sha256', this.token).update(`${backendId}\0${nativeThreadId}`).digest('hex')
+  }
+
+  private authorized(request: IncomingMessage, backendId?: BackendId, nativeThreadId?: string): boolean {
+    const authorization = request.headers.authorization
+    if (authorization === `Bearer ${this.token}`) return true
+    if (!backendId || !nativeThreadId || typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) return false
+    const supplied = Buffer.from(authorization.slice(7))
+    const expected = Buffer.from(this.callerToken(backendId, nativeThreadId))
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected)
+  }
+
+  private localOrigin(request: IncomingMessage): boolean {
+    const origin = request.headers.origin
+    if (!origin) return true
+    try {
+      const hostname = new URL(origin).hostname
+      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+    } catch {
+      return false
+    }
+  }
+
+  private async requestBody(request: IncomingMessage): Promise<string> {
+    return new Promise((resolveBody, reject) => {
       let body = ''
+      let tooLarge = false
       request.setEncoding('utf8')
       request.on('data', (chunk: string) => {
         body += chunk
-        if (body.length > 64_000) request.destroy()
+        if (body.length > 64_000) tooLarge = true
       })
-      request.on('end', () => {
-        void (async () => {
-          try {
-            const input = JSON.parse(body) as { backendId?: BackendId; nativeThreadId?: string; tool?: ThreadBusAgentTool; arguments?: unknown }
-            if (!input.backendId || !input.nativeThreadId || !input.tool) throw new Error('Invalid thread-bus request.')
-            const result = await this.agentCall(input.backendId, input.nativeThreadId, input.tool, input.arguments)
-            response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, result }))
-          } catch (error) {
-            response.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }))
-          }
-        })()
+      request.on('end', () => tooLarge ? reject(new Error('Thread-bus request is too large.')) : resolveBody(body))
+      request.on('error', reject)
+    })
+  }
+
+  private json(response: ServerResponse, status: number, value?: unknown): void {
+    if (value === undefined) {
+      response.writeHead(status).end()
+      return
+    }
+    response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value))
+  }
+
+  private async handleAgentCall(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (request.method !== 'POST') {
+      this.json(response, 404)
+      return
+    }
+    try {
+      const input = JSON.parse(await this.requestBody(request)) as { backendId?: BackendId; nativeThreadId?: string; tool?: ThreadBusAgentTool; arguments?: unknown }
+      if (!input.backendId || !input.nativeThreadId || !input.tool) throw new Error('Invalid thread-bus request.')
+      if (!this.authorized(request, input.backendId, input.nativeThreadId)) {
+        this.json(response, 404)
+        return
+      }
+      const result = await this.agentCall(input.backendId, input.nativeThreadId, input.tool, input.arguments)
+      this.json(response, 200, { ok: true, result })
+    } catch (error) {
+      this.json(response, 400, { ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  private mcpTools(): Array<Record<string, unknown>> {
+    const threadId = { type: 'string', description: 'R.A.L.F. thread id returned by ralf_threads_list.' }
+    const message = { type: 'string', description: 'Message to send to the other agent.' }
+    return [
+      {
+        name: 'ralf_threads_list',
+        description: 'List other threads in this project that use the same backend.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: true }
+      },
+      {
+        name: 'ralf_threads_read',
+        description: 'Read recent messages from another same-project, same-backend thread.',
+        inputSchema: {
+          type: 'object',
+          properties: { threadId, limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 } },
+          required: ['threadId'],
+          additionalProperties: false
+        },
+        annotations: { readOnlyHint: true }
+      },
+      {
+        name: 'ralf_threads_send',
+        description: 'Send a bounded message to another same-project, same-backend thread.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            threadId,
+            message,
+            expectsReply: { type: 'boolean', default: true },
+            maxTurns: { type: 'integer', minimum: 1, maximum: 8, default: 4 }
+          },
+          required: ['threadId', 'message'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'ralf_threads_reply',
+        description: 'Reply once to a R.A.L.F. thread message addressed to this thread.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            messageId: { type: 'string', description: 'Message id from the incoming R.A.L.F. thread message.' },
+            message,
+            expectsReply: { type: 'boolean', default: false }
+          },
+          required: ['messageId', 'message'],
+          additionalProperties: false
+        }
+      }
+    ]
+  }
+
+  private async handleMcp(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const nativeThreadId = request.headers['x-ralf-thread']
+    const backendId = request.headers['x-ralf-backend']
+    if (backendId !== 'claude' || typeof nativeThreadId !== 'string' || !this.authorized(request, 'claude', nativeThreadId)) {
+      this.json(response, 404)
+      return
+    }
+    if (!this.localOrigin(request)) {
+      this.json(response, 403)
+      return
+    }
+    if (request.method === 'GET' || request.method === 'DELETE') {
+      response.writeHead(405, { allow: 'POST' }).end()
+      return
+    }
+    if (request.method !== 'POST') {
+      this.json(response, 404)
+      return
+    }
+    let input: { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> }
+    try {
+      input = JSON.parse(await this.requestBody(request)) as typeof input
+    } catch (error) {
+      this.json(response, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: error instanceof Error ? error.message : 'Invalid JSON.' } })
+      return
+    }
+    if (input.jsonrpc !== '2.0' || !input.method) {
+      this.json(response, 400, { jsonrpc: '2.0', id: input.id ?? null, error: { code: -32600, message: 'Invalid JSON-RPC request.' } })
+      return
+    }
+    if (input.id === undefined) {
+      this.json(response, 202)
+      return
+    }
+
+    const reply = (result: unknown): void => this.json(response, 200, { jsonrpc: '2.0', id: input.id, result })
+    if (input.method === 'initialize') {
+      const requested = typeof input.params?.protocolVersion === 'string' ? input.params.protocolVersion : ''
+      reply({
+        protocolVersion: requested === '2025-03-26' ? requested : '2025-06-18',
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: 'ralf-thread-bus', version: '1.0.0' }
       })
+      return
+    }
+    if (input.method === 'tools/list') {
+      reply({ tools: this.mcpTools() })
+      return
+    }
+    if (input.method === 'tools/call') {
+      const name = input.params?.name
+      if (typeof name !== 'string') {
+        reply({ content: [{ type: 'text', text: 'R.A.L.F. could not identify the calling Claude thread.' }], isError: true })
+        return
+      }
+      try {
+        const result = await this.agentCall('claude', nativeThreadId, name as ThreadBusAgentTool, input.params?.arguments)
+        reply({ content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: false })
+      } catch (error) {
+        reply({ content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true })
+      }
+      return
+    }
+    this.json(response, 200, { jsonrpc: '2.0', id: input.id, error: { code: -32601, message: 'Method not found.' } })
+  }
+
+  async start(): Promise<ThreadBusConnection> {
+    if (this.server) return {
+      url: `http://127.0.0.1:${this.port}`,
+      token: this.token,
+      tokenFor: (backendId, nativeThreadId) => this.callerToken(backendId, nativeThreadId)
+    }
+    this.token = randomBytes(32).toString('hex')
+    this.server = createServer((request, response) => {
+      if (request.url === '/agent-call') {
+        void this.handleAgentCall(request, response)
+        return
+      }
+      if (request.url === '/mcp') {
+        void this.handleMcp(request, response)
+        return
+      }
+      response.writeHead(404).end()
     })
     await new Promise<void>((resolveStart, reject) => {
       this.server?.once('error', reject)
@@ -316,7 +487,11 @@ export class ThreadBus {
         resolveStart()
       })
     })
-    return { url: `http://127.0.0.1:${this.port}`, token: this.token }
+    return {
+      url: `http://127.0.0.1:${this.port}`,
+      token: this.token,
+      tokenFor: (backendId, nativeThreadId) => this.callerToken(backendId, nativeThreadId)
+    }
   }
 
   async stop(): Promise<void> {

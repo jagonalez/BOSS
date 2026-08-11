@@ -158,6 +158,7 @@ app.whenReady().then(() => {
   void threadBus.start()
     .then((connection) => {
       server.configureThreadBus(connection)
+      backendMgr.configureThreadBus(connection)
       return backendMgr.start(saved.projectPath)
     })
     .catch((error) => {

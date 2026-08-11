@@ -1,5 +1,5 @@
 import type { BackendId, BackendMessageOptions } from '@shared/backend'
-import type { ThreadBusToolCall } from '@shared/thread-bus'
+import type { ThreadBusConnection, ThreadBusToolCall } from '@shared/thread-bus'
 
 export interface BackendInfo {
   id: BackendId
@@ -53,6 +53,9 @@ export interface Backend {
 
   /** Optional trusted host tools. The backend supplies the native caller thread id. */
   setThreadBusHandler?(handler: (call: ThreadBusToolCall) => Promise<unknown>): void
+
+  /** Optional loopback connection for backends that load tools in child processes. */
+  configureThreadBus?(connection: ThreadBusConnection): void
 
   /** Events */
   onEvent(cb: (ev: EventMessage) => void): () => void

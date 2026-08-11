@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
+import type { ThreadBusConnection } from '@shared/thread-bus'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { textFromParts } from './manager'
 
@@ -61,6 +62,7 @@ export class ClaudeBackend implements Backend {
   private healthy = false
   private processes = new Map<string, ChildProcess>()
   private store: ClaudeStore = { version: 1, sessions: {} }
+  private threadBus?: ThreadBusConnection
 
   constructor(cwd?: string) {
     this.projectPath = cwd ?? ''
@@ -98,6 +100,7 @@ export class ClaudeBackend implements Backend {
   supportsMcp(): boolean { return false }
   async registerMcpServer(_name: string, _config: McpServerConfig): Promise<boolean> { return false }
   async unregisterMcpServer(_name: string): Promise<void> {}
+  configureThreadBus(connection: ThreadBusConnection): void { this.threadBus = connection }
   onEvent(callback: (event: EventMessage) => void): () => void {
     this.eventCb = callback
     return () => { if (this.eventCb === callback) this.eventCb = undefined }
@@ -218,12 +221,32 @@ export class ClaudeBackend implements Backend {
         : options?.mode === 'accept-edits'
           ? 'acceptEdits'
           : 'default'
+    const threadBusConfig = this.threadBus ? JSON.stringify({
+      mcpServers: {
+        ralf_thread_bus: {
+          type: 'http',
+          url: `${this.threadBus.url}/mcp`,
+          headers: {
+            Authorization: 'Bearer ${RALF_THREAD_BUS_TOKEN}',
+            'X-Ralf-Backend': 'claude',
+            'X-Ralf-Thread': '${RALF_NATIVE_THREAD_ID}'
+          }
+        }
+      }
+    }) : ''
+    const allowedThreadTools = [
+      'mcp__ralf_thread_bus__ralf_threads_list',
+      'mcp__ralf_thread_bus__ralf_threads_read',
+      'mcp__ralf_thread_bus__ralf_threads_send',
+      'mcp__ralf_thread_bus__ralf_threads_reply'
+    ].join(',')
     const args = [
       '-p',
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
       '--permission-mode', mode,
+      ...(threadBusConfig ? ['--mcp-config', threadBusConfig, '--allowedTools', allowedThreadTools] : []),
       ...(hasHistory ? ['--resume', sessionId] : ['--session-id', sessionId]),
       ...(options?.model?.modelID ? ['--model', options.model.modelID] : []),
       ...(options?.model?.variant ? ['--effort', options.model.variant] : []),
@@ -231,7 +254,14 @@ export class ClaudeBackend implements Backend {
     ]
     const child = spawn('claude', args, {
       cwd: record.projectPath || this.projectPath || globalThis.process.cwd(),
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        ...(this.threadBus ? {
+          RALF_THREAD_BUS_TOKEN: this.threadBus.tokenFor('claude', sessionId),
+          RALF_NATIVE_THREAD_ID: sessionId
+        } : {})
+      }
     })
     this.processes.set(sessionId, child)
     this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'busy' } })
@@ -249,7 +279,13 @@ export class ClaudeBackend implements Backend {
         if (line.trim()) {
           try {
             const value = JSON.parse(line) as Record<string, unknown>
-            if (value.type === 'assistant') {
+            if (value.type === 'system' && value.subtype === 'init' && Array.isArray(value.mcp_server_errors) && value.mcp_server_errors.length > 0) {
+              this.emit({
+                type: 'session.error',
+                sessionID: sessionId,
+                error: `Claude Code could not load R.A.L.F. thread tools: ${value.mcp_server_errors.map(String).join('; ')}`
+              })
+            } else if (value.type === 'assistant') {
               const message = value.message as { id?: string; content?: unknown; model?: string } | undefined
               assistantId = message?.id ?? assistantId
               this.upsert(sessionId, {
