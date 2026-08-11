@@ -29,7 +29,7 @@ import {
   splitWorkspaceGroup
 } from '../lib/actions'
 import { activeWorkspaceView, walkTabs } from '../lib/workspaces'
-import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, RenameIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
 const TAB_DRAG_TYPE = 'application/x-ralf-workspace-tab'
@@ -479,7 +479,7 @@ function WorkspaceBar(): React.JSX.Element {
     setFormatsOpen(false)
     appStore.setState({
       confirm: {
-        title: 'Apply workspace format?',
+        title: 'Apply format?',
         message: 'This replaces the current group arrangement. Threads and their history are not deleted.',
         confirmLabel: 'Apply format',
         action: () => applyLayoutTemplate(id)
@@ -488,12 +488,12 @@ function WorkspaceBar(): React.JSX.Element {
   }
 
   const saveFormat = (): void => {
-    const name = window.prompt('Name this workspace format')?.trim()
+    const name = window.prompt('Name this format')?.trim()
     if (name) saveCurrentLayoutTemplate(name)
   }
 
   const rename = (viewId: string, current: string): void => {
-    const name = window.prompt('Name this workspace', current)?.trim()
+    const name = window.prompt('Name this view', current)?.trim()
     if (name) renameWorkspaceView(viewId, name)
   }
 
@@ -506,7 +506,7 @@ function WorkspaceBar(): React.JSX.Element {
         <span className="workspace-project-dot" />
         <div><strong>{shortProject(workspace?.projectKey)}</strong><small>{workspace?.projectKey}</small></div>
       </div>
-      <div className="workspace-view-tabs" role="tablist" aria-label="Project workspaces">
+      <div className="workspace-view-tabs" role="tablist" aria-label="Project views">
         {workspace?.views.map((view) => (
           <button
             key={view.id}
@@ -518,11 +518,20 @@ function WorkspaceBar(): React.JSX.Element {
             onDoubleClick={() => rename(view.id, view.name)}
           >
             <span>{view.name}</span>
+            <span
+              className="workspace-view-rename"
+              role="button"
+              title="Rename view"
+              onClick={(event) => {
+                event.stopPropagation()
+                rename(view.id, view.name)
+              }}
+            ><RenameIcon size={12} /></span>
             {workspace.views.length > 1 ? (
               <span
                 className="workspace-view-close"
                 role="button"
-                title="Close workspace view (threads remain available)"
+                title="Close view (threads remain available)"
                 onClick={(event) => {
                   event.stopPropagation()
                   closeWorkspaceView(view.id)
@@ -531,7 +540,7 @@ function WorkspaceBar(): React.JSX.Element {
             ) : null}
           </button>
         ))}
-        <button className="workspace-view-add" title="New workspace view" onClick={createWorkspaceView}>
+        <button className="workspace-view-add" title="New view" onClick={createWorkspaceView}>
           <PlusIcon size={13} />
         </button>
       </div>
@@ -614,7 +623,7 @@ export function Workspace(): React.JSX.Element {
     return () => window.removeEventListener('keydown', key)
   }, [])
 
-  if (!workspace) return <div className="workspace-loading">Open a project to load its workspace.</div>
+  if (!workspace) return <div className="workspace-loading">Open a project to load its views.</div>
   const view = activeWorkspaceView(workspace)
   return (
     <div className="workspace-shell">

@@ -29,6 +29,13 @@ export const PlusIcon = (p: IconProps): React.JSX.Element => (
   </Svg>
 )
 
+export const RenameIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" />
+    <path d="m13.5 8 3 3" />
+  </Svg>
+)
+
 export const FolderIcon = (p: IconProps): React.JSX.Element => (
   <Svg {...p}>
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
