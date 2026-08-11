@@ -254,7 +254,6 @@ export function Sidebar(): React.JSX.Element {
     <aside className="sidebar" style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
       <div className="sidebar-head">
         <div className="logo">
-          <img className="logo-mark" src="./icon.png" alt="R.A.L.F." />
           <span>R.A.L.F.</span>
         </div>
         <button className="sidebar-collapse" title="Hide sidebar" onClick={() => setHidden(true)}>
