@@ -13,6 +13,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "fetch:opencode": "node scripts/fetch-opencode.mjs",
+    "fetch:cua-driver": "bash scripts/fetch-cua-driver.sh",
     "pack": "electron-vite build && electron-builder --dir",
     "dist": "electron-vite build && electron-builder"
   },
@@ -52,6 +53,13 @@
       {
         "from": "resources/opencode",
         "to": "opencode",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/cua-driver",
+        "to": "cua-driver",
         "filter": [
           "**/*"
         ]

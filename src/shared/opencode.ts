@@ -150,22 +150,6 @@ export interface ReviewRun {
   stale: boolean
 }
 
-export type PanelKind = 'review' | 'files' | 'browse' | 'terminal' | 'chat'
-
-export interface PanelTab {
-  id: string
-  kind: PanelKind
-  sessionId?: string
-  terminalId?: string
-}
-
-export interface PanelGroup {
-  id: string
-  tabs: PanelTab[]
-  activeTabId: string | null
-  width: number
-}
-
 export interface SessionMeta {
   sessionId: string
   projectPath?: string
@@ -173,7 +157,6 @@ export interface SessionMeta {
   forkedFrom?: { sessionId: string; messageId?: string }
   gitBranch?: string
   reviews: ReviewRun[]
-  panelGroups?: PanelGroup[]
 }
 
 export interface Provider {

@@ -181,7 +181,11 @@ function PermissionCard({ permission }: { permission: PermissionRequest }): Reac
     } catch {
       /* ignore */
     }
-    appStore.setState({ permission: null })
+    appStore.setState((st) => {
+      const permissions = { ...st.permissions }
+      delete permissions[permission.sessionID]
+      return { permissions }
+    })
   }
 
   const patterns = permission.patterns ?? []
@@ -483,7 +487,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
-  const streaming = useStore(appStore, (s) => s.streaming)
+  const streaming = useStore(appStore, (s) => (sessionId ?? s.activeSessionId ? Boolean(s.streaming[sessionId ?? s.activeSessionId ?? '']) : false))
   const hasSession = useStore(appStore, (s) => Boolean(sessionId ?? s.activeSessionId))
   const effectiveSession = useStore(appStore, (s) => sessionId ?? s.activeSessionId)
   const sessions = useStore(appStore, (s) => s.sessions)
@@ -736,7 +740,9 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const canSend = text.trim().length > 0 || attachments.length > 0
-  const lastError = useStore(appStore, (s) => s.lastError)
+  const lastError = useStore(appStore, (s) =>
+    effectiveSession ? s.lastErrorBySession[effectiveSession] ?? s.lastError : s.lastError
+  )
 
   if (activeSession?.parentID) {
     return (
@@ -757,7 +763,18 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         <div className="chat-error">
           <span className="chat-error-icon">!</span>
           <span className="chat-error-text">{lastError}</span>
-          <button className="chat-error-close" onClick={() => appStore.setState({ lastError: null })} title="Dismiss">
+          <button
+            className="chat-error-close"
+            onClick={() =>
+              appStore.setState((st) => ({
+                lastError: null,
+                lastErrorBySession: effectiveSession
+                  ? { ...st.lastErrorBySession, [effectiveSession]: '' }
+                  : st.lastErrorBySession
+              }))
+            }
+            title="Dismiss"
+          >
             ×
           </button>
         </div>
@@ -838,7 +855,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             ) : null}
           </div>
           {streaming ? (
-            <button className="btn-send" onClick={() => void abortRun()} title="Stop">
+            <button className="btn-send" onClick={() => void abortRun(effectiveSession ?? undefined)} title="Stop">
               <StopIcon size={16} />
             </button>
           ) : (
@@ -979,9 +996,9 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const msgCtxRef = useRef<HTMLDivElement>(null)
   const launcherProject = useStore(appStore, (s) => s.launcherProject)
 
-  const streaming = useStore(appStore, (s) => s.streaming)
-  const permission = useStore(appStore, (s) => (effectiveId && s.permission?.sessionID === effectiveId ? s.permission : null))
-  const question = useStore(appStore, (s) => (effectiveId && s.question?.sessionID === effectiveId ? s.question : null))
+  const streaming = useStore(appStore, (s) => (effectiveId ? Boolean(s.streaming[effectiveId]) : false))
+  const permission = useStore(appStore, (s) => (effectiveId ? s.permissions[effectiveId] ?? null : null))
+  const question = useStore(appStore, (s) => (effectiveId ? s.questions[effectiveId] ?? null : null))
   const revertedIds = useMemo(() => new Set(revertedList ?? []), [revertedList])
   const visible = useMemo(() => messages.filter((m) => !revertedIds.has(m.info.id)), [messages, revertedIds])
   const WINDOW = 100

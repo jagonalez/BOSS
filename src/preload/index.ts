@@ -45,6 +45,10 @@ const ralf: RalfApi = {
 
   computerUseStatus: () => ipcRenderer.invoke(IpcChannels.ComputerUseStatus),
   setComputerUse: (on: boolean) => ipcRenderer.invoke(IpcChannels.ComputerUseSetEnabled, on),
+  computerUsePermissions: () => ipcRenderer.invoke(IpcChannels.ComputerUsePermissions),
+  requestComputerUsePermission: (pane: 'accessibility' | 'screenRecording') =>
+    ipcRenderer.invoke(IpcChannels.ComputerUseRequestPermission, pane),
+  openPrivacyPane: (pane: 'accessibility' | 'screenRecording') => ipcRenderer.invoke(IpcChannels.OpenPrivacyPane, pane),
 
   projectCurrent: () => ipcRenderer.invoke(IpcChannels.ProjectCurrent),
   projectSet: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectSet, path),
@@ -64,7 +68,10 @@ const ralf: RalfApi = {
   ttsSpeak: (req) => ipcRenderer.invoke(IpcChannels.TtsSpeak, req),
   onSpeechStatusChanged: (cb) => subscribe(IpcChannels.SpeechStatusChanged, cb),
 
-  asrTranscribe: (req) => ipcRenderer.invoke(IpcChannels.AsrTranscribe, req)
+  asrTranscribe: (req) => ipcRenderer.invoke(IpcChannels.AsrTranscribe, req),
+
+  getBackendEngine: () => ipcRenderer.invoke(IpcChannels.BackendGetEngine),
+  setBackendEngine: (engine: 'opencode' | 'pi') => ipcRenderer.invoke(IpcChannels.BackendSetEngine, engine)
 }
 
 contextBridge.exposeInMainWorld('ralf', ralf)

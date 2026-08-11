@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell } from 'electron'
+import { app, BrowserWindow, session, shell, ipcMain } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { OpenCodeServer } from './opencode-server'
@@ -10,7 +10,10 @@ import { ComputerUse } from './computer-use'
 import { PTYManager } from './pty-manager'
 import { SpeechManager } from './speech'
 import { registerIpc, type IpcDeps } from './ipc'
+import { IpcChannels } from '@shared/ipc'
 import { loadState } from './state-store'
+import { BackendManager } from './backend/manager'
+import { createBackend } from './backend/factory'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -24,8 +27,24 @@ let mainWindow: BrowserWindow | null = null
 const server = new OpenCodeServer()
 const api = new ApiClient(server)
 const events = new EventStream(server)
+const backendMgr = new BackendManager(
+  () => createBackend('opencode', { server, api, events }),
+  (cwd?: string) => createBackend('pi', { server: server as any, api: api as any, events: events as any, cwd }),
+  (process.env.RALF_ENGINE as 'opencode'|'pi') ?? 'opencode'
+)
+const backend = backendMgr.current
+
+// Backend engine IPC
+ipcMain.handle(IpcChannels.BackendGetEngine, () => backendMgr.engineName)
+ipcMain.handle(IpcChannels.BackendSetEngine, async (_e, engine: 'opencode' | 'pi') => {
+  await backendMgr.setEngine(engine, server.projectPath)
+  computerUse.bind(backendMgr.current)
+  return backendMgr.engineName
+})
+
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
-const computerUse = new ComputerUse(api, join(mainDir, 'computer-use-helper.js'))
+const computerUse = new ComputerUse()
+computerUse.bind(backendMgr.current)
 const pty = new PTYManager()
 const speech = new SpeechManager()
 
@@ -140,8 +159,8 @@ app.whenReady().then(() => {
   loadRenderer()
   const saved = loadState()
   if (saved.projectPath) server.setInitialCwd(saved.projectPath)
-  void server.start()
-  events.start()
+  void backend.start()
+  // events.start() is handled by OpenCodeBackend.start()
 })
 
 app.on('activate', () => {
@@ -157,8 +176,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  events.stop()
+  void backend.stop()
   void computerUse.dispose()
-  void server.stop()
   speech.dispose()
 })
