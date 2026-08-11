@@ -96,7 +96,7 @@ export function BackendControls({ sessionId }: { sessionId: string }): React.JSX
               }}
             >
               <BackendBadge backendId={target.backendId} />
-              <span className="backend-menu-copy"><strong>{target.title || 'Untitled'}</strong><small>{target.projectPath || target.directory || target.path}</small></span>
+              <span className="backend-menu-copy"><strong>{target.title || 'Untitled'}</strong><small>{(target.projectPath ?? target.directory ?? target.path) || 'Chat'}</small></span>
             </button>
           ))}
           {targets.length === 0 ? <div className="backend-menu-empty">No other threads in this project.</div> : null}

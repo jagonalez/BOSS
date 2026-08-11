@@ -62,7 +62,8 @@ export interface Backend {
 
   /** Sessions */
   sessionsList(): Promise<SessionInfo[]>
-  sessionCreate(title?: string): Promise<SessionInfo>
+  sessionCreate(title?: string, directory?: string): Promise<SessionInfo>
+  setSessionDirectory?(id: string, directory: string): void
   sessionDelete(id: string): Promise<void>
   sessionRename(id: string, title: string): Promise<SessionInfo>
   sessionGet(id: string): Promise<SessionInfo>

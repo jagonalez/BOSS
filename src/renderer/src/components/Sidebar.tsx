@@ -6,8 +6,8 @@ import {
   cloneThreadToBackend,
   deleteSession,
   forkSession,
+  newGlobalChat,
   newChatInProject,
-  newSession,
   openCommitDialog,
   openProject,
   openProjectFolder,
@@ -114,7 +114,7 @@ export function Sidebar(): React.JSX.Element {
 
   const sessionsByPath = new Map<string, SessionInfo[]>()
   for (const session of visibleSessions) {
-    const raw = session.projectPath || session.directory || session.path || ''
+    const raw = session.projectPath ?? session.directory ?? session.path ?? ''
     const key = raw === '/' ? '' : raw
     const list = sessionsByPath.get(key) ?? []
     list.push(session)
@@ -330,7 +330,7 @@ export function Sidebar(): React.JSX.Element {
       </div>
       <div className="sidebar-divider" onMouseDown={onDividerDown} title="Drag to resize" />
 
-      <SectionHeader label="Chats" onAdd={() => void newSession()} addTitle="New chat" />
+      <SectionHeader label="Chats" onAdd={() => void newGlobalChat()} addTitle="New chat" />
       <div className="list sidebar-section-chats">
         {looseChats.map((session) => (
           <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />

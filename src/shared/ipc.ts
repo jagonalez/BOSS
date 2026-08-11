@@ -5,6 +5,7 @@ export interface ApiRequest {
   path: string
   query?: Record<string, string | number | boolean | undefined>
   body?: unknown
+  directory?: string
 }
 
 export interface ApiResponse {

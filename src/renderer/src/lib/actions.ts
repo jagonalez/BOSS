@@ -3,7 +3,7 @@ import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
-import type { BackendId, BackendModeId } from '@shared/backend'
+import type { BackendId, BackendModeId, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
@@ -184,7 +184,7 @@ export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, session
 export async function createThreadInGroup(groupId: string, backendId: BackendId = appStore.getState().engine): Promise<void> {
   try {
     const session = await OpenCode.createSession(undefined, backendId)
-    upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
+    upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? appStore.getState().projectPath })
     await refreshSessions()
     const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
     setMode(defaultMode, session.id)
@@ -360,7 +360,7 @@ async function ensureProject(path: string | null): Promise<void> {
 export async function newChatWithPrompt(prompt: string, attachments?: Attachment[]): Promise<void> {
   const project = appStore.getState().launcherProject
   await ensureProject(project)
-  await newSession()
+  await createSession(project ? 'current' : 'global')
   const id = appStore.getState().activeSessionId
   if (id) await sendPrompt(prompt, id, attachments)
 }
@@ -875,7 +875,7 @@ export async function refreshFiles(): Promise<void> {
 export function selectSession(id: string, bindWorkspace = true): void {
   const cur = appStore.getState()
   const session = cur.sessions.find((s) => s.id === id)
-  const sessionPath = session?.projectPath || session?.directory || session?.path || ''
+  const sessionPath = session?.projectPath ?? session?.directory ?? session?.path ?? ''
   const inProject = Boolean(sessionPath && sessionPath !== '/')
   if (bindWorkspace && inProject && cur.projectWorkspace?.projectKey === sessionPath) {
     openSessionInWorkspace(id)
@@ -897,11 +897,11 @@ export function selectSession(id: string, bindWorkspace = true): void {
   void refreshDiff(id)
   void refreshProviders(id)
 }
-export async function newSession(): Promise<void> {
+async function createSession(scope: ThreadCreationScope): Promise<void> {
   try {
     const backendId = appStore.getState().engine
-    const session = await OpenCode.createSession(undefined, backendId)
-    upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
+    const session = await OpenCode.createSession(undefined, backendId, scope)
+    upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? '' })
     await refreshSessions()
     const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
     setMode(defaultMode, session.id)
@@ -910,6 +910,14 @@ export async function newSession(): Promise<void> {
   } catch {
     /* ignore */
   }
+}
+
+export async function newSession(): Promise<void> {
+  await createSession('current')
+}
+
+export async function newGlobalChat(): Promise<void> {
+  await createSession('global')
 }
 
 export async function importNativeThreads(backendId: BackendId): Promise<number> {
@@ -940,7 +948,7 @@ export async function openProject(path: string): Promise<void> {
   await refreshSessions()
   await refreshProjects()
   await refreshFiles()
-  const preferred = appStore.getState().sessions.find((session) => (session.projectPath || session.directory || session.path) === info.path)?.id
+  const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
   loadProjectWorkspace(info.path, preferred)
 }
 
@@ -1020,7 +1028,7 @@ export function toggleArchive(id: string): void {
 
 export function archiveAllInPath(path: string): void {
   appStore.setState((s) => {
-    const ids = s.sessions.filter((x) => (x.projectPath || x.directory || x.path) === path).map((x) => x.id)
+    const ids = s.sessions.filter((x) => (x.projectPath ?? x.directory ?? x.path) === path).map((x) => x.id)
     const archived = [...new Set([...s.archived, ...ids])]
     persistArchived(archived)
     return { archived }
@@ -1308,7 +1316,7 @@ export async function openProjectFolder(): Promise<void> {
     await window.ralf.projectSet(path)
     await refreshSessions()
     await refreshProjects()
-    const preferred = appStore.getState().sessions.find((session) => (session.projectPath || session.directory || session.path) === path)?.id
+    const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === path)?.id
     loadProjectWorkspace(path, preferred)
   } catch (err) {
     console.error('open project folder:', err)
