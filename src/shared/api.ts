@@ -12,6 +12,8 @@ import type {
   OptionalDownloadEvent,
   ProjectInfo,
   ServerInfo,
+  SiteInfo,
+  CloudflareSettings,
   TerminalDataEvent,
   TerminalExitEvent,
   TtsSpeakRequest
@@ -75,4 +77,15 @@ export interface RalfApi {
   asrTranscribe(req: AsrTranscribeRequest): Promise<AsrTranscribeResult>
 
   backendRequest(req: BackendRequest): Promise<unknown>
+
+  sitesList(): Promise<SiteInfo[]>
+  sitesPublish(folder: string, name?: string): Promise<SiteInfo>
+  sitesRemove(id: string): Promise<void>
+  sitesDeploy(id: string): Promise<SiteInfo>
+  sitesUnpublish(id: string): Promise<SiteInfo>
+  sitesChooseFolder(): Promise<string | null>
+  onSitesChanged(cb: (sites: SiteInfo[]) => void): () => void
+  sitesCfGet(): Promise<CloudflareSettings>
+  sitesCfSet(token: string, accountId: string): Promise<CloudflareSettings>
+  sitesCfClear(): Promise<CloudflareSettings>
 }

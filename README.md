@@ -17,6 +17,7 @@ Codex Desktop pairs a chat UI with an app-server that runs the coding agent. Ral
   - **Browser** — a real, fully-isolated browser (`WebContentsView` in its own session) for QA'ing local sites.
   - **Terminal** — run shell commands against the project via the session.
   - **Side chat** — a second, independent chat session.
+- **Sites** — publish a folder of static files (or have the agent do it via the `publish_site` tool) and preview it instantly at a localhost URL in Ralf's built-in browser. Optionally deploy to Cloudflare Workers Static Assets for a public `*.workers.dev` URL.
 - **Security** — sandboxed renderer, context isolation, no node integration for remote content, `webviewTag` disabled, a narrow typed IPC surface, and the browse view runs in its own hardened session.
 
 ## Architecture
@@ -38,6 +39,21 @@ Codex Desktop pairs a chat UI with an app-server that runs the coding agent. Ral
 ```
 
 The renderer never talks to opencode directly: every request goes through main-process IPC, so the server URL/password never leak to page content.
+
+## Sites
+
+Publish any folder of static files and preview it instantly at a localhost URL — no account needed. Sites survive restarts (the registry lives in `userData/sites.json`), are unlinked from any single project, and can be opened in Ralf's built-in browser tab or your default browser.
+
+- **Publish** — the **Sites** page has a *Publish folder…* picker, or the agent can call the `publish_site` MCP tool (registered automatically when the active backend supports MCP).
+- **Deploy** — for a public URL, connect a Cloudflare account with a scoped API token. Ralf uses Workers Static Assets (manifest session → base64 upload → script deploy) and verifies served content before reporting success.
+
+### Cloudflare setup
+
+1. Create an API token scoped to **Account → Workers Scripts → Edit**.
+2. In Ralf's **Sites** page, click **Connect…** and paste the token plus your account ID.
+3. Hit **Deploy** on a site. Ralf uploads the folder as static assets and gives you a `https://<name>.<subdomain>.workers.dev/` URL.
+
+The token is stored encrypted in `userData/sites.secret` via Electron `safeStorage`.
 
 ## Voice (TTS & ASR)
 
