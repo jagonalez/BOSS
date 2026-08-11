@@ -12,7 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendRequest, ThreadCreationScope } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendRequest, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 
@@ -137,11 +137,11 @@ export const OpenCode = {
   summarize: (id: string, model?: { providerID: string; modelID: string }) =>
     backendRequest<void>({ type: 'thread.compact', threadId: id, model }),
   backendModels: (threadId?: string, backendId?: BackendId) =>
-    backendRequest<Array<{ id: string; name?: string; provider?: string; variants?: string[] }>>({ type: 'thread.models', threadId, backendId }),
-  cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string) =>
-    backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction }),
-  forkIntoWorktree: (threadId: string, instruction?: string) =>
-    backendRequest<SessionInfo>({ type: 'thread.worktree.create', threadId, instruction }),
+    backendRequest<BackendModelDescriptor[]>({ type: 'thread.models', threadId, backendId }),
+  cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string, options?: BackendMessageOptions) =>
+    backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction, options }),
+  forkIntoWorktree: (threadId: string, instruction?: string, options?: BackendMessageOptions) =>
+    backendRequest<SessionInfo>({ type: 'thread.worktree.create', threadId, instruction, options }),
   listWorktrees: (threadId?: string) =>
     backendRequest<WorktreeInfo[]>({ type: 'worktree.list', threadId }),
   worktreeSettings: () =>

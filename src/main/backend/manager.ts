@@ -677,7 +677,7 @@ export class BackendManager {
     ].filter(Boolean).join('\n\n')
   }
 
-  async clone(threadId: string, backendId: BackendId, instruction?: string): Promise<SessionInfo> {
+  async clone(threadId: string, backendId: BackendId, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
     const source = this.binding(threadId)
     const packet = await this.contextPacket(threadId, instruction)
     const title = `${source.title ?? 'Untitled'} · ${DEFINITIONS[backendId].label}`
@@ -686,11 +686,11 @@ export class BackendManager {
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
     }, source.projectId === 'global' ? 'global' : 'current')
-    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { mode: 'ask' })
+    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { ...options, mode: options?.mode ?? 'ask' })
     return created
   }
 
-  async forkIntoWorktree(threadId: string, instruction?: string): Promise<SessionInfo> {
+  async forkIntoWorktree(threadId: string, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const source = this.binding(threadId)
     if (source.projectId === 'global' || !source.projectPath) throw new Error('Projectless chats cannot create Git worktrees.')
@@ -723,7 +723,7 @@ export class BackendManager {
     await this.worktrees.setOwner(worktree.id, created.id)
     binding.worktree = { ...worktree, ownerThreadId: created.id }
     this.save()
-    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { mode: 'ask' })
+    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { ...options, mode: options?.mode ?? 'ask' })
     return this.session(binding)
   }
 
@@ -815,8 +815,8 @@ export class BackendManager {
         const id = request.threadId ? this.binding(request.threadId).backendId : request.backendId ?? 'opencode'
         return (await this.ensureStarted(id)).modelsList()
       }
-      case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction)
-      case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction)
+      case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction, request.options)
+      case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction, request.options)
       case 'worktree.list': {
         if (!this.worktrees) return []
         const projectId = request.threadId ? this.binding(request.threadId).projectId : this.currentScope.projectId

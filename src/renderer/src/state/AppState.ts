@@ -14,7 +14,7 @@ import type {
   SessionMeta,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type {
   BrowseNavigationState,
@@ -62,7 +62,7 @@ export interface AppState {
   todos: Record<string, Todo[]>
   permissions: Record<string, PermissionRequest>
   questions: Record<string, QuestionRequest>
-  modelSwitch: { to: string; sessionId?: string } | null
+  modelSwitch: { to: string; providerID?: string; sessionId?: string } | null
   commitPath: string | null
   renameTarget: string | null
   confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; action: () => void } | null
@@ -77,15 +77,20 @@ export interface AppState {
   sessionBusy: Record<string, boolean>
   compacting: Record<string, boolean>
   model: string | null
+  modelProvider: string | null
   variant: string | null
   mode: BackendModeId
   modelsBySession: Record<string, string>
+  modelProvidersBySession: Record<string, string>
   variantsBySession: Record<string, string | null>
   modesBySession: Record<string, BackendModeId>
   agent: string
   engine: BackendId
   backends: BackendDescriptor[]
   backendAuth: BackendAuthStatus[]
+  backendModels: Partial<Record<BackendId, BackendModelDescriptor[]>>
+  backendModelsLoading: boolean
+  defaultModels: Partial<Record<BackendId, BackendModelPreference>>
   authTerminalBackends: Record<string, BackendId>
   threadBus: ThreadBusSnapshot | null
   projectPath: string
@@ -159,15 +164,20 @@ export const initialState: AppState = {
   sessionBusy: {},
   compacting: {},
   model: null,
+  modelProvider: null,
   variant: null,
   mode: 'ask',
   modelsBySession: {},
+  modelProvidersBySession: {},
   variantsBySession: {},
   modesBySession: {},
   agent: 'build',
   engine: 'opencode',
   backends: [],
   backendAuth: [],
+  backendModels: {},
+  backendModelsLoading: false,
+  defaultModels: {},
   authTerminalBackends: {},
   threadBus: null,
   projectPath: '',

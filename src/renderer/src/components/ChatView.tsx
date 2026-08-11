@@ -443,6 +443,7 @@ function ModePicker({ backendId, sessionId }: { backendId: 'opencode' | 'pi' | '
 
 function EffortPicker({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const model = useStore(appStore, (s) => (sessionId && s.modelsBySession[sessionId]) || s.model)
+  const modelProvider = useStore(appStore, (s) => (sessionId && s.modelProvidersBySession?.[sessionId]) || s.modelProvider)
   const variant = useStore(appStore, (s) => sessionId && Object.prototype.hasOwnProperty.call(s.variantsBySession, sessionId)
     ? s.variantsBySession[sessionId]
     : s.variant)
@@ -458,7 +459,7 @@ function EffortPicker({ sessionId }: { sessionId?: string }): React.JSX.Element 
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
-  const currentModel = providers.flatMap((p) => providerModels(p)).find((m) => m.id === model)
+  const currentModel = providers.flatMap((p) => providerModels(p)).find((m) => m.id === model && (!modelProvider || m.providerID === modelProvider))
   const variants = currentModel?.variants ?? []
   if (variants.length === 0) return <></>
 
@@ -703,16 +704,17 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     autoGrow()
   }
 
-  const onModelChange = (to: string): void => {
+  const onModelChange = (to: string, providerID: string): void => {
     const state = appStore.getState()
     const sid = sessionId ?? state.activeSessionId
     const current = (sid && state.modelsBySession[sid]) || state.model
-    if (to === current) return
+    const currentProvider = (sid && state.modelProvidersBySession?.[sid]) || state.modelProvider
+    if (to === current && providerID === currentProvider) return
     const hasMessages = sid ? (state.messages[sid]?.length ?? 0) > 0 : false
     if (hasMessages) {
-      appStore.setState({ modelSwitch: { to, sessionId: sid ?? undefined } })
+      appStore.setState({ modelSwitch: { to, providerID, sessionId: sid ?? undefined } })
     } else {
-      setModel(to, sid)
+      setModel(to, sid, providerID)
     }
   }
 

@@ -38,6 +38,18 @@ export interface BackendAuthStatus {
   accounts?: string[]
 }
 
+export interface BackendModelDescriptor {
+  id: string
+  name?: string
+  provider?: string
+  variants?: string[]
+}
+
+export interface BackendModelPreference {
+  modelID: string
+  providerID: string
+}
+
 export interface BackendMessageOptions {
   model?: { providerID: string; modelID: string; variant?: string }
   agent?: string
@@ -65,8 +77,8 @@ export type BackendRequest =
   | { type: 'thread.command'; threadId: string; command: string; arguments: string; options?: BackendMessageOptions }
   | { type: 'thread.compact'; threadId: string; model?: { providerID: string; modelID: string } }
   | { type: 'thread.models'; threadId?: string; backendId?: BackendId }
-  | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string }
-  | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string }
+  | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }
+  | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string; options?: BackendMessageOptions }
   | { type: 'worktree.list'; threadId?: string }
   | { type: 'worktree.settings.get' }
   | { type: 'worktree.settings.set'; autoCleanupEnabled?: boolean; cleanupAfterDays?: number }
