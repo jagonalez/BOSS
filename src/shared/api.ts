@@ -61,7 +61,7 @@ export interface RalfApi {
   projectSet(path: string): Promise<ProjectInfo>
   projectChoose(): Promise<string | null>
 
-  terminalCreate(cwd?: string, cols?: number, rows?: number): Promise<string>
+  terminalCreate(cwd?: string, cols?: number, rows?: number, authBackendId?: import('./backend').BackendId): Promise<string>
   terminalWrite(id: string, data: string): Promise<boolean>
   terminalResize(id: string, cols: number, rows: number): Promise<boolean>
   terminalDispose(id: string): Promise<boolean>

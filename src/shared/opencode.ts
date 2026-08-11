@@ -13,6 +13,7 @@ export interface SessionInfo {
   projectPath?: string
   /** Directory in which this thread's backend actually runs. */
   executionPath?: string
+  worktree?: import('./worktree').WorktreeInfo
   title?: string
   time?: SessionTime
   path?: string

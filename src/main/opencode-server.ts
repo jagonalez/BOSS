@@ -25,7 +25,7 @@ function getFreePort(): Promise<number> {
   })
 }
 
-function resolveOpenCodeBin(): string {
+export function resolveOpenCodeBin(): string {
   const exe = process.platform === 'win32' ? 'opencode.exe' : 'opencode'
   if (process.env.OPENCODE_BIN) return process.env.OPENCODE_BIN
   if (!app.isPackaged) return exe
@@ -170,6 +170,14 @@ export const reply = tool({
     expectsReply: tool.schema.boolean().optional()
   },
   execute(args, context) { return call("ralf_threads_reply", args, context) }
+})
+
+export const spawn_worktree = tool({
+  description: "Fork this conversation into a new R.A.L.F. thread in an isolated Git worktree.",
+  args: {
+    instruction: tool.schema.string().describe("Concrete implementation task for the new worktree thread")
+  },
+  execute(args, context) { return call("ralf_threads_spawn_worktree", args, context) }
 })
 `
   }

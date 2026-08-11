@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useStore, appStore } from '../state/AppState'
+import type { BackendId } from '@shared/backend'
 
 function xtermTheme(): Record<string, string> {
   const cs = getComputedStyle(document.documentElement)
@@ -40,7 +41,7 @@ function xtermTheme(): Record<string, string> {
   }
 }
 
-export function TerminalTab(): React.JSX.Element {
+export function TerminalTab({ authBackendId }: { authBackendId?: BackendId }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const projectPath = useStore(appStore, (s) => s.projectPath)
 
@@ -86,7 +87,7 @@ export function TerminalTab(): React.JSX.Element {
 
     const initial = fit.proposeDimensions()
     void window.ralf
-      .terminalCreate(projectPath || undefined, initial?.cols ?? 80, initial?.rows ?? 24)
+      .terminalCreate(projectPath || undefined, initial?.cols ?? 80, initial?.rows ?? 24, authBackendId)
       .then((id) => {
         if (cancelled) {
           window.ralf.terminalDispose(id)
@@ -112,7 +113,7 @@ export function TerminalTab(): React.JSX.Element {
       if (termId) window.ralf.terminalDispose(termId)
       term.dispose()
     }
-  }, [projectPath])
+  }, [projectPath, authBackendId])
 
   return <div className="terminal-view" ref={containerRef} />
 }

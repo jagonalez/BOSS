@@ -52,6 +52,7 @@ export type ThreadBusAgentTool =
   | 'ralf_threads_read'
   | 'ralf_threads_send'
   | 'ralf_threads_reply'
+  | 'ralf_threads_spawn_worktree'
 
 export interface ThreadBusToolCall {
   nativeThreadId: string

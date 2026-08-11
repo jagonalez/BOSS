@@ -3,7 +3,7 @@ import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
-import type { BackendId, BackendModeId } from '@shared/backend'
+import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
@@ -181,10 +181,95 @@ export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, session
   if (kind === 'thread' && sessionId) selectSession(sessionId, false)
 }
 
+export function openBackendLogin(backendId: BackendId): void {
+  let workspace = currentWorkspace()
+  if (!workspace) {
+    workspace = loadWorkspace('__connections__')
+    appStore.setState({ projectWorkspace: workspace })
+  }
+  const view = activeWorkspaceView(workspace)
+  const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
+  const created = tab('terminal')
+  updateWorkspaceView((item) => ({
+    ...item,
+    root: addTab(item.root, groupId, created),
+    focusedGroupId: groupId
+  }))
+  appStore.setState((state) => ({
+    authTerminalBackends: { ...(state.authTerminalBackends ?? {}), [created.id]: backendId },
+    settingsOpen: false,
+    activePage: 'project'
+  }))
+}
+
+export async function refreshBackendAuth(): Promise<void> {
+  try {
+    appStore.setState({ backendAuth: await OpenCode.backendAuthStatus() })
+  } catch {
+    /* Individual backend availability is already shown in Settings. */
+  }
+}
+
+export async function refreshBackendModels(): Promise<void> {
+  const backends = appStore.getState().backends
+  appStore.setState({ backendModelsLoading: true })
+  const entries = await Promise.all(backends.map(async (backend): Promise<[BackendId, BackendModelDescriptor[]]> => {
+    if (!backend.available) return [backend.id, []]
+    try {
+      if (backend.id === 'opencode') {
+        const { all, connected } = await OpenCode.providers()
+        const connectedSet = new Set(connected ?? [])
+        const providers = (all ?? []).filter((provider) => connectedSet.size === 0 || connectedSet.has(provider.id))
+        return [backend.id, providers.flatMap((provider) => providerModels(provider).map((model) => ({
+          id: model.id,
+          name: model.name,
+          provider: provider.id,
+          variants: model.variants
+        })))]
+      }
+      return [backend.id, await OpenCode.backendModels(undefined, backend.id)]
+    } catch {
+      return [backend.id, []]
+    }
+  }))
+  appStore.setState({ backendModels: Object.fromEntries(entries), backendModelsLoading: false })
+}
+
+export function setDefaultModel(backendId: BackendId, model: BackendModelDescriptor | null): void {
+  appStore.setState((state) => {
+    const defaultModels = { ...(state.defaultModels ?? {}) }
+    if (model) {
+      defaultModels[backendId] = { modelID: model.id, providerID: model.provider || backendId }
+    } else {
+      delete defaultModels[backendId]
+    }
+    persistThreadPreference('ralf.defaultModels', defaultModels)
+    return { defaultModels }
+  })
+}
+
+function applyBackendDefaultModel(sessionId: string, backendId: BackendId): void {
+  const preference = appStore.getState().defaultModels?.[backendId]
+  if (preference) setModel(preference.modelID, sessionId, preference.providerID)
+}
+
+function copyThreadModelPreference(sourceId: string, targetId: string): void {
+  const state = appStore.getState()
+  const source = state.sessions.find((session) => session.id === sourceId)
+  const modelID = state.modelsBySession[sourceId] ?? source?.model?.id
+  const providerID = state.modelProvidersBySession?.[sourceId] ?? source?.model?.provider
+  if (!modelID) return
+  setModel(modelID, targetId, providerID)
+  if (Object.prototype.hasOwnProperty.call(state.variantsBySession, sourceId)) {
+    setVariant(state.variantsBySession[sourceId], targetId)
+  }
+}
+
 export async function createThreadInGroup(groupId: string, backendId: BackendId = appStore.getState().engine): Promise<void> {
   try {
     const session = await OpenCode.createSession(undefined, backendId)
-    upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
+    applyBackendDefaultModel(session.id, backendId)
+    upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? appStore.getState().projectPath })
     await refreshSessions()
     const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
     setMode(defaultMode, session.id)
@@ -207,6 +292,11 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
     const root = closeTab(item.root, groupId, tabId)
     const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
     return { ...item, root, focusedGroupId }
+  })
+  appStore.setState((state) => {
+    const authTerminalBackends = { ...(state.authTerminalBackends ?? {}) }
+    delete authTerminalBackends[tabId]
+    return { authTerminalBackends }
   })
   if (next) syncFocusedThread()
 }
@@ -360,7 +450,7 @@ async function ensureProject(path: string | null): Promise<void> {
 export async function newChatWithPrompt(prompt: string, attachments?: Attachment[]): Promise<void> {
   const project = appStore.getState().launcherProject
   await ensureProject(project)
-  await newSession()
+  await createSession(project ? 'current' : 'global')
   const id = appStore.getState().activeSessionId
   if (id) await sendPrompt(prompt, id, attachments)
 }
@@ -521,9 +611,12 @@ function persistThreadPreference(key: string, value: unknown): void {
 export function loadThreadPreferences(): void {
   try {
     const modelsBySession = JSON.parse(localStorage.getItem('ralf.modelsBySession') ?? '{}') as Record<string, string>
+    const modelProvidersBySession = JSON.parse(localStorage.getItem('ralf.modelProvidersBySession') ?? '{}') as Record<string, string>
     const variantsBySession = JSON.parse(localStorage.getItem('ralf.variantsBySession') ?? '{}') as Record<string, string | null>
     const modesBySession = JSON.parse(localStorage.getItem('ralf.modesBySession') ?? '{}') as Record<string, BackendModeId>
-    appStore.setState({ modelsBySession, variantsBySession, modesBySession })
+    const defaultModels = JSON.parse(localStorage.getItem('ralf.defaultModels') ?? '{}') as Partial<Record<BackendId, BackendModelPreference>>
+    const modelProvider = localStorage.getItem('ralf.modelProvider')
+    appStore.setState({ modelsBySession, modelProvidersBySession, variantsBySession, modesBySession, defaultModels, modelProvider })
   } catch {
     /* Ignore malformed preferences and retain safe defaults. */
   }
@@ -532,6 +625,11 @@ export function loadThreadPreferences(): void {
 export function modelForSession(sessionId?: string): string | null {
   const state = appStore.getState()
   return (sessionId && state.modelsBySession[sessionId]) || state.model
+}
+
+export function modelProviderForSession(sessionId?: string): string | null {
+  const state = appStore.getState()
+  return (sessionId && state.modelProvidersBySession?.[sessionId]) || state.modelProvider
 }
 
 export function variantForSession(sessionId?: string): string | null {
@@ -549,19 +647,27 @@ export function modeForSession(sessionId?: string): BackendModeId {
   return descriptor?.modes.some((mode) => mode.id === requested) ? requested : descriptor?.modes[0]?.id ?? requested
 }
 
-export function setModel(id: string, sessionId: string | null = appStore.getState().activeSessionId): void {
+export function setModel(id: string, sessionId: string | null = appStore.getState().activeSessionId, providerID?: string): void {
   if (sessionId) {
     appStore.setState((state) => {
       const modelsBySession = { ...state.modelsBySession, [sessionId]: id }
+      const modelProvidersBySession = { ...(state.modelProvidersBySession ?? {}) }
+      if (providerID) modelProvidersBySession[sessionId] = providerID
+      else delete modelProvidersBySession[sessionId]
       const variantsBySession = { ...state.variantsBySession, [sessionId]: null }
       persistThreadPreference('ralf.modelsBySession', modelsBySession)
+      persistThreadPreference('ralf.modelProvidersBySession', modelProvidersBySession)
       persistThreadPreference('ralf.variantsBySession', variantsBySession)
-      return { modelsBySession, variantsBySession }
+      return { modelsBySession, modelProvidersBySession, variantsBySession }
     })
     return
   }
-  appStore.setState({ model: id, variant: null })
-  try { localStorage.setItem('ralf.model', id) } catch { /* ignore */ }
+  appStore.setState({ model: id, modelProvider: providerID ?? null, variant: null })
+  try {
+    localStorage.setItem('ralf.model', id)
+    if (providerID) localStorage.setItem('ralf.modelProvider', providerID)
+    else localStorage.removeItem('ralf.modelProvider')
+  } catch { /* ignore */ }
 }
 
 export function loadVariant(): void {
@@ -659,7 +765,9 @@ export async function cloneThreadToBackend(threadId: string, backendId: BackendI
   const source = appStore.getState().sessions.find((session) => session.id === threadId)
   if (!source || (source.backendId ?? 'opencode') === backendId) return
   try {
-    const session = await OpenCode.cloneToBackend(threadId, backendId)
+    const preference = appStore.getState().defaultModels?.[backendId]
+    const session = await OpenCode.cloneToBackend(threadId, backendId, undefined, preference ? { model: preference } : undefined)
+    applyBackendDefaultModel(session.id, backendId)
     upsertSessionMeta(session.id, {
       kind: 'fork',
       projectPath: appStore.getState().projectPath,
@@ -748,24 +856,33 @@ export function pushHistory(sessionId: string, text: string): void {
 export function resolveDefaultModel(sessionId?: string): void {
   const s = appStore.getState()
   const providers = sessionId ? s.providersBySession[sessionId] ?? s.providers : s.providers
-  const valid = (id: string): boolean => providers.some((p) => providerModels(p).some((m) => m.id === id))
-  const current = modelForSession(sessionId)
-  if (current && valid(current)) return
+  const valid = (id: string, providerID?: string | null): boolean => providers.some((provider) =>
+    (!providerID || provider.id === providerID) && providerModels(provider).some((model) => model.id === id)
+  )
+  const current = sessionId ? s.modelsBySession[sessionId] ?? null : s.model
+  const currentProvider = sessionId ? s.modelProvidersBySession?.[sessionId] : s.modelProvider
+  if (current && valid(current, currentProvider)) return
   if (sessionId && current) {
     appStore.setState((state) => {
       const modelsBySession = { ...state.modelsBySession }
+      const modelProvidersBySession = { ...(state.modelProvidersBySession ?? {}) }
       const variantsBySession = { ...state.variantsBySession }
       delete modelsBySession[sessionId]
+      delete modelProvidersBySession[sessionId]
       delete variantsBySession[sessionId]
-      return { modelsBySession, variantsBySession }
+      persistThreadPreference('ralf.modelsBySession', modelsBySession)
+      persistThreadPreference('ralf.modelProvidersBySession', modelProvidersBySession)
+      persistThreadPreference('ralf.variantsBySession', variantsBySession)
+      return { modelsBySession, modelProvidersBySession, variantsBySession }
     })
   } else if (current) {
-    appStore.setState({ model: null, variant: null })
+    appStore.setState({ model: null, modelProvider: null, variant: null })
   }
   try {
     const saved = localStorage.getItem('ralf.model')
-    if (saved && valid(saved)) {
-      setModel(saved, sessionId ?? null)
+    const savedProvider = localStorage.getItem('ralf.modelProvider')
+    if (saved && valid(saved, savedProvider)) {
+      setModel(saved, sessionId ?? null, savedProvider ?? undefined)
       return
     }
   } catch {
@@ -773,13 +890,13 @@ export function resolveDefaultModel(sessionId?: string): void {
   }
   const recent = [...s.sessions].sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0]
   if (recent?.model?.id && valid(recent.model.id) && !isHighVariant(recent.model.id)) {
-    setModel(recent.model.id, sessionId ?? null)
+    setModel(recent.model.id, sessionId ?? null, recent.model.provider)
     return
   }
   const first = providers[0]
   if (first) {
     const m = providerModels(first).find((mm) => !isHighVariant(mm.id)) ?? providerModels(first)[0]
-    if (m) setModel(m.id, sessionId ?? null)
+    if (m) setModel(m.id, sessionId ?? null, first.id)
   }
 }
 
@@ -875,7 +992,7 @@ export async function refreshFiles(): Promise<void> {
 export function selectSession(id: string, bindWorkspace = true): void {
   const cur = appStore.getState()
   const session = cur.sessions.find((s) => s.id === id)
-  const sessionPath = session?.projectPath || session?.directory || session?.path || ''
+  const sessionPath = session?.projectPath ?? session?.directory ?? session?.path ?? ''
   const inProject = Boolean(sessionPath && sessionPath !== '/')
   if (bindWorkspace && inProject && cur.projectWorkspace?.projectKey === sessionPath) {
     openSessionInWorkspace(id)
@@ -885,7 +1002,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
     void refreshProviders(id)
     return
   }
-  if (session?.model?.id && !cur.modelsBySession[id]) setModel(session.model.id, id)
+  if (session?.model?.id && !cur.modelsBySession[id]) setModel(session.model.id, id, session.model.provider)
   appStore.setState({
     activeSessionId: id,
     activePage: inProject ? 'project' : 'chat',
@@ -897,11 +1014,12 @@ export function selectSession(id: string, bindWorkspace = true): void {
   void refreshDiff(id)
   void refreshProviders(id)
 }
-export async function newSession(): Promise<void> {
+async function createSession(scope: ThreadCreationScope): Promise<void> {
   try {
     const backendId = appStore.getState().engine
-    const session = await OpenCode.createSession(undefined, backendId)
-    upsertSessionMeta(session.id, { kind: 'main', projectPath: appStore.getState().projectPath })
+    const session = await OpenCode.createSession(undefined, backendId, scope)
+    applyBackendDefaultModel(session.id, backendId)
+    upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? '' })
     await refreshSessions()
     const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
     setMode(defaultMode, session.id)
@@ -910,6 +1028,14 @@ export async function newSession(): Promise<void> {
   } catch {
     /* ignore */
   }
+}
+
+export async function newSession(): Promise<void> {
+  await createSession('current')
+}
+
+export async function newGlobalChat(): Promise<void> {
+  await createSession('global')
 }
 
 export async function importNativeThreads(backendId: BackendId): Promise<number> {
@@ -940,7 +1066,7 @@ export async function openProject(path: string): Promise<void> {
   await refreshSessions()
   await refreshProjects()
   await refreshFiles()
-  const preferred = appStore.getState().sessions.find((session) => (session.projectPath || session.directory || session.path) === info.path)?.id
+  const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
   loadProjectWorkspace(info.path, preferred)
 }
 
@@ -969,19 +1095,23 @@ export async function deleteSession(id: string): Promise<void> {
     }
     appStore.setState((s) => {
       const modelsBySession = { ...s.modelsBySession }
+      const modelProvidersBySession = { ...(s.modelProvidersBySession ?? {}) }
       const variantsBySession = { ...s.variantsBySession }
       const modesBySession = { ...s.modesBySession }
       const providersBySession = { ...s.providersBySession }
       delete modelsBySession[id]
+      delete modelProvidersBySession[id]
       delete variantsBySession[id]
       delete modesBySession[id]
       delete providersBySession[id]
       persistThreadPreference('ralf.modelsBySession', modelsBySession)
+      persistThreadPreference('ralf.modelProvidersBySession', modelProvidersBySession)
       persistThreadPreference('ralf.variantsBySession', variantsBySession)
       persistThreadPreference('ralf.modesBySession', modesBySession)
       return {
         archived: s.archived.filter((x) => x !== id),
         modelsBySession,
+        modelProvidersBySession,
         variantsBySession,
         modesBySession,
         providersBySession
@@ -1020,7 +1150,7 @@ export function toggleArchive(id: string): void {
 
 export function archiveAllInPath(path: string): void {
   appStore.setState((s) => {
-    const ids = s.sessions.filter((x) => (x.projectPath || x.directory || x.path) === path).map((x) => x.id)
+    const ids = s.sessions.filter((x) => (x.projectPath ?? x.directory ?? x.path) === path).map((x) => x.id)
     const archived = [...new Set([...s.archived, ...ids])]
     persistArchived(archived)
     return { archived }
@@ -1030,11 +1160,41 @@ export function archiveAllInPath(path: string): void {
 export async function forkSession(id: string): Promise<void> {
   try {
     const session = await OpenCode.fork(id)
+    copyThreadModelPreference(id, session.id)
     upsertSessionMeta(session.id, { kind: 'fork', forkedFrom: { sessionId: id } })
     await refreshSessions()
     selectSession(session.id)
   } catch {
     /* ignore */
+  }
+}
+
+export async function forkSessionIntoWorktree(id: string): Promise<void> {
+  try {
+    const options = modelKeyWithVariant(modelForSession(id), id)
+    const session = await OpenCode.forkIntoWorktree(id, undefined, options ? { model: options } : undefined)
+    copyThreadModelPreference(id, session.id)
+    upsertSessionMeta(session.id, {
+      kind: 'fork',
+      projectPath: session.projectPath,
+      gitBranch: session.worktree?.branch,
+      forkedFrom: { sessionId: id }
+    })
+    await refreshSessions()
+    if (!openSessionInWorkspace(session.id)) selectSession(session.id)
+  } catch (error) {
+    setSessionError(id, errorSummary(error))
+  }
+}
+
+export async function removeSessionWorktree(id: string): Promise<void> {
+  const session = appStore.getState().sessions.find((item) => item.id === id)
+  if (!session?.worktree || session.worktree.status !== 'active') return
+  try {
+    await OpenCode.removeWorktree(session.worktree.id)
+    await refreshSessions()
+  } catch (error) {
+    setSessionError(id, errorSummary(error))
   }
 }
 
@@ -1079,6 +1239,7 @@ export async function unrevertSession(sessionID: string): Promise<void> {
 export async function forkFromMessage(sessionID: string, messageID: string): Promise<void> {
   try {
     const session = await OpenCode.fork(sessionID, messageID)
+    copyThreadModelPreference(sessionID, session.id)
     upsertSessionMeta(session.id, { kind: 'fork', forkedFrom: { sessionId: sessionID, messageId: messageID } })
     await refreshSessions()
     selectSession(session.id)
@@ -1147,6 +1308,13 @@ export async function renameSessionById(id: string, title: string): Promise<void
 export function resolveModelKey(id: string, sessionId?: string): { providerID: string; modelID: string } | undefined {
   const s = appStore.getState()
   const providers = sessionId ? s.providersBySession[sessionId] ?? s.providers : s.providers
+  const preferredProvider = sessionId ? s.modelProvidersBySession?.[sessionId] : s.modelProvider
+  if (preferredProvider) {
+    const provider = providers.find((item) => item.id === preferredProvider)
+    if (provider && providerModels(provider).some((model) => model.id === id)) {
+      return { providerID: provider.id, modelID: id }
+    }
+  }
   for (const p of providers) {
     if (providerModels(p).some((m) => m.id === id)) {
       return { providerID: p.id, modelID: id }
@@ -1193,7 +1361,7 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
       const provider = appStore.getState().providers.find((p) => p.id === providerID)
       const base = provider ? providerModels(provider).find((m) => !isHighVariant(m.id)) : undefined
       if (base && base.id !== model) {
-        setModel(base.id, sessionID)
+        setModel(base.id, sessionID, providerID)
         setSessionError(sessionID, `No access to “${model}” — switched to ${base.name ?? base.id}.`)
       } else {
         setSessionError(sessionID, msg)
@@ -1308,7 +1476,7 @@ export async function openProjectFolder(): Promise<void> {
     await window.ralf.projectSet(path)
     await refreshSessions()
     await refreshProjects()
-    const preferred = appStore.getState().sessions.find((session) => (session.projectPath || session.directory || session.path) === path)?.id
+    const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === path)?.id
     loadProjectWorkspace(path, preferred)
   } catch (err) {
     console.error('open project folder:', err)
