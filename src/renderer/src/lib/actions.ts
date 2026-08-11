@@ -57,7 +57,7 @@ export function loadProjectWorkspace(projectKey: string, preferredSessionId?: st
 export function createWorkspaceView(): void {
   const workspace = currentWorkspace()
   if (!workspace) return
-  const created = workspaceView(`Workspace ${workspace.views.length + 1}`)
+  const created = workspaceView(`View ${workspace.views.length + 1}`)
   updateWorkspace((item) => ({
     ...item,
     views: [...item.views, created],

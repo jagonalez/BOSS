@@ -565,6 +565,7 @@ button {
   box-shadow: inset 0 -2px var(--accent);
 }
 
+.workspace-view-rename,
 .workspace-view-close {
   width: 16px;
   height: 16px;
@@ -574,6 +575,20 @@ button {
   margin-left: auto;
   border-radius: 4px;
   color: var(--text-faint);
+}
+
+.workspace-view-rename {
+  display: none;
+}
+
+.workspace-view-tab:hover .workspace-view-rename,
+.workspace-view-tab.active .workspace-view-rename {
+  display: grid;
+}
+
+.workspace-view-rename:hover {
+  color: var(--text);
+  background: var(--surface-raised);
 }
 
 .workspace-view-close:hover {

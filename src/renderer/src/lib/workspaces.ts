@@ -149,7 +149,13 @@ export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWo
     Array.isArray(saved.views) &&
     saved.views.length > 0 &&
     saved.views.every((view) => view && typeof view.id === 'string' && typeof view.name === 'string' && isNode(view.root))
-  ) return saved
+  ) {
+    const views = saved.views.map((view, index) => ({
+      ...view,
+      name: /^Workspace(?: \d+)?$/.test(view.name) ? (index === 0 ? 'Main' : `View ${index + 1}`) : view.name
+    }))
+    return { ...saved, views }
+  }
 
   const legacy = readJson<Record<string, {
     version?: number
@@ -159,12 +165,12 @@ export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWo
     updatedAt?: number
   }>>(LEGACY_WORKSPACES_KEY, {})[projectKey]
   if (legacy?.version === 2 && legacy.root && isNode(legacy.root)) {
-    const view = workspaceView('Workspace', legacy.root)
+    const view = workspaceView('Main', legacy.root)
     if (legacy.focusedGroupId && findGroup(legacy.root, legacy.focusedGroupId)) view.focusedGroupId = legacy.focusedGroupId
     return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: legacy.updatedAt ?? Date.now() }
   }
   const root = group(sessionId ? [tab('thread', sessionId)] : [])
-  const view = workspaceView('Workspace', root)
+  const view = workspaceView('Main', root)
   return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: Date.now() }
 }
 
