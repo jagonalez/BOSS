@@ -40,6 +40,8 @@
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
   --workspace-gap: 5px;
   --workspace-tab-height: 34px;
+  --workspace-tab-min-width: 92px;
+  --workspace-tab-ideal-width: 240px;
 }
 
 :root[data-theme='midnight-purple'] {
@@ -805,12 +807,13 @@ button {
 
 .workspace-tab {
   position: relative;
-  min-width: 58px;
-  max-width: 210px;
+  width: var(--workspace-tab-ideal-width);
+  min-width: var(--workspace-tab-min-width);
+  max-width: var(--workspace-tab-ideal-width);
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 0 1 auto;
+  flex: 1 1 var(--workspace-tab-ideal-width);
   padding: 0 8px;
   border: 0;
   border-right: 1px solid var(--line-subtle);
