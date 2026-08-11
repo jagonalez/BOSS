@@ -111,9 +111,11 @@ export function App(): React.JSX.Element {
           break
         case 'session.status':
         case 'session.idle': {
-          const wasStreaming = appStore.getState().streaming
+          const props = (ev.properties ?? {}) as { sessionID?: string }
+          const sid = props.sessionID ?? appStore.getState().activeSessionId ?? ''
+          const wasStreaming = Boolean(appStore.getState().streaming[sid])
           refreshStreaming()
-          if (wasStreaming && !appStore.getState().streaming && !document.hasFocus()) {
+          if (wasStreaming && !appStore.getState().streaming[sid] && !document.hasFocus()) {
             setAttention('done')
           }
           break
@@ -132,7 +134,13 @@ export function App(): React.JSX.Element {
           const mode = appStore.getState().mode
           const props = (ev.properties ?? {}) as { sessionID?: string; id?: string }
           if (mode !== 'ask') {
-            appStore.setState({ permission: null })
+            if (props.sessionID) {
+              appStore.setState((st) => {
+                const permissions = { ...st.permissions }
+                delete permissions[props.sessionID!]
+                return { permissions }
+              })
+            }
             if (props.sessionID && props.id) {
               void autoRespond(props.sessionID, props.id, mode === 'auto' ? 'once' : 'reject')
             }
@@ -228,7 +236,8 @@ export function App(): React.JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
         const s = appStore.getState()
-        if (s.streaming && s.activeSessionId) void abortRun()
+        const sid = s.activeSessionId
+        if (sid && s.streaming[sid]) void abortRun(sid)
       }
     }
     const onFocus = (): void => {

@@ -57,7 +57,7 @@ export interface AppState {
   files: FileNode[] | null
   fileContent: { path: string; content: string } | null
   todos: Record<string, Todo[]>
-  permission: PermissionRequest | null
+  permissions: Record<string, PermissionRequest>
   modelSwitch: { to: string } | null
   commitPath: string | null
   renameTarget: string | null
@@ -70,8 +70,8 @@ export interface AppState {
   optionalProgress: Partial<Record<OptionalComponentId, OptionalDownloadEvent>>
   computerUse: ComputerUseStatus
   computerUsePerms: ComputerUsePermissions
-  streaming: boolean
-  streamingLocked: boolean
+  streaming: Record<string, boolean>
+  streamingLocked: Record<string, boolean>
   sessionBusy: Record<string, boolean>
   compacting: Record<string, boolean>
   model: string | null
@@ -81,6 +81,7 @@ export interface AppState {
   engine: 'opencode' | 'pi'
   projectPath: string
   lastError: string | null
+  lastErrorBySession: Record<string, string>
   drafts: Record<string, string>
   attachments: Record<string, Attachment[]>
   history: Record<string, string[]>
@@ -122,7 +123,7 @@ export const initialState: AppState = {
   files: null,
   fileContent: null,
   todos: {},
-  permission: null,
+  permissions: {},
   modelSwitch: null,
   commitPath: null,
   renameTarget: null,
@@ -135,8 +136,8 @@ export const initialState: AppState = {
   optionalProgress: {},
   computerUse: { supported: false, enabled: false, running: false },
   computerUsePerms: { available: false, accessibility: false, screenRecording: false },
-  streaming: false,
-  streamingLocked: false,
+  streaming: {},
+  streamingLocked: {},
   sessionBusy: {},
   compacting: {},
   model: null,
@@ -146,6 +147,7 @@ export const initialState: AppState = {
   engine: 'opencode',
   projectPath: '',
   lastError: null,
+  lastErrorBySession: {},
   drafts: {},
   attachments: {},
   history: {},
@@ -248,10 +250,18 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       return sid && todos ? { todos: { ...state.todos, [sid]: todos } } : {}
     }
     case 'permission.asked':
-    case 'permission.updated':
-      return { permission: (props as unknown as PermissionRequest) ?? null }
-    case 'permission.replied':
-      return { permission: null }
+    case 'permission.updated': {
+      const perm = (props as unknown as PermissionRequest) ?? null
+      if (!perm?.sessionID) return {}
+      return { permissions: { ...state.permissions, [perm.sessionID]: perm } }
+    }
+    case 'permission.replied': {
+      const sid = props.sessionID as string | undefined
+      if (!sid) return {}
+      const next = { ...state.permissions }
+      delete next[sid]
+      return { permissions: next }
+    }
     case 'session.status': {
       const sid = props.sessionID as string | undefined
       const status = (props.status as { type?: string } | undefined)?.type
@@ -269,8 +279,12 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       if (!sid) return {}
       return { compacting: { ...state.compacting, [sid]: false } }
     }
-    case 'session.error':
-      return { lastError: errorSummary(props.error ?? props.message ?? 'opencode error') }
+    case 'session.error': {
+      const sid = props.sessionID as string | undefined
+      const msg = errorSummary(props.error ?? props.message ?? 'opencode error')
+      if (!sid) return { lastError: msg }
+      return { lastErrorBySession: { ...(state as { lastErrorBySession?: Record<string, string> }).lastErrorBySession, [sid]: msg } }
+    }
     case 'config.updated':
       return {}
     default:
