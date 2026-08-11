@@ -16,6 +16,7 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
 
 const ralf: RalfApi = {
   platform: () => process.platform,
+  toggleMaximize: () => ipcRenderer.invoke(IpcChannels.WindowToggleMaximize),
   serverInfo: () => ipcRenderer.invoke(IpcChannels.ServerGetInfo),
   onServerStatusChanged: (cb) => subscribe(IpcChannels.ServerStatusChanged, cb),
 

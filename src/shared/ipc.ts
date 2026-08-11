@@ -144,7 +144,8 @@ export const IpcChannels = {
   SpeechStatusChanged: 'speech:status-changed',
   AsrTranscribe: 'asr:transcribe',
   BackendRequest: 'backend:request',
-  BackendInfo: 'backend:info'
+  BackendInfo: 'backend:info',
+  WindowToggleMaximize: 'window:toggle-maximize'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

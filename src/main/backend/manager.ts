@@ -35,31 +35,48 @@ interface BackendDefinition {
   description: string
   command?: string
   capabilities: BackendCapabilities
+  modes: BackendDescriptor['modes']
 }
 
 const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
     label: 'OpenCode',
     description: 'OpenCode server with native sessions, permissions, tools, and providers.',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, images: true, mcp: true }
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, images: true, mcp: true, interactiveQuestions: true },
+    modes: [
+      { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
+      { id: 'auto', label: 'Auto', description: 'approve supported actions automatically' },
+      { id: 'plan', label: 'Plan', description: 'read-only planning agent' }
+    ]
   },
   pi: {
     label: 'Pi',
     description: 'Pi coding agent over its native JSONL RPC protocol.',
     command: 'pi',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, images: true, mcp: false }
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, images: true, mcp: false, interactiveQuestions: false },
+    modes: [{ id: 'auto', label: 'Approved', description: 'Pi RPC runs with its approved tool policy' }]
   },
   codex: {
     label: 'Codex',
     description: 'Codex CLI through the supported app-server JSON-RPC protocol.',
     command: 'codex',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, images: true, mcp: false }
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, images: true, mcp: false, interactiveQuestions: false },
+    modes: [
+      { id: 'ask', label: 'Ask', description: 'request approval when Codex needs to leave its sandbox' },
+      { id: 'auto', label: 'Auto', description: 'run inside the workspace sandbox without approval prompts' },
+      { id: 'plan', label: 'Plan', description: 'read-only filesystem sandbox' }
+    ]
   },
   claude: {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: false, images: false, mcp: false }
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: false, images: false, mcp: false, interactiveQuestions: false },
+    modes: [
+      { id: 'ask', label: 'Ask', description: 'use Claude default permissions; unavailable approvals stop the run' },
+      { id: 'accept-edits', label: 'Edit automatically', description: 'approve edits and common filesystem operations' },
+      { id: 'plan', label: 'Plan', description: 'read-only planning mode' }
+    ]
   }
 }
 
@@ -322,7 +339,8 @@ export class BackendManager {
         healthy: this.started.has(id) ? info.healthy : probe.available,
         version: info.version || probe.version,
         unavailableReason: probe.reason,
-        capabilities: definition.capabilities
+        capabilities: definition.capabilities,
+        modes: definition.modes
       }
     })
   }

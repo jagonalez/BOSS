@@ -44,18 +44,19 @@ function SessionCard({ session, state }: { session: SessionInfo; state: 'attenti
 export function CommandCenter(): React.JSX.Element {
   const sessions = useStore(appStore, (state) => state.sessions.filter((session) => !session.parentID))
   const permissions = useStore(appStore, (state) => state.permissions)
+  const questions = useStore(appStore, (state) => state.questions)
   const errors = useStore(appStore, (state) => state.lastErrorBySession)
   const streaming = useStore(appStore, (state) => state.streaming)
   const serverHealthy = useStore(appStore, (state) => state.serverHealthy)
 
   const ordered = [...sessions].sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
-  const needsAttention = ordered.filter((session) => permissions[session.id] || errors[session.id])
+  const needsAttention = ordered.filter((session) => permissions[session.id] || questions[session.id] || errors[session.id])
   const running = ordered.filter((session) => streaming[session.id] && !needsAttention.includes(session))
   const recent = ordered.filter((session) => !streaming[session.id] && !needsAttention.includes(session)).slice(0, 6)
 
   return (
     <div className="command-center">
-      <header className="command-header">
+      <header className="command-header" onDoubleClick={() => void window.ralf.toggleMaximize()}>
         <div>
           <span className="command-eyebrow">Command Center</span>
           <h1>Here’s what’s happening.</h1>

@@ -136,7 +136,7 @@ export const OpenCode = {
   summarize: (id: string, model?: { providerID: string; modelID: string }) =>
     backendRequest<void>({ type: 'thread.compact', threadId: id, model }),
   backendModels: (threadId?: string, backendId?: BackendId) =>
-    backendRequest<Array<{ id: string; name?: string; provider?: string }>>({ type: 'thread.models', threadId, backendId }),
+    backendRequest<Array<{ id: string; name?: string; provider?: string; variants?: string[] }>>({ type: 'thread.models', threadId, backendId }),
   cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string) =>
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction }),
   relayToThread: (sourceThreadId: string, targetThreadId: string, instruction?: string) =>

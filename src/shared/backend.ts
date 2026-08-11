@@ -1,4 +1,11 @@
 export type BackendId = 'opencode' | 'pi' | 'codex' | 'claude'
+export type BackendModeId = 'ask' | 'auto' | 'plan' | 'accept-edits'
+
+export interface BackendModeDescriptor {
+  id: BackendModeId
+  label: string
+  description: string
+}
 
 export interface BackendCapabilities {
   streaming: boolean
@@ -7,6 +14,7 @@ export interface BackendCapabilities {
   nativeFork: boolean
   images: boolean
   mcp: boolean
+  interactiveQuestions: boolean
 }
 
 export interface BackendDescriptor {
@@ -19,12 +27,13 @@ export interface BackendDescriptor {
   command?: string
   unavailableReason?: string
   capabilities: BackendCapabilities
+  modes: BackendModeDescriptor[]
 }
 
 export interface BackendMessageOptions {
   model?: { providerID: string; modelID: string; variant?: string }
   agent?: string
-  mode?: 'auto' | 'ask' | 'plan'
+  mode?: BackendModeId
 }
 
 export type BackendRequest =

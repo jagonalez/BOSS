@@ -211,7 +211,13 @@ export class ClaudeBackend implements Backend {
     })
 
     const hasHistory = record.messages.some((message) => message.info.role === 'assistant')
-    const mode = options?.mode === 'plan' ? 'plan' : options?.mode === 'auto' ? 'auto' : 'dontAsk'
+    const mode = options?.mode === 'plan'
+      ? 'plan'
+      : options?.mode === 'auto'
+        ? 'auto'
+        : options?.mode === 'accept-edits'
+          ? 'acceptEdits'
+          : 'default'
     const args = [
       '-p',
       '--output-format', 'stream-json',
@@ -294,8 +300,8 @@ export class ClaudeBackend implements Backend {
 
   async modelsList(): Promise<ModelInfo[]> {
     return [
-      { id: 'sonnet', name: 'Sonnet', provider: 'anthropic' },
-      { id: 'opus', name: 'Opus', provider: 'anthropic' },
+      { id: 'sonnet', name: 'Sonnet', provider: 'anthropic', variants: ['low', 'medium', 'high'] },
+      { id: 'opus', name: 'Opus', provider: 'anthropic', variants: ['low', 'medium', 'high', 'xhigh', 'max'] },
       { id: 'fable', name: 'Fable', provider: 'anthropic' },
       { id: 'haiku', name: 'Haiku', provider: 'anthropic' }
     ]
