@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import type { BackendId } from '@shared/backend'
 import type { MessageWithParts } from '@shared/opencode'
 import type {
@@ -13,9 +13,16 @@ import type {
   ThreadBusSnapshot,
   ThreadBusThread
 } from '@shared/thread-bus'
+import { projectScope } from './project-identity'
+
+interface LegacyThreadBusState {
+  version: 1
+  policies: Record<string, CollaborationPolicy>
+  messages: Array<Omit<ThreadBusMessage, 'projectId'>>
+}
 
 interface StoredThreadBusState {
-  version: 1
+  version: 2
   policies: Record<string, CollaborationPolicy>
   messages: ThreadBusMessage[]
 }
@@ -23,7 +30,7 @@ interface StoredThreadBusState {
 export interface ThreadBusHost {
   threadForNative(backendId: BackendId, nativeThreadId: string): ThreadBusThread | undefined
   threadInfo(threadId: string): ThreadBusThread | undefined
-  threadList(projectPath: string): ThreadBusThread[]
+  threadList(projectId: string): ThreadBusThread[]
   threadMessages(threadId: string, limit: number): Promise<MessageWithParts[]>
   deliverThreadMessage(threadId: string, body: string): Promise<void>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
@@ -35,10 +42,6 @@ const MAX_QUEUE_PER_THREAD = 25
 
 function stateFile(): string {
   return join(app.getPath('userData'), 'thread-bus.json')
-}
-
-function projectKey(path: string): string {
-  return path ? resolve(path) : ''
 }
 
 function messageText(messages: MessageWithParts[]): string {
@@ -84,10 +87,24 @@ export class ThreadBus {
 
   private load(): void {
     try {
-      const state = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredThreadBusState
-      if (state.version !== 1) return
-      Object.assign(this.policies, state.policies)
-      this.messages = Array.isArray(state.messages) ? state.messages.slice(-MAX_MESSAGES) : []
+      const state = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredThreadBusState | LegacyThreadBusState
+      if (state.version === 2) {
+        Object.assign(this.policies, state.policies)
+        this.messages = Array.isArray(state.messages) ? state.messages.slice(-MAX_MESSAGES) : []
+        return
+      }
+      if (state.version === 1) {
+        for (const [path, policy] of Object.entries(state.policies)) {
+          this.policies[projectScope(path).projectId] = policy
+        }
+        this.messages = Array.isArray(state.messages)
+          ? state.messages.slice(-MAX_MESSAGES).map((message) => {
+            const scope = projectScope(message.projectPath)
+            return { ...message, projectId: scope.projectId, projectPath: scope.projectPath }
+          })
+          : []
+        this.save()
+      }
     } catch {
       /* First launch starts with collaboration disabled. */
     }
@@ -95,7 +112,7 @@ export class ThreadBus {
 
   private save(): void {
     const state: StoredThreadBusState = {
-      version: 1,
+      version: 2,
       policies: this.policies,
       messages: this.messages.slice(-MAX_MESSAGES)
     }
@@ -106,37 +123,36 @@ export class ThreadBus {
     }
   }
 
-  policy(path: string): CollaborationPolicy {
-    return this.policies[projectKey(path)] ?? 'off'
+  policy(projectId: string): CollaborationPolicy {
+    return this.policies[projectId] ?? 'off'
   }
 
-  setPolicy(path: string, policy: CollaborationPolicy): ThreadBusSnapshot {
-    this.policies[projectKey(path)] = policy
+  setPolicy(projectId: string, projectPath: string, policy: CollaborationPolicy): ThreadBusSnapshot {
+    this.policies[projectId] = policy
     this.save()
-    return this.publish(path)
+    return this.publish(projectId, projectPath)
   }
 
-  clearFailures(path: string): ThreadBusSnapshot {
-    const key = projectKey(path)
-    this.messages = this.messages.filter((message) => message.status !== 'failed' || projectKey(message.projectPath) !== key)
+  clearFailures(projectId: string, projectPath: string): ThreadBusSnapshot {
+    this.messages = this.messages.filter((message) => message.status !== 'failed' || message.projectId !== projectId)
     this.save()
-    return this.publish(path)
+    return this.publish(projectId, projectPath)
   }
 
-  snapshot(path: string): ThreadBusSnapshot {
-    const key = projectKey(path)
-    const messages = this.messages.filter((message) => projectKey(message.projectPath) === key).slice(-100)
+  snapshot(projectId: string, projectPath: string): ThreadBusSnapshot {
+    const messages = this.messages.filter((message) => message.projectId === projectId).slice(-100)
     return {
-      projectPath: path,
-      policy: this.policy(path),
-      threads: this.host.threadList(path),
+      projectId,
+      projectPath,
+      policy: this.policy(projectId),
+      threads: this.host.threadList(projectId),
       messages,
       toolBackends: ['opencode', 'pi', 'codex', 'claude']
     }
   }
 
-  private publish(path: string): ThreadBusSnapshot {
-    const snapshot = this.snapshot(path)
+  private publish(projectId: string, projectPath: string): ThreadBusSnapshot {
+    const snapshot = this.snapshot(projectId, projectPath)
     this.host.emitThreadBus(snapshot)
     return snapshot
   }
@@ -144,7 +160,7 @@ export class ThreadBus {
   async agentCall(backendId: BackendId, nativeThreadId: string, tool: ThreadBusAgentTool, args: unknown): Promise<unknown> {
     const caller = this.host.threadForNative(backendId, nativeThreadId)
     if (!caller) throw new Error('R.A.L.F. could not identify the calling thread.')
-    const policy = this.policy(caller.projectPath)
+    const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
     if (!['ralf_threads_list', 'ralf_threads_read', 'ralf_threads_send', 'ralf_threads_reply'].includes(tool)) {
       throw new Error('Unknown R.A.L.F. thread tool.')
@@ -152,7 +168,7 @@ export class ThreadBus {
 
     switch (tool) {
       case 'ralf_threads_list':
-        return this.host.threadList(caller.projectPath)
+        return this.host.threadList(caller.projectId)
           .filter((thread) => thread.backendId === caller.backendId)
           .map((thread) => ({ id: thread.id, title: thread.title, busy: thread.busy, current: thread.id === caller.id }))
       case 'ralf_threads_read': {
@@ -196,7 +212,7 @@ export class ThreadBus {
     const target = this.host.threadInfo(targetId)
     if (!target) throw new Error('Target thread not found.')
     if (target.backendId !== caller.backendId) throw new Error('Agent communication is limited to threads on the same backend.')
-    if (projectKey(target.projectPath) !== projectKey(caller.projectPath)) throw new Error('Agent communication is limited to threads in the same project.')
+    if (target.projectId !== caller.projectId) throw new Error('Agent communication is limited to threads in the same project.')
     return target
   }
 
@@ -219,6 +235,7 @@ export class ThreadBus {
       fromThreadId: caller.id,
       toThreadId: target.id,
       backendId: caller.backendId,
+      projectId: caller.projectId,
       projectPath: caller.projectPath,
       body,
       createdAt: Date.now(),
@@ -230,7 +247,7 @@ export class ThreadBus {
     }
     this.messages.push(message)
     this.save()
-    this.publish(caller.projectPath)
+    this.publish(caller.projectId, caller.projectPath)
     if (!target.busy && !this.deliveryLocks.has(target.id)) await this.deliver(message)
     return message
   }
@@ -262,7 +279,7 @@ export class ThreadBus {
       this.deliveryLocks.delete(message.toThreadId)
     }
     this.save()
-    this.publish(message.projectPath)
+    this.publish(message.projectId, message.projectPath)
   }
 
   async flush(threadId: string): Promise<void> {

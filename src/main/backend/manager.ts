@@ -14,12 +14,16 @@ import type {
 import type { EventMessage, MessageWithParts, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
+import { projectScope, type ProjectScope } from '../project-identity'
 
 interface ThreadBinding {
   id: string
   backendId: BackendId
   nativeSessionId: string
+  nativeSessionOwnership: 'ralf' | 'imported'
+  projectId: string
   projectPath: string
+  executionPath: string
   title?: string
   createdAt: number
   updatedAt: number
@@ -27,8 +31,16 @@ interface ThreadBinding {
   lineage?: SessionInfo['lineage']
 }
 
-interface StoredBackendState {
+type LegacyThreadBinding = Omit<ThreadBinding, 'nativeSessionOwnership' | 'projectId' | 'executionPath'>
+
+interface LegacyBackendState {
   version: 1
+  threads: LegacyThreadBinding[]
+}
+
+interface StoredBackendState {
+  version: 2
+  legacyOpenCodeImportComplete: boolean
   threads: ThreadBinding[]
 }
 
@@ -144,6 +156,7 @@ export class BackendManager {
   private threadBus?: ThreadBus
   private eventCb?: (event: Record<string, unknown>) => void
   private loaded = false
+  private legacyOpenCodeImportPending = false
 
   constructor(private readonly backends: Record<BackendId, Backend>) {}
 
@@ -162,6 +175,10 @@ export class BackendManager {
     return this.projectPath
   }
 
+  private get currentScope(): ProjectScope {
+    return projectScope(this.projectPath)
+  }
+
   onEvent(callback: (event: Record<string, unknown>) => void): () => void {
     this.eventCb = callback
     return () => {
@@ -173,6 +190,11 @@ export class BackendManager {
     this.load()
     if (projectPath) this.projectPath = projectPath
     await this.ensureStarted('opencode')
+    if (this.legacyOpenCodeImportPending) {
+      await this.importNativeSessions('opencode')
+      this.legacyOpenCodeImportPending = false
+      this.save()
+    }
     await this.threadBus?.resume()
   }
 
@@ -193,17 +215,36 @@ export class BackendManager {
     if (this.loaded) return
     this.loaded = true
     try {
-      const parsed = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredBackendState
-      if (parsed.version === 1 && Array.isArray(parsed.threads)) {
+      const parsed = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredBackendState | LegacyBackendState
+      if (parsed.version === 2 && Array.isArray(parsed.threads)) {
         for (const binding of parsed.threads) this.bindings.set(binding.id, binding)
+        this.legacyOpenCodeImportPending = !parsed.legacyOpenCodeImportComplete
+      } else if (parsed.version === 1 && Array.isArray(parsed.threads)) {
+        for (const legacy of parsed.threads) {
+          const scope = projectScope(legacy.projectPath)
+          const binding: ThreadBinding = {
+            ...legacy,
+            nativeSessionOwnership: legacy.backendId === 'opencode' ? 'imported' : 'ralf',
+            projectId: scope.projectId,
+            projectPath: scope.projectPath,
+            executionPath: scope.executionPath
+          }
+          this.bindings.set(binding.id, binding)
+        }
+        this.save()
       }
     } catch {
-      /* First launch or an unreadable cache starts with native OpenCode discovery. */
+      /* Preserve pre-R.A.L.F. OpenCode sessions once on first launch or migration. */
+      this.legacyOpenCodeImportPending = true
     }
   }
 
   private save(): void {
-    const state: StoredBackendState = { version: 1, threads: [...this.bindings.values()] }
+    const state: StoredBackendState = {
+      version: 2,
+      legacyOpenCodeImportComplete: !this.legacyOpenCodeImportPending,
+      threads: [...this.bindings.values()]
+    }
     try {
       writeFileSync(stateFile(), JSON.stringify(state, null, 2))
     } catch {
@@ -258,36 +299,54 @@ export class BackendManager {
       id: binding.id,
       backendId: binding.backendId,
       nativeSessionId: binding.nativeSessionId,
+      nativeSessionOwnership: binding.nativeSessionOwnership,
+      projectId: binding.projectId,
+      projectPath: binding.projectPath,
+      executionPath: binding.executionPath,
       title: binding.title ?? native?.title,
-      directory: binding.projectPath || native?.directory,
-      path: binding.projectPath || native?.path,
+      directory: binding.executionPath || native?.directory,
+      path: binding.executionPath || native?.path,
       parentID: binding.parentID,
       lineage: binding.lineage,
       time: native?.time ?? { created: binding.createdAt, updated: binding.updatedAt }
     }
   }
 
-  private registerNative(backendId: BackendId, native: SessionInfo, lineage?: SessionInfo['lineage']): ThreadBinding {
+  private registerNative(
+    backendId: BackendId,
+    native: SessionInfo,
+    nativeSessionOwnership: ThreadBinding['nativeSessionOwnership'],
+    lineage?: SessionInfo['lineage']
+  ): ThreadBinding {
     const existing = this.bindingForNative(backendId, native.id)
     if (existing) {
       existing.title = native.title ?? existing.title
       existing.updatedAt = native.time?.updated ?? now()
-      existing.projectPath = native.directory || native.path || existing.projectPath || this.projectPath
+      if (native.directory) {
+        const scope = projectScope(native.directory)
+        existing.projectId = scope.projectId
+        existing.projectPath = scope.projectPath
+        existing.executionPath = scope.executionPath
+      }
       this.bindings.set(existing.id, existing)
       return existing
     }
-    const id = backendId === 'opencode' ? native.id : randomUUID()
+    const executionPath = native.directory || this.projectPath
+    const scope = projectScope(executionPath)
     const binding: ThreadBinding = {
-      id,
+      id: randomUUID(),
       backendId,
       nativeSessionId: native.id,
-      projectPath: native.directory || native.path || this.projectPath,
+      nativeSessionOwnership,
+      projectId: scope.projectId,
+      projectPath: scope.projectPath,
+      executionPath: scope.executionPath,
       title: native.title,
       createdAt: native.time?.created ?? now(),
       updatedAt: native.time?.updated ?? now(),
       lineage
     }
-    this.bindings.set(id, binding)
+    this.bindings.set(binding.id, binding)
     return binding
   }
 
@@ -376,12 +435,11 @@ export class BackendManager {
     this.load()
     const openCode = await this.ensureStarted('opencode')
     const nativeSessions = await openCode.sessionsList().catch(() => [])
-    for (const native of nativeSessions) this.registerNative('opencode', native)
-    this.save()
+    const currentProjectId = this.currentScope.projectId
 
     const current = [...this.bindings.values()].filter((binding) => {
       if (!this.projectPath) return true
-      return !binding.projectPath || binding.projectPath === this.projectPath
+      return binding.projectId === currentProjectId
     })
     return current
       .map((binding) => {
@@ -393,12 +451,28 @@ export class BackendManager {
       .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
   }
 
+  async importNativeSessions(backendId: BackendId): Promise<SessionInfo[]> {
+    const backend = await this.ensureStarted(backendId)
+    const nativeSessions = await backend.sessionsList()
+    const imported: SessionInfo[] = []
+    for (const native of nativeSessions) {
+      if (this.bindingForNative(backendId, native.id)) continue
+      const binding = this.registerNative(backendId, native, 'imported')
+      imported.push(this.session(binding, native))
+    }
+    this.save()
+    return imported
+  }
+
   async sessionCreate(backendId: BackendId, title?: string, lineage?: SessionInfo['lineage']): Promise<SessionInfo> {
     const backend = await this.ensureStarted(backendId)
     const native = await backend.sessionCreate(title)
-    const binding = this.registerNative(backendId, native, lineage)
+    const binding = this.registerNative(backendId, native, 'ralf', lineage)
+    const scope = this.currentScope
     binding.title = title ?? native.title
-    binding.projectPath = this.projectPath
+    binding.projectId = scope.projectId
+    binding.projectPath = scope.projectPath
+    binding.executionPath = scope.executionPath
     this.bindings.set(binding.id, binding)
     this.save()
     const session = this.session(binding, native)
@@ -415,8 +489,10 @@ export class BackendManager {
 
   async sessionDelete(threadId: string): Promise<void> {
     const binding = this.binding(threadId)
-    const backend = await this.ensureStarted(binding.backendId)
-    await backend.sessionDelete(binding.nativeSessionId)
+    if (binding.nativeSessionOwnership === 'ralf') {
+      const backend = await this.ensureStarted(binding.backendId)
+      await backend.sessionDelete(binding.nativeSessionId)
+    }
     this.bindings.delete(threadId)
     this.save()
     this.eventCb?.({ type: 'session.deleted', properties: { info: this.session(binding) }, backendId: binding.backendId })
@@ -462,9 +538,9 @@ export class BackendManager {
     return binding ? this.threadBusInfo(binding) : undefined
   }
 
-  threadList(projectPath: string): ThreadBusThread[] {
+  threadList(projectId: string): ThreadBusThread[] {
     return [...this.bindings.values()]
-      .filter((binding) => !projectPath || !binding.projectPath || binding.projectPath === projectPath)
+      .filter((binding) => !projectId || binding.projectId === projectId)
       .map((binding) => this.threadBusInfo(binding))
       .sort((a, b) => a.title.localeCompare(b.title))
   }
@@ -474,7 +550,9 @@ export class BackendManager {
       id: binding.id,
       title: binding.title || 'Untitled thread',
       backendId: binding.backendId,
-      projectPath: binding.projectPath || this.projectPath,
+      projectId: binding.projectId,
+      projectPath: binding.projectPath,
+      executionPath: binding.executionPath,
       busy: this.busyThreads.has(binding.id)
     }
   }
@@ -485,6 +563,22 @@ export class BackendManager {
 
   async deliverThreadMessage(threadId: string, body: string): Promise<void> {
     await this.sendMessage(threadId, [{ type: 'text', text: body }], { mode: 'ask' })
+  }
+
+  private async runCommand(
+    threadId: string,
+    command: string,
+    args: string,
+    options?: BackendMessageOptions
+  ): Promise<MessageWithParts> {
+    const binding = this.binding(threadId)
+    const backend = await this.ensureStarted(binding.backendId)
+    if (!backend.runCommand) throw new Error(`${DEFINITIONS[binding.backendId].label} does not support native slash commands.`)
+    const message = await backend.runCommand(binding.nativeSessionId, command, args, options)
+    return {
+      info: { ...message.info, sessionID: threadId },
+      parts: message.parts.map((part) => ({ ...part, sessionID: threadId }))
+    }
   }
 
   emitThreadBus(snapshot: ThreadBusSnapshot): void {
@@ -502,11 +596,14 @@ export class BackendManager {
     const backend = await this.ensureStarted(source.backendId)
     const native = await backend.fork(source.nativeSessionId, messageId)
     if (native.id === source.nativeSessionId) return this.clone(threadId, source.backendId)
-    const binding = this.registerNative(source.backendId, native, {
+    const binding = this.registerNative(source.backendId, native, 'ralf', {
       kind: 'fork',
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
     })
+    binding.projectId = source.projectId
+    binding.projectPath = source.projectPath
+    binding.executionPath = source.executionPath
     binding.parentID = threadId
     this.save()
     return this.session(binding, native)
@@ -555,6 +652,7 @@ export class BackendManager {
       case 'backend.list': return this.descriptors()
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return this.sessionCreate(request.backendId, request.title)
+      case 'thread.import-native': return this.importNativeSessions(request.backendId)
       case 'thread.get': return this.sessionGet(request.threadId)
       case 'thread.delete': return this.sessionDelete(request.threadId)
       case 'thread.rename': return this.sessionRename(request.threadId, request.title)
@@ -578,6 +676,15 @@ export class BackendManager {
         return (await this.ensureStarted(binding.backendId)).diffGet(binding.nativeSessionId, request.messageId)
       }
       case 'thread.fork': return this.fork(request.threadId, request.messageId)
+      case 'thread.revert': {
+        const binding = this.binding(request.threadId)
+        return (await this.ensureStarted(binding.backendId)).revert(binding.nativeSessionId, request.messageId)
+      }
+      case 'thread.unrevert': {
+        const binding = this.binding(request.threadId)
+        return (await this.ensureStarted(binding.backendId)).unrevert(binding.nativeSessionId)
+      }
+      case 'thread.command': return this.runCommand(request.threadId, request.command, request.arguments, request.options)
       case 'thread.compact': {
         const binding = this.binding(request.threadId)
         return (await this.ensureStarted(binding.backendId)).compact(binding.nativeSessionId, request.model)
@@ -590,18 +697,27 @@ export class BackendManager {
       case 'thread.relay': return this.relay(request.sourceThreadId, request.targetThreadId, request.instruction)
       case 'thread.bus.get': {
         if (!this.threadBus) throw new Error('Thread collaboration is not available.')
-        const projectPath = request.threadId ? this.binding(request.threadId).projectPath : this.projectPath
-        return this.threadBus.snapshot(projectPath)
+        const binding = request.threadId ? this.binding(request.threadId) : undefined
+        const scope = binding
+          ? { projectId: binding.projectId, projectPath: binding.projectPath }
+          : this.currentScope
+        return this.threadBus.snapshot(scope.projectId, scope.projectPath)
       }
       case 'thread.bus.policy': {
         if (!this.threadBus) throw new Error('Thread collaboration is not available.')
-        const projectPath = request.threadId ? this.binding(request.threadId).projectPath : this.projectPath
-        return this.threadBus.setPolicy(projectPath, request.policy)
+        const binding = request.threadId ? this.binding(request.threadId) : undefined
+        const scope = binding
+          ? { projectId: binding.projectId, projectPath: binding.projectPath }
+          : this.currentScope
+        return this.threadBus.setPolicy(scope.projectId, scope.projectPath, request.policy)
       }
       case 'thread.bus.clear-failures': {
         if (!this.threadBus) throw new Error('Thread collaboration is not available.')
-        const projectPath = request.threadId ? this.binding(request.threadId).projectPath : this.projectPath
-        return this.threadBus.clearFailures(projectPath)
+        const binding = request.threadId ? this.binding(request.threadId) : undefined
+        const scope = binding
+          ? { projectId: binding.projectId, projectPath: binding.projectPath }
+          : this.currentScope
+        return this.threadBus.clearFailures(scope.projectId, scope.projectPath)
       }
     }
   }

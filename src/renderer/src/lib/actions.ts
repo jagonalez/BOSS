@@ -874,7 +874,7 @@ export async function refreshFiles(): Promise<void> {
 export function selectSession(id: string, bindWorkspace = true): void {
   const cur = appStore.getState()
   const session = cur.sessions.find((s) => s.id === id)
-  const sessionPath = session?.directory || session?.path || ''
+  const sessionPath = session?.projectPath || session?.directory || session?.path || ''
   const inProject = Boolean(sessionPath && sessionPath !== '/')
   if (bindWorkspace && inProject && cur.projectWorkspace?.projectKey === sessionPath) {
     openSessionInWorkspace(id)
@@ -911,6 +911,12 @@ export async function newSession(): Promise<void> {
   }
 }
 
+export async function importNativeThreads(backendId: BackendId): Promise<number> {
+  const imported = await OpenCode.importNativeSessions(backendId)
+  await refreshSessions()
+  return imported.length
+}
+
 export async function openProject(path: string): Promise<void> {
   let info
   try {
@@ -933,7 +939,7 @@ export async function openProject(path: string): Promise<void> {
   await refreshSessions()
   await refreshProjects()
   await refreshFiles()
-  const preferred = appStore.getState().sessions.find((session) => (session.directory || session.path) === info.path)?.id
+  const preferred = appStore.getState().sessions.find((session) => (session.projectPath || session.directory || session.path) === info.path)?.id
   loadProjectWorkspace(info.path, preferred)
 }
 
@@ -1013,7 +1019,7 @@ export function toggleArchive(id: string): void {
 
 export function archiveAllInPath(path: string): void {
   appStore.setState((s) => {
-    const ids = s.sessions.filter((x) => (x.directory || x.path) === path).map((x) => x.id)
+    const ids = s.sessions.filter((x) => (x.projectPath || x.directory || x.path) === path).map((x) => x.id)
     const archived = [...new Set([...s.archived, ...ids])]
     persistArchived(archived)
     return { archived }
@@ -1301,7 +1307,7 @@ export async function openProjectFolder(): Promise<void> {
     await window.ralf.projectSet(path)
     await refreshSessions()
     await refreshProjects()
-    const preferred = appStore.getState().sessions.find((session) => (session.directory || session.path) === path)?.id
+    const preferred = appStore.getState().sessions.find((session) => (session.projectPath || session.directory || session.path) === path)?.id
     loadProjectWorkspace(path, preferred)
   } catch (err) {
     console.error('open project folder:', err)

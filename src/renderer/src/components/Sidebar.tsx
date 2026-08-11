@@ -114,7 +114,7 @@ export function Sidebar(): React.JSX.Element {
 
   const sessionsByPath = new Map<string, SessionInfo[]>()
   for (const session of visibleSessions) {
-    const raw = session.directory || session.path || ''
+    const raw = session.projectPath || session.directory || session.path || ''
     const key = raw === '/' ? '' : raw
     const list = sessionsByPath.get(key) ?? []
     list.push(session)

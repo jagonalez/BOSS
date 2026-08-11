@@ -98,6 +98,14 @@ export interface Backend {
   revert(sessionId: string, messageId: string): Promise<void>
   unrevert(sessionId: string): Promise<void>
 
+  /** Optional backend-native slash command execution. */
+  runCommand?(
+    sessionId: string,
+    command: string,
+    args: string,
+    opts?: BackendMessageOptions
+  ): Promise<MessageWithParts>
+
   /** Optional native compaction. Implementations may safely no-op. */
   compact(sessionId: string, model?: { providerID: string; modelID: string }): Promise<void>
 }

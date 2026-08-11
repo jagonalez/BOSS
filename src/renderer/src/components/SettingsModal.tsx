@@ -1,8 +1,8 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, setEngine, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
+import { clearThreadBusFailures, importNativeThreads, setEngine, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 
 export function SettingsModal(): React.JSX.Element | null {
@@ -13,6 +13,7 @@ export function SettingsModal(): React.JSX.Element | null {
   const backends = useStore(appStore, (s) => s.backends)
   const defaultBackend = useStore(appStore, (s) => s.engine)
   const threadBus = useStore(appStore, (s) => s.threadBus)
+  const [importStatus, setImportStatus] = useState('')
   if (!open) return null
 
   const current = document.documentElement.dataset.theme ?? 'graphite'
@@ -38,6 +39,24 @@ export function SettingsModal(): React.JSX.Element | null {
           ))}
         </div>
         <div className="settings-row-hint">The default is used by quick-create. Every project workspace can choose a backend when creating a thread.</div>
+        <div className="settings-row">
+          <div className="settings-row-main">
+            <div className="settings-row-label">Existing OpenCode sessions</div>
+            <div className="settings-row-hint">R.A.L.F. only manages sessions it creates. Import existing OpenCode sessions when you want them to appear as R.A.L.F. threads.</div>
+          </div>
+          <button
+            className="btn-ghost"
+            onClick={() => {
+              setImportStatus('Importing…')
+              void importNativeThreads('opencode')
+                .then((count) => setImportStatus(count ? `Imported ${count}` : 'Nothing new'))
+                .catch(() => setImportStatus('Import failed'))
+            }}
+          >
+            Import
+          </button>
+        </div>
+        {importStatus ? <div className="settings-row-hint">{importStatus}</div> : null}
         <div className="settings-section-title">Thread collaboration</div>
         <div className="settings-row">
           <div className="settings-row-main">

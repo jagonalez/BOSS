@@ -81,7 +81,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     if (!projectPath || workspaceProjectKey === projectPath) return
-    const preferred = sessions.find((session) => (session.directory || session.path) === projectPath)?.id
+    const preferred = sessions.find((session) => (session.projectPath || session.directory || session.path) === projectPath)?.id
     loadProjectWorkspace(projectPath, preferred)
   }, [projectPath, sessions, workspaceProjectKey])
 

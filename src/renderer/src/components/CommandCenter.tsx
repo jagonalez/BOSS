@@ -14,12 +14,12 @@ function timeAgo(timestamp?: number): string {
 }
 
 function projectName(session: SessionInfo): string {
-  const path = session.directory || session.path || ''
+  const path = session.projectPath || session.directory || session.path || ''
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || 'Chat'
 }
 
 async function openSession(session: SessionInfo): Promise<void> {
-  const path = session.directory || session.path || ''
+  const path = session.projectPath || session.directory || session.path || ''
   if (path && path !== '/' && path !== appStore.getState().projectPath) await openProject(path)
   selectSession(session.id)
 }
