@@ -134,7 +134,7 @@ export async function runThreadReview(sessionID: string, target: string): Promis
   try {
     await OpenCode.sendMessageAsync(sessionID, parts, { model: modelKey, agent })
   } catch (err) {
-    appStore.setState({ lastError: errorSummary(err) })
+    setSessionError(sessionID, errorSummary(err))
   }
   await loadMessages(sessionID)
 }
@@ -235,7 +235,22 @@ export function loadMode(): void {
   }
 }
 
-export function loadEngine(): void {
+export async function loadEngine(): Promise<void> {
+  // Main is the source of truth for the running engine (RALF_ENGINE / engine switch).
+  try {
+    const engine = await window.ralf.getBackendEngine()
+    if (engine === 'opencode' || engine === 'pi') {
+      appStore.setState({ engine })
+      try {
+        localStorage.setItem('ralf.engine', engine)
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+  } catch {
+    /* main unreachable; fall back to saved preference below */
+  }
   try {
     const saved = localStorage.getItem('ralf.engine')
     if (saved === 'opencode' || saved === 'pi') appStore.setState({ engine: saved })
@@ -353,13 +368,10 @@ export async function loadMessages(sessionID: string): Promise<void> {
 
 export function refreshStreaming(): void {
   const s = appStore.getState()
-  if (s.streamingLocked) {
-    if (s.streaming) appStore.setState({ streaming: false })
-    return
-  }
   const sid = s.activeSessionId
-  if (!sid) {
-    appStore.setState({ streaming: false })
+  if (!sid) return
+  if (s.streamingLocked[sid]) {
+    if (s.streaming[sid]) appStore.setState((st) => ({ streaming: { ...st.streaming, [sid]: false } }))
     return
   }
   const msgs = s.messages[sid] ?? []
@@ -370,7 +382,9 @@ export function refreshStreaming(): void {
     last !== undefined && (last.info.role === 'user' || (last.info.role === 'assistant' && !last.info.time?.completed))
   const busy = Boolean(s.sessionBusy[sid]) || Boolean(s.compacting[sid])
   const working = runningPart || awaiting || busy
-  if (working !== s.streaming) appStore.setState({ streaming: working })
+  if (working !== s.streaming[sid]) {
+    appStore.setState((st) => ({ streaming: { ...st.streaming, [sid]: working } }))
+  }
 }
 
 export async function loadTodos(sessionID: string): Promise<void> {
@@ -570,14 +584,19 @@ export async function editMessage(sessionID: string, messageID: string, text: st
 }
 
 export async function runCommand(sessionID: string, command: string, args: string): Promise<void> {
-  appStore.setState({ streaming: true, lastError: null, streamingLocked: false })
+  appStore.setState((st) => ({
+    streaming: { ...st.streaming, [sessionID]: true },
+    lastError: null,
+    lastErrorBySession: { ...st.lastErrorBySession, [sessionID]: '' },
+    streamingLocked: { ...st.streamingLocked, [sessionID]: false }
+  }))
   const cur = appStore.getState()
   const modelKey = cur.model ? modelKeyWithVariant(cur.model) : undefined
   const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
     await OpenCode.runCommand(sessionID, command, args, { agent, model: modelKey })
   } catch (err) {
-    appStore.setState({ lastError: errorSummary(err) })
+    setSessionError(sessionID, errorSummary(err))
   }
   await loadMessages(sessionID)
 }
@@ -620,7 +639,12 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     parts.push({ type: 'file', mime: a.mime, filename: a.name, url: a.dataUrl })
   }
   if (text.trim()) parts.push({ type: 'text', text })
-  appStore.setState({ streaming: true, lastError: null, streamingLocked: false })
+  appStore.setState((st) => ({
+    streaming: { ...st.streaming, [sessionID]: true },
+    lastError: null,
+    lastErrorBySession: { ...st.lastErrorBySession, [sessionID]: '' },
+    streamingLocked: { ...st.streamingLocked, [sessionID]: false }
+  }))
   const modelKey = cur.model ? modelKeyWithVariant(cur.model) : undefined
   const agent = cur.mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
@@ -641,12 +665,12 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
       const base = provider ? providerModels(provider).find((m) => !isHighVariant(m.id)) : undefined
       if (base && base.id !== cur.model) {
         setModel(base.id)
-        appStore.setState({ lastError: `No access to “${cur.model}” — switched to ${base.name ?? base.id}.` })
+        setSessionError(sessionID, `No access to “${cur.model}” — switched to ${base.name ?? base.id}.`)
       } else {
-        appStore.setState({ lastError: msg })
+        setSessionError(sessionID, msg)
       }
     } else {
-      appStore.setState({ lastError: msg })
+      setSessionError(sessionID, msg)
     }
   }
   await loadMessages(sessionID)
@@ -655,34 +679,44 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   }, 1200)
 }
 
+export function setSessionError(sessionID: string, msg: string): void {
+  appStore.setState((st) => ({ lastErrorBySession: { ...st.lastErrorBySession, [sessionID]: msg } }))
+}
+
 export async function compactSession(sessionID: string): Promise<void> {
   const cur = appStore.getState()
   const modelKey = cur.model ? resolveModelKey(cur.model) : undefined
   if (!modelKey) {
-    appStore.setState({ lastError: 'Select a model first to compact the session.' })
+    setSessionError(sessionID, 'Select a model first to compact the session.')
     return
   }
   appStore.setState((s) => ({ compacting: { ...s.compacting, [sessionID]: true } }))
   try {
     await OpenCode.summarize(sessionID, modelKey)
   } catch (err) {
-    appStore.setState({ lastError: errorSummary(err) })
+    setSessionError(sessionID, errorSummary(err))
   }
   appStore.setState((s) => ({ compacting: { ...s.compacting, [sessionID]: false } }))
   await loadMessages(sessionID)
   await refreshSessions()
 }
 
-export async function abortRun(): Promise<void> {
+export async function abortRun(sessionID?: string): Promise<void> {
   const cur = appStore.getState()
-  appStore.setState({ streaming: false, streamingLocked: true })
-  if (!cur.activeSessionId) return
+  const target = sessionID ?? cur.activeSessionId
+  if (target) {
+    appStore.setState((st) => ({
+      streaming: { ...st.streaming, [target]: false },
+      streamingLocked: { ...st.streamingLocked, [target]: true }
+    }))
+  }
+  if (!target) return
   try {
-    await OpenCode.abort(cur.activeSessionId)
+    await OpenCode.abort(target)
   } catch {
     /* ignore */
   }
-  if (cur.activeSessionId) void loadMessages(cur.activeSessionId)
+  if (target) void loadMessages(target)
 }
 export async function refreshOptional(): Promise<void> {
   try {
@@ -696,6 +730,24 @@ export async function toggleComputerUse(on: boolean): Promise<void> {
   try {
     const status = await window.ralf.setComputerUse(on)
     appStore.setState({ computerUse: status })
+    if (on) {
+      await refreshComputerUsePermissions(true)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function refreshComputerUsePermissions(promptIfMissing = false): Promise<void> {
+  try {
+    const perms = await window.ralf.computerUsePermissions()
+    appStore.setState({ computerUsePerms: perms })
+    if (promptIfMissing && perms.available) {
+      if (!perms.accessibility) await window.ralf.requestComputerUsePermission('accessibility').catch(() => {})
+      if (!perms.screenRecording) await window.ralf.requestComputerUsePermission('screenRecording').catch(() => {})
+      const next = await window.ralf.computerUsePermissions().catch(() => perms)
+      appStore.setState({ computerUsePerms: next })
+    }
   } catch {
     /* ignore */
   }
@@ -746,8 +798,10 @@ export async function openPanelTab(kind: PanelKind, groupId?: string): Promise<v
       const session = await OpenCode.createSession()
       tab.sessionId = session.id
       upsertSessionMeta(session.id, { kind: 'side', projectPath: appStore.getState().projectPath })
-    } catch {
-      /* ignore */
+    } catch (err) {
+      const sid = appStore.getState().activeSessionId
+      if (sid) setSessionError(sid, 'Couldn’t create side chat: ' + errorSummary(err))
+      return
     }
   }
   appStore.setState((prev) => ({
