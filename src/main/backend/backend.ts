@@ -1,4 +1,5 @@
 import type { BackendId, BackendMessageOptions } from '@shared/backend'
+import type { ThreadBusConnection, ThreadBusToolCall } from '@shared/thread-bus'
 
 export interface BackendInfo {
   id: BackendId
@@ -50,6 +51,12 @@ export interface Backend {
   registerMcpServer(name: string, config: McpServerConfig): Promise<boolean>
   unregisterMcpServer(name: string): Promise<void>
 
+  /** Optional trusted host tools. The backend supplies the native caller thread id. */
+  setThreadBusHandler?(handler: (call: ThreadBusToolCall) => Promise<unknown>): void
+
+  /** Optional loopback connection for backends that load tools in child processes. */
+  configureThreadBus?(connection: ThreadBusConnection): void
+
   /** Events */
   onEvent(cb: (ev: EventMessage) => void): () => void
 
@@ -90,6 +97,14 @@ export interface Backend {
   fork(sessionId: string, messageId?: string): Promise<SessionInfo>
   revert(sessionId: string, messageId: string): Promise<void>
   unrevert(sessionId: string): Promise<void>
+
+  /** Optional backend-native slash command execution. */
+  runCommand?(
+    sessionId: string,
+    command: string,
+    args: string,
+    opts?: BackendMessageOptions
+  ): Promise<MessageWithParts>
 
   /** Optional native compaction. Implementations may safely no-op. */
   compact(sessionId: string, model?: { providerID: string; modelID: string }): Promise<void>

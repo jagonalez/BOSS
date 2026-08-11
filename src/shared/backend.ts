@@ -40,6 +40,7 @@ export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'thread.list' }
   | { type: 'thread.create'; backendId: BackendId; title?: string }
+  | { type: 'thread.import-native'; backendId: BackendId }
   | { type: 'thread.get'; threadId: string }
   | { type: 'thread.delete'; threadId: string }
   | { type: 'thread.rename'; threadId: string; title: string }
@@ -50,7 +51,13 @@ export type BackendRequest =
   | { type: 'thread.permission'; threadId: string; permissionId: string; response: 'once' | 'always' | 'reject' }
   | { type: 'thread.diff'; threadId: string; messageId?: string }
   | { type: 'thread.fork'; threadId: string; messageId?: string }
+  | { type: 'thread.revert'; threadId: string; messageId: string }
+  | { type: 'thread.unrevert'; threadId: string }
+  | { type: 'thread.command'; threadId: string; command: string; arguments: string; options?: BackendMessageOptions }
   | { type: 'thread.compact'; threadId: string; model?: { providerID: string; modelID: string } }
   | { type: 'thread.models'; threadId?: string; backendId?: BackendId }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string }
   | { type: 'thread.relay'; sourceThreadId: string; targetThreadId: string; instruction?: string }
+  | { type: 'thread.bus.get'; threadId?: string }
+  | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
+  | { type: 'thread.bus.clear-failures'; threadId?: string }

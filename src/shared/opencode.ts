@@ -7,6 +7,12 @@ export interface SessionInfo {
   /** Stable R.A.L.F. thread id. Native ids are deliberately kept behind this binding. */
   backendId?: BackendId
   nativeSessionId?: string
+  nativeSessionOwnership?: 'ralf' | 'imported'
+  projectId?: string
+  /** Logical project root shared by its main checkout and managed worktrees. */
+  projectPath?: string
+  /** Directory in which this thread's backend actually runs. */
+  executionPath?: string
   title?: string
   time?: SessionTime
   path?: string

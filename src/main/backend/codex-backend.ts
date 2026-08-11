@@ -2,6 +2,7 @@ import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
+import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 
 type RpcId = string | number
@@ -47,6 +48,60 @@ interface PendingApproval {
   method: string
   params: Record<string, unknown>
 }
+
+const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
+  {
+    type: 'function',
+    name: 'ralf_threads_list',
+    description: 'List other R.A.L.F. threads in this project that use the same backend.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    type: 'function',
+    name: 'ralf_threads_read',
+    description: 'Read a bounded recent transcript from another same-project, same-backend R.A.L.F. thread.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string', description: 'R.A.L.F. thread id returned by ralf_threads_list.' },
+        limit: { type: 'number', description: 'Number of recent messages to read, from 1 to 20.' }
+      },
+      required: ['threadId'],
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'ralf_threads_send',
+    description: 'Send a durable message to another same-project, same-backend R.A.L.F. thread. Busy targets queue the message.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string', description: 'Target R.A.L.F. thread id.' },
+        message: { type: 'string', description: 'Concise context, question, or requested task.' },
+        expectsReply: { type: 'boolean', description: 'Whether the target should reply.' },
+        maxTurns: { type: 'number', description: 'Maximum messages in this exchange, from 1 to 8.' }
+      },
+      required: ['threadId', 'message'],
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'ralf_threads_reply',
+    description: 'Reply to a R.A.L.F. thread message addressed to this thread.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        messageId: { type: 'string', description: 'Message id included in the incoming R.A.L.F. message.' },
+        message: { type: 'string', description: 'Reply for the sending thread.' },
+        expectsReply: { type: 'boolean', description: 'Whether another response is useful.' }
+      },
+      required: ['messageId', 'message'],
+      additionalProperties: false
+    }
+  }
+]
 
 function threadInfo(thread: CodexThread): SessionInfo {
   return {
@@ -160,6 +215,7 @@ export class CodexBackend implements Backend {
   private version = ''
   private healthy = false
   private buffer = ''
+  private threadBusHandler?: (call: ThreadBusToolCall) => Promise<unknown>
 
   constructor(cwd?: string) {
     this.projectPath = cwd ?? ''
@@ -197,7 +253,10 @@ export class CodexBackend implements Backend {
     })
     await this.request('initialize', {
       clientInfo: { name: 'ralf_desktop', title: 'R.A.L.F.', version: '0.1.0' },
-      capabilities: null
+      capabilities: {
+        experimentalApi: true,
+        requestAttestation: false
+      }
     })
     this.notify('initialized', {})
     this.healthy = true
@@ -221,6 +280,10 @@ export class CodexBackend implements Backend {
   supportsMcp(): boolean { return false }
   async registerMcpServer(_name: string, _config: McpServerConfig): Promise<boolean> { return false }
   async unregisterMcpServer(_name: string): Promise<void> {}
+
+  setThreadBusHandler(handler: (call: ThreadBusToolCall) => Promise<unknown>): void {
+    this.threadBusHandler = handler
+  }
 
   onEvent(callback: (event: EventMessage) => void): () => void {
     this.eventCb = callback
@@ -280,6 +343,26 @@ export class CodexBackend implements Backend {
   }
 
   private handleServerRequest(id: RpcId, method: string, params: Record<string, unknown>): void {
+    if (method === 'item/tool/call') {
+      const tool = String(params.tool ?? '') as ThreadBusAgentTool
+      if (!this.threadBusHandler || !tool.startsWith('ralf_threads_')) {
+        this.respond(id, { contentItems: [{ type: 'inputText', text: 'Unknown R.A.L.F. tool.' }], success: false })
+        return
+      }
+      void this.threadBusHandler({
+        nativeThreadId: String(params.threadId ?? ''),
+        tool,
+        arguments: params.arguments
+      }).then((result) => {
+        this.respond(id, { contentItems: [{ type: 'inputText', text: JSON.stringify(result, null, 2) }], success: true })
+      }).catch((error) => {
+        this.respond(id, {
+          contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : String(error) }],
+          success: false
+        })
+      })
+      return
+    }
     if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval' || method === 'item/permissions/requestApproval') {
       const permissionId = String(id)
       this.approvals.set(permissionId, { rpcId: id, method, params })
@@ -364,11 +447,21 @@ export class CodexBackend implements Backend {
   }
 
   async sessionCreate(title?: string): Promise<SessionInfo> {
-    const result = await this.request('thread/start', {
+    const params = {
       cwd: this.projectPath || undefined,
       approvalPolicy: 'on-request',
-      sandbox: 'workspace-write'
-    }) as { thread: CodexThread }
+      sandbox: 'workspace-write',
+      dynamicTools: THREAD_BUS_TOOLS
+    }
+    let result: { thread: CodexThread }
+    try {
+      result = await this.request('thread/start', params) as { thread: CodexThread }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/dynamicTools|experimental|invalid params|unknown field|-32602/i.test(message)) throw error
+      const { dynamicTools: _dynamicTools, ...fallback } = params
+      result = await this.request('thread/start', fallback) as { thread: CodexThread }
+    }
     this.loadedThreads.add(result.thread.id)
     if (title) await this.request('thread/name/set', { threadId: result.thread.id, name: title })
     return { ...threadInfo(result.thread), title: title ?? threadInfo(result.thread).title }

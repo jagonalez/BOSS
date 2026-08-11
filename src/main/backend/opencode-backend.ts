@@ -2,6 +2,7 @@ import { OpenCodeServer } from '../opencode-server'
 import { ApiClient } from '../api-client'
 import { EventStream } from '../event-stream'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
+import type { BackendMessageOptions } from '@shared/backend'
 import type { SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, EventMessage } from '@shared/opencode'
 
 export class OpenCodeBackend implements Backend {
@@ -183,6 +184,15 @@ export class OpenCodeBackend implements Backend {
 
   async unrevert(sessionId: string): Promise<void> {
     await this.api.request({ method: 'POST', path: `/session/${sessionId}/unrevert` })
+  }
+
+  async runCommand(sessionId: string, command: string, args: string, opts?: BackendMessageOptions): Promise<MessageWithParts> {
+    const res = await this.api.request({
+      method: 'POST',
+      path: `/session/${sessionId}/command`,
+      body: { command, arguments: args, agent: opts?.agent, model: opts?.model }
+    })
+    return res.body as MessageWithParts
   }
 
   async compact(sessionId: string, model?: { providerID: string; modelID: string }): Promise<void> {
