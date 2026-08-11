@@ -74,6 +74,8 @@ export class ComputerUse {
     if (process.platform !== 'darwin') {
       return { available: false, accessibility: false, screenRecording: false }
     }
+    // In embedded mode the daemon runs as Ralf's child, so Ralf's own TCC
+    // grants ARE the driver's grants — systemPreferences is authoritative.
     let accessibility = false
     let screenRecording = false
     try {
@@ -89,12 +91,14 @@ export class ComputerUse {
     if (process.platform !== 'darwin') return false
     try {
       if (pane === 'accessibility') {
-        return systemPreferences.isTrustedAccessibilityClient(true)
+        systemPreferences.isTrustedAccessibilityClient(true)
+      } else {
+        // Triggering a capture prompts macOS for Screen Recording.
+        const { desktopCapturer } = await import('electron')
+        await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
       }
-      // Triggering a capture prompts macOS for Screen Recording, then re-probe.
-      const { desktopCapturer } = await import('electron')
-      await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
-      return systemPreferences.getMediaAccessStatus('screen') === 'granted'
+      const perms = await this.permissions()
+      return pane === 'accessibility' ? perms.accessibility : perms.screenRecording
     } catch {
       return false
     }
