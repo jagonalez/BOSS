@@ -111,10 +111,15 @@ function CloudflareSection(): React.JSX.Element {
 
   const save = async (): Promise<void> => {
     setSaving(true)
-    await setCloudflareConfig(token, accountId)
-    setSaving(false)
-    setOpen(false)
-    setToken('')
+    try {
+      const saved = await setCloudflareConfig(token, accountId)
+      if (saved) {
+        setOpen(false)
+        setToken('')
+      }
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (

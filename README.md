@@ -55,7 +55,9 @@ Publish any folder of static files and preview it instantly at a localhost URL �
 
 The token is stored encrypted in `userData/sites.secret` via Electron `safeStorage`.
 
-## Voice (TTS & ASR)Ralf ships local speech built on [`@huggingface/transformers`](https://www.npmjs.com/package/@huggingface/transformers) — no Python, no separate runtimes. On first use, the models download automatically and are cached on disk:
+## Voice (TTS & ASR)
+
+Ralf ships local speech built on [`@huggingface/transformers`](https://www.npmjs.com/package/@huggingface/transformers) — no Python, no separate runtimes. On first use, the models download automatically and are cached on disk:
 
 | Model | Size (approx.) | Used for |
 | --- | --- | --- |

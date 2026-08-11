@@ -19,7 +19,8 @@ const TOOL = {
       },
       name: { type: 'string', description: 'Optional human-readable name for the site.' }
     },
-    required: ['folder']
+    required: ['folder'],
+    additionalProperties: false
   }
 }
 
@@ -55,6 +56,13 @@ async function handle(msg) {
     const { name, arguments: args } = msg.params || {}
     if (name === 'publish_site') {
       try {
+        if (typeof args?.folder !== 'string' || !args.folder.trim()) {
+          throw new Error('folder must be a non-empty string')
+        }
+        if (args.name !== undefined && typeof args.name !== 'string') {
+          throw new Error('name must be a string')
+        }
+        if (!CONTROL_URL || !SECRET) throw new Error('Ralf Sites control endpoint is unavailable')
         const res = await fetch(`${CONTROL_URL}/publish`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SECRET}` },
@@ -74,8 +82,14 @@ async function handle(msg) {
           result: { content: [{ type: 'text', text: `publish_site failed: ${err.message}` }], isError: true }
         })
       }
+    } else {
+      send({ jsonrpc: '2.0', id: msg.id, error: { code: -32602, message: `Unknown tool: ${String(name)}` } })
     }
     return
+  }
+
+  if (msg.id !== undefined) {
+    send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: `Method not found: ${msg.method}` } })
   }
 }
 
