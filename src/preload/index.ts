@@ -55,8 +55,8 @@ const ralf: RalfApi = {
   projectSet: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectSet, path),
   projectChoose: () => ipcRenderer.invoke(IpcChannels.ProjectChoose),
 
-  terminalCreate: (cwd?: string, cols?: number, rows?: number) =>
-    ipcRenderer.invoke(IpcChannels.TerminalCreate, { cwd, cols, rows }),
+  terminalCreate: (cwd?: string, cols?: number, rows?: number, authBackendId?: import('../shared/backend').BackendId) =>
+    ipcRenderer.invoke(IpcChannels.TerminalCreate, { cwd, cols, rows, authBackendId }),
   terminalWrite: (id: string, data: string) => ipcRenderer.invoke(IpcChannels.TerminalWrite, { id, data }),
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke(IpcChannels.TerminalResize, { id, cols, rows }),

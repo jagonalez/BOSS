@@ -1968,6 +1968,37 @@ button {
   background: var(--surface-hover);
 }
 
+.settings-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-connection {
+  gap: 10px;
+}
+
+.connection-state {
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--text-faint);
+  background: var(--surface-hover);
+}
+
+.connection-state.connected {
+  color: var(--green);
+  background: rgba(61, 184, 122, 0.14);
+}
+
+.connection-state.not-connected {
+  color: var(--yellow);
+  background: rgba(210, 153, 34, 0.14);
+}
+
 .item .badge.side {
   color: var(--accent);
   background: var(--accent-soft);

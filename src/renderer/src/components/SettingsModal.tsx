@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, importNativeThreads, setEngine, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
+import { clearThreadBusFailures, importNativeThreads, openBackendLogin, refreshBackendAuth, setEngine, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { WorktreeSettings } from '@shared/worktree'
@@ -15,11 +15,13 @@ export function SettingsModal(): React.JSX.Element | null {
   const backends = useStore(appStore, (s) => s.backends)
   const defaultBackend = useStore(appStore, (s) => s.engine)
   const threadBus = useStore(appStore, (s) => s.threadBus)
+  const backendAuth = useStore(appStore, (s) => s.backendAuth)
   const [importStatus, setImportStatus] = useState('')
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
   useEffect(() => {
     if (!open) return
     void OpenCode.worktreeSettings().then(setWorktreeSettings).catch(() => {})
+    void refreshBackendAuth()
   }, [open])
   if (!open) return null
 
@@ -46,6 +48,33 @@ export function SettingsModal(): React.JSX.Element | null {
           ))}
         </div>
         <div className="settings-row-hint">The default is used by quick-create. Every project workspace can choose a backend when creating a thread.</div>
+        <div className="settings-section-title">Connections</div>
+        <div className="settings-connections">
+          {backends.map((backend) => {
+            const auth = (backendAuth ?? []).find((item) => item.backendId === backend.id)
+            return (
+              <div className="settings-row settings-connection" key={backend.id}>
+                <BackendBadge backendId={backend.id} />
+                <div className="settings-row-main">
+                  <div className="settings-row-label">
+                    {backend.label}
+                    <span className={`connection-state ${auth?.state ?? 'unknown'}`}>
+                      {auth?.state === 'connected' ? 'Connected' : auth?.state === 'not-connected' ? 'Not connected' : 'Checking…'}
+                    </span>
+                  </div>
+                  <div className="settings-row-hint">
+                    {auth?.detail ?? 'Checking the CLI credential store…'}
+                    {auth?.accounts?.length ? ` · ${auth.accounts.join(', ')}` : ''}
+                  </div>
+                </div>
+                <button className="btn-ghost" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
+                  {auth?.state === 'connected' ? 'Re-authenticate' : 'Connect'}
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        <div className="settings-row-hint">R.A.L.F. launches each agent's own login flow and uses its existing credential store. Credentials are never copied into R.A.L.F.</div>
         <div className="settings-row">
           <div className="settings-row-main">
             <div className="settings-row-label">Existing OpenCode sessions</div>
