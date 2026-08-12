@@ -5,14 +5,18 @@ import { gitBranches, gitCommitFiles, gitCurrentBranch, gitDiffFiles, gitFileDif
 import { markStaleReviews, runThreadReview } from '../lib/actions'
 import { DiffReview, type DiffFileData } from './DiffReview'
 import { ReviewIcon } from './icons'
+import type { AddReviewCommentInput, ReviewSnapshot, SubmitReviewEvent } from '@shared/review'
+import { ReviewConversation } from './ReviewConversation'
 
-type Scope = 'worktree' | 'staged' | 'compare' | 'commits'
+type Scope = 'worktree' | 'staged' | 'compare' | 'commits' | 'pull-request' | 'conversation'
 
 const SCOPE_LABELS: Record<Scope, string> = {
   worktree: 'Working tree',
   staged: 'Staged',
   compare: 'Compare',
-  commits: 'Commits'
+  commits: 'Commits',
+  'pull-request': 'Pull request',
+  conversation: 'Conversation'
 }
 
 export function GitView({ contextPath, sessionId }: { contextPath?: string; sessionId?: string }): React.JSX.Element {
@@ -29,6 +33,27 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
   const [data, setData] = useState<DiffFileData[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null)
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewError, setReviewError] = useState('')
+  const visibleComments = scope === 'pull-request'
+    ? [...(reviewSnapshot?.pullRequest?.comments ?? []), ...(reviewSnapshot?.localComments ?? [])]
+    : reviewSnapshot?.localComments ?? []
+
+  async function loadReview(): Promise<void> {
+    if (!projectPath) return
+    setReviewLoading(true)
+    setReviewError('')
+    try {
+      setReviewSnapshot(await window.ralf.reviewSnapshot(projectPath))
+    } catch (err) {
+      setReviewError(String((err as Error).message ?? err))
+    } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  useEffect(() => { void loadReview() }, [projectPath, gitRefresh])
 
   useEffect(() => {
     void (async () => {
@@ -45,8 +70,8 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
   }, [projectPath])
 
   useEffect(() => {
-    if (scope !== 'commits') void loadScope()
-  }, [projectPath, scope, baseBranch, gitRefresh])
+    if (scope !== 'commits' && scope !== 'conversation') void loadScope()
+  }, [projectPath, scope, baseBranch, gitRefresh, reviewSnapshot?.pullRequest?.headRefOid])
 
   useEffect(() => {
     if (activeSessionId) markStaleReviews(activeSessionId, projectPath)
@@ -58,11 +83,17 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
     if (!projectPath) return
     setLoading(true)
     try {
-      const paths = await gitDiffFiles(projectPath, scope as 'worktree' | 'staged' | 'compare', baseBranch)
+      const pullRequestFiles = scope === 'pull-request' && reviewSnapshot?.pullRequest
+        ? await window.ralf.reviewPullRequestDiff(projectPath)
+        : undefined
+      const paths = pullRequestFiles?.map((file) => file.path)
+        ?? await gitDiffFiles(projectPath, scope as 'worktree' | 'staged' | 'compare', baseBranch)
       const items: DiffFileData[] = []
       for (const p of paths) {
         try {
-          const text = await gitFileDiff(projectPath, scope as 'worktree' | 'staged' | 'compare', p, baseBranch)
+          const text = pullRequestFiles
+            ? pullRequestFiles.find((file) => file.path === p)?.patch ?? ''
+            : await gitFileDiff(projectPath, scope as 'worktree' | 'staged' | 'compare', p, baseBranch)
           const lines = parseGitDiff(text)
           items.push({
             path: p,
@@ -124,11 +155,50 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
     setLoading(false)
   }
 
+  async function addReviewComment(input: AddReviewCommentInput, publish: boolean): Promise<void> {
+    setReviewError('')
+    try {
+      if (publish) setReviewSnapshot(await window.ralf.reviewPublishComment(projectPath, input))
+      else {
+        await window.ralf.reviewLocalAdd(projectPath, input)
+        await loadReview()
+      }
+    } catch (err) {
+      setReviewError(String((err as Error).message ?? err))
+      throw err
+    }
+  }
+
+  async function replyToComment(commentId: string, body: string): Promise<void> {
+    setReviewError('')
+    try {
+      setReviewSnapshot(await window.ralf.reviewReply(projectPath, commentId, body))
+    } catch (err) {
+      setReviewError(String((err as Error).message ?? err))
+      throw err
+    }
+  }
+
+  async function deleteLocalComment(commentId: string): Promise<void> {
+    await window.ralf.reviewLocalDelete(projectPath, commentId)
+    await loadReview()
+  }
+
+  async function submitReview(event: SubmitReviewEvent, body: string): Promise<void> {
+    setReviewError('')
+    try {
+      setReviewSnapshot(await window.ralf.reviewSubmit(projectPath, event, body))
+    } catch (err) {
+      setReviewError(String((err as Error).message ?? err))
+      throw err
+    }
+  }
+
   return (
     <div className="git-view">
       <div className="git-toolbar">
         <div className="git-scope">
-          {(Object.keys(SCOPE_LABELS) as Scope[]).map((s) => (
+          {(Object.keys(SCOPE_LABELS) as Scope[]).filter((item) => item !== 'pull-request' || reviewSnapshot?.pullRequest).map((s) => (
             <button key={s} className={`git-scope-btn ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
               {SCOPE_LABELS[s]}
             </button>
@@ -143,7 +213,7 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
             ))}
           </select>
         )}
-        {activeSessionId ? (
+        {activeSessionId && scope !== 'conversation' ? (
           <button
             className="btn-ghost"
             onClick={() =>
@@ -170,7 +240,18 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
           ))}
         </div>
       ) : null}
-      {scope === 'commits' ? (
+      {scope === 'conversation' ? (
+        <ReviewConversation
+          snapshot={reviewSnapshot}
+          loading={reviewLoading}
+          error={reviewError}
+          onRefresh={() => void loadReview()}
+          onAddComment={addReviewComment}
+          onReply={replyToComment}
+          onDelete={deleteLocalComment}
+          onSubmit={submitReview}
+        />
+      ) : scope === 'commits' ? (
         <div className="two-pane">
           <div className="pane pane-list">
             {commits.map((c) => (
@@ -185,10 +266,10 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
             ))}
             {!loading && commits.length === 0 && <div className="empty-inline">{error || 'No commits'}</div>}
           </div>
-          <DiffReview files={data} loading={loading} error={error} showList={false} />
+          <DiffReview files={data} loading={loading} error={error} showList={false} comments={visibleComments} onAddComment={addReviewComment} />
         </div>
       ) : (
-        <DiffReview files={data} loading={loading} error={error} />
+        <DiffReview files={data} loading={loading} error={error} comments={visibleComments} canPublish={scope === 'pull-request'} onAddComment={addReviewComment} />
       )}
     </div>
   )

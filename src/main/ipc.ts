@@ -19,6 +19,7 @@ import type { SitesManager } from './sites'
 import type { BackendManager } from './backend/manager'
 import type { BackendRequest } from '@shared/backend'
 import type { AsrTranscribeRequest, TtsSpeakRequest } from '@shared/ipc'
+import type { ReviewManager } from './review-manager'
 
 export interface IpcDeps {
   server: OpenCodeServer
@@ -31,6 +32,7 @@ export interface IpcDeps {
   pty: PTYManager
   speech: SpeechManager
   sites: SitesManager
+  reviews: ReviewManager
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -215,6 +217,24 @@ export function registerIpc(deps: IpcDeps): void {
       })
     })
   })
+
+  ipcMain.handle(IpcChannels.ReviewSnapshot, (_event, path: string) => deps.reviews.snapshot(path))
+  ipcMain.handle(IpcChannels.ReviewPullRequestDiff, (_event, path: string) => deps.reviews.pullRequestDiff(path))
+  ipcMain.handle(IpcChannels.ReviewLocalAdd, (_event, body: { path: string; input: import('@shared/review').AddReviewCommentInput }) =>
+    deps.reviews.addLocal(body.path, body.input)
+  )
+  ipcMain.handle(IpcChannels.ReviewLocalDelete, (_event, body: { path: string; commentId: string }) =>
+    deps.reviews.deleteLocal(body.path, body.commentId)
+  )
+  ipcMain.handle(IpcChannels.ReviewPublishComment, (_event, body: { path: string; input: import('@shared/review').AddReviewCommentInput }) =>
+    deps.reviews.publishComment(body.path, body.input)
+  )
+  ipcMain.handle(IpcChannels.ReviewReply, (_event, body: { path: string; commentId: string; body: string }) =>
+    deps.reviews.reply(body.path, body.commentId, body.body)
+  )
+  ipcMain.handle(IpcChannels.ReviewSubmit, (_event, body: { path: string; event: import('@shared/review').SubmitReviewEvent; body: string }) =>
+    deps.reviews.submit(body.path, body.event, body.body)
+  )
 
   ipcMain.handle(IpcChannels.TtsStatus, () => deps.speech.ttsStatus())
 
