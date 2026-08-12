@@ -128,21 +128,22 @@ export class WebAccess {
   }
 
   /**
-   * Publish the loopback server on the user's tailnet. Command syntax follows
-   * current tailscale releases (`serve --bg`, `serve reset`); failures are
-   * surfaced verbatim in Settings rather than guessed at, since CLI flags
-   * have changed across versions.
+   * Publish the loopback server on the user's tailnet. Plain-HTTP serve on
+   * port 80 rather than HTTPS: tailnet traffic is WireGuard-encrypted anyway,
+   * and HTTPS requires Let's Encrypt certificate provisioning that hangs on
+   * some tailnets and macOS GUI builds (observed live). Failures surface
+   * verbatim in Settings, since CLI flags vary across versions.
    */
   private async startTailscale(): Promise<void> {
     this.tailscaleUrl = undefined
     this.tailscaleError = undefined
     if (!this.config.tailscale) return
     try {
-      await tailscaleRun(['serve', '--bg', String(this.config.port)])
+      await tailscaleRun(['serve', '--bg', '--http=80', String(this.config.port)])
       this.tailscaleServing = true
       const status = JSON.parse(await tailscaleRun(['status', '--json'])) as { Self?: { DNSName?: string } }
       const dns = status.Self?.DNSName?.replace(/\.$/, '')
-      this.tailscaleUrl = dns ? `https://${dns}` : undefined
+      this.tailscaleUrl = dns ? `http://${dns}` : undefined
     } catch (error) {
       this.tailscaleError = error instanceof Error ? error.message : String(error)
     }
