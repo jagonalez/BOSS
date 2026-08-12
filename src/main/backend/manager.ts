@@ -25,6 +25,7 @@ import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
 import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
+import { budgetViolation, normalizeTaskPolicy, type TaskPolicy } from '@shared/task-policy'
 
 interface ThreadBinding {
   id: string
@@ -42,6 +43,7 @@ interface ThreadBinding {
   worktree?: WorktreeInfo
   followUps?: QueuedFollowUp[]
   attention?: ThreadAttention
+  policy?: TaskPolicy
 }
 
 type LegacyThreadBinding = Omit<ThreadBinding, 'nativeSessionOwnership' | 'projectId' | 'executionPath'>
@@ -783,6 +785,9 @@ export class BackendManager {
     if (binding.worktree?.status === 'removed') {
       throw new Error('This thread\'s worktree was cleaned up. Fork it into a new worktree before continuing.')
     }
+    const usage = this.transcripts?.usage(threadId).totals ?? { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
+    const violation = budgetViolation(binding.policy, usage)
+    if (violation) throw new Error(`${violation} Increase or remove the task budget before continuing.`)
     const backend = await this.ensureStarted(binding.backendId)
     binding.updatedAt = now()
     this.save()
@@ -1209,7 +1214,8 @@ export class BackendManager {
         running: this.busyThreads.has(binding.id),
         attention: binding.attention,
         lastRun: usage.lastRun,
-        usage: usage.totals
+        usage: usage.totals,
+        policy: binding.policy
       }
     }).sort((a, b) => b.updatedAt - a.updatedAt)
     const totals = threads.reduce<ThreadUsageTotals>((value, thread) => ({
@@ -1228,6 +1234,18 @@ export class BackendManager {
       this.clearThreadAttention(binding)
     }
     return this.supervisionSnapshot()
+  }
+
+  taskPolicy(threadId: string): TaskPolicy | undefined {
+    return this.binding(threadId).policy
+  }
+
+  setTaskPolicy(threadId: string, policy: TaskPolicy): TaskPolicy {
+    const binding = this.binding(threadId)
+    binding.policy = normalizeTaskPolicy(policy)
+    this.save()
+    this.emit({ type: 'thread.policy.updated', properties: { threadId, policy: binding.policy }, backendId: binding.backendId })
+    return binding.policy
   }
 
   searchTranscripts(query: string, limit?: number): TranscriptSearchResult[] {
@@ -1313,6 +1331,8 @@ export class BackendManager {
       case 'supervision.snapshot': return this.supervisionSnapshot()
       case 'supervision.search': return this.searchTranscripts(request.query, request.limit)
       case 'supervision.acknowledge': return this.acknowledgeAttention(request.threadId)
+      case 'thread.policy.get': return this.taskPolicy(request.threadId)
+      case 'thread.policy.set': return this.setTaskPolicy(request.threadId, request.policy)
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction, request.options)
       case 'thread.delegate': return this.delegate(request.threadId, request.backendId, request.instruction, request.placement, request.options)
       case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction, request.options)

@@ -402,6 +402,7 @@ export function Sidebar(): React.JSX.Element {
               {menuItem('Open', () => selectSession(ctx.session!.id))}
               {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Delegate…', () => appStore.setState({ delegateTarget: ctx.session!.id }))}
+              {menuItem('Goal & budget…', () => appStore.setState({ policyTarget: ctx.session!.id }))}
               {menuItem('Fork', () => void forkSession(ctx.session!.id))}
               {ctx.session.projectId !== 'global' ? menuItem('Fork into worktree…', () =>
                 appStore.setState({

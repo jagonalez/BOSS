@@ -109,6 +109,8 @@ export type BackendRequest =
   | { type: 'supervision.snapshot' }
   | { type: 'supervision.search'; query: string; limit?: number }
   | { type: 'supervision.acknowledge'; threadId: string }
+  | { type: 'thread.policy.get'; threadId: string }
+  | { type: 'thread.policy.set'; threadId: string; policy: import('./task-policy').TaskPolicy }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }
   | { type: 'thread.delegate'; threadId: string; backendId: BackendId; instruction: string; placement: DelegatePlacement; options?: BackendMessageOptions }
   | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string; options?: BackendMessageOptions }

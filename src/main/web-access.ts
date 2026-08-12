@@ -88,6 +88,9 @@ export class WebAccess {
 
   constructor(private readonly configFile: string, private readonly host: WebAccessHost) {
     this.config = this.load()
+    // Persist newly generated fields immediately so an upgraded install does
+    // not rotate its read-only token again on the next restart.
+    this.save()
   }
 
   setOnChange(callback: () => void): void {
