@@ -47,13 +47,20 @@ function ThreadCard({ thread, state, label }: {
     thread.lastRun?.tokens !== undefined ? `${compactNumber(thread.lastRun.tokens)} reported tokens` : '',
     thread.lastRun?.toolCalls ? `${thread.lastRun.toolCalls} tools` : ''
   ].filter(Boolean).join(' · ')
+  const budget = [
+    thread.policy?.budget.maxRuns ? `${thread.policy.budget.maxRuns} run cap` : '',
+    thread.policy?.budget.maxTokens ? `${compactNumber(thread.policy.budget.maxTokens)} token cap` : '',
+    thread.policy?.budget.maxDurationMinutes ? `${thread.policy.budget.maxDurationMinutes}m cap` : ''
+  ].filter(Boolean).join(' · ')
   return (
     <button className="command-session-card" onClick={() => void openThread(thread)}>
       <span className={`command-state-icon ${state}`}><ChatIcon size={14} /></span>
       <span className="command-session-main">
         <strong>{thread.title}</strong>
         <small>{projectName(thread.projectPath)} · {thread.backendId} · {label}</small>
+        {thread.policy?.goal ? <span className="command-session-goal">{thread.policy.goal}</span> : null}
         {metrics ? <small className="command-session-metrics">{metrics}</small> : null}
+        {budget ? <small className="command-session-budget">Budget · {budget}</small> : null}
       </span>
       <span className="command-session-time">{timeAgo(thread.updatedAt)}</span>
       <ChevronIcon size={14} />

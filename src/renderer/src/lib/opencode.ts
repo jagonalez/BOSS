@@ -20,6 +20,7 @@ import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/a
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
 import type { SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
+import type { TaskPolicy } from '@shared/task-policy'
 
 export class ApiError extends Error {
   constructor(
@@ -163,6 +164,10 @@ export const OpenCode = {
     backendRequest<TranscriptSearchResult[]>({ type: 'supervision.search', query, limit }),
   acknowledgeAttention: (threadId: string) =>
     backendRequest<SupervisionSnapshot>({ type: 'supervision.acknowledge', threadId }),
+  taskPolicy: (threadId: string) =>
+    backendRequest<TaskPolicy | undefined>({ type: 'thread.policy.get', threadId }),
+  setTaskPolicy: (threadId: string, policy: TaskPolicy) =>
+    backendRequest<TaskPolicy>({ type: 'thread.policy.set', threadId, policy }),
   cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction, options }),
   delegate: (threadId: string, backendId: BackendId, instruction: string, placement: DelegatePlacement, options?: BackendMessageOptions) =>

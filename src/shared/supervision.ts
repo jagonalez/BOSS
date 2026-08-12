@@ -1,4 +1,5 @@
 import type { BackendId } from './backend'
+import type { TaskPolicy } from './task-policy'
 
 export type RunStatus = 'running' | 'completed' | 'error' | 'interrupted'
 export type AttentionKind = 'permission' | 'question' | 'completed' | 'error' | 'interrupted'
@@ -38,6 +39,7 @@ export interface SupervisedThread {
   attention?: ThreadAttention
   lastRun?: RunMetrics
   usage: ThreadUsageTotals
+  policy?: TaskPolicy
 }
 
 export interface SupervisionSnapshot {

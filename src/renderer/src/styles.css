@@ -2275,6 +2275,21 @@ textarea {
   color: var(--text-muted);
 }
 
+.command-session-goal {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-session-main .command-session-budget {
+  color: var(--accent);
+  opacity: 0.82;
+}
+
 .command-search-result {
   width: 100%;
   min-width: 0;
@@ -6431,6 +6446,92 @@ select:hover {
 
 @media (max-width: 620px) {
   .delegate-backends { grid-template-columns: 1fr; }
+}
+
+.policy-modal {
+  width: 660px;
+  max-height: min(820px, 92vh);
+  overflow-y: auto;
+}
+
+.policy-budget-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.policy-budget-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.policy-budget-grid input,
+.policy-reviewer input,
+.policy-reviewer select {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  padding: 8px 9px;
+  font: inherit;
+}
+
+.policy-note {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.policy-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+}
+
+.policy-section-title legend {
+  margin: 0;
+}
+
+.policy-reviewer {
+  display: grid;
+  grid-template-columns: 24px 120px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.policy-reviewer.fallback {
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr);
+}
+
+.policy-order {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: var(--bg-inset);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.policy-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 620px) {
+  .policy-budget-grid { grid-template-columns: 1fr; }
+  .policy-reviewer { grid-template-columns: 24px 1fr auto; }
+  .policy-reviewer input { grid-column: 2 / -1; }
 }
 
 .btn-allow {

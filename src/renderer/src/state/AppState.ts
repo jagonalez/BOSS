@@ -69,6 +69,7 @@ export interface AppState {
   commitPath: string | null
   renameTarget: string | null
   delegateTarget: string | null
+  policyTarget: string | null
   confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; action: () => void } | null
   reviewFile: string | null
   browse: Record<string, BrowseNavigationState>
@@ -163,6 +164,7 @@ export const initialState: AppState = {
   commitPath: null,
   renameTarget: null,
   delegateTarget: null,
+  policyTarget: null,
   confirm: null,
   reviewFile: null,
   browse: {},
