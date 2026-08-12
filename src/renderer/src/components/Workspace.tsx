@@ -28,7 +28,7 @@ import {
   setWorkspaceSplitRatio,
   splitWorkspaceGroup
 } from '../lib/actions'
-import { activeWorkspaceView, walkTabs } from '../lib/workspaces'
+import { activeWorkspaceView, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -391,14 +391,18 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
   const focused = view?.focusedGroupId === group.id
   const movable = Boolean(view && walkTabs(view.root).length > 1)
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
+  const [menuRight, setMenuRight] = useState<number | null>(null)
   const [dropTarget, setDropTarget] = useState<DropPosition | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const addButtonRef = useRef<HTMLButtonElement>(null)
   const activeId = group.tabs.some((item) => item.id === group.activeTabId) ? group.activeTabId : group.tabs[0]?.id ?? null
 
   useEffect(() => {
     if (!menuOpen) return
     const close = (event: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false)
+      const target = event.target as Node
+      if (addButtonRef.current?.contains(target)) return
+      if (menuRef.current && !menuRef.current.contains(target)) setMenuOpen(false)
     }
     const key = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setMenuOpen(false)
@@ -428,7 +432,8 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
 
   return (
     <section
-      className={`workspace-group ${focused ? 'focused' : ''}`}
+      className={`workspace-group ${focused ? 'focused' : ''} ${menuRight !== null ? 'menu-anchored' : ''}`}
+      style={{ '--workspace-add-menu-right': `${menuRight ?? 8}px` } as React.CSSProperties}
       data-workspace-group={group.id}
       onMouseDown={() => focusWorkspaceGroup(group.id)}
       onDragOver={(event) => {
@@ -490,10 +495,16 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
             </button>
           ))}
           <button
+            ref={addButtonRef}
             className="workspace-tab-add"
             title="Add tab"
             onClick={(event) => {
               event.stopPropagation()
+              const trigger = event.currentTarget.getBoundingClientRect()
+              const container = event.currentTarget.closest('.workspace-group')?.getBoundingClientRect()
+              setMenuRight(container
+                ? workspaceMenuRight(trigger.right, container.left, container.right)
+                : 8)
               setMenuOpen((open) => !open)
             }}
           >
@@ -512,7 +523,10 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
 
       <div className="workspace-group-content">
         {group.tabs.length === 0 ? (
-          <button className="workspace-empty-group" onClick={() => setMenuOpen(true)}>
+          <button className="workspace-empty-group" onClick={() => {
+            setMenuRight(null)
+            setMenuOpen(true)
+          }}>
             <PlusIcon size={18} />
             <span>Add a thread or tool</span>
           </button>

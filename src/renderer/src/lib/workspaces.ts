@@ -44,6 +44,21 @@ export function nextWorkspaceViewName(views: Array<Pick<WorkspaceView, 'name'>>)
   return `View ${highest + 1}`
 }
 
+/** Align a menu's right edge with its trigger while keeping the whole menu
+ * inside the workspace group. Values are relative to the viewport. */
+export function workspaceMenuRight(
+  triggerRight: number,
+  containerLeft: number,
+  containerRight: number,
+  menuWidth = 220,
+  inset = 8
+): number {
+  const containerWidth = Math.max(0, containerRight - containerLeft)
+  const desired = containerRight - triggerRight
+  const maximum = Math.max(inset, containerWidth - Math.min(menuWidth, Math.max(0, containerWidth - inset * 2)) - inset)
+  return Math.min(Math.max(inset, desired), maximum)
+}
+
 export function split(
   direction: SplitDirection,
   first: WorkspaceNode,
