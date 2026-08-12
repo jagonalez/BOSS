@@ -1,4 +1,4 @@
-import { appStore, upsertMessagesFromList, type Attachment } from '../state/AppState'
+import { appStore, type Attachment } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
@@ -995,7 +995,11 @@ export async function loadMessages(sessionID: string): Promise<void> {
   try {
     const list = await OpenCode.listMessages(sessionID)
     appStore.setState((s) => ({
-      messages: upsertMessagesFromList(s.messages, list)
+      // The main-process transcript is the authoritative projection and already
+      // merges richer live parts with native history. Replacing this thread is
+      // important: retaining renderer-only message ids can show the same
+      // response twice after a backend reconciles its live and history ids.
+      messages: { ...s.messages, [sessionID]: list }
     }))
     const state = appStore.getState()
     if (!state.sessionBusy[sessionID] && !recentlySent(sessionID)) finalizeStalledParts(sessionID)

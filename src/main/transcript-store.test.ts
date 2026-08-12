@@ -90,6 +90,64 @@ test('can prune messages only after native history is authoritative', () => {
   }
 })
 
+test('reconciles duplicate live and native narrative parts without dropping tool details', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ralf-transcripts-'))
+  const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
+  try {
+    store.recordMessage(source, {
+      id: 'assistant-turn', sessionID: source.nativeSessionId, role: 'assistant'
+    })
+    store.recordPart(source, {
+      id: 'live-text', type: 'text', sessionID: source.nativeSessionId,
+      messageID: 'assistant-turn', text: 'This response must appear once.'
+    })
+    store.recordPart(source, {
+      id: 'live-tool', type: 'tool', sessionID: source.nativeSessionId,
+      messageID: 'assistant-turn', state: { status: 'completed', tool: 'shell', output: 'kept' }
+    })
+    store.reconcile(source, [{
+      info: { id: 'assistant-turn', sessionID: source.nativeSessionId, role: 'assistant' },
+      parts: [{
+        id: 'native-text', type: 'text', sessionID: source.nativeSessionId,
+        messageID: 'assistant-turn', text: 'This response must appear once.'
+      }]
+    }])
+
+    const parts = store.messages(source.threadId)[0].parts
+    assert.deepEqual(parts.filter((part) => part.type === 'text').map((part) => part.id), ['native-text'])
+    assert.equal(parts.find((part) => part.id === 'live-tool')?.state?.output, 'kept')
+    store.close()
+
+    const reopened = new TranscriptStore(join(directory, 'transcripts.sqlite'))
+    assert.equal(
+      reopened.messages(source.threadId)[0].parts.filter((part) => part.type === 'text').length,
+      1
+    )
+    reopened.close()
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('does not render duplicate narrative rows already persisted under different ids', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ralf-transcripts-'))
+  const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
+  try {
+    for (const id of ['stream-text', 'history-text']) {
+      store.recordPart(source, {
+        id, type: 'text', sessionID: source.nativeSessionId,
+        messageID: 'assistant-turn', text: 'Same semantic response.'
+      })
+    }
+    const texts = store.messages(source.threadId)[0].parts.filter((part) => part.type === 'text')
+    assert.equal(texts.length, 1)
+    assert.equal(texts[0].text, 'Same semantic response.')
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('recovers an active run and marks unfinished tools as interrupted', () => {
   const directory = mkdtempSync(join(tmpdir(), 'ralf-transcripts-'))
   const path = join(directory, 'transcripts.sqlite')
