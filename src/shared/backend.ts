@@ -122,6 +122,8 @@ export type BackendRequest =
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }
   | { type: 'mcp.remove'; connectionId: string }
   | { type: 'mcp.import.scan' }
+  | { type: 'mobile.status' }
+  | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean } }
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
   | { type: 'thread.bus.clear-failures'; threadId?: string }
