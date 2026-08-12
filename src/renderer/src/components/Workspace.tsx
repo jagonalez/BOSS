@@ -339,7 +339,17 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
   )
 }
 
-function TabContent({ item, active, overlayOpen }: { item: WorkspaceTab; active: boolean; overlayOpen: boolean }): React.JSX.Element {
+function TabContent({
+  groupId,
+  item,
+  active,
+  overlayOpen
+}: {
+  groupId: string
+  item: WorkspaceTab
+  active: boolean
+  overlayOpen: boolean
+}): React.JSX.Element {
   const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
   const reviewSessionId = useStore(appStore, (state) => {
     const activeSession = state.sessions.find((session) => session.id === state.activeSessionId)
@@ -361,7 +371,13 @@ function TabContent({ item, active, overlayOpen }: { item: WorkspaceTab; active:
       content = <BrowseTab id={`workspace-${item.id}`} visible={active && !overlayOpen} />
       break
     case 'terminal':
-      content = <TerminalTab authBackendId={authBackendId} contextPath={item.contextPath} />
+      content = (
+        <TerminalTab
+          authBackendId={authBackendId}
+          contextPath={item.contextPath}
+          onExit={() => closeWorkspaceTab(groupId, item.id)}
+        />
+      )
       break
     case 'review':
       content = <ReviewTab contextPath={item.contextPath} sessionId={reviewSessionId} />
@@ -532,7 +548,13 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
           </button>
         ) : null}
         {group.tabs.map((item) => (
-          <TabContent key={item.id} item={item} active={item.id === activeId} overlayOpen={menuOpen || Boolean(dropTarget)} />
+          <TabContent
+            key={item.id}
+            groupId={group.id}
+            item={item}
+            active={item.id === activeId}
+            overlayOpen={menuOpen || Boolean(dropTarget)}
+          />
         ))}
       </div>
 
