@@ -21,6 +21,8 @@ import type { WorktreeManager } from './worktree-manager'
 interface AutomationState {
   version: 1
   automations: Automation[]
+  /** POST target for phone push (an ntfy topic URL or any webhook). */
+  notifyWebhookUrl?: string
 }
 
 interface RunState {
@@ -75,6 +77,7 @@ function extractSummary(messages: MessageWithParts[]): string | undefined {
 export class AutomationManager {
   private loaded = false
   private automations: Automation[] = []
+  private notifyWebhookUrl = ''
   private runs: AutomationRun[] = []
   private readonly active = new Map<string, ActiveRun>()
   private tickTimer?: NodeJS.Timeout
@@ -91,7 +94,10 @@ export class AutomationManager {
     this.loaded = true
     try {
       const parsed = JSON.parse(await readFile(this.options.stateFile, 'utf8')) as Partial<AutomationState>
-      if (parsed.version === 1 && Array.isArray(parsed.automations)) this.automations = parsed.automations
+      if (parsed.version === 1 && Array.isArray(parsed.automations)) {
+        this.automations = parsed.automations
+        this.notifyWebhookUrl = typeof parsed.notifyWebhookUrl === 'string' ? parsed.notifyWebhookUrl : ''
+      }
       for (const automation of this.automations) {
         // Migrate the pre-notify-mode boolean field.
         const legacy = automation.notify as unknown
@@ -121,7 +127,11 @@ export class AutomationManager {
 
   private async save(): Promise<void> {
     await mkdir(dirname(this.options.stateFile), { recursive: true })
-    const state: AutomationState = { version: 1, automations: this.automations }
+    const state: AutomationState = {
+      version: 1,
+      automations: this.automations,
+      ...(this.notifyWebhookUrl ? { notifyWebhookUrl: this.notifyWebhookUrl } : {})
+    }
     const runState: RunState = { version: 1, runs: this.runs }
     await writeFile(this.options.stateFile, JSON.stringify(state, null, 2))
     await writeFile(this.options.runsFile, JSON.stringify(runState, null, 2))
@@ -306,6 +316,17 @@ export class AutomationManager {
       case 'automation.delete': return this.delete(request.automationId)
       case 'automation.run': return this.runNow(request.automationId)
       case 'automation.stop': return this.stopRun(request.automationId)
+      case 'automation.webhook.get':
+        await this.load()
+        return this.notifyWebhookUrl
+      case 'automation.webhook.set': {
+        await this.load()
+        const url = request.url.trim()
+        if (url && !/^https?:\/\//.test(url)) throw new Error('The webhook must be an http(s) URL, e.g. https://ntfy.sh/your-topic.')
+        this.notifyWebhookUrl = url
+        await this.save()
+        return this.notifyWebhookUrl
+      }
       default: throw new Error(`Unsupported automation request: ${request.type}`)
     }
   }
@@ -563,6 +584,17 @@ export class AutomationManager {
       new Notification({ title: 'R.A.L.F. automation', body }).show()
     } catch {
       /* Notifications are best-effort. */
+    }
+    if (this.notifyWebhookUrl) {
+      // ntfy-compatible: plain-text body, title in a header. Any webhook that
+      // accepts a text POST works.
+      void fetch(this.notifyWebhookUrl, {
+        method: 'POST',
+        headers: { title: `R.A.L.F. · ${automation.name}`, 'content-type': 'text/plain' },
+        body
+      }).catch(() => {
+        /* Push is best-effort; the run record is the source of truth. */
+      })
     }
   }
 }
