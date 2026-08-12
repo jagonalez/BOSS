@@ -384,7 +384,8 @@ export class AutomationManager {
           mode: automation.mode,
           model: automation.model
             ? { providerID: automation.model.providerID, modelID: automation.model.modelID }
-            : undefined
+            : undefined,
+          strictTools: true
         }
       })
       active.sent = true

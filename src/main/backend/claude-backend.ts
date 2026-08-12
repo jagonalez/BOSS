@@ -253,6 +253,7 @@ export class ClaudeBackend implements Backend {
       '--permission-mode', mode,
       '--append-system-prompt', QA_GUIDANCE,
       ...(threadBusConfig ? ['--mcp-config', threadBusConfig, '--allowedTools', allowedThreadTools] : []),
+      ...(options?.strictTools && threadBusConfig ? ['--strict-mcp-config'] : []),
       ...(hasHistory ? ['--resume', sessionId] : ['--session-id', sessionId]),
       ...(options?.model?.modelID ? ['--model', options.model.modelID] : []),
       ...(options?.model?.variant ? ['--effort', options.model.variant] : []),
