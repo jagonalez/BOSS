@@ -18,6 +18,7 @@ import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
+import type { MobileAccessStatus } from '@shared/mobile'
 
 export class ApiError extends Error {
   constructor(
@@ -171,6 +172,11 @@ export const OpenCode = {
     backendRequest<McpConnectionView>({ type: 'mcp.update', connectionId, patch }),
   mcpRemove: (connectionId: string) => backendRequest<void>({ type: 'mcp.remove', connectionId }),
   mcpImportScan: () => backendRequest<McpImportCandidate[]>({ type: 'mcp.import.scan' }),
+  notifyWebhook: () => backendRequest<string>({ type: 'automation.webhook.get' }),
+  setNotifyWebhook: (url: string) => backendRequest<string>({ type: 'automation.webhook.set', url }),
+  mobileStatus: () => backendRequest<MobileAccessStatus>({ type: 'mobile.status' }),
+  mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean }) =>
+    backendRequest<MobileAccessStatus>({ type: 'mobile.set', patch }),
   automationsList: () => backendRequest<AutomationsSnapshot>({ type: 'automation.list' }),
   createAutomation: (input: AutomationInput) => backendRequest<Automation>({ type: 'automation.create', input }),
   updateAutomation: (automationId: string, patch: Partial<AutomationInput> & { enabled?: boolean }) =>

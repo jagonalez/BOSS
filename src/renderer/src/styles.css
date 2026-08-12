@@ -2405,6 +2405,24 @@ textarea {
   cursor: pointer;
 }
 
+.row-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-webhook {
+  width: 240px;
+}
+
+.mobile-token {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .mcp-tools-list {
   margin: 6px 0 0;
   padding-left: 18px;
