@@ -32,6 +32,7 @@ import type {
 import type { ProjectInfo } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, LayoutTemplate, ProjectWorkspace, TerminalStartLocation } from '@shared/workspace'
+import type { TeamSnapshot } from '@shared/team'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
 
@@ -100,6 +101,7 @@ export interface AppState {
   qaPolicies: Record<string, QaPolicyState>
   qaDefault: QaPolicy
   automations: AutomationsSnapshot | null
+  team: TeamSnapshot | null
   mcpConnections: McpConnectionView[]
   projectPath: string
   selectedCheckoutPath: string
@@ -195,6 +197,7 @@ export const initialState: AppState = {
   qaPolicies: {},
   qaDefault: 'suggest',
   automations: null,
+  team: null,
   mcpConnections: [],
   projectPath: '',
   selectedCheckoutPath: '',

@@ -8,6 +8,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
+import type { TeamSnapshot } from '@shared/team'
 import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind } from '@shared/workspace'
 import {
   activeWorkspaceView,
@@ -58,6 +59,17 @@ export function setTerminalStartLocation(value: TerminalStartLocation): void {
 
 export function showPage(page: AppPage): void {
   appStore.setState({ activePage: page })
+}
+
+export async function refreshTeamBoard(): Promise<TeamSnapshot | null> {
+  try {
+    const team = await OpenCode.teamSnapshot()
+    appStore.setState({ team })
+    return team
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+    return null
+  }
 }
 
 export function setNativeViewsSuspended(reason: string, suspended: boolean): void {

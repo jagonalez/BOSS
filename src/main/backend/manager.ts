@@ -23,6 +23,7 @@ import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
+import type { TeamBoardManager } from '../team-board-manager'
 
 interface ThreadBinding {
   id: string
@@ -175,6 +176,7 @@ export class BackendManager {
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
+  private teamBoards?: TeamBoardManager
   private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
   private loaded = false
   private worktreeCleanupTimer?: NodeJS.Timeout
@@ -277,6 +279,10 @@ export class BackendManager {
 
   attachMobile(mobile: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.mobile = mobile
+  }
+
+  attachTeamBoards(teamBoards: TeamBoardManager): void {
+    this.teamBoards = teamBoards
   }
 
   async start(projectPath?: string): Promise<void> {
@@ -1060,6 +1066,50 @@ export class BackendManager {
     return removed
   }
 
+  async startTeamTask(input: {
+    backendId: BackendId
+    projectPath: string
+    title: string
+    prompt: string
+    worktree: boolean
+  }): Promise<{ threadId: string; worktreeBranch?: string }> {
+    const scope = projectScope(input.projectPath)
+    if (!scope.projectPath) throw new Error('Choose a project folder before starting this task.')
+    let worktree: WorktreeInfo | undefined
+    if (input.worktree) {
+      if (!this.worktrees) throw new Error('Git worktrees are not available.')
+      worktree = await this.worktrees.create({
+        projectId: scope.projectId,
+        projectPath: scope.projectPath,
+        sourcePath: scope.executionPath,
+        title: input.title
+      })
+    }
+    let created: SessionInfo
+    try {
+      created = await this.sessionCreateInScope(
+        input.backendId,
+        worktree
+          ? { projectId: scope.projectId, projectPath: scope.projectPath, executionPath: worktree.path }
+          : scope,
+        input.title,
+        undefined,
+        worktree
+      )
+      if (worktree) {
+        await this.worktrees?.setOwner(worktree.id, created.id)
+        const binding = this.binding(created.id)
+        binding.worktree = { ...worktree, ownerThreadId: created.id }
+        this.save()
+      }
+      await this.sendMessage(created.id, [{ type: 'text', text: input.prompt }], { mode: 'ask' })
+    } catch (error) {
+      if (worktree) await this.worktrees?.remove(worktree.id).catch(() => {})
+      throw error
+    }
+    return { threadId: created.id, worktreeBranch: worktree?.branch }
+  }
+
   async relay(sourceThreadId: string, targetThreadId: string, instruction?: string): Promise<SessionInfo> {
     if (sourceThreadId === targetThreadId) throw new Error('Choose a different target thread.')
     const packet = await this.contextPacket(sourceThreadId, instruction ?? 'Review this update and respond with anything the source thread should know.')
@@ -1079,6 +1129,10 @@ export class BackendManager {
     if (request.type.startsWith('mobile.')) {
       if (!this.mobile) throw new Error('Mobile access is not available.')
       return this.mobile.handle(request)
+    }
+    if (request.type.startsWith('team.')) {
+      if (!this.teamBoards) throw new Error('Team boards are not available.')
+      return this.teamBoards.handle(request)
     }
     switch (request.type) {
       case 'backend.list': return this.descriptors()

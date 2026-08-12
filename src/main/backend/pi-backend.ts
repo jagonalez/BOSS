@@ -457,6 +457,37 @@ export default function (pi: ExtensionAPI) {
     execute: (_id, args, signal) => call("ralf_threads_spawn_worktree", args, signal)
   })
   pi.registerTool({
+    name: "ralf_team_board_read",
+    label: "Read R.A.L.F. Team Board",
+    description: "Read the shared team brief, people, tasks, and public updates. Private transcripts are excluded.",
+    parameters: Type.Object({}),
+    execute: (_id, args, signal) => call("ralf_team_board_read", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_team_tasks_propose",
+    label: "Propose R.A.L.F. team tasks",
+    description: "Propose structured tasks on the connected R.A.L.F. team board.",
+    parameters: Type.Object({
+      tasks: Type.Array(Type.Object({
+        title: Type.String(),
+        summary: Type.Optional(Type.String()),
+        acceptanceCriteria: Type.Optional(Type.Array(Type.String())),
+        projectHint: Type.Optional(Type.String())
+      }), { minItems: 1, maxItems: 20 })
+    }),
+    execute: (_id, args, signal) => call("ralf_team_tasks_propose", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_team_task_publish",
+    label: "Publish R.A.L.F. team update",
+    description: "Publish a concise update or status for the team task that started this thread. Never publishes the private transcript.",
+    parameters: Type.Object({
+      update: Type.Optional(Type.String()),
+      status: Type.Optional(Type.Union([Type.Literal("working"), Type.Literal("blocked"), Type.Literal("review"), Type.Literal("done")]))
+    }),
+    execute: (_id, args, signal) => call("ralf_team_task_publish", args, signal)
+  })
+  pi.registerTool({
     name: "ralf_mcp_list",
     label: "List R.A.L.F. MCP tools",
     description: "List external MCP tools available through R.A.L.F. connections. Pass tool to get one tool's full input schema before calling it.",

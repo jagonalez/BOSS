@@ -117,7 +117,55 @@ export class OpenCodeServer {
     const toolsDir = join(this.threadBusConfigDir, 'tools')
     mkdirSync(toolsDir, { recursive: true })
     writeFileSync(join(toolsDir, 'ralf_threads.ts'), this.threadToolSource())
+    writeFileSync(join(toolsDir, 'ralf_team.ts'), this.teamToolSource())
     writeFileSync(join(toolsDir, 'ralf.ts'), this.qaToolSource())
+  }
+
+  private teamToolSource(): string {
+    return `import { tool } from "@opencode-ai/plugin"
+
+async function call(name, args, context) {
+  const url = process.env.RALF_THREAD_BUS_URL
+  const token = process.env.RALF_THREAD_BUS_TOKEN
+  if (!url || !token) throw new Error("R.A.L.F. Team Board is unavailable.")
+  const response = await fetch(url + "/agent-call", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ backendId: "opencode", nativeThreadId: context.sessionID, tool: name, arguments: args })
+  })
+  const payload = await response.json()
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. team tool failed.")
+  return JSON.stringify(payload.result, null, 2)
+}
+
+export const board_read = tool({
+  description: "Read the connected R.A.L.F. team brief, tasks, people, and public updates. Private transcripts are excluded.",
+  args: {},
+  execute(args, context) { return call("ralf_team_board_read", args, context) }
+})
+
+export const tasks_propose = tool({
+  description: "Propose structured tasks on the connected R.A.L.F. team board.",
+  args: {
+    tasks: tool.schema.array(tool.schema.object({
+      title: tool.schema.string(),
+      summary: tool.schema.string().optional(),
+      acceptanceCriteria: tool.schema.array(tool.schema.string()).optional(),
+      projectHint: tool.schema.string().optional()
+    })).min(1).max(20)
+  },
+  execute(args, context) { return call("ralf_team_tasks_propose", args, context) }
+})
+
+export const task_publish = tool({
+  description: "Publish a concise update or status for the team task that started this thread. Never publishes the private transcript.",
+  args: {
+    update: tool.schema.string().optional(),
+    status: tool.schema.enum(["working", "blocked", "review", "done"]).optional()
+  },
+  execute(args, context) { return call("ralf_team_task_publish", args, context) }
+})
+`
   }
 
   private threadToolSource(): string {

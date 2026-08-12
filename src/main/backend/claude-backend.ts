@@ -7,6 +7,7 @@ import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backe
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
+import { TEAM_AGENT_TOOL_DEFINITIONS } from '@shared/team'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { textFromParts } from './manager'
 import { claudePermissionMode, claudePermissionResponse, parseClaudePermission } from './claude-protocol'
@@ -258,6 +259,7 @@ export class ClaudeBackend implements Backend {
       'mcp__ralf_thread_bus__ralf_threads_send',
       'mcp__ralf_thread_bus__ralf_threads_reply',
       'mcp__ralf_thread_bus__ralf_threads_spawn_worktree',
+      ...TEAM_AGENT_TOOL_DEFINITIONS.map((tool) => `mcp__ralf_thread_bus__${tool.name}`),
       ...QA_TOOL_DEFINITIONS.map((tool) => `mcp__ralf_thread_bus__${tool.name}`),
       ...(this.threadBus?.agentToolNames() ?? []).map((name) => `mcp__ralf_thread_bus__${name}`)
     ].join(',')

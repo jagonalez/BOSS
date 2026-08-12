@@ -4,6 +4,7 @@ import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backe
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
+import { TEAM_AGENT_TOOL_DEFINITIONS } from '@shared/team'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 
 type RpcId = string | number
@@ -124,6 +125,12 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
       additionalProperties: false
     }
   },
+  ...TEAM_AGENT_TOOL_DEFINITIONS.map((tool) => ({
+    type: 'function',
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema
+  })),
   ...QA_TOOL_DEFINITIONS.map((tool) => ({
     type: 'function',
     name: tool.name,
@@ -445,7 +452,7 @@ export class CodexBackend implements Backend {
   private handleServerRequest(id: RpcId, method: string, params: Record<string, unknown>): void {
     if (method === 'item/tool/call') {
       const tool = String(params.tool ?? '') as ThreadBusAgentTool
-      if (!this.threadBusHandler || (!tool.startsWith('ralf_threads_') && !tool.startsWith('ralf_browser_') && !tool.startsWith('ralf_mcp_') && tool !== 'ralf_computer')) {
+      if (!this.threadBusHandler || (!tool.startsWith('ralf_threads_') && !tool.startsWith('ralf_team_') && !tool.startsWith('ralf_browser_') && !tool.startsWith('ralf_mcp_') && tool !== 'ralf_computer')) {
         this.respond(id, { contentItems: [{ type: 'inputText', text: 'Unknown R.A.L.F. tool.' }], success: false })
         return
       }

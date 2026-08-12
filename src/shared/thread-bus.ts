@@ -1,5 +1,6 @@
 import type { BackendId } from './backend'
 import type { QaAgentTool } from './qa'
+import type { TeamAgentTool } from './team'
 
 export type CollaborationPolicy = 'off' | 'read' | 'collaborate'
 export type ThreadBusMessageStatus = 'queued' | 'delivered' | 'failed'
@@ -59,6 +60,7 @@ export type ThreadBusAgentTool =
   | 'ralf_mcp_list'
   | 'ralf_mcp_call'
   | `mcp_${string}`
+  | TeamAgentTool
   | QaAgentTool
 
 export interface ThreadBusToolCall {

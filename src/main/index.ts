@@ -24,6 +24,7 @@ import { QaTools } from './qa-tools'
 import { TranscriptStore } from './transcript-store'
 import { ReviewManager } from './review-manager'
 import { GitHubReviewProvider } from './github-review-provider'
+import { TeamBoardManager } from './team-board-manager'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -66,6 +67,13 @@ mcpHub.setOnChange(() => {
 const webAccess = new WebAccess(join(app.getPath('userData'), 'mobile-access.json'), backendMgr)
 backendMgr.attachMobile(webAccess)
 webAccess.setOnChange(() => backendMgr.emit({ type: 'mobile.updated', properties: { status: webAccess.status() } }))
+const teamBoards = new TeamBoardManager(join(app.getPath('userData'), 'team-board.json'), backendMgr)
+backendMgr.attachTeamBoards(teamBoards)
+threadBus.attachTeamBoards(teamBoards)
+webAccess.setTeamAccess((token) => teamBoards.authorize(token))
+backendMgr.onEvent((event) => {
+  void teamBoards.handleBackendEvent(event)
+})
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse()

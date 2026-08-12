@@ -7,6 +7,7 @@ import { Workspace } from './components/Workspace'
 import { CommandCenter } from './components/CommandCenter'
 import { SitesPage } from './components/SitesPage'
 import { AutomationsPage } from './components/AutomationsPage'
+import { TeamBoardPage } from './components/TeamBoardPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme } from './lib/themes'
 import { CommitDialog } from './components/CommitDialog'
@@ -24,6 +25,7 @@ import {
   refreshSessions,
   refreshThreadBus,
   refreshAutomations,
+  refreshTeamBoard,
   syncAutomationThreadPreferences,
   finalizeStalledParts,
   refreshStreaming,
@@ -56,6 +58,7 @@ async function refreshAll(): Promise<void> {
   void refreshConfig()
   void refreshThreadBus()
   void refreshAutomations()
+  void refreshTeamBoard()
   const id = appStore.getState().activeSessionId
   if (id) {
     void loadMessages(id)
@@ -216,6 +219,9 @@ export function App(): React.JSX.Element {
         case 'automations.updated':
           syncAutomationThreadPreferences(appStore.getState().automations)
           break
+        case 'team.updated':
+          void refreshTeamBoard()
+          break
         default:
           break
       }
@@ -313,6 +319,7 @@ export function App(): React.JSX.Element {
 
   const page = (() => {
     if (activePage === 'command-center') return <CommandCenter />
+    if (activePage === 'team') return <TeamBoardPage />
     if (activePage === 'automations') return <AutomationsPage />
     if (activePage === 'sites') return <SitesPage />
     if (activePage === 'project') return <Workspace />

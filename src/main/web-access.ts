@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { BackendRequest } from '../shared/backend'
 import type { MobileAccessConfig, MobileAccessStatus } from '../shared/mobile'
 import { MOBILE_PAGE } from './mobile-page'
+import { webAccessRequestAllowed, type WebAccessRole } from './web-access-policy'
 
 /**
  * Serves the mobile site and a narrow API over loopback. Remote access is
@@ -17,23 +18,6 @@ interface WebAccessHost {
   handle(request: BackendRequest): Promise<unknown>
   onEvent(callback: (event: Record<string, unknown>) => void): () => void
 }
-
-/** Only thread review/steering and automations. No settings, no MCP
- * connection management, no worktree removal, no thread deletion. */
-const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
-  'backend.list',
-  'thread.list',
-  'thread.get',
-  'thread.messages',
-  'thread.send',
-  'thread.abort',
-  'thread.todos',
-  'thread.permission',
-  'thread.diff',
-  'automation.list',
-  'automation.run',
-  'automation.stop'
-])
 
 /** Event types the mobile page reacts to; the rest are desktop concerns. */
 const FORWARDED_EVENTS = new Set([
@@ -82,6 +66,7 @@ export class WebAccess {
   private tailscaleUrl?: string
   private tailscaleError?: string
   private tailscaleServing = false
+  private teamAccess?: (token: string) => boolean
 
   constructor(private readonly configFile: string, private readonly host: WebAccessHost) {
     this.config = this.load()
@@ -89,6 +74,10 @@ export class WebAccess {
 
   setOnChange(callback: () => void): void {
     this.onChange = callback
+  }
+
+  setTeamAccess(callback: (token: string) => boolean): void {
+    this.teamAccess = callback
   }
 
   private load(): MobileAccessConfig {
@@ -199,14 +188,15 @@ export class WebAccess {
     this.onChange?.()
   }
 
-  private authorized(request: IncomingMessage): boolean {
+  private accessRole(request: IncomingMessage): WebAccessRole | null {
     const url = new URL(request.url ?? '/', 'http://localhost')
     const supplied = request.headers.authorization?.startsWith('Bearer ')
       ? request.headers.authorization.slice(7)
       : url.searchParams.get('token') ?? ''
     const expected = Buffer.from(this.config.token)
     const given = Buffer.from(supplied)
-    return given.length === expected.length && timingSafeEqual(given, expected)
+    if (given.length === expected.length && timingSafeEqual(given, expected)) return 'control'
+    return this.teamAccess?.(supplied) ? 'team' : null
   }
 
   private broadcast(event: Record<string, unknown>): void {
@@ -226,11 +216,16 @@ export class WebAccess {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(MOBILE_PAGE)
       return
     }
-    if (!this.authorized(request)) {
+    const role = this.accessRole(request)
+    if (!role) {
       this.json(response, 401, { error: 'unauthorized' })
       return
     }
     if (path === '/api/events' && request.method === 'GET') {
+      if (role !== 'control') {
+        this.json(response, 403, { error: 'Team access does not include private desktop events.' })
+        return
+      }
       response.writeHead(200, {
         'content-type': 'text/event-stream',
         'cache-control': 'no-cache',
@@ -252,7 +247,7 @@ export class WebAccess {
         void (async () => {
           try {
             const payload = JSON.parse(body) as BackendRequest
-            if (!ALLOWED_REQUESTS.has(payload.type)) {
+            if (!webAccessRequestAllowed(role, payload.type)) {
               this.json(response, 403, { error: `"${payload.type}" is not available over mobile access.` })
               return
             }

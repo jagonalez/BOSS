@@ -18,6 +18,8 @@ import { projectScope } from './project-identity'
 import type { QaTools } from './qa-tools'
 import { MCP_TOOL_PREFIX } from '@shared/mcp'
 import type { McpHub } from './mcp-hub'
+import type { TeamBoardManager } from './team-board-manager'
+import { TEAM_AGENT_TOOL_DEFINITIONS } from '@shared/team'
 
 interface LegacyThreadBusState {
   version: 1
@@ -87,6 +89,7 @@ export class ThreadBus {
   private readonly deliveryLocks = new Set<string>()
   private qaTools?: QaTools
   private mcpHub?: McpHub
+  private teamBoards?: TeamBoardManager
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
@@ -98,6 +101,10 @@ export class ThreadBus {
 
   attachMcpHub(mcpHub: McpHub): void {
     this.mcpHub = mcpHub
+  }
+
+  attachTeamBoards(teamBoards: TeamBoardManager): void {
+    this.teamBoards = teamBoards
   }
 
   qaStatus(threadId: string) {
@@ -218,6 +225,10 @@ export class ThreadBus {
         return this.mcpHub.callAgentTool(name, toolArgs)
       }
       return this.mcpHub.callAgentTool(tool, args)
+    }
+    if (tool.startsWith('ralf_team_')) {
+      if (!this.teamBoards) throw new Error('R.A.L.F. Team Board is not ready.')
+      return this.teamBoards.agentCall(caller.id, tool as import('@shared/team').TeamAgentTool, args)
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
@@ -487,6 +498,12 @@ export class ThreadBus {
           additionalProperties: false
         }
       },
+      ...TEAM_AGENT_TOOL_DEFINITIONS.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: { readOnlyHint: tool.readOnly }
+      })),
       ...QA_TOOL_DEFINITIONS.map((tool) => ({
         name: tool.name,
         description: tool.description,
