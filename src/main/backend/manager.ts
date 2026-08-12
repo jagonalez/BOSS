@@ -596,7 +596,7 @@ export class BackendManager {
   }
 
   private emitFollowUps(binding: ThreadBinding): void {
-    this.eventCb?.({
+    this.emit({
       type: 'thread.followups.updated',
       properties: { threadId: binding.id, followUps: binding.followUps ?? [] },
       backendId: binding.backendId
@@ -712,7 +712,7 @@ export class BackendManager {
         queueMicrotask(() => void this.deliverNextFollowUp(threadId))
       }
     } catch (error) {
-      this.eventCb?.({
+      this.emit({
         type: 'session.error',
         properties: { sessionID: threadId, error: error instanceof Error ? error.message : String(error) },
         backendId: binding.backendId
