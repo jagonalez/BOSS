@@ -220,7 +220,7 @@ export async function refreshBackendModels(): Promise<void> {
     try {
       if (backend.id === 'opencode') {
         const { all, connected } = await OpenCode.providers()
-        const connectedSet = new Set(connected ?? [])
+        const connectedSet = await connectedProviderIds(connected)
         const providers = (all ?? []).filter((provider) => connectedSet.size === 0 || connectedSet.has(provider.id))
         return [backend.id, providers.flatMap((provider) => providerModels(provider).map((model) => ({
           id: model.id,
@@ -616,6 +616,29 @@ export async function refreshProjects(): Promise<void> {
   }
 }
 
+/**
+ * Providers configured in the opencode config file (provider: { openrouter: … })
+ * may not appear in the /provider "connected" list, which reflects
+ * credential-store logins — union them in so their models stay visible.
+ */
+async function connectedProviderIds(connected: string[] | undefined): Promise<Set<string>> {
+  const ids = new Set(connected ?? [])
+  let config = appStore.getState().config
+  if (!config) {
+    try {
+      config = await OpenCode.config()
+      appStore.setState({ config })
+    } catch {
+      return ids
+    }
+  }
+  const provider = (config as { provider?: unknown }).provider
+  if (provider && typeof provider === 'object') {
+    for (const key of Object.keys(provider as Record<string, unknown>)) ids.add(key)
+  }
+  return ids
+}
+
 export async function refreshProviders(sessionId?: string): Promise<void> {
   const state = appStore.getState()
   const id = sessionId ?? state.activeSessionId ?? undefined
@@ -639,7 +662,7 @@ export async function refreshProviders(sessionId?: string): Promise<void> {
       return
     }
     const { all, connected } = await OpenCode.providers()
-    const connectedSet = new Set(connected ?? [])
+    const connectedSet = await connectedProviderIds(connected)
     const filtered = (all ?? []).filter((p) => connectedSet.has(p.id))
     const providers = filtered.length > 0 ? filtered : all ?? []
     appStore.setState((current) => id
