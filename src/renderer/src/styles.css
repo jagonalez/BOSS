@@ -2411,6 +2411,10 @@ textarea {
   gap: 8px;
 }
 
+.mobile-webhook {
+  width: 240px;
+}
+
 .mobile-token {
   padding: 3px 8px;
   border-radius: 6px;

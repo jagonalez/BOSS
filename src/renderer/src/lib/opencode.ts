@@ -172,6 +172,8 @@ export const OpenCode = {
     backendRequest<McpConnectionView>({ type: 'mcp.update', connectionId, patch }),
   mcpRemove: (connectionId: string) => backendRequest<void>({ type: 'mcp.remove', connectionId }),
   mcpImportScan: () => backendRequest<McpImportCandidate[]>({ type: 'mcp.import.scan' }),
+  notifyWebhook: () => backendRequest<string>({ type: 'automation.webhook.get' }),
+  setNotifyWebhook: (url: string) => backendRequest<string>({ type: 'automation.webhook.set', url }),
   mobileStatus: () => backendRequest<MobileAccessStatus>({ type: 'mobile.status' }),
   mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean }) =>
     backendRequest<MobileAccessStatus>({ type: 'mobile.set', patch }),

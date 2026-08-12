@@ -7,10 +7,25 @@ export function MobileSettings(): React.JSX.Element {
   const [status, setStatus] = useState<MobileAccessStatus | null>(null)
   const [showToken, setShowToken] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [webhook, setWebhook] = useState('')
+  const [webhookSaved, setWebhookSaved] = useState(false)
+  const [webhookError, setWebhookError] = useState<string | null>(null)
 
   useEffect(() => {
     void OpenCode.mobileStatus().then(setStatus).catch(() => {})
+    void OpenCode.notifyWebhook().then(setWebhook).catch(() => {})
   }, [])
+
+  const saveWebhook = async (): Promise<void> => {
+    setWebhookError(null)
+    try {
+      setWebhook(await OpenCode.setNotifyWebhook(webhook))
+      setWebhookSaved(true)
+      setTimeout(() => setWebhookSaved(false), 1500)
+    } catch (err) {
+      setWebhookError(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   const apply = async (patch: Parameters<typeof OpenCode.mobileSet>[0]): Promise<void> => {
     setBusy(true)
@@ -81,6 +96,23 @@ export function MobileSettings(): React.JSX.Element {
             </SettingsRow>
           </>
         ) : null}
+      </section>
+      <section className="settings-card settings-card-list">
+        <SettingsRow
+          title="Push notifications"
+          description="Automation notifications also POST to this URL. Easiest: install the ntfy app, subscribe to a topic, and paste https://ntfy.sh/<your-topic> here. Leave empty to disable."
+        >
+          <div className="row-inline">
+            <input
+              className="settings-input mobile-webhook"
+              value={webhook}
+              placeholder="https://ntfy.sh/your-topic"
+              onChange={(e) => setWebhook(e.target.value)}
+            />
+            <Button size="small" onClick={() => void saveWebhook()}>{webhookSaved ? 'Saved' : 'Save'}</Button>
+          </div>
+        </SettingsRow>
+        {webhookError ? <div className="automation-error">{webhookError}</div> : null}
       </section>
     </div>
   )
