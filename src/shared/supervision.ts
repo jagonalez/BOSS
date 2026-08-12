@@ -1,6 +1,13 @@
 import type { BackendId } from './backend'
 
 export type RunStatus = 'running' | 'completed' | 'error' | 'interrupted'
+export type AttentionKind = 'permission' | 'question' | 'completed' | 'error' | 'interrupted'
+
+export interface ThreadAttention {
+  kind: AttentionKind
+  createdAt: number
+  detail?: string
+}
 
 export interface RunMetrics {
   status: RunStatus
@@ -28,6 +35,7 @@ export interface SupervisedThread {
   updatedAt: number
   worktreeBranch?: string
   running: boolean
+  attention?: ThreadAttention
   lastRun?: RunMetrics
   usage: ThreadUsageTotals
 }

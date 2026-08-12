@@ -22,6 +22,9 @@ interface WebAccessHost {
  * connection management, no worktree removal, no thread deletion. */
 const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'backend.list',
+  'supervision.snapshot',
+  'supervision.search',
+  'supervision.acknowledge',
   'thread.list',
   'thread.get',
   'thread.messages',
@@ -33,6 +36,18 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'automation.list',
   'automation.run',
   'automation.stop'
+])
+
+const READ_ONLY_REQUESTS = new Set<BackendRequest['type']>([
+  'backend.list',
+  'supervision.snapshot',
+  'supervision.search',
+  'thread.list',
+  'thread.get',
+  'thread.messages',
+  'thread.todos',
+  'thread.diff',
+  'automation.list'
 ])
 
 /** Event types the mobile page reacts to; the rest are desktop concerns. */
@@ -99,13 +114,22 @@ export class WebAccess {
           enabled: Boolean(parsed.enabled),
           port: Number.isInteger(parsed.port) && (parsed.port as number) > 1024 ? (parsed.port as number) : DEFAULT_PORT,
           token: parsed.token,
+          viewerToken: typeof parsed.viewerToken === 'string' && parsed.viewerToken.length >= 32
+            ? parsed.viewerToken
+            : randomBytes(24).toString('base64url'),
           tailscale: parsed.tailscale !== false
         }
       }
     } catch {
       /* First launch generates a fresh config below. */
     }
-    return { enabled: false, port: DEFAULT_PORT, token: randomBytes(24).toString('base64url'), tailscale: true }
+    return {
+      enabled: false,
+      port: DEFAULT_PORT,
+      token: randomBytes(24).toString('base64url'),
+      viewerToken: randomBytes(24).toString('base64url'),
+      tailscale: true
+    }
   }
 
   private save(): void {
@@ -199,14 +223,17 @@ export class WebAccess {
     this.onChange?.()
   }
 
-  private authorized(request: IncomingMessage): boolean {
+  private access(request: IncomingMessage): 'control' | 'read-only' | null {
     const url = new URL(request.url ?? '/', 'http://localhost')
     const supplied = request.headers.authorization?.startsWith('Bearer ')
       ? request.headers.authorization.slice(7)
       : url.searchParams.get('token') ?? ''
-    const expected = Buffer.from(this.config.token)
     const given = Buffer.from(supplied)
-    return given.length === expected.length && timingSafeEqual(given, expected)
+    for (const [role, token] of [['control', this.config.token], ['read-only', this.config.viewerToken]] as const) {
+      const expected = Buffer.from(token)
+      if (given.length === expected.length && timingSafeEqual(given, expected)) return role
+    }
+    return null
   }
 
   private broadcast(event: Record<string, unknown>): void {
@@ -226,8 +253,13 @@ export class WebAccess {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(MOBILE_PAGE)
       return
     }
-    if (!this.authorized(request)) {
+    const access = this.access(request)
+    if (!access) {
       this.json(response, 401, { error: 'unauthorized' })
+      return
+    }
+    if (path === '/api/access' && request.method === 'GET') {
+      this.json(response, 200, { role: access })
       return
     }
     if (path === '/api/events' && request.method === 'GET') {
@@ -256,6 +288,10 @@ export class WebAccess {
               this.json(response, 403, { error: `"${payload.type}" is not available over mobile access.` })
               return
             }
+            if (access === 'read-only' && !READ_ONLY_REQUESTS.has(payload.type)) {
+              this.json(response, 403, { error: `"${payload.type}" requires a control token.` })
+              return
+            }
             const result = await this.host.handle(payload)
             this.json(response, 200, { ok: true, result: result ?? null })
           } catch (error) {
@@ -279,6 +315,7 @@ export class WebAccess {
           this.config.port = request.patch.port
         }
         if (request.patch.regenerateToken) this.config.token = randomBytes(24).toString('base64url')
+        if (request.patch.regenerateViewerToken) this.config.viewerToken = randomBytes(24).toString('base64url')
         this.save()
         await this.stopServer()
         if (this.config.enabled) await this.startServer()

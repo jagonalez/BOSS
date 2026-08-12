@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, BrowserWindow, Notification } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -11,6 +11,7 @@ import type {
   BackendCapabilities,
   BackendMessageOptions,
   BackendModelPreference,
+  DelegatePlacement,
   QueuedFollowUp,
   QueuedFollowUpAttachment,
   ThreadCreationScope
@@ -23,7 +24,7 @@ import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
-import type { SupervisionSnapshot, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
+import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 
 interface ThreadBinding {
   id: string
@@ -40,6 +41,7 @@ interface ThreadBinding {
   lineage?: SessionInfo['lineage']
   worktree?: WorktreeInfo
   followUps?: QueuedFollowUp[]
+  attention?: ThreadAttention
 }
 
 type LegacyThreadBinding = Omit<ThreadBinding, 'nativeSessionOwnership' | 'projectId' | 'executionPath'>
@@ -220,6 +222,41 @@ export class BackendManager {
 
   emit(event: Record<string, unknown>): void {
     for (const callback of this.eventCbs) callback(event)
+  }
+
+  private errorDetail(value: unknown): string | undefined {
+    if (value instanceof Error) return value.message.slice(0, 240)
+    if (typeof value === 'string') return value.slice(0, 240)
+    if (value && typeof value === 'object') {
+      const record = value as { message?: unknown; data?: { message?: unknown } }
+      const message = record.message ?? record.data?.message
+      if (typeof message === 'string') return message.slice(0, 240)
+    }
+    return undefined
+  }
+
+  private setThreadAttention(binding: ThreadBinding, kind: AttentionKind, detail?: string): void {
+    if (kind === 'completed' && BrowserWindow.getAllWindows().some((window) => window.isFocused())) return
+    const changed = binding.attention?.kind !== kind || binding.attention?.detail !== detail
+    binding.attention = { kind, detail, createdAt: now() }
+    this.save()
+    if (!changed || BrowserWindow.getAllWindows().some((window) => window.isFocused())) return
+    const body = detail ?? ({
+      permission: 'Waiting for permission.',
+      question: 'Waiting for an answer.',
+      completed: 'Finished working.',
+      error: 'The run failed.',
+      interrupted: 'The run was interrupted.'
+    } satisfies Record<AttentionKind, string>)[kind]
+    if (Notification.isSupported()) {
+      new Notification({ title: binding.title ?? 'R.A.L.F. task', body }).show()
+    }
+  }
+
+  private clearThreadAttention(binding: ThreadBinding): void {
+    if (!binding.attention) return
+    binding.attention = undefined
+    this.save()
   }
 
   scopeFor(projectPath: string): ProjectScope {
@@ -494,6 +531,9 @@ export class BackendManager {
       case 'permission.asked':
       case 'permission.updated': return { type: value.type, properties: value.permission ?? {} }
       case 'permission.replied': return { type: value.type, properties: { sessionID: value.sessionID, permissionID: value.permissionID, response: value.response } }
+      case 'question.asked': return { type: value.type, properties: value.question ?? {} }
+      case 'question.replied': return { type: value.type, properties: { sessionID: value.sessionID, requestID: value.requestID } }
+      case 'question.rejected': return { type: value.type, properties: { sessionID: value.sessionID, requestID: value.requestID } }
       case 'session.status': return { type: value.type, properties: { sessionID: value.sessionID, status: value.status } }
       case 'session.idle':
       case 'session.compacted': return { type: value.type, properties: { sessionID: value.sessionID } }
@@ -545,6 +585,10 @@ export class BackendManager {
             this.transcripts?.beginRun(this.transcriptSource(binding))
           }
           this.busyThreads.add(binding.id)
+          if (binding.attention && binding.attention.kind !== 'permission' && binding.attention.kind !== 'question') {
+            binding.attention = undefined
+            this.save()
+          }
         } else {
           this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
           this.busyThreads.delete(binding.id)
@@ -554,9 +598,19 @@ export class BackendManager {
         this.busyThreads.delete(binding.id)
         void this.threadBus?.flush(binding.id)
         void this.deliverNextFollowUp(binding.id)
+        this.setThreadAttention(binding, 'completed')
       } else if (eventType === 'session.error') {
         this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
         this.busyThreads.delete(binding.id)
+        this.setThreadAttention(binding, 'error', this.errorDetail(properties.error))
+      } else if (eventType === 'permission.asked' || eventType === 'permission.updated') {
+        this.setThreadAttention(binding, 'permission')
+      } else if (eventType === 'permission.replied') {
+        if (binding.attention?.kind === 'permission') this.clearThreadAttention(binding)
+      } else if (eventType === 'question.asked') {
+        this.setThreadAttention(binding, 'question')
+      } else if (eventType === 'question.replied' || eventType === 'question.rejected') {
+        if (binding.attention?.kind === 'question') this.clearThreadAttention(binding)
       }
     }
     this.emit({ ...event, properties, backendId })
@@ -989,6 +1043,77 @@ export class BackendManager {
     return created
   }
 
+  async delegate(
+    threadId: string,
+    backendId: BackendId,
+    instruction: string,
+    placement: DelegatePlacement,
+    options?: BackendMessageOptions
+  ): Promise<SessionInfo> {
+    const task = instruction.trim()
+    if (!task) throw new Error('Describe the task to delegate.')
+    const source = this.binding(threadId)
+    const packet = await this.contextPacket(threadId, [
+      'You are a delegated worker. Complete the task below autonomously.',
+      'Keep your work scoped to the task. Report the result, relevant files, verification, and any blockers when finished.',
+      `Delegated task: ${task}`
+    ].join('\n'))
+    const shortTask = task.replace(/\s+/g, ' ').slice(0, 56)
+    const title = `Delegate · ${shortTask}${task.length > 56 ? '…' : ''}`
+    let created: SessionInfo
+
+    if (placement === 'new-worktree') {
+      if (!this.worktrees) throw new Error('Git worktrees are not available.')
+      if (source.projectId === 'global' || !source.projectPath) {
+        throw new Error('Projectless chats cannot delegate into Git worktrees.')
+      }
+      const worktree = await this.worktrees.create({
+        projectId: source.projectId,
+        projectPath: source.projectPath,
+        sourcePath: source.executionPath || source.projectPath,
+        title,
+        ownerThreadId: undefined
+      })
+      try {
+        created = await this.sessionCreateInScope(
+          backendId,
+          { projectId: source.projectId, projectPath: source.projectPath, executionPath: worktree.path },
+          title,
+          { kind: 'delegate', sourceThreadId: threadId, sourceBackendId: source.backendId },
+          worktree
+        )
+        await this.worktrees.setOwner(worktree.id, created.id)
+        const binding = this.binding(created.id)
+        binding.worktree = { ...worktree, ownerThreadId: created.id }
+        this.save()
+        created = this.session(binding)
+      } catch (error) {
+        await this.worktrees.remove(worktree.id).catch(() => {})
+        throw error
+      }
+    } else {
+      created = await this.sessionCreateInScope(
+        backendId,
+        {
+          projectId: source.projectId,
+          projectPath: source.projectPath,
+          executionPath: source.executionPath
+        },
+        title,
+        { kind: 'delegate', sourceThreadId: threadId, sourceBackendId: source.backendId },
+        source.worktree
+      )
+    }
+
+    await this.sendMessage(created.id, [{ type: 'text', text: packet }], {
+      ...options,
+      mode: options?.mode ?? DEFINITIONS[backendId].modes.find((mode) => mode.id === 'auto')?.id
+        ?? DEFINITIONS[backendId].modes.find((mode) => mode.id === 'accept-edits')?.id
+        ?? DEFINITIONS[backendId].modes[0]?.id
+    })
+    return this.sessionGet(created.id)
+  }
+
   async forkIntoWorktree(threadId: string, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const source = this.binding(threadId)
@@ -1082,6 +1207,7 @@ export class BackendManager {
         updatedAt: binding.updatedAt,
         worktreeBranch: binding.worktree?.branch,
         running: this.busyThreads.has(binding.id),
+        attention: binding.attention,
         lastRun: usage.lastRun,
         usage: usage.totals
       }
@@ -1094,6 +1220,14 @@ export class BackendManager {
       toolCalls: value.toolCalls + thread.usage.toolCalls
     }), { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 })
     return { generatedAt: now(), threads, totals }
+  }
+
+  acknowledgeAttention(threadId: string): SupervisionSnapshot {
+    const binding = this.binding(threadId)
+    if (binding.attention?.kind !== 'permission' && binding.attention?.kind !== 'question') {
+      this.clearThreadAttention(binding)
+    }
+    return this.supervisionSnapshot()
   }
 
   searchTranscripts(query: string, limit?: number): TranscriptSearchResult[] {
@@ -1178,7 +1312,9 @@ export class BackendManager {
       }
       case 'supervision.snapshot': return this.supervisionSnapshot()
       case 'supervision.search': return this.searchTranscripts(request.query, request.limit)
+      case 'supervision.acknowledge': return this.acknowledgeAttention(request.threadId)
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction, request.options)
+      case 'thread.delegate': return this.delegate(request.threadId, request.backendId, request.instruction, request.placement, request.options)
       case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction, request.options)
       case 'worktree.list': {
         if (!this.worktrees) return []

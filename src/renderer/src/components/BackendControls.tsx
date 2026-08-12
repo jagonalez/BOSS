@@ -68,6 +68,14 @@ export function BackendControls({ sessionId }: { sessionId: string }): React.JSX
       >
         Send to…
       </button>
+      <button
+        className="backend-control-button relay"
+        disabled={blank}
+        onClick={() => appStore.setState({ delegateTarget: sessionId })}
+        title={blank ? 'Send a message first to establish context' : 'Start a new worker with a bounded context handoff'}
+      >
+        Delegate…
+      </button>
       {menu === 'backend' ? (
         <div className="backend-menu">
           <div className="workspace-menu-title">{blank ? 'Choose backend' : 'Continue this thread in'}</div>
