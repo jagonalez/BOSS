@@ -9,15 +9,17 @@ import type { BackendId, BackendModelDescriptor, BackendModelPreference } from '
 import type { WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
+import { McpSettings } from './McpSettings'
 
-type SettingsSection = 'agents' | 'connections' | 'collaboration' | 'worktrees' | 'appearance' | 'voice'
+type SettingsSection = 'agents' | 'connections' | 'mcp' | 'collaboration' | 'worktrees' | 'appearance' | 'voice'
 
 const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
   {
     label: 'R.A.L.F.',
     items: [
       { id: 'agents', label: 'Agent defaults' },
-      { id: 'connections', label: 'Models & connections' }
+      { id: 'connections', label: 'Models & connections' },
+      { id: 'mcp', label: 'MCP connections' }
     ]
   },
   {
@@ -44,6 +46,10 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   connections: {
     title: 'Models & connections',
     description: 'See what every agent can use, connect cloud accounts, and choose defaults for new threads.'
+  },
+  mcp: {
+    title: 'MCP connections',
+    description: 'Connect MCP servers once; every backend and automation can use their tools through R.A.L.F.'
   },
   collaboration: {
     title: 'Collaboration',
@@ -419,6 +425,8 @@ export function SettingsModal(): React.JSX.Element | null {
                 </section>
               </div>
             ) : null}
+
+            {section === 'mcp' ? <McpSettings /> : null}
 
             {section === 'collaboration' ? (
               <div className="settings-group-stack">

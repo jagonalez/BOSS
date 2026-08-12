@@ -18,6 +18,7 @@ import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, Ba
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
+import type { McpConnectionView } from '@shared/mcp'
 import type {
   BrowseNavigationState,
   CloudflareSettings,
@@ -98,6 +99,7 @@ export interface AppState {
   qaPolicies: Record<string, QaPolicyState>
   qaDefault: QaPolicy
   automations: AutomationsSnapshot | null
+  mcpConnections: McpConnectionView[]
   projectPath: string
   lastError: string | null
   lastErrorBySession: Record<string, string>
@@ -189,6 +191,7 @@ export const initialState: AppState = {
   qaPolicies: {},
   qaDefault: 'suggest',
   automations: null,
+  mcpConnections: [],
   projectPath: '',
   lastError: null,
   lastErrorBySession: {},
@@ -363,6 +366,10 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
     case 'automations.updated': {
       const snapshot = props.snapshot as AutomationsSnapshot | undefined
       return snapshot ? { automations: snapshot } : {}
+    }
+    case 'mcp.updated': {
+      const connections = props.connections as McpConnectionView[] | undefined
+      return connections ? { mcpConnections: connections } : {}
     }
     default:
       return {}

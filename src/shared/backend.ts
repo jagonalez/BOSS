@@ -114,6 +114,11 @@ export type BackendRequest =
   | { type: 'automation.delete'; automationId: string }
   | { type: 'automation.run'; automationId: string }
   | { type: 'automation.stop'; automationId: string }
+  | { type: 'mcp.list' }
+  | { type: 'mcp.add'; input: import('./mcp').McpConnectionInput }
+  | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }
+  | { type: 'mcp.remove'; connectionId: string }
+  | { type: 'mcp.import.scan' }
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
   | { type: 'thread.bus.clear-failures'; threadId?: string }

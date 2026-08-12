@@ -120,7 +120,27 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema
-  }))
+  })),
+  {
+    type: 'function',
+    name: 'ralf_mcp_list',
+    description: 'List external MCP tools available through R.A.L.F. connections (Slack, Datadog, and other services).',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    type: 'function',
+    name: 'ralf_mcp_call',
+    description: 'Call an external MCP tool listed by ralf_mcp_list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tool: { type: 'string', description: 'Tool name from ralf_mcp_list.' },
+        arguments: { type: 'object', description: 'Arguments for the tool.', additionalProperties: true }
+      },
+      required: ['tool'],
+      additionalProperties: false
+    }
+  }
 ]
 
 function threadInfo(thread: CodexThread): SessionInfo {
@@ -365,7 +385,7 @@ export class CodexBackend implements Backend {
   private handleServerRequest(id: RpcId, method: string, params: Record<string, unknown>): void {
     if (method === 'item/tool/call') {
       const tool = String(params.tool ?? '') as ThreadBusAgentTool
-      if (!this.threadBusHandler || (!tool.startsWith('ralf_threads_') && !tool.startsWith('ralf_browser_') && tool !== 'ralf_computer')) {
+      if (!this.threadBusHandler || (!tool.startsWith('ralf_threads_') && !tool.startsWith('ralf_browser_') && !tool.startsWith('ralf_mcp_') && tool !== 'ralf_computer')) {
         this.respond(id, { contentItems: [{ type: 'inputText', text: 'Unknown R.A.L.F. tool.' }], success: false })
         return
       }

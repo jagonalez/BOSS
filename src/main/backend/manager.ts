@@ -170,6 +170,7 @@ export class BackendManager {
   private threadBus?: ThreadBus
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
+  private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private loaded = false
   private worktreeCleanupTimer?: NodeJS.Timeout
 
@@ -234,6 +235,10 @@ export class BackendManager {
 
   attachAutomations(automations: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.automations = automations
+  }
+
+  attachMcpHub(mcpHub: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.mcpHub = mcpHub
   }
 
   async start(projectPath?: string): Promise<void> {
@@ -923,6 +928,10 @@ export class BackendManager {
     if (request.type.startsWith('automation.')) {
       if (!this.automations) throw new Error('Automations are not available.')
       return this.automations.handle(request)
+    }
+    if (request.type.startsWith('mcp.')) {
+      if (!this.mcpHub) throw new Error('MCP connections are not available.')
+      return this.mcpHub.handle(request)
     }
     switch (request.type) {
       case 'backend.list': return this.descriptors()
