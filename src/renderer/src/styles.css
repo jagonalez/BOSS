@@ -2263,6 +2263,17 @@ textarea {
   user-select: none;
 }
 
+.automations-page .settings-model-picker {
+  flex: 1;
+  min-width: 0;
+}
+
+.automations-page .settings-model-picker-menu {
+  right: auto;
+  left: 0;
+  width: min(390px, 78vw);
+}
+
 .automation-card.running {
   border-color: color-mix(in srgb, var(--green) 40%, transparent);
 }

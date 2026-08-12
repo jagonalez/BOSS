@@ -196,8 +196,10 @@ export const spawn_worktree = tool({
 })
 
 export const mcp_list = tool({
-  description: "List external MCP tools available through R.A.L.F. connections (Slack, Datadog, and other services).",
-  args: {},
+  description: "List external MCP tools available through R.A.L.F. connections. Pass tool to get one tool's full input schema before calling it.",
+  args: {
+    tool: tool.schema.string().optional().describe("Tool name from the catalog; returns its full input schema")
+  },
   execute(args, context) { return call("ralf_mcp_list", args, context) }
 })
 

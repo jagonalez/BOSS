@@ -25,6 +25,7 @@ import {
   refreshThreadBus,
   refreshAutomations,
   syncAutomationThreadPreferences,
+  finalizeStalledParts,
   refreshStreaming,
   loadMode,
   loadThreadPreferences,
@@ -133,6 +134,7 @@ export function App(): React.JSX.Element {
           const props = (ev.properties ?? {}) as { sessionID?: string }
           const sid = props.sessionID ?? appStore.getState().activeSessionId ?? ''
           const wasStreaming = Boolean(appStore.getState().streaming[sid])
+          if (ev.type === 'session.idle' && sid) finalizeStalledParts(sid)
           refreshStreaming(sid)
           if (wasStreaming && !appStore.getState().streaming[sid] && !document.hasFocus()) {
             setAttention('done')
@@ -179,6 +181,8 @@ export function App(): React.JSX.Element {
         case 'session.error': {
           const props = (ev.properties ?? {}) as { sessionID?: string }
           if (props.sessionID) {
+            finalizeStalledParts(props.sessionID)
+            refreshStreaming(props.sessionID)
             void loadMessages(props.sessionID)
           }
           setAttention('error')

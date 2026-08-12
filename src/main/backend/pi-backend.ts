@@ -459,8 +459,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "ralf_mcp_list",
     label: "List R.A.L.F. MCP tools",
-    description: "List external MCP tools available through R.A.L.F. connections (Slack, Datadog, and other services).",
-    parameters: Type.Object({}),
+    description: "List external MCP tools available through R.A.L.F. connections. Pass tool to get one tool's full input schema before calling it.",
+    parameters: Type.Object({ tool: Type.Optional(Type.String({ description: "Tool name from the catalog; returns its full input schema." })) }),
     execute: (_id, args, signal) => call("ralf_mcp_list", args, signal)
   })
   pi.registerTool({
