@@ -16,6 +16,7 @@ import type {
 } from '@shared/opencode'
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
+import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type {
   BrowseNavigationState,
   CloudflareSettings,
@@ -93,6 +94,8 @@ export interface AppState {
   defaultModels: Partial<Record<BackendId, BackendModelPreference>>
   authTerminalBackends: Record<string, BackendId>
   threadBus: ThreadBusSnapshot | null
+  qaPolicies: Record<string, QaPolicyState>
+  qaDefault: QaPolicy
   projectPath: string
   lastError: string | null
   lastErrorBySession: Record<string, string>
@@ -180,6 +183,8 @@ export const initialState: AppState = {
   defaultModels: {},
   authTerminalBackends: {},
   threadBus: null,
+  qaPolicies: {},
+  qaDefault: 'suggest',
   projectPath: '',
   lastError: null,
   lastErrorBySession: {},

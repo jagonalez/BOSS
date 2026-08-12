@@ -5,6 +5,7 @@ import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy } from '@shared/thread-bus'
+import type { QaPolicy } from '@shared/qa'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
 import {
@@ -1000,6 +1001,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
   if (cur.activeSessionId === id) {
     appStore.setState({ activePage: inProject ? 'project' : 'chat' })
     void refreshProviders(id)
+    void refreshQaPolicy(id)
     return
   }
   if (session?.model?.id && !cur.modelsBySession[id]) setModel(session.model.id, id, session.model.provider)
@@ -1013,6 +1015,45 @@ export function selectSession(id: string, bindWorkspace = true): void {
   void loadTodos(id)
   void refreshDiff(id)
   void refreshProviders(id)
+  void refreshQaPolicy(id)
+}
+
+export async function refreshQaPolicy(threadId: string): Promise<void> {
+  try {
+    const state = await OpenCode.qaPolicy(threadId)
+    appStore.setState((current) => ({ qaPolicies: { ...current.qaPolicies, [threadId]: state } }))
+  } catch {
+    /* QA controls remain in their safe Suggest default if the broker is unavailable. */
+  }
+}
+
+export async function setQaPolicy(threadId: string, policy: QaPolicy | null): Promise<void> {
+  try {
+    const state = await OpenCode.setQaPolicy(threadId, policy)
+    appStore.setState((current) => ({ qaPolicies: { ...current.qaPolicies, [threadId]: state } }))
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+  }
+}
+
+export async function refreshQaDefault(): Promise<void> {
+  try {
+    appStore.setState({ qaDefault: await OpenCode.qaDefault() })
+  } catch {
+    /* Keep the safe default. */
+  }
+}
+
+export async function setQaDefault(policy: QaPolicy): Promise<void> {
+  try {
+    appStore.setState({ qaDefault: await OpenCode.setQaDefault(policy) })
+    if (policy === 'automatic') {
+      const computerUse = await window.ralf.computerUseStatus().catch(() => appStore.getState().computerUse)
+      appStore.setState({ computerUse })
+    }
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+  }
 }
 async function createSession(scope: ThreadCreationScope): Promise<void> {
   try {

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
-import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, rejectQuestion, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
+import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, rejectQuestion, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -524,8 +524,8 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
 
   useEffect(() => {
     void OpenCode.listCommands()
-      .then(setCommands)
-      .catch(() => {})
+      .then((items) => setCommands([{ name: 'qa', description: 'Set QA access for this thread: auto, suggest, off, or default', template: '' }, ...items]))
+      .catch(() => setCommands([{ name: 'qa', description: 'Set QA access for this thread: auto, suggest, off, or default', template: '' }]))
   }, [])
 
   // Live dictation: append ASR segments into the current text without
@@ -658,6 +658,28 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
       return
     }
     const cmdMatch = /^\/([\w-]+)(?:\s+(.*))?$/.exec(text.trim())
+    if (cmdMatch?.[1] === 'qa') {
+      const value = (cmdMatch[2] ?? '').trim().toLowerCase()
+      const policy = value === 'auto' || value === 'automatic'
+        ? 'automatic'
+        : value === 'suggest'
+          ? 'suggest'
+          : value === 'off'
+            ? 'off'
+            : value === 'default'
+              ? null
+              : undefined
+      if (policy !== undefined) {
+        pushHistory(effectiveSession, text)
+        void setQaPolicy(effectiveSession, policy)
+        setText('')
+        setCompletion(null)
+        if (textareaRef.current) textareaRef.current.style.height = 'auto'
+      } else {
+        appStore.setState({ lastError: 'Use /qa auto, /qa suggest, /qa off, or /qa default.' })
+      }
+      return
+    }
     if (cmdMatch && commands.some((c) => c.name === cmdMatch[1])) {
       if (text.trim()) pushHistory(effectiveSession, text)
       void runCommand(effectiveSession, cmdMatch[1], cmdMatch[2] ?? '')

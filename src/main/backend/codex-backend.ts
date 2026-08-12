@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
+import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 
 type RpcId = string | number
@@ -113,7 +114,13 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
       required: ['instruction'],
       additionalProperties: false
     }
-  }
+  },
+  ...QA_TOOL_DEFINITIONS.map((tool) => ({
+    type: 'function',
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema
+  }))
 ]
 
 function threadInfo(thread: CodexThread): SessionInfo {
@@ -358,7 +365,7 @@ export class CodexBackend implements Backend {
   private handleServerRequest(id: RpcId, method: string, params: Record<string, unknown>): void {
     if (method === 'item/tool/call') {
       const tool = String(params.tool ?? '') as ThreadBusAgentTool
-      if (!this.threadBusHandler || !tool.startsWith('ralf_threads_')) {
+      if (!this.threadBusHandler || (!tool.startsWith('ralf_threads_') && !tool.startsWith('ralf_browser_') && tool !== 'ralf_computer')) {
         this.respond(id, { contentItems: [{ type: 'inputText', text: 'Unknown R.A.L.F. tool.' }], success: false })
         return
       }
@@ -367,7 +374,17 @@ export class CodexBackend implements Backend {
         tool,
         arguments: params.arguments
       }).then((result) => {
-        this.respond(id, { contentItems: [{ type: 'inputText', text: JSON.stringify(result, null, 2) }], success: true })
+        if (isAgentToolResult(result)) {
+          this.respond(id, {
+            contentItems: [
+              { type: 'inputText', text: result.text },
+              ...(result.image ? [{ type: 'inputImage', imageUrl: `data:${result.image.mimeType};base64,${result.image.data}` }] : [])
+            ],
+            success: true
+          })
+        } else {
+          this.respond(id, { contentItems: [{ type: 'inputText', text: JSON.stringify(result, null, 2) }], success: true })
+        }
       }).catch((error) => {
         this.respond(id, {
           contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : String(error) }],
@@ -464,6 +481,7 @@ export class CodexBackend implements Backend {
       cwd: directory || this.projectPath || undefined,
       approvalPolicy: 'on-request',
       sandbox: 'workspace-write',
+      developerInstructions: QA_GUIDANCE,
       dynamicTools: THREAD_BUS_TOOLS
     }
     let result: { thread: CodexThread }
@@ -472,7 +490,7 @@ export class CodexBackend implements Backend {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (!/dynamicTools|experimental|invalid params|unknown field|-32602/i.test(message)) throw error
-      const { dynamicTools: _dynamicTools, ...fallback } = params
+      const { dynamicTools: _dynamicTools, developerInstructions: _developerInstructions, ...fallback } = params
       result = await this.request('thread/start', fallback) as { thread: CodexThread }
     }
     this.loadedThreads.add(result.thread.id)
@@ -497,7 +515,13 @@ export class CodexBackend implements Backend {
 
   private async ensureLoaded(id: string): Promise<void> {
     if (this.loadedThreads.has(id)) return
-    await this.request('thread/resume', { threadId: id })
+    try {
+      await this.request('thread/resume', { threadId: id, dynamicTools: THREAD_BUS_TOOLS, developerInstructions: QA_GUIDANCE })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!/dynamicTools|developerInstructions|experimental|invalid params|unknown field|-32602/i.test(message)) throw error
+      await this.request('thread/resume', { threadId: id })
+    }
     this.loadedThreads.add(id)
   }
 
