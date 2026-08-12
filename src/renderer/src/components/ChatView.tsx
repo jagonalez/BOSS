@@ -8,7 +8,8 @@ import { MessageText } from '../lib/text'
 import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, SendIcon, StopIcon, MicIcon, MicOffIcon, VolumeIcon } from './icons'
 import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
-import { BackendControls, BACKEND_SHORT_LABELS } from './BackendControls'
+import { BackendControls } from './BackendControls'
+import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
