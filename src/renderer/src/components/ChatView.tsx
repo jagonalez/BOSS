@@ -1141,7 +1141,9 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const liveText = allParts.some((p) => p.type === 'text' && (p.text ?? '').trim().length > 0)
   const runningPart = allParts.find((p) => p.state?.status === 'running' || p.state?.status === 'pending')
   const waitingForReply = visible[visible.length - 1]?.info.role === 'user'
-  const activity = streaming ? (runningPart ? runningLabel(runningPart) : waitingForReply || !liveText ? 'Thinking' : null) : null
+  // While the thread streams, always show a label: the running tool when one is
+  // active, 'Thinking' before any reply text, 'Working' between text and tools.
+  const activity = streaming ? (runningPart ? runningLabel(runningPart) : waitingForReply || !liveText ? 'Thinking' : 'Working') : null
   const expandingRef = useRef(false)
 
   const speakAloud = useStore(appStore, (s) => s.speakAloud)
