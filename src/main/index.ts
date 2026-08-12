@@ -22,6 +22,7 @@ import { WebAccess } from './web-access'
 import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
 import { TranscriptStore } from './transcript-store'
+import { ReviewManager } from './review-manager'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -73,11 +74,12 @@ threadBus.attachQaTools(qaTools)
 const pty = new PTYManager(backendAuth)
 const speech = new SpeechManager()
 const sites = new SitesManager(() => backendMgr.currentProject || server.projectPath)
+const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments.json'))
 
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, reviews }
 }
 
 function registerIpcOnce(): void {

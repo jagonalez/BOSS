@@ -20,6 +20,7 @@ import type {
 } from './ipc'
 import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
 import type { BackendRequest } from './backend'
+import type { AddReviewCommentInput, PullRequestFileDiff, ReviewComment, ReviewSnapshot, SubmitReviewEvent } from './review'
 
 export interface RalfApi {
   platform(): string
@@ -69,6 +70,13 @@ export interface RalfApi {
   onTerminalExit(cb: (evt: TerminalExitEvent) => void): () => void
 
   gitRun(path: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }>
+  reviewSnapshot(path: string): Promise<ReviewSnapshot>
+  reviewPullRequestDiff(path: string): Promise<PullRequestFileDiff[]>
+  reviewLocalAdd(path: string, input: AddReviewCommentInput): Promise<ReviewComment>
+  reviewLocalDelete(path: string, commentId: string): Promise<boolean>
+  reviewPublishComment(path: string, input: AddReviewCommentInput): Promise<ReviewSnapshot>
+  reviewReply(path: string, commentId: string, body: string): Promise<ReviewSnapshot>
+  reviewSubmit(path: string, event: SubmitReviewEvent, body: string): Promise<ReviewSnapshot>
 
   ttsStatus(): Promise<TtsStatus>
   ttsSpeak(req: TtsSpeakRequest): Promise<TtsSpeakResult>
