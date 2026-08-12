@@ -76,6 +76,8 @@ export interface Backend {
     parts: unknown[],
     opts?: BackendMessageOptions
   ): Promise<void>
+  /** Add input to the active run. Only present when the descriptor advertises native steering. */
+  steer?(sessionId: string, parts: unknown[]): Promise<void>
   abort(sessionId: string): Promise<void>
 
   /** Models */

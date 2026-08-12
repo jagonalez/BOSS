@@ -10,6 +10,8 @@ import type {
   BackendRequest,
   BackendCapabilities,
   BackendMessageOptions,
+  QueuedFollowUp,
+  QueuedFollowUpAttachment,
   ThreadCreationScope
 } from '@shared/backend'
 import type { EventMessage, MessageWithParts, SessionInfo } from '@shared/opencode'
@@ -34,6 +36,7 @@ interface ThreadBinding {
   parentID?: string
   lineage?: SessionInfo['lineage']
   worktree?: WorktreeInfo
+  followUps?: QueuedFollowUp[]
 }
 
 type LegacyThreadBinding = Omit<ThreadBinding, 'nativeSessionOwnership' | 'projectId' | 'executionPath'>
@@ -43,9 +46,14 @@ interface LegacyBackendState {
   threads: LegacyThreadBinding[]
 }
 
-interface StoredBackendState {
+interface PreviousBackendState {
   version: 2
   legacyOpenCodeImportComplete: boolean
+  threads: ThreadBinding[]
+}
+
+interface StoredBackendState {
+  version: 3
   threads: ThreadBinding[]
 }
 
@@ -61,7 +69,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
     label: 'OpenCode',
     description: 'OpenCode server with native sessions, permissions, tools, and providers.',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, images: true, mcp: true, interactiveQuestions: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
       { id: 'auto', label: 'Auto', description: 'approve supported actions automatically' },
@@ -72,14 +80,14 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Pi',
     description: 'Pi coding agent over its native JSONL RPC protocol.',
     command: 'pi',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, images: true, mcp: false, interactiveQuestions: false },
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false },
     modes: [{ id: 'auto', label: 'Approved', description: 'Pi RPC runs with its approved tool policy' }]
   },
   codex: {
     label: 'Codex',
     description: 'Codex CLI through the supported app-server JSON-RPC protocol.',
     command: 'codex',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, images: true, mcp: false, interactiveQuestions: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'request approval when Codex needs to leave its sandbox' },
       { id: 'auto', label: 'Auto', description: 'run inside the workspace sandbox without approval prompts' },
@@ -90,7 +98,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: false, images: false, mcp: false, interactiveQuestions: false },
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: false, mcp: false, interactiveQuestions: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'use Claude default permissions; unavailable approvals stop the run' },
       { id: 'accept-edits', label: 'Edit automatically', description: 'approve edits and common filesystem operations' },
@@ -158,10 +166,10 @@ export class BackendManager {
   private readonly starting = new Map<BackendId, Promise<Backend>>()
   private readonly unsubscribers = new Map<BackendId, () => void>()
   private readonly busyThreads = new Set<string>()
+  private readonly followUpDeliveries = new Set<string>()
   private threadBus?: ThreadBus
   private eventCb?: (event: Record<string, unknown>) => void
   private loaded = false
-  private legacyOpenCodeImportPending = false
   private worktreeCleanupTimer?: NodeJS.Timeout
 
   constructor(
@@ -206,12 +214,10 @@ export class BackendManager {
     this.load()
     if (projectPath) this.projectPath = projectPath
     await this.ensureStarted('opencode')
-    if (this.legacyOpenCodeImportPending) {
-      await this.importNativeSessions('opencode')
-      this.legacyOpenCodeImportPending = false
-      this.save()
-    }
     await this.threadBus?.resume()
+    for (const binding of this.bindings.values()) {
+      if (binding.followUps?.length) void this.deliverNextFollowUp(binding.id)
+    }
     await this.cleanupWorktrees()
     this.worktreeCleanupTimer = setInterval(() => void this.cleanupWorktrees(), 6 * 60 * 60 * 1_000)
     this.worktreeCleanupTimer.unref()
@@ -236,10 +242,9 @@ export class BackendManager {
     if (this.loaded) return
     this.loaded = true
     try {
-      const parsed = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredBackendState | LegacyBackendState
-      if (parsed.version === 2 && Array.isArray(parsed.threads)) {
+      const parsed = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredBackendState | PreviousBackendState | LegacyBackendState
+      if ((parsed.version === 2 || parsed.version === 3) && Array.isArray(parsed.threads)) {
         for (const binding of parsed.threads) this.bindings.set(binding.id, binding)
-        this.legacyOpenCodeImportPending = !parsed.legacyOpenCodeImportComplete
       } else if (parsed.version === 1 && Array.isArray(parsed.threads)) {
         for (const legacy of parsed.threads) {
           const scope = projectScope(legacy.projectPath)
@@ -256,14 +261,13 @@ export class BackendManager {
       }
     } catch {
       /* Preserve pre-R.A.L.F. OpenCode sessions once on first launch or migration. */
-      this.legacyOpenCodeImportPending = true
+      /* First R.A.L.F. launch starts with no thread bindings. */
     }
   }
 
   private save(): void {
     const state: StoredBackendState = {
-      version: 2,
-      legacyOpenCodeImportComplete: !this.legacyOpenCodeImportPending,
+      version: 3,
       threads: [...this.bindings.values()]
     }
     try {
@@ -428,6 +432,7 @@ export class BackendManager {
       } else if (eventType === 'session.idle') {
         this.busyThreads.delete(binding.id)
         void this.threadBus?.flush(binding.id)
+        void this.deliverNextFollowUp(binding.id)
       } else if (eventType === 'session.error') {
         this.busyThreads.delete(binding.id)
       }
@@ -473,19 +478,6 @@ export class BackendManager {
         return this.session(binding, native)
       })
       .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
-  }
-
-  async importNativeSessions(backendId: BackendId): Promise<SessionInfo[]> {
-    const backend = await this.ensureStarted(backendId)
-    const nativeSessions = await backend.sessionsList()
-    const imported: SessionInfo[] = []
-    for (const native of nativeSessions) {
-      if (this.bindingForNative(backendId, native.id)) continue
-      const binding = this.registerNative(backendId, native, 'imported')
-      imported.push(this.session(binding, native))
-    }
-    this.save()
-    return imported
   }
 
   async sessionCreate(
@@ -568,7 +560,140 @@ export class BackendManager {
     const backend = await this.ensureStarted(binding.backendId)
     binding.updatedAt = now()
     this.save()
-    await backend.sendMessage(binding.nativeSessionId, parts, options)
+    this.busyThreads.add(threadId)
+    try {
+      await backend.sendMessage(binding.nativeSessionId, parts, options)
+    } catch (error) {
+      this.busyThreads.delete(threadId)
+      throw error
+    }
+  }
+
+  private emitFollowUps(binding: ThreadBinding): void {
+    this.eventCb?.({
+      type: 'thread.followups.updated',
+      properties: { threadId: binding.id, followUps: binding.followUps ?? [] },
+      backendId: binding.backendId
+    })
+  }
+
+  private followUpParts(item: QueuedFollowUp): unknown[] {
+    return [
+      ...item.attachments.map((attachment) => ({
+        type: 'file',
+        mime: attachment.mime,
+        filename: attachment.name,
+        url: attachment.dataUrl
+      })),
+      ...(item.text.trim() ? [{ type: 'text', text: item.text }] : [])
+    ]
+  }
+
+  followUps(threadId: string): QueuedFollowUp[] {
+    return [...(this.binding(threadId).followUps ?? [])]
+  }
+
+  async addFollowUp(
+    threadId: string,
+    text: string,
+    attachments: QueuedFollowUpAttachment[] = [],
+    options?: BackendMessageOptions
+  ): Promise<QueuedFollowUp[]> {
+    if (!text.trim() && attachments.length === 0) throw new Error('A follow-up message is required.')
+    const binding = this.binding(threadId)
+    const item: QueuedFollowUp = {
+      id: randomUUID(),
+      threadId,
+      text,
+      attachments,
+      options,
+      createdAt: now()
+    }
+    binding.followUps = [...(binding.followUps ?? []), item]
+    this.save()
+    this.emitFollowUps(binding)
+    if (!this.busyThreads.has(threadId)) void this.deliverNextFollowUp(threadId)
+    return [...binding.followUps]
+  }
+
+  updateFollowUp(threadId: string, followUpId: string, text: string): QueuedFollowUp[] {
+    const binding = this.binding(threadId)
+    const item = binding.followUps?.find((followUp) => followUp.id === followUpId)
+    if (!item) throw new Error('Queued follow-up not found.')
+    if (!text.trim() && item.attachments.length === 0) throw new Error('A follow-up message is required.')
+    item.text = text
+    this.save()
+    this.emitFollowUps(binding)
+    return [...(binding.followUps ?? [])]
+  }
+
+  removeFollowUp(threadId: string, followUpId: string): QueuedFollowUp[] {
+    const binding = this.binding(threadId)
+    binding.followUps = (binding.followUps ?? []).filter((item) => item.id !== followUpId)
+    this.save()
+    this.emitFollowUps(binding)
+    return [...binding.followUps]
+  }
+
+  moveFollowUp(threadId: string, followUpId: string, toIndex: number): QueuedFollowUp[] {
+    const binding = this.binding(threadId)
+    const list = [...(binding.followUps ?? [])]
+    const fromIndex = list.findIndex((item) => item.id === followUpId)
+    if (fromIndex < 0) throw new Error('Queued follow-up not found.')
+    const [item] = list.splice(fromIndex, 1)
+    list.splice(Math.max(0, Math.min(toIndex, list.length)), 0, item)
+    binding.followUps = list
+    this.save()
+    this.emitFollowUps(binding)
+    return [...list]
+  }
+
+  async steerFollowUp(threadId: string, followUpId: string): Promise<QueuedFollowUp[]> {
+    const binding = this.binding(threadId)
+    const item = binding.followUps?.find((followUp) => followUp.id === followUpId)
+    if (!item) throw new Error('Queued follow-up not found.')
+    const backend = await this.ensureStarted(binding.backendId)
+    if (!this.busyThreads.has(threadId)) {
+      binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]
+      this.save()
+      this.emitFollowUps(binding)
+      await this.deliverNextFollowUp(threadId)
+      return [...(binding.followUps ?? [])]
+    }
+    if (DEFINITIONS[binding.backendId].capabilities.steering === 'native' && backend.steer) {
+      await backend.steer(binding.nativeSessionId, this.followUpParts(item))
+      return this.removeFollowUp(threadId, followUpId)
+    }
+    binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]
+    this.save()
+    this.emitFollowUps(binding)
+    await backend.abort(binding.nativeSessionId)
+    return [...binding.followUps]
+  }
+
+  private async deliverNextFollowUp(threadId: string): Promise<void> {
+    if (this.followUpDeliveries.has(threadId) || this.busyThreads.has(threadId)) return
+    const binding = this.bindings.get(threadId)
+    const item = binding?.followUps?.[0]
+    if (!binding || !item) return
+    this.followUpDeliveries.add(threadId)
+    try {
+      await this.sendMessage(threadId, this.followUpParts(item), item.options)
+      binding.followUps = (binding.followUps ?? []).filter((followUp) => followUp.id !== item.id)
+      this.save()
+      this.emitFollowUps(binding)
+      if (!this.busyThreads.has(threadId) && binding.followUps.length) {
+        queueMicrotask(() => void this.deliverNextFollowUp(threadId))
+      }
+    } catch (error) {
+      this.eventCb?.({
+        type: 'session.error',
+        properties: { sessionID: threadId, error: error instanceof Error ? error.message : String(error) },
+        backendId: binding.backendId
+      })
+    } finally {
+      this.followUpDeliveries.delete(threadId)
+    }
   }
 
   threadForNative(backendId: BackendId, nativeThreadId: string): ThreadBusThread | undefined {
@@ -774,12 +899,17 @@ export class BackendManager {
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return this.sessionCreate(request.backendId, request.title, undefined, request.scope)
-      case 'thread.import-native': return this.importNativeSessions(request.backendId)
       case 'thread.get': return this.sessionGet(request.threadId)
       case 'thread.delete': return this.sessionDelete(request.threadId)
       case 'thread.rename': return this.sessionRename(request.threadId, request.title)
       case 'thread.messages': return this.messagesList(request.threadId, request.limit)
       case 'thread.send': return this.sendMessage(request.threadId, request.parts, request.options)
+      case 'thread.followups.list': return this.followUps(request.threadId)
+      case 'thread.followups.add': return this.addFollowUp(request.threadId, request.text, request.attachments, request.options)
+      case 'thread.followups.update': return this.updateFollowUp(request.threadId, request.followUpId, request.text)
+      case 'thread.followups.remove': return this.removeFollowUp(request.threadId, request.followUpId)
+      case 'thread.followups.move': return this.moveFollowUp(request.threadId, request.followUpId, request.toIndex)
+      case 'thread.followups.steer': return this.steerFollowUp(request.threadId, request.followUpId)
       case 'thread.abort': return this.abort(request.threadId)
       case 'thread.todos': {
         const binding = this.binding(request.threadId)

@@ -12,7 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendRequest, ThreadCreationScope } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendRequest, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
@@ -111,8 +111,6 @@ export const OpenCode = {
   listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
   createSession: (title?: string, backendId: BackendId = 'opencode', scope: ThreadCreationScope = 'current') =>
     backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, scope }),
-  importNativeSessions: (backendId: BackendId) =>
-    backendRequest<SessionInfo[]>({ type: 'thread.import-native', backendId }),
   deleteSession: (id: string) => backendRequest<void>({ type: 'thread.delete', threadId: id }),
   getSession: (id: string) => backendRequest<SessionInfo>({ type: 'thread.get', threadId: id }),
   renameSession: (id: string, title: string) =>
@@ -121,6 +119,18 @@ export const OpenCode = {
     backendRequest<MessageWithParts[]>({ type: 'thread.messages', threadId: id, limit }),
   sendMessageAsync: (id: string, parts: unknown[], opts?: BackendMessageOptions) =>
     backendRequest<void>({ type: 'thread.send', threadId: id, parts, options: opts }),
+  followUps: (id: string) =>
+    backendRequest<QueuedFollowUp[]>({ type: 'thread.followups.list', threadId: id }),
+  addFollowUp: (id: string, text: string, attachments?: QueuedFollowUpAttachment[], options?: BackendMessageOptions) =>
+    backendRequest<QueuedFollowUp[]>({ type: 'thread.followups.add', threadId: id, text, attachments, options }),
+  updateFollowUp: (id: string, followUpId: string, text: string) =>
+    backendRequest<QueuedFollowUp[]>({ type: 'thread.followups.update', threadId: id, followUpId, text }),
+  removeFollowUp: (id: string, followUpId: string) =>
+    backendRequest<QueuedFollowUp[]>({ type: 'thread.followups.remove', threadId: id, followUpId }),
+  moveFollowUp: (id: string, followUpId: string, toIndex: number) =>
+    backendRequest<QueuedFollowUp[]>({ type: 'thread.followups.move', threadId: id, followUpId, toIndex }),
+  steerFollowUp: (id: string, followUpId: string) =>
+    backendRequest<QueuedFollowUp[]>({ type: 'thread.followups.steer', threadId: id, followUpId }),
   abort: (id: string) => backendRequest<void>({ type: 'thread.abort', threadId: id }),
   revertMessage: (id: string, messageID: string) =>
     backendRequest<void>({ type: 'thread.revert', threadId: id, messageId: messageID }),

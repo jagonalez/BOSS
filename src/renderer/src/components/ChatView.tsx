@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
-import { abortRun, editMessage, forkFromMessage, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, rejectQuestion, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
+import { abortRun, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, steerFollowUp, toggleAsr, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -502,6 +502,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const asrTargetId = React.useId()
   const streaming = useStore(appStore, (s) => (sessionId ?? s.activeSessionId ? Boolean(s.streaming[sessionId ?? s.activeSessionId ?? '']) : false))
+  const sessionBusy = useStore(appStore, (s) => (sessionId ?? s.activeSessionId ? Boolean(s.sessionBusy[sessionId ?? s.activeSessionId ?? '']) : false))
   const hasSession = useStore(appStore, (s) => Boolean(sessionId ?? s.activeSessionId))
   const effectiveSession = useStore(appStore, (s) => sessionId ?? s.activeSessionId)
   const sessions = useStore(appStore, (s) => s.sessions)
@@ -521,6 +522,15 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const [commands, setCommands] = useState<Command[]>([])
   const [completion, setCompletion] = useState<{ type: 'command' | 'file'; query: string; items: string[]; index: number } | null>(null)
   const history = useStore(appStore, (s) => (effectiveSession ? s.history[effectiveSession] ?? [] : []))
+  const followUps = useStore(appStore, (s) => (effectiveSession ? s.followUps[effectiveSession] ?? [] : []))
+  const steering = backends.find((backend) => backend.id === backendId)?.capabilities.steering ?? 'stop-and-redirect'
+  const [editingFollowUpId, setEditingFollowUpId] = useState<string | null>(null)
+  const [editingFollowUpText, setEditingFollowUpText] = useState('')
+  const working = streaming || sessionBusy
+
+  useEffect(() => {
+    if (effectiveSession) void refreshFollowUps(effectiveSession)
+  }, [effectiveSession])
 
   useEffect(() => {
     void OpenCode.listCommands()
@@ -680,7 +690,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
       }
       return
     }
-    if (cmdMatch && commands.some((c) => c.name === cmdMatch[1])) {
+    if (!working && cmdMatch && commands.some((c) => c.name === cmdMatch[1])) {
       if (text.trim()) pushHistory(effectiveSession, text)
       void runCommand(effectiveSession, cmdMatch[1], cmdMatch[2] ?? '')
       setText('')
@@ -804,6 +814,75 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
 
   return (
     <div className="composer-wrap">
+      {followUps.length > 0 ? (
+        <div className="followup-queue" aria-label="Queued follow-ups">
+          <div className="followup-queue-header">
+            <span>Up next</span>
+            <small>{followUps.length} queued</small>
+          </div>
+          {followUps.map((followUp, index) => (
+            <div className="followup-item" key={followUp.id}>
+              <span className="followup-index">{index + 1}</span>
+              {editingFollowUpId === followUp.id ? (
+                <textarea
+                  className="followup-edit"
+                  value={editingFollowUpText}
+                  autoFocus
+                  rows={2}
+                  onChange={(event) => setEditingFollowUpText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setEditingFollowUpId(null)
+                    if (event.key === 'Enter' && !event.shiftKey && editingFollowUpText.trim()) {
+                      event.preventDefault()
+                      void updateFollowUp(followUp.threadId, followUp.id, editingFollowUpText)
+                      setEditingFollowUpId(null)
+                    }
+                  }}
+                />
+              ) : (
+                <span className="followup-text">{followUp.text || `${followUp.attachments.length} attachment${followUp.attachments.length === 1 ? '' : 's'}`}</span>
+              )}
+              <div className="followup-actions">
+                {editingFollowUpId === followUp.id ? (
+                  <>
+                    <button onClick={() => setEditingFollowUpId(null)}>Cancel</button>
+                    <button
+                      disabled={!editingFollowUpText.trim() && followUp.attachments.length === 0}
+                      onClick={() => {
+                        void updateFollowUp(followUp.threadId, followUp.id, editingFollowUpText)
+                        setEditingFollowUpId(null)
+                      }}
+                    >
+                      Save
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditingFollowUpId(followUp.id)
+                        setEditingFollowUpText(followUp.text)
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button disabled={index === 0} onClick={() => void moveFollowUp(followUp.threadId, followUp.id, index - 1)} title="Move earlier">↑</button>
+                    <button disabled={index === followUps.length - 1} onClick={() => void moveFollowUp(followUp.threadId, followUp.id, index + 1)} title="Move later">↓</button>
+                    <button
+                      className="followup-steer"
+                      onClick={() => void steerFollowUp(followUp.threadId, followUp.id)}
+                      title={!working ? 'Retry this queued message now' : steering === 'native' ? 'Add this instruction to the active run' : 'Stop the current run and send this instruction next'}
+                    >
+                      {!working ? 'Retry now' : steering === 'native' ? 'Steer now' : 'Stop & redirect'}
+                    </button>
+                    <button className="followup-delete" onClick={() => void removeFollowUp(followUp.threadId, followUp.id)}>Delete</button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {lastError ? (
         <div className="chat-error">
           <span className="chat-error-icon">!</span>
@@ -845,7 +924,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         <div className="composer-input">
           <textarea
             ref={textareaRef}
-            placeholder={hasSession ? `Ask ${backendLabel}…` : 'Start a thread'}
+            placeholder={hasSession ? working ? `Queue a follow-up for ${backendLabel}…` : `Ask ${backendLabel}…` : 'Start a thread'}
             value={text}
             onChange={(e) => {
               setText(e.target.value)
@@ -896,15 +975,16 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             <ModelPicker onPick={onModelChange} sessionId={effectiveSession ?? undefined} />
             <EffortPicker sessionId={effectiveSession ?? undefined} />
           </div>
-          {streaming ? (
-            <button className="btn-send" onClick={() => void abortRun(effectiveSession ?? undefined)} title="Stop">
-              <StopIcon size={16} />
-            </button>
-          ) : (
-            <button className="btn-send" disabled={!canSend} onClick={submit} title="Send">
+          <div className="composer-submit-actions">
+            {working ? (
+              <button className="btn-stop-secondary" onClick={() => void abortRun(effectiveSession ?? undefined)} title="Stop current run">
+                <StopIcon size={14} />
+              </button>
+            ) : null}
+            <button className="btn-send" disabled={!canSend} onClick={submit} title={working ? 'Queue follow-up' : 'Send'}>
               <SendIcon size={16} />
             </button>
-          )}
+          </div>
         </div>
       </div>
       <input
@@ -1035,8 +1115,8 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
   const backendId = useStore(appStore, (s) => s.sessions.find((session) => session.id === effectiveId)?.backendId ?? 'opencode')
+  const historyCapabilities = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId)?.capabilities)
   const projects = useStore(appStore, (s) => s.projects)
-  const revertedList = useStore(appStore, (s) => (effectiveId ? s.reverted[effectiveId] : undefined))
   const scrollRef = useRef<HTMLDivElement>(null)
   const [msgCtx, setMsgCtx] = useState<{ x: number; y: number; message: MessageWithParts } | null>(null)
   const msgCtxRef = useRef<HTMLDivElement>(null)
@@ -1045,8 +1125,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const streaming = useStore(appStore, (s) => (effectiveId ? Boolean(s.streaming[effectiveId]) : false))
   const permission = useStore(appStore, (s) => (effectiveId ? s.permissions[effectiveId] ?? null : null))
   const question = useStore(appStore, (s) => (effectiveId ? s.questions[effectiveId] ?? null : null))
-  const revertedIds = useMemo(() => new Set(revertedList ?? []), [revertedList])
-  const visible = useMemo(() => messages.filter((m) => !revertedIds.has(m.info.id)), [messages, revertedIds])
+  const visible = messages
   const WINDOW = 100
   const PAGE = 200
   const [visibleCount, setVisibleCount] = useState(WINDOW)
@@ -1236,14 +1315,6 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   return (
     <div className="chat">
-      {backendId === 'opencode' && revertedIds.size > 0 && (
-        <div className="reverted-banner">
-          <span>{revertedIds.size} message{revertedIds.size === 1 ? '' : 's'} reverted — file changes undone.</span>
-          <button className="btn-ghost" onClick={() => effectiveId && void unrevertSession(effectiveId)}>
-            Undo revert
-          </button>
-        </div>
-      )}
       <div className="chat-messages-area">
         <div className="messages" ref={scrollRef} onScroll={onScroll}>
           {(() => {
@@ -1271,47 +1342,31 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
       </div>
       {msgCtx && (
         <div ref={msgCtxRef} className="ctx-menu" style={{ left: Math.min(msgCtx.x, window.innerWidth - 220), top: msgCtx.y }}>
-          {backendId === 'opencode' ? (
-            <>
-              <button
-                className="ctx-item"
-                onClick={() => {
-                  if (effectiveId) {
-                    appStore.setState({
-                      confirm: {
-                        title: 'Revert message?',
-                        message: 'This removes this message and everything after it.',
-                        confirmLabel: 'Revert',
-                        destructive: true,
-                        action: () => void revertMessage(effectiveId, msgCtx.message.info.id)
-                      }
-                    })
-                  }
-                  setMsgCtx(null)
-                }}
-              >
-                Revert
-              </button>
-              <button
-                className="ctx-item"
-                onClick={() => {
-                  if (effectiveId) void editMessage(effectiveId, msgCtx.message.info.id, menuText)
-                  setMsgCtx(null)
-                }}
-              >
-                Rewrite
-              </button>
-            </>
+          {msgCtx.message.info.role === 'user' ? (
+            <button
+              className="ctx-item"
+              onClick={() => {
+                if (effectiveId) void forkFromMessage(
+                  effectiveId,
+                  historyCapabilities?.branching === 'message' ? msgCtx.message.info.id : undefined
+                )
+                setMsgCtx(null)
+              }}
+            >
+              {historyCapabilities?.branching === 'message' ? 'Branch from here' : 'Duplicate thread'}
+            </button>
           ) : null}
-          <button
-            className="ctx-item"
-            onClick={() => {
-              if (effectiveId) void forkFromMessage(effectiveId, msgCtx.message.info.id)
-              setMsgCtx(null)
-            }}
-          >
-            {backendId === 'opencode' ? 'Fork from here' : 'Fork thread'}
-          </button>
+          {msgCtx.message.info.role === 'user' && historyCapabilities?.branching === 'message' ? (
+            <button
+              className="ctx-item"
+              onClick={() => {
+                if (effectiveId) void forkFromMessage(effectiveId, msgCtx.message.info.id, menuText)
+                setMsgCtx(null)
+              }}
+            >
+              Edit in new branch…
+            </button>
+          ) : null}
           <button
             className="ctx-item"
             onClick={() => {
@@ -1320,15 +1375,6 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
             }}
           >
             Copy text
-          </button>
-          <button
-            className="ctx-item"
-            onClick={() => {
-              void navigator.clipboard.writeText(msgCtx.message.info.id)
-              setMsgCtx(null)
-            }}
-          >
-            Copy ID
           </button>
         </div>
       )}

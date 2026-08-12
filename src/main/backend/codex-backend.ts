@@ -555,6 +555,16 @@ export class CodexBackend implements Backend {
     if (result.turn?.id) this.activeTurns.set(sessionId, result.turn.id)
   }
 
+  async steer(sessionId: string, parts: unknown[]): Promise<void> {
+    const turnId = this.activeTurns.get(sessionId)
+    if (!turnId) throw new Error('Codex no longer has an active turn to steer.')
+    await this.request('turn/steer', {
+      threadId: sessionId,
+      expectedTurnId: turnId,
+      input: userInputs(parts)
+    })
+  }
+
   async abort(sessionId: string): Promise<void> {
     const turnId = this.activeTurns.get(sessionId)
     if (turnId) await this.request('turn/interrupt', { threadId: sessionId, turnId })
