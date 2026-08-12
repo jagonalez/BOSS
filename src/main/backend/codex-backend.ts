@@ -288,6 +288,10 @@ export class CodexBackend implements Backend {
   private loadedThreads = new Set<string>()
   private activeTurns = new Map<string, string>()
   private liveText = new Map<string, string>()
+  /** codex thread/read omits custom tool call items (the shape used for
+   * R.A.L.F.-provided tools), so parts seen live are re-merged into every
+   * history reload. Keyed by message id, then part id. */
+  private readonly livePartCache = new Map<string, Map<string, Part>>()
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
   private version = ''
@@ -503,7 +507,15 @@ export class CodexBackend implements Backend {
         } else {
           this.emit({ type: 'message.updated', message: { id: messageId, sessionID: sessionId, role: 'assistant', time: { created: Number(params.startedAtMs ?? Date.now()) } } })
           const part = itemPart(sessionId, messageId, item)
-          if (part) this.emit({ type: 'message.part.updated', part })
+          if (part) {
+            if (item.type === 'customToolCall' || item.type === 'custom_tool_call' || item.type === 'customToolCallOutput' || item.type === 'custom_tool_call_output') {
+              const cached = this.livePartCache.get(messageId) ?? new Map<string, Part>()
+              const existing = cached.get(part.id)
+              cached.set(part.id, existing ? { ...existing, ...part, state: { ...existing.state, ...part.state } } : part)
+              this.livePartCache.set(messageId, cached)
+            }
+            this.emit({ type: 'message.part.updated', part })
+          }
         }
         break
       }
@@ -586,6 +598,14 @@ export class CodexBackend implements Backend {
   async messagesList(sessionId: string, limit?: number): Promise<MessageWithParts[]> {
     const result = await this.request('thread/read', { threadId: sessionId, includeTurns: true }) as { thread: CodexThread }
     const messages = (result.thread.turns ?? []).flatMap((turn) => turnMessages(sessionId, turn))
+    for (const message of messages) {
+      const cached = this.livePartCache.get(message.info.id)
+      if (!cached) continue
+      const present = new Set(message.parts.map((part) => part.id))
+      for (const part of cached.values()) {
+        if (!present.has(part.id)) message.parts.push(part)
+      }
+    }
     return limit ? messages.slice(-limit) : messages
   }
 
