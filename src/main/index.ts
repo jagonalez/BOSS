@@ -20,6 +20,7 @@ import { AutomationManager } from './automation-manager'
 import { McpHub } from './mcp-hub'
 import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
+import { TranscriptStore } from './transcript-store'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -39,12 +40,13 @@ const worktrees = new WorktreeManager({
   stateFile: join(app.getPath('userData'), 'worktrees.json'),
   root: join(app.getPath('userData'), 'worktrees')
 })
+const transcripts = new TranscriptStore(join(app.getPath('userData'), 'transcripts.sqlite'))
 const backendMgr = new BackendManager({
   opencode: openCodeBackend,
   pi: createBackend('pi', { server, api, events }),
   codex: createBackend('codex', { server, api, events }),
   claude: createBackend('claude', { server, api, events })
-}, worktrees, backendAuth)
+}, worktrees, backendAuth, transcripts)
 const threadBus = new ThreadBus(backendMgr)
 backendMgr.attachThreadBus(threadBus)
 const automations = new AutomationManager({

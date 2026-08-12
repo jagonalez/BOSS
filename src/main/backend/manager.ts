@@ -15,13 +15,14 @@ import type {
   QueuedFollowUpAttachment,
   ThreadCreationScope
 } from '@shared/backend'
-import type { EventMessage, MessageWithParts, SessionInfo } from '@shared/opencode'
+import type { EventMessage, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 import { projectScope, type ProjectScope } from '../project-identity'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
+import type { TranscriptStore } from '../transcript-store'
 
 interface ThreadBinding {
   id: string
@@ -179,7 +180,8 @@ export class BackendManager {
   constructor(
     private readonly backends: Record<BackendId, Backend>,
     private readonly worktrees?: WorktreeManager,
-    private readonly backendAuth?: BackendAuth
+    private readonly backendAuth?: BackendAuth,
+    private readonly transcripts?: TranscriptStore
   ) {}
 
   attachThreadBus(threadBus: ThreadBus): void {
@@ -292,6 +294,7 @@ export class BackendManager {
     await this.threadBus?.stop()
     if (this.worktreeCleanupTimer) clearInterval(this.worktreeCleanupTimer)
     this.worktreeCleanupTimer = undefined
+    this.transcripts?.close()
   }
 
   async setProject(path: string): Promise<void> {
@@ -324,6 +327,30 @@ export class BackendManager {
       /* Preserve pre-R.A.L.F. OpenCode sessions once on first launch or migration. */
       /* First R.A.L.F. launch starts with no thread bindings. */
     }
+    this.migrateLegacyCodexParts()
+  }
+
+  private migrateLegacyCodexParts(): void {
+    if (!this.transcripts || this.transcripts.metadata('migration.codex-live-parts.v1') === 'complete') return
+    try {
+      const parsed = JSON.parse(readFileSync(join(app.getPath('userData'), 'codex-live-parts.json'), 'utf8')) as {
+        version?: number
+        threads?: Record<string, Record<string, Part[]>>
+      }
+      if (parsed.version === 1 && parsed.threads) {
+        for (const [nativeSessionId, messages] of Object.entries(parsed.threads)) {
+          const binding = this.bindingForNative('codex', nativeSessionId)
+          if (!binding) continue
+          for (const parts of Object.values(messages)) {
+            for (const part of parts) this.transcripts.recordPart(this.transcriptSource(binding), part)
+          }
+        }
+        this.transcripts.flush()
+      }
+    } catch {
+      /* No legacy cache is the normal case on a fresh install. */
+    }
+    this.transcripts.setMetadata('migration.codex-live-parts.v1', 'complete')
   }
 
   private save(): void {
@@ -379,6 +406,14 @@ export class BackendManager {
     return [...this.bindings.values()].find(
       (binding) => binding.backendId === backendId && binding.nativeSessionId === nativeSessionId
     )
+  }
+
+  private transcriptSource(binding: ThreadBinding) {
+    return {
+      threadId: binding.id,
+      backendId: binding.backendId,
+      nativeSessionId: binding.nativeSessionId
+    }
   }
 
   private session(binding: ThreadBinding, native?: SessionInfo): SessionInfo {
@@ -486,15 +521,35 @@ export class BackendManager {
       if (properties.sessionID) properties.sessionID = binding.id
       if (part) properties.part = { ...part, sessionID: binding.id }
       if (messageInfo?.sessionID) properties.info = { ...messageInfo, sessionID: binding.id }
+      if (eventType === 'message.updated' && properties.info) {
+        this.transcripts?.recordMessage(
+          this.transcriptSource(binding),
+          properties.info as MessageWithParts['info']
+        )
+      } else if ((eventType === 'message.part.updated' || eventType === 'message.part.created') && properties.part) {
+        this.transcripts?.recordPart(
+          this.transcriptSource(binding),
+          properties.part as MessageWithParts['parts'][number]
+        )
+      }
       if (eventType === 'session.status') {
         const status = (properties.status as { type?: string } | undefined)?.type
-        if (status === 'busy' || status === 'retry') this.busyThreads.add(binding.id)
-        else this.busyThreads.delete(binding.id)
+        if (status === 'busy' || status === 'retry') {
+          if (!this.busyThreads.has(binding.id)) {
+            this.transcripts?.beginRun(this.transcriptSource(binding))
+          }
+          this.busyThreads.add(binding.id)
+        } else {
+          this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
+          this.busyThreads.delete(binding.id)
+        }
       } else if (eventType === 'session.idle') {
+        this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
         this.busyThreads.delete(binding.id)
         void this.threadBus?.flush(binding.id)
         void this.deliverNextFollowUp(binding.id)
       } else if (eventType === 'session.error') {
+        this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
         this.busyThreads.delete(binding.id)
       }
     }
@@ -586,6 +641,7 @@ export class BackendManager {
       const backend = await this.ensureStarted(binding.backendId)
       await backend.sessionDelete(binding.nativeSessionId)
     }
+    this.transcripts?.deleteThread(threadId)
     this.bindings.delete(threadId)
     this.save()
     this.emit({ type: 'session.deleted', properties: { info: this.session(binding) }, backendId: binding.backendId })
@@ -605,12 +661,23 @@ export class BackendManager {
 
   async messagesList(threadId: string, limit?: number): Promise<MessageWithParts[]> {
     const binding = this.binding(threadId)
-    const backend = await this.ensureStarted(binding.backendId)
-    const messages = await backend.messagesList(binding.nativeSessionId, limit)
-    return messages.map((message) => ({
+    let messages: MessageWithParts[]
+    try {
+      const backend = await this.ensureStarted(binding.backendId)
+      messages = await backend.messagesList(binding.nativeSessionId)
+    } catch (error) {
+      if (this.transcripts?.hasMessages(threadId)) return this.transcripts.messages(threadId, limit)
+      throw error
+    }
+    const normalized = messages.map((message) => ({
       info: { ...message.info, sessionID: threadId },
       parts: message.parts.map((part) => ({ ...part, sessionID: threadId }))
     }))
+    if (!this.transcripts) return limit ? normalized.slice(-limit) : normalized
+    this.transcripts.reconcile(this.transcriptSource(binding), normalized, {
+      pruneMissingMessages: !this.busyThreads.has(threadId)
+    })
+    return this.transcripts.messages(threadId, limit)
   }
 
   async sendMessage(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
@@ -621,10 +688,12 @@ export class BackendManager {
     const backend = await this.ensureStarted(binding.backendId)
     binding.updatedAt = now()
     this.save()
+    this.transcripts?.beginRun(this.transcriptSource(binding))
     this.busyThreads.add(threadId)
     try {
       await backend.sendMessage(binding.nativeSessionId, parts, options)
     } catch (error) {
+      this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
       this.busyThreads.delete(threadId)
       throw error
     }

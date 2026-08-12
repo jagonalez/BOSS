@@ -1,8 +1,5 @@
-import { app } from 'electron'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
@@ -50,6 +47,10 @@ interface CodexItem {
   call_id?: string
   callId?: string
   output?: unknown
+  contentItems?: Array<{ type?: string; text?: string; imageUrl?: string }>
+  durationMs?: number | null
+  success?: boolean | null
+  namespace?: string | null
 }
 
 interface PendingApproval {
@@ -185,6 +186,20 @@ function userInputs(parts: unknown[]): Array<Record<string, unknown>> {
   return inputs
 }
 
+function dynamicToolOutput(item: CodexItem): unknown {
+  if (!item.contentItems?.length) return item.result ?? item.error
+  const text = item.contentItems
+    .filter((entry) => entry.type === 'inputText' || entry.text)
+    .map((entry) => entry.text ?? '')
+    .filter(Boolean)
+    .join('\n')
+  const images = item.contentItems
+    .filter((entry) => entry.type === 'inputImage' && entry.imageUrl)
+    .map((entry) => entry.imageUrl)
+  if (!images.length) return text
+  return { text, images }
+}
+
 function itemPart(sessionId: string, messageId: string, item: CodexItem): Part | null {
   if (item.type === 'agentMessage' || item.type === 'plan') {
     return { id: item.id, type: 'text', sessionID: sessionId, messageID: messageId, text: item.text ?? '' }
@@ -218,7 +233,7 @@ function itemPart(sessionId: string, messageId: string, item: CodexItem): Part |
       type: 'tool',
       sessionID: sessionId,
       messageID: messageId,
-      state: { status: 'completed', tool: 'tool', output }
+      state: { status: 'completed', output }
     }
   }
   if (item.type === 'commandExecution') {
@@ -237,16 +252,20 @@ function itemPart(sessionId: string, messageId: string, item: CodexItem): Part |
     }
   }
   if (item.type === 'fileChange' || item.type === 'mcpToolCall' || item.type === 'dynamicToolCall' || item.type === 'collabAgentToolCall') {
+    const completed = item.status === 'completed' || item.success !== null && item.success !== undefined
     return {
       id: item.id,
       type: 'tool',
       sessionID: sessionId,
       messageID: messageId,
       state: {
-        status: item.status === 'failed' ? 'error' : item.status === 'completed' ? 'completed' : 'running',
+        status: item.status === 'failed' || item.success === false ? 'error' : completed ? 'completed' : 'running',
         tool: item.type === 'fileChange' ? 'fileChange' : item.tool ?? item.type,
         input: item.arguments ?? item.changes,
-        output: item.result ?? item.error
+        output: item.type === 'dynamicToolCall' ? dynamicToolOutput(item) : item.result ?? item.error,
+        metadata: item.type === 'dynamicToolCall'
+          ? { durationMs: item.durationMs, namespace: item.namespace, success: item.success }
+          : undefined
       }
     }
   }
@@ -291,82 +310,6 @@ export class CodexBackend implements Backend {
   private loadedThreads = new Set<string>()
   private activeTurns = new Map<string, string>()
   private liveText = new Map<string, string>()
-  /** codex thread/read omits custom tool call items (the shape used for
-   * R.A.L.F.-provided tools), so parts seen live are re-merged into every
-   * history reload. Persisted to disk so runs stay reviewable after a
-   * restart. Keyed by message id, then part id. */
-  private readonly livePartCache = new Map<string, Map<string, Part>>()
-  /** Native thread id -> message ids, for pruning on thread deletion. */
-  private readonly livePartThreads = new Map<string, Set<string>>()
-  private livePartsLoaded = false
-  private livePartsSaveTimer?: NodeJS.Timeout
-
-  private livePartsFile(): string {
-    return join(app.getPath('userData'), 'codex-live-parts.json')
-  }
-
-  private loadLiveParts(): void {
-    if (this.livePartsLoaded) return
-    this.livePartsLoaded = true
-    try {
-      const parsed = JSON.parse(readFileSync(this.livePartsFile(), 'utf8')) as {
-        version?: number
-        threads?: Record<string, Record<string, Part[]>>
-      }
-      if (parsed.version !== 1 || !parsed.threads) return
-      for (const [threadId, byMessage] of Object.entries(parsed.threads)) {
-        const messageIds = new Set<string>()
-        for (const [messageId, parts] of Object.entries(byMessage)) {
-          messageIds.add(messageId)
-          const map = new Map<string, Part>()
-          for (const part of parts) map.set(part.id, part)
-          this.livePartCache.set(messageId, map)
-        }
-        this.livePartThreads.set(threadId, messageIds)
-      }
-    } catch {
-      /* First launch starts with no cached parts. */
-    }
-  }
-
-  private saveLiveParts(): void {
-    if (this.livePartsSaveTimer) return
-    this.livePartsSaveTimer = setTimeout(() => {
-      this.livePartsSaveTimer = undefined
-      const threads: Record<string, Record<string, Part[]>> = {}
-      const threadIds = [...this.livePartThreads.keys()].slice(-200)
-      for (const threadId of threadIds) {
-        const byMessage: Record<string, Part[]> = {}
-        for (const messageId of this.livePartThreads.get(threadId) ?? []) {
-          const parts = this.livePartCache.get(messageId)
-          if (parts?.size) byMessage[messageId] = [...parts.values()]
-        }
-        if (Object.keys(byMessage).length) threads[threadId] = byMessage
-      }
-      try {
-        writeFileSync(this.livePartsFile(), JSON.stringify({ version: 1, threads }))
-      } catch {
-        /* Parts stay available in memory if persistence is unavailable. */
-      }
-    }, 500)
-    this.livePartsSaveTimer.unref()
-  }
-
-  private cacheLivePart(threadId: string, messageId: string, part: Part): void {
-    this.loadLiveParts()
-    const state = part.state
-    const bounded = state && typeof state.output === 'string' && state.output.length > 20_000
-      ? { ...part, state: { ...state, output: `${state.output.slice(0, 20_000)}\n[truncated]` } }
-      : part
-    const cached = this.livePartCache.get(messageId) ?? new Map<string, Part>()
-    const existing = cached.get(bounded.id)
-    cached.set(bounded.id, existing ? { ...existing, ...bounded, state: { ...existing.state, ...bounded.state } } : bounded)
-    this.livePartCache.set(messageId, cached)
-    const messageIds = this.livePartThreads.get(threadId) ?? new Set<string>()
-    messageIds.add(messageId)
-    this.livePartThreads.set(threadId, messageIds)
-    this.saveLiveParts()
-  }
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
   private version = ''
@@ -583,9 +526,6 @@ export class CodexBackend implements Backend {
           this.emit({ type: 'message.updated', message: { id: messageId, sessionID: sessionId, role: 'assistant', time: { created: Number(params.startedAtMs ?? Date.now()) } } })
           const part = itemPart(sessionId, messageId, item)
           if (part) {
-            if (item.type === 'customToolCall' || item.type === 'custom_tool_call' || item.type === 'customToolCallOutput' || item.type === 'custom_tool_call_output') {
-              this.cacheLivePart(sessionId, messageId, part)
-            }
             this.emit({ type: 'message.part.updated', part })
           }
         }
@@ -643,10 +583,6 @@ export class CodexBackend implements Backend {
   async sessionDelete(id: string): Promise<void> {
     await this.request('thread/delete', { threadId: id })
     this.loadedThreads.delete(id)
-    this.loadLiveParts()
-    for (const messageId of this.livePartThreads.get(id) ?? []) this.livePartCache.delete(messageId)
-    this.livePartThreads.delete(id)
-    this.saveLiveParts()
   }
 
   async sessionRename(id: string, title: string): Promise<SessionInfo> {
@@ -674,15 +610,6 @@ export class CodexBackend implements Backend {
   async messagesList(sessionId: string, limit?: number): Promise<MessageWithParts[]> {
     const result = await this.request('thread/read', { threadId: sessionId, includeTurns: true }) as { thread: CodexThread }
     const messages = (result.thread.turns ?? []).flatMap((turn) => turnMessages(sessionId, turn))
-    this.loadLiveParts()
-    for (const message of messages) {
-      const cached = this.livePartCache.get(message.info.id)
-      if (!cached) continue
-      const present = new Set(message.parts.map((part) => part.id))
-      for (const part of cached.values()) {
-        if (!present.has(part.id)) message.parts.push(part)
-      }
-    }
     return limit ? messages.slice(-limit) : messages
   }
 

@@ -91,7 +91,7 @@ function toolOutputText(part: Part): string {
       return String(out)
     }
   }
-  return ''
+  return s.error ?? ''
 }
 
 function isRunning(status?: string): boolean {
