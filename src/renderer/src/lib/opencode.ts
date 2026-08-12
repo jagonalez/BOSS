@@ -19,6 +19,7 @@ import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
+import type { SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
 
 export class ApiError extends Error {
   constructor(
@@ -157,6 +158,9 @@ export const OpenCode = {
     backendRequest<void>({ type: 'thread.compact', threadId: id, model }),
   backendModels: (threadId?: string, backendId?: BackendId) =>
     backendRequest<BackendModelDescriptor[]>({ type: 'thread.models', threadId, backendId }),
+  supervision: () => backendRequest<SupervisionSnapshot>({ type: 'supervision.snapshot' }),
+  searchTranscripts: (query: string, limit = 40) =>
+    backendRequest<TranscriptSearchResult[]>({ type: 'supervision.search', query, limit }),
   cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction, options }),
   forkIntoWorktree: (threadId: string, instruction?: string, options?: BackendMessageOptions) =>
