@@ -793,11 +793,24 @@ export class BackendManager {
     this.save()
     this.transcripts?.beginRun(this.transcriptSource(binding))
     this.busyThreads.add(threadId)
+    // Do not make visible activity depend on how quickly (or whether) a
+    // backend echoes its native busy event. Native events will subsequently
+    // reconcile this optimistic state and carry the streamed transcript.
+    this.emit({
+      type: 'session.status',
+      properties: { sessionID: threadId, status: { type: 'busy' } },
+      backendId: binding.backendId
+    })
     try {
       await backend.sendMessage(binding.nativeSessionId, parts, options)
     } catch (error) {
       this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
       this.busyThreads.delete(threadId)
+      this.emit({
+        type: 'session.status',
+        properties: { sessionID: threadId, status: { type: 'idle' } },
+        backendId: binding.backendId
+      })
       throw error
     }
   }
