@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
-import { abortRun, compactSession, editMessage, forkFromMessage, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, rejectQuestion, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
+import { abortRun, editMessage, forkFromMessage, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, rejectQuestion, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, toggleAsr, unrevertSession } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -895,15 +895,6 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             <ModePicker backendId={backendId} sessionId={effectiveSession ?? undefined} />
             <ModelPicker onPick={onModelChange} sessionId={effectiveSession ?? undefined} />
             <EffortPicker sessionId={effectiveSession ?? undefined} />
-            {hasSession && effectiveSession && !streaming ? (
-              <button
-                className="composer-compact"
-                onClick={() => void compactSession(effectiveSession)}
-                title="Summarize older messages into a compact context summary"
-              >
-                Compact
-              </button>
-            ) : null}
           </div>
           {streaming ? (
             <button className="btn-send" onClick={() => void abortRun(effectiveSession ?? undefined)} title="Stop">

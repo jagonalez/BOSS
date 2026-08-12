@@ -1,10 +1,13 @@
 import React from 'react'
 import { useStore, appStore } from '../state/AppState'
+import { serviceDegradations } from '../lib/status'
 
 export function Toolbar(): React.JSX.Element {
-  const serverVersion = useStore(appStore, (s) => s.serverVersion)
+  const serverUrl = useStore(appStore, (s) => s.serverUrl)
   const serverHealthy = useStore(appStore, (s) => s.serverHealthy)
+  const backends = useStore(appStore, (s) => s.backends)
   const attention = useStore(appStore, (s) => s.attention)
+  const degradations = serviceDegradations(serverUrl, serverHealthy, backends)
 
   return (
     <div className="toolbar">
@@ -15,10 +18,12 @@ export function Toolbar(): React.JSX.Element {
           <span>{attention.kind === 'permission' ? 'Permission needed' : attention.kind === 'error' ? 'Error' : 'Done'}</span>
         </div>
       ) : null}
-      <div className="server-pill" title={`OpenCode project service ${serverVersion}`}>
-        <span className={`status-dot ${serverHealthy ? 'ok' : 'pulse'}`} />
-        <span>{serverHealthy ? serverVersion || 'opencode' : 'connecting'}</span>
-      </div>
+      {degradations.length ? (
+        <div className="server-pill degraded" title={degradations.join('\n')}>
+          <span className="status-dot" />
+          <span>{degradations.length === 1 ? degradations[0] : `${degradations.length} services degraded`}</span>
+        </div>
+      ) : null}
     </div>
   )
 }

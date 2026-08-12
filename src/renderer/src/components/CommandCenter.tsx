@@ -3,6 +3,7 @@ import type { SessionInfo } from '@shared/opencode'
 import { useStore, appStore } from '../state/AppState'
 import { openProject, selectSession } from '../lib/actions'
 import { ChatIcon, ChevronIcon } from './icons'
+import { serviceDegradations } from '../lib/status'
 
 function timeAgo(timestamp?: number): string {
   if (!timestamp) return 'recently'
@@ -49,7 +50,10 @@ export function CommandCenter(): React.JSX.Element {
   const errors = useStore(appStore, (state) => state.lastErrorBySession)
   const streaming = useStore(appStore, (state) => state.streaming)
   const serverHealthy = useStore(appStore, (state) => state.serverHealthy)
+  const serverUrl = useStore(appStore, (state) => state.serverUrl)
+  const backends = useStore(appStore, (state) => state.backends)
   const threadBus = useStore(appStore, (state) => state.threadBus)
+  const degradations = serviceDegradations(serverUrl, serverHealthy, backends)
 
   const ordered = [...sessions].sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
   const needsAttention = ordered.filter((session) => permissions[session.id] || questions[session.id] || errors[session.id] || threadBus?.messages.some((message) => message.fromThreadId === session.id && message.status === 'failed'))
@@ -64,9 +68,11 @@ export function CommandCenter(): React.JSX.Element {
           <h1>Here’s what’s happening.</h1>
           <p>Status is based on live R.A.L.F. events. An optional AI briefing can be layered on later.</p>
         </div>
-        <div className={`command-connection ${serverHealthy ? 'connected' : ''}`}>
-          <span />{serverHealthy ? 'Connected' : 'Connecting'}
-        </div>
+        {degradations.length ? (
+          <div className="command-connection degraded" title={degradations.join('\n')}>
+            <span />{degradations.length === 1 ? degradations[0] : `${degradations.length} services degraded`}
+          </div>
+        ) : null}
       </header>
 
       <div className="command-grid">
