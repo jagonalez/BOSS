@@ -437,6 +437,21 @@ textarea {
   display: block;
 }
 
+.settings-computer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-computer-toggle input {
+  accent-color: var(--accent);
+}
+
 /* ---------- Full-page settings ---------- */
 
 .settings-page {

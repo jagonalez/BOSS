@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, importNativeThreads, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshQaDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
+import { clearThreadBusFailures, importNativeThreads, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
@@ -215,6 +215,8 @@ export function SettingsModal(): React.JSX.Element | null {
   const backendModelsLoading = useStore(appStore, (s) => s.backendModelsLoading ?? false)
   const defaultModels = useStore(appStore, (s) => s.defaultModels ?? {})
   const qaDefault = useStore(appStore, (s) => s.qaDefault)
+  const computerUse = useStore(appStore, (s) => s.computerUse)
+  const computerUsePerms = useStore(appStore, (s) => s.computerUsePerms)
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [importStatus, setImportStatus] = useState('')
@@ -239,6 +241,12 @@ export function SettingsModal(): React.JSX.Element | null {
   if (!open) return null
 
   const heading = SETTINGS_HEADINGS[section]
+  const missingComputerPermissions = computerUsePerms.available
+    ? [
+        !computerUsePerms.accessibility ? 'Accessibility' : '',
+        !computerUsePerms.screenRecording ? 'Screen Recording' : ''
+      ].filter(Boolean)
+    : []
 
   return (
     <div className="settings-page">
@@ -316,6 +324,29 @@ export function SettingsModal(): React.JSX.Element | null {
                       <option value="automatic">Automatic — allow scoped actions</option>
                       <option value="off">Off</option>
                     </Select>
+                  </SettingsRow>
+                  <SettingsRow
+                    title="Computer use"
+                    description="Allows scoped native-app inspection and interaction. Browser QA does not require this service."
+                  >
+                    <label className="settings-computer-toggle">
+                      <input
+                        type="checkbox"
+                        disabled={!computerUse.supported}
+                        checked={computerUse.enabled}
+                        onChange={(event) => void toggleComputerUse(event.target.checked)}
+                      />
+                      <span>{computerUse.enabled ? 'On' : 'Off'}</span>
+                    </label>
+                    {!computerUse.supported ? <StatusBadge tone="danger">Unavailable</StatusBadge> : null}
+                    {computerUse.enabled && missingComputerPermissions.length === 0 && !computerUse.error ? <StatusBadge tone="success">Ready</StatusBadge> : null}
+                    {computerUse.enabled && missingComputerPermissions.length > 0 ? (
+                      <>
+                        <StatusBadge tone="warning">Needs {missingComputerPermissions.join(' + ')}</StatusBadge>
+                        <Button size="small" onClick={() => void refreshComputerUsePermissions(true)}>Fix permissions</Button>
+                      </>
+                    ) : null}
+                    {computerUse.error ? <StatusBadge tone="danger">{computerUse.error}</StatusBadge> : null}
                   </SettingsRow>
                   <SettingsRow
                     title="Existing OpenCode sessions"

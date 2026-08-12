@@ -3,7 +3,6 @@ import { useStore, appStore, applyEvent } from './state/AppState'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { ChatView } from './components/ChatView'
-import { Footer } from './components/Footer'
 import { Workspace } from './components/Workspace'
 import { CommandCenter, EmptyProductPage } from './components/CommandCenter'
 import { SitesPage } from './components/SitesPage'
@@ -312,7 +311,6 @@ export function App(): React.JSX.Element {
       <Sidebar />
       <div className="main">
         {page}
-        <Footer />
       </div>
       <ModelSwitchModal />
       <CommitDialog />
