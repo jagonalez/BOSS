@@ -86,6 +86,8 @@ main { flex: 1; padding: 12px 12px 90px; }
   border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px;
   font: inherit; max-height: 110px;
 }
+/* iOS auto-zooms focused inputs below 16px; keep every input at 16px. */
+input, textarea { font-size: 16px !important; }
 .perm {
   border: 1px solid var(--yellow); border-radius: 12px; padding: 12px; margin: 10px 0;
   background: var(--pane);
