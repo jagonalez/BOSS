@@ -3853,6 +3853,140 @@ textarea {
 
 .composer-wrap {
   padding: 12px 28px 16px;
+  container-type: inline-size;
+}
+
+.followup-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 780px;
+  margin: 0 auto 8px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--bg-elevated) 88%, var(--accent) 12%);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, var(--accent) 25%);
+  border-radius: 12px;
+}
+
+.followup-queue-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 3px 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.followup-queue-header small {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.followup-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 6px 7px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.followup-index {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--bg-inset);
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.followup-text {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-edit {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  background: var(--bg-inset);
+  border: 1px solid var(--accent-dim, var(--accent));
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.followup-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.followup-actions button,
+.btn-stop-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 4px 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.followup-actions button:hover:not(:disabled),
+.btn-stop-secondary:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.followup-actions button:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
+.followup-actions .followup-steer {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+}
+
+.followup-actions .followup-delete:hover {
+  color: var(--red);
+}
+
+@container (max-width: 620px) {
+  .followup-item {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .followup-actions {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
 }
 
 .composer {
@@ -3952,11 +4086,24 @@ textarea {
 
 .composer-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
   border-top: 1px solid var(--border-subtle);
   padding-top: 8px;
+}
+
+.composer-submit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.btn-stop-secondary {
+  width: 28px;
+  height: 36px;
+  padding: 0;
 }
 
 .agent-toggle {

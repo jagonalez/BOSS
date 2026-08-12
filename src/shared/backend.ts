@@ -13,9 +13,27 @@ export interface BackendCapabilities {
   models: boolean
   permissions: boolean
   nativeFork: boolean
+  steering: 'native' | 'stop-and-redirect'
+  branching: 'message' | 'thread' | 'context-copy'
   images: boolean
   mcp: boolean
   interactiveQuestions: boolean
+}
+
+export interface QueuedFollowUpAttachment {
+  id: string
+  name: string
+  mime: string
+  dataUrl: string
+}
+
+export interface QueuedFollowUp {
+  id: string
+  threadId: string
+  text: string
+  attachments: QueuedFollowUpAttachment[]
+  options?: BackendMessageOptions
+  createdAt: number
 }
 
 export interface BackendDescriptor {
@@ -62,12 +80,17 @@ export type BackendRequest =
   | { type: 'backend.auth.status' }
   | { type: 'thread.list' }
   | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope }
-  | { type: 'thread.import-native'; backendId: BackendId }
   | { type: 'thread.get'; threadId: string }
   | { type: 'thread.delete'; threadId: string }
   | { type: 'thread.rename'; threadId: string; title: string }
   | { type: 'thread.messages'; threadId: string; limit?: number }
   | { type: 'thread.send'; threadId: string; parts: unknown[]; options?: BackendMessageOptions }
+  | { type: 'thread.followups.list'; threadId: string }
+  | { type: 'thread.followups.add'; threadId: string; text: string; attachments?: QueuedFollowUpAttachment[]; options?: BackendMessageOptions }
+  | { type: 'thread.followups.update'; threadId: string; followUpId: string; text: string }
+  | { type: 'thread.followups.remove'; threadId: string; followUpId: string }
+  | { type: 'thread.followups.move'; threadId: string; followUpId: string; toIndex: number }
+  | { type: 'thread.followups.steer'; threadId: string; followUpId: string }
   | { type: 'thread.abort'; threadId: string }
   | { type: 'thread.todos'; threadId: string }
   | { type: 'thread.permission'; threadId: string; permissionId: string; response: 'once' | 'always' | 'reject' }

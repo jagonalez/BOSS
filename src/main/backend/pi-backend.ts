@@ -123,6 +123,15 @@ function contentParts(sessionId: string, messageId: string, content: PiMessage['
   })
 }
 
+function messageText(content: PiMessage['content']): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter((block) => block.type === 'text')
+    .map((block) => String(block.text ?? ''))
+    .join('\n')
+}
+
 function toMessage(sessionId: string, value: PiMessage, index: number): MessageWithParts | null {
   if (value.role !== 'user' && value.role !== 'assistant') return null
   const created = typeof value.timestamp === 'number' ? value.timestamp : Date.parse(String(value.timestamp ?? '')) || Date.now()
@@ -250,6 +259,7 @@ export class PiBackend implements Backend {
   private sessionDirectories = new Map<string, string>()
   private messageIds = new Map<string, string>()
   private liveText = new Map<string, string>()
+  private forkEntryIds = new Map<string, Map<string, string>>()
   private version = ''
   private healthy = false
   private threadBus?: ThreadBusConnection
@@ -484,6 +494,7 @@ export default function (pi: ExtensionAPI) {
       case 'agent_start':
         this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'busy' } })
         break
+      case 'agent_end':
       case 'agent_settled':
         this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'idle' } })
         this.emit({ type: 'session.idle', sessionID: sessionId })
@@ -628,8 +639,13 @@ export default function (pi: ExtensionAPI) {
   }
 
   async messagesList(sessionId: string, limit?: number): Promise<MessageWithParts[]> {
-    const response = await (await this.runtime(sessionId)).send({ type: 'get_messages' })
+    const runtime = await this.runtime(sessionId)
+    const response = await runtime.send({ type: 'get_messages' })
     const data = response.data as { messages?: PiMessage[] } | undefined
+    const forkResponse = await runtime.send({ type: 'get_fork_messages' }).catch(() => undefined)
+    const forkData = forkResponse?.data as { messages?: Array<{ entryId?: string; text?: string }> } | undefined
+    const availableForks = [...(forkData?.messages ?? [])]
+    const mappedEntries = new Map<string, string>()
     const messages: MessageWithParts[] = []
     for (const [index, message] of (data?.messages ?? []).entries()) {
       if (message.role === 'toolResult' && message.toolCallId) {
@@ -651,8 +667,19 @@ export default function (pi: ExtensionAPI) {
         continue
       }
       const converted = toMessage(sessionId, message, index)
-      if (converted) messages.push(converted)
+      if (converted) {
+        messages.push(converted)
+        if (message.role === 'user') {
+          const text = messageText(message.content)
+          const matchIndex = availableForks.findIndex((candidate) => candidate.text === text)
+          if (matchIndex >= 0) {
+            const [match] = availableForks.splice(matchIndex, 1)
+            if (match.entryId) mappedEntries.set(converted.info.id, match.entryId)
+          }
+        }
+      }
     }
+    this.forkEntryIds.set(sessionId, mappedEntries)
     return limit ? messages.slice(-limit) : messages
   }
 
@@ -664,6 +691,15 @@ export default function (pi: ExtensionAPI) {
     }
     const content = promptContent(parts)
     await runtime.send({ type: 'prompt', message: content.message, ...(content.images.length ? { images: content.images } : {}) })
+  }
+
+  async steer(sessionId: string, parts: unknown[]): Promise<void> {
+    const content = promptContent(parts)
+    await (await this.runtime(sessionId)).send({
+      type: 'steer',
+      message: content.message,
+      ...(content.images.length ? { images: content.images } : {})
+    })
   }
 
   async abort(sessionId: string): Promise<void> { await (await this.runtime(sessionId)).send({ type: 'abort' }) }
@@ -716,9 +752,18 @@ export default function (pi: ExtensionAPI) {
   async fileTree(_path?: string): Promise<FileNode[]> { return [] }
   async fileContent(path: string): Promise<FileContent> { return { path, content: '' } }
 
-  async fork(sessionId: string, _messageId?: string): Promise<SessionInfo> {
+  async fork(sessionId: string, messageId?: string): Promise<SessionInfo> {
     const runtime = await this.runtime(sessionId)
-    await runtime.send({ type: 'clone' })
+    let entryId: string | undefined
+    if (messageId) {
+      entryId = this.forkEntryIds.get(sessionId)?.get(messageId)
+      if (!entryId) {
+        await this.messagesList(sessionId)
+        entryId = this.forkEntryIds.get(sessionId)?.get(messageId)
+      }
+      if (!entryId) throw new Error('Pi could not match this message to a branch point. Refresh the thread and try again.')
+    }
+    await runtime.send(entryId ? { type: 'fork', entryId } : { type: 'clone' })
     const state = (await runtime.send({ type: 'get_state' })).data as PiState | undefined
     const newId = state?.sessionId
     if (!newId || newId === sessionId) return { id: sessionId }

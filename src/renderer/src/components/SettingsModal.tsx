@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, importNativeThreads, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
@@ -39,7 +39,7 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
 const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: string }> = {
   agents: {
     title: 'Agent defaults',
-    description: 'Choose how new work starts and bring existing sessions into R.A.L.F.'
+    description: 'Choose how new R.A.L.F. threads start.'
   },
   connections: {
     title: 'Models & connections',
@@ -219,7 +219,6 @@ export function SettingsModal(): React.JSX.Element | null {
   const computerUsePerms = useStore(appStore, (s) => s.computerUsePerms)
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
-  const [importStatus, setImportStatus] = useState('')
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
 
   useEffect(() => {
@@ -347,20 +346,6 @@ export function SettingsModal(): React.JSX.Element | null {
                       </>
                     ) : null}
                     {computerUse.error ? <StatusBadge tone="danger">{computerUse.error}</StatusBadge> : null}
-                  </SettingsRow>
-                  <SettingsRow
-                    title="Existing OpenCode sessions"
-                    description={<>Import native sessions when you want them to appear as R.A.L.F. threads.{importStatus ? <span className="settings-inline-status"> {importStatus}</span> : null}</>}
-                  >
-                  <Button
-                    size="small"
-                    onClick={() => {
-                      setImportStatus('Importing…')
-                      void importNativeThreads('opencode')
-                        .then((count) => setImportStatus(count ? `Imported ${count}` : 'Nothing new'))
-                        .catch(() => setImportStatus('Import failed'))
-                    }}
-                  >Import</Button>
                   </SettingsRow>
                 </section>
               </div>

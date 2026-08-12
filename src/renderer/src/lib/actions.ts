@@ -534,6 +534,15 @@ export async function refreshSessions(): Promise<void> {
   }
 }
 
+export async function refreshFollowUps(threadId: string): Promise<void> {
+  try {
+    const followUps = await OpenCode.followUps(threadId)
+    appStore.setState((state) => ({ followUps: { ...state.followUps, [threadId]: followUps } }))
+  } catch {
+    /* The thread may have been removed while its view was still closing. */
+  }
+}
+
 export async function refreshThreadBus(threadId?: string): Promise<void> {
   try {
     appStore.setState({ threadBus: await OpenCode.threadBus(threadId) })
@@ -1002,6 +1011,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
     appStore.setState({ activePage: inProject ? 'project' : 'chat' })
     void refreshProviders(id)
     void refreshQaPolicy(id)
+    void refreshFollowUps(id)
     return
   }
   if (session?.model?.id && !cur.modelsBySession[id]) setModel(session.model.id, id, session.model.provider)
@@ -1016,6 +1026,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
   void refreshDiff(id)
   void refreshProviders(id)
   void refreshQaPolicy(id)
+  void refreshFollowUps(id)
 }
 
 export async function refreshQaPolicy(threadId: string): Promise<void> {
@@ -1077,12 +1088,6 @@ export async function newSession(): Promise<void> {
 
 export async function newGlobalChat(): Promise<void> {
   await createSession('global')
-}
-
-export async function importNativeThreads(backendId: BackendId): Promise<number> {
-  const imported = await OpenCode.importNativeSessions(backendId)
-  await refreshSessions()
-  return imported.length
 }
 
 export async function openProject(path: string): Promise<void> {
@@ -1277,15 +1282,21 @@ export async function unrevertSession(sessionID: string): Promise<void> {
   await refreshFiles()
 }
 
-export async function forkFromMessage(sessionID: string, messageID: string): Promise<void> {
+export async function forkFromMessage(sessionID: string, messageID?: string, draft?: string): Promise<void> {
   try {
     const session = await OpenCode.fork(sessionID, messageID)
     copyThreadModelPreference(sessionID, session.id)
     upsertSessionMeta(session.id, { kind: 'fork', forkedFrom: { sessionId: sessionID, messageId: messageID } })
     await refreshSessions()
     selectSession(session.id)
-  } catch {
-    /* ignore */
+    if (draft?.trim()) {
+      appStore.setState((state) => ({
+        drafts: { ...state.drafts, [session.id]: draft },
+        composerEpoch: state.composerEpoch + 1
+      }))
+    }
+  } catch (error) {
+    setSessionError(sessionID, errorSummary(error))
   }
 }
 
@@ -1374,22 +1385,32 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     parts.push({ type: 'file', mime: a.mime, filename: a.name, url: a.dataUrl })
   }
   if (text.trim()) parts.push({ type: 'text', text })
+  const model = modelForSession(sessionID)
+  const mode = modeForSession(sessionID)
+  const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
+  const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
+  const options = { model: modelKey, agent, mode }
+  if (cur.streaming[sessionID] || cur.sessionBusy[sessionID]) {
+    try {
+      const followUps = await OpenCode.addFollowUp(sessionID, text, attachments, options)
+      appStore.setState((state) => ({
+        followUps: { ...state.followUps, [sessionID]: followUps },
+        lastError: null,
+        lastErrorBySession: { ...state.lastErrorBySession, [sessionID]: '' }
+      }))
+    } catch (error) {
+      setSessionError(sessionID, errorSummary(error))
+    }
+    return
+  }
   appStore.setState((st) => ({
     streaming: { ...st.streaming, [sessionID]: true },
     lastError: null,
     lastErrorBySession: { ...st.lastErrorBySession, [sessionID]: '' },
     streamingLocked: { ...st.streamingLocked, [sessionID]: false }
   }))
-  const model = modelForSession(sessionID)
-  const mode = modeForSession(sessionID)
-  const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
-  const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
-    await OpenCode.sendMessageAsync(sessionID, parts, {
-      model: modelKey,
-      agent,
-      mode
-    })
+    await OpenCode.sendMessageAsync(sessionID, parts, options)
   } catch (err) {
     const raw = String((err as Error).message ?? err)
     const isNetwork = /-> 0:|fetch failed|ECONNREFUSED/i.test(raw)
@@ -1415,6 +1436,42 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   setTimeout(() => {
     void loadMessages(sessionID)
   }, 1200)
+}
+
+export async function updateFollowUp(threadId: string, followUpId: string, text: string): Promise<void> {
+  try {
+    const followUps = await OpenCode.updateFollowUp(threadId, followUpId, text)
+    appStore.setState((state) => ({ followUps: { ...state.followUps, [threadId]: followUps } }))
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+  }
+}
+
+export async function removeFollowUp(threadId: string, followUpId: string): Promise<void> {
+  try {
+    const followUps = await OpenCode.removeFollowUp(threadId, followUpId)
+    appStore.setState((state) => ({ followUps: { ...state.followUps, [threadId]: followUps } }))
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+  }
+}
+
+export async function moveFollowUp(threadId: string, followUpId: string, toIndex: number): Promise<void> {
+  try {
+    const followUps = await OpenCode.moveFollowUp(threadId, followUpId, toIndex)
+    appStore.setState((state) => ({ followUps: { ...state.followUps, [threadId]: followUps } }))
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+  }
+}
+
+export async function steerFollowUp(threadId: string, followUpId: string): Promise<void> {
+  try {
+    const followUps = await OpenCode.steerFollowUp(threadId, followUpId)
+    appStore.setState((state) => ({ followUps: { ...state.followUps, [threadId]: followUps } }))
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+  }
 }
 
 export function setSessionError(sessionID: string, msg: string): void {

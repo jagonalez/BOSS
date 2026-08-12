@@ -14,7 +14,7 @@ import type {
   SessionMeta,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, QueuedFollowUp } from '@shared/backend'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type {
@@ -101,6 +101,7 @@ export interface AppState {
   lastErrorBySession: Record<string, string>
   drafts: Record<string, string>
   attachments: Record<string, Attachment[]>
+  followUps: Record<string, QueuedFollowUp[]>
   history: Record<string, string[]>
   archived: string[]
   reverted: Record<string, string[]>
@@ -190,6 +191,7 @@ export const initialState: AppState = {
   lastErrorBySession: {},
   drafts: {},
   attachments: {},
+  followUps: {},
   history: {},
   archived: [],
   reverted: {},
@@ -349,6 +351,11 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
     case 'thread.bus.updated': {
       const snapshot = props.snapshot as ThreadBusSnapshot | undefined
       return snapshot && (!state.projectPath || snapshot.projectPath === state.projectPath) ? { threadBus: snapshot } : {}
+    }
+    case 'thread.followups.updated': {
+      const threadId = props.threadId as string | undefined
+      const followUps = props.followUps as QueuedFollowUp[] | undefined
+      return threadId && followUps ? { followUps: { ...state.followUps, [threadId]: followUps } } : {}
     }
     default:
       return {}
