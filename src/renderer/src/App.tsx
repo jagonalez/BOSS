@@ -136,7 +136,14 @@ export function App(): React.JSX.Element {
           const props = (ev.properties ?? {}) as { sessionID?: string }
           const sid = props.sessionID ?? appStore.getState().activeSessionId ?? ''
           const wasStreaming = Boolean(appStore.getState().streaming[sid])
-          if (ev.type === 'session.idle' && sid) finalizeStalledParts(sid)
+          if (ev.type === 'session.idle' && sid) {
+            finalizeStalledParts(sid)
+            // Idle is the authoritative completion edge. Refreshing here also
+            // recovers the final response when intermediate backend events
+            // were missed during a reconnect or directory change.
+            void loadMessages(sid)
+            void loadTodos(sid)
+          }
           refreshStreaming(sid)
           if (wasStreaming && !appStore.getState().streaming[sid] && !document.hasFocus()) {
             setAttention('done')

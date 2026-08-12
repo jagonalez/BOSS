@@ -1,25 +1,37 @@
-import { OpenCodeServer } from '../opencode-server'
-import { ApiClient } from '../api-client'
-import { EventStream } from '../event-stream'
+import type { OpenCodeServer } from '../opencode-server'
+import type { ApiClient } from '../api-client'
+import type { EventStream } from '../event-stream'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, EventMessage } from '@shared/opencode'
 
 export class OpenCodeBackend implements Backend {
   readonly id = 'opencode' as const
+  private readonly server: OpenCodeServer
+  private readonly api: ApiClient
+  private readonly events: EventStream
   private eventCb?: (ev: EventMessage) => void
+  private sessionDirectories = new Map<string, string>()
+  private observedStatuses = new Map<string, 'busy' | 'retry'>()
+  private submittedAt = new Map<string, number>()
+  private statusTimer?: NodeJS.Timeout
+  private reconcilingStatuses = false
 
   constructor(
-    private server: OpenCodeServer,
-    private api: ApiClient,
-    private events: EventStream
+    server: OpenCodeServer,
+    api: ApiClient,
+    events: EventStream
   ) {
+    this.server = server
+    this.api = api
+    this.events = events
     // wire normalized events from EventStream -> EventMessage
     this.events.onEvent = (raw) => {
       try {
-        const ev = JSON.parse(raw) as unknown
+        const ev = JSON.parse(raw) as EventMessage
+        this.observeStatus(ev)
         // EventMessage is the canonical shape; pass through
-        this.eventCb?.(ev as EventMessage)
+        this.eventCb?.(ev)
       } catch {
         this.eventCb?.({ type: 'unknown', raw })
       }
@@ -29,9 +41,15 @@ export class OpenCodeBackend implements Backend {
   async start(): Promise<void> {
     await this.server.start()
     this.events.start()
+    if (!this.statusTimer) {
+      this.statusTimer = setInterval(() => void this.reconcileStatuses(), 2_000)
+      this.statusTimer.unref()
+    }
   }
 
   async stop(): Promise<void> {
+    if (this.statusTimer) clearInterval(this.statusTimer)
+    this.statusTimer = undefined
     this.events.stop()
     await this.server.stop()
   }
@@ -77,11 +95,20 @@ export class OpenCodeBackend implements Backend {
 
   async sessionCreate(title?: string, directory?: string): Promise<SessionInfo> {
     const res = await this.api.request({ method: 'POST', path: '/session', body: title ? { title } : {}, directory })
-    return res.body as SessionInfo
+    const session = res.body as SessionInfo
+    if (directory || session.directory) this.setSessionDirectory(session.id, directory ?? session.directory!)
+    return session
+  }
+
+  setSessionDirectory(id: string, directory: string): void {
+    this.sessionDirectories.set(id, directory)
   }
 
   async sessionDelete(id: string): Promise<void> {
-    await this.api.request({ method: 'DELETE', path: `/session/${id}` })
+    await this.api.request({ method: 'DELETE', path: `/session/${id}`, directory: this.sessionDirectories.get(id) })
+    this.sessionDirectories.delete(id)
+    this.observedStatuses.delete(id)
+    this.submittedAt.delete(id)
   }
 
   async sessionRename(id: string, title: string): Promise<SessionInfo> {
@@ -108,12 +135,70 @@ export class OpenCodeBackend implements Backend {
     await this.api.request({
       method: 'POST',
       path: `/session/${sessionId}/prompt_async`,
-      body: { parts, ...opts }
+      body: { parts, ...opts },
+      directory: this.sessionDirectories.get(sessionId)
     })
+    // The manager already exposes an optimistic busy state. Mirroring it here
+    // lets status reconciliation clear that state if the corresponding idle
+    // event is missed. Give OpenCode a short window to publish its busy state
+    // before treating an absent status entry as idle.
+    this.observedStatuses.set(sessionId, 'busy')
+    this.submittedAt.set(sessionId, Date.now())
   }
 
   async abort(sessionId: string): Promise<void> {
-    await this.api.request({ method: 'POST', path: `/session/${sessionId}/abort` })
+    await this.api.request({
+      method: 'POST',
+      path: `/session/${sessionId}/abort`,
+      directory: this.sessionDirectories.get(sessionId)
+    })
+  }
+
+  private observeStatus(event: EventMessage): void {
+    const value = event as EventMessage & { properties?: { sessionID?: string; status?: { type?: string } } }
+    const sessionId = value.properties?.sessionID ?? ('sessionID' in value ? value.sessionID : undefined)
+    if (!sessionId) return
+    const status = value.properties?.status?.type ?? (value.type === 'session.status' ? value.status.type : undefined)
+    if (status === 'busy' || status === 'retry') {
+      this.observedStatuses.set(sessionId, status)
+      return
+    }
+    if (value.type === 'session.idle' || status === 'idle' || value.type === 'session.error') {
+      this.observedStatuses.delete(sessionId)
+      this.submittedAt.delete(sessionId)
+    }
+  }
+
+  private async reconcileStatuses(): Promise<void> {
+    if (this.reconcilingStatuses || this.sessionDirectories.size === 0) return
+    this.reconcilingStatuses = true
+    try {
+      const directories = new Set(this.sessionDirectories.values())
+      for (const directory of directories) {
+        const response = await this.api.request({ method: 'GET', path: '/session/status', directory })
+        if (response.status < 200 || response.status >= 300 || !response.body || typeof response.body !== 'object') continue
+        const statuses = response.body as Record<string, { type?: string }>
+        for (const [sessionId, knownDirectory] of this.sessionDirectories) {
+          if (knownDirectory !== directory) continue
+          const status = statuses[sessionId]?.type
+          const previous = this.observedStatuses.get(sessionId)
+          if (status === 'busy' || status === 'retry') {
+            if (previous !== status) {
+              this.observedStatuses.set(sessionId, status)
+              this.eventCb?.({ type: 'session.status', sessionID: sessionId, status: { type: status } })
+            }
+            continue
+          }
+          if (!previous) continue
+          if (Date.now() - (this.submittedAt.get(sessionId) ?? 0) < 3_000) continue
+          this.observedStatuses.delete(sessionId)
+          this.submittedAt.delete(sessionId)
+          this.eventCb?.({ type: 'session.idle', sessionID: sessionId })
+        }
+      }
+    } finally {
+      this.reconcilingStatuses = false
+    }
   }
 
   /* Models */
