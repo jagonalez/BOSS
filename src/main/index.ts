@@ -18,6 +18,7 @@ import { ThreadBus } from './thread-bus'
 import { WorktreeManager } from './worktree-manager'
 import { AutomationManager } from './automation-manager'
 import { McpHub } from './mcp-hub'
+import { WebAccess } from './web-access'
 import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
 import { TranscriptStore } from './transcript-store'
@@ -60,6 +61,9 @@ threadBus.attachMcpHub(mcpHub)
 mcpHub.setOnChange(() => {
   void mcpHub.list().then((connections) => backendMgr.emit({ type: 'mcp.updated', properties: { connections } })).catch(() => {})
 })
+const webAccess = new WebAccess(join(app.getPath('userData'), 'mobile-access.json'), backendMgr)
+backendMgr.attachMobile(webAccess)
+webAccess.setOnChange(() => backendMgr.emit({ type: 'mobile.updated', properties: { status: webAccess.status() } }))
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
@@ -196,6 +200,7 @@ app.whenReady().then(() => {
     sites.bind(openCodeBackend)
     await mcpHub.start()
     await automations.start()
+    await webAccess.start()
   })()
 })
 
@@ -212,6 +217,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void webAccess.stop()
   void automations.stop()
   void mcpHub.stop()
   void backendMgr.stop()
