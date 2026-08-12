@@ -19,7 +19,7 @@ import {
   toggleArchive
 } from '../lib/actions'
 import { ChatIcon, ChevronIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
-import { BACKEND_SHORT_LABELS } from './BackendControls'
+import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
 interface CtxMenu {
