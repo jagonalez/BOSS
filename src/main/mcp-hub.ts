@@ -15,10 +15,11 @@ import { MCP_TOOL_PREFIX, SECRET_MASK } from '../shared/mcp'
 import type { BackendRequest } from '../shared/backend'
 import { HttpMcpClient, StdioMcpClient, type McpClient, type McpToolDefinition } from './mcp-client'
 
-interface StoredConnection extends Omit<McpConnection, 'env' | 'headers'> {
-  /** Secret maps are stored value-encrypted: { KEY: <base64 ciphertext> }. */
+interface StoredConnection extends Omit<McpConnection, 'env' | 'headers' | 'authToken'> {
+  /** Secret maps and the token are stored value-encrypted (base64 ciphertext). */
   env?: Record<string, string>
   headers?: Record<string, string>
+  authToken?: string
   secretsEncrypted: boolean
 }
 
@@ -57,6 +58,21 @@ function decryptValues(values: Record<string, string> | undefined, encrypted: bo
     }
   }
   return result
+}
+
+function encryptValue(value: string | undefined, available: boolean): string | undefined {
+  if (!value) return undefined
+  return available ? safeStorage.encryptString(value).toString('base64') : value
+}
+
+function decryptValue(value: string | undefined, encrypted: boolean): string {
+  if (!value) return ''
+  if (!encrypted) return value
+  try {
+    return safeStorage.decryptString(Buffer.from(value, 'base64'))
+  } catch {
+    return ''
+  }
 }
 
 function maskValues(values: Record<string, string> | undefined): Record<string, string> | undefined {
@@ -142,9 +158,12 @@ export class McpHub {
   }
 
   private connectionSecrets(connection: StoredConnection): { env: Record<string, string>; headers: Record<string, string> } {
+    const headers = decryptValues(connection.headers, connection.secretsEncrypted)
+    const token = decryptValue(connection.authToken, connection.secretsEncrypted)
+    if (token) headers.Authorization = `Bearer ${token}`
     return {
       env: decryptValues(connection.env, connection.secretsEncrypted),
-      headers: decryptValues(connection.headers, connection.secretsEncrypted)
+      headers
     }
   }
 
@@ -190,7 +209,8 @@ export class McpHub {
       connection: {
         ...connection,
         env: maskValues(connection.env),
-        headers: maskValues(connection.headers)
+        headers: maskValues(connection.headers),
+        authToken: connection.authToken ? SECRET_MASK : undefined
       },
       status: state.status,
       error: state.error,
@@ -214,7 +234,12 @@ export class McpHub {
     return { ...input, name }
   }
 
-  /** Merge masked secret values from the renderer with the stored ciphertext. */
+  /**
+   * Merge masked secret values from the renderer with the stored ciphertext.
+   * A masked value under a new key is treated as a rename when exactly one
+   * stored key disappeared; otherwise the save fails loudly instead of
+   * writing an empty secret.
+   */
   private mergeSecrets(
     incoming: Record<string, string> | undefined,
     stored: Record<string, string> | undefined,
@@ -223,9 +248,24 @@ export class McpHub {
   ): Record<string, string> | undefined {
     if (!incoming) return undefined
     const storedPlain = decryptValues(stored, storedEncrypted)
+    const removedKeys = new Set(Object.keys(storedPlain).filter((key) => !(key in incoming)))
     const merged: Record<string, string> = {}
     for (const [key, value] of Object.entries(incoming)) {
-      merged[key] = value === SECRET_MASK ? storedPlain[key] ?? '' : value
+      if (value !== SECRET_MASK) {
+        merged[key] = value
+        continue
+      }
+      if (key in storedPlain) {
+        merged[key] = storedPlain[key]
+        continue
+      }
+      if (removedKeys.size === 1) {
+        const renamed = [...removedKeys][0]
+        merged[key] = storedPlain[renamed]
+        removedKeys.delete(renamed)
+        continue
+      }
+      throw new Error(`"${key}" has a hidden value but no stored secret. Enter its value again.`)
     }
     return encryptValues(merged, available)
   }
@@ -242,6 +282,7 @@ export class McpHub {
       ...clean,
       env: encryptValues(clean.env, available),
       headers: encryptValues(clean.headers, available),
+      authToken: encryptValue(clean.authToken, available),
       secretsEncrypted: available,
       id: randomUUID(),
       slug,
@@ -266,7 +307,8 @@ export class McpHub {
       args: patch.args ?? connection.args,
       url: patch.url ?? connection.url,
       env: patch.env,
-      headers: patch.headers
+      headers: patch.headers,
+      authToken: patch.authToken
     })
     connection.name = clean.name
     connection.transport = clean.transport
@@ -279,6 +321,12 @@ export class McpHub {
     }
     if (patch.headers !== undefined) {
       connection.headers = this.mergeSecrets(clean.headers, connection.headers, connection.secretsEncrypted, available)
+      connection.secretsEncrypted = available
+    }
+    if (patch.authToken !== undefined) {
+      connection.authToken = clean.authToken === SECRET_MASK
+        ? connection.authToken
+        : encryptValue(clean.authToken, available)
       connection.secretsEncrypted = available
     }
     if (patch.enabled !== undefined) connection.enabled = patch.enabled

@@ -2332,9 +2332,28 @@ textarea {
   align-items: flex-start;
 }
 
-.mcp-pairs {
-  resize: vertical;
-  min-height: 44px;
+.mcp-pairs-editor {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mcp-pair-row {
+  display: flex;
+  gap: 6px;
+}
+
+.mcp-pair-key {
+  flex: 0 0 38%;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.mcp-pair-value {
+  flex: 1;
+  min-width: 0;
   font-family: var(--font-mono, monospace);
   font-size: 12px;
 }
