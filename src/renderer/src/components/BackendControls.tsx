@@ -2,13 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import type { BackendId } from '@shared/backend'
 import { appStore, useStore } from '../state/AppState'
 import { cloneThreadToBackend, relayThreadToThread, setNativeViewsSuspended } from '../lib/actions'
-
-export const BACKEND_SHORT_LABELS: Record<BackendId, string> = {
-  opencode: 'OpenCode',
-  pi: 'Pi',
-  codex: 'Codex',
-  claude: 'Claude'
-}
+import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 
 export function BackendBadge({ backendId }: { backendId?: BackendId }): React.JSX.Element {
   const id = backendId ?? 'opencode'
