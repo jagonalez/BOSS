@@ -5,21 +5,63 @@ import { OpenCode } from '../lib/opencode'
 import { refreshMcpConnections } from '../lib/actions'
 import { Button, StatusBadge, Select } from './ui'
 
-function parsePairs(text: string): Record<string, string> | undefined {
-  const pairs: Record<string, string> = {}
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    const index = trimmed.indexOf('=')
-    if (index <= 0) continue
-    pairs[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1).trim()
-  }
-  return Object.keys(pairs).length > 0 ? pairs : undefined
+interface Pair {
+  key: string
+  value: string
 }
 
-function pairsText(pairs: Record<string, string> | undefined): string {
-  if (!pairs) return ''
-  return Object.entries(pairs).map(([key, value]) => `${key}=${value}`).join('\n')
+function pairsToRecord(pairs: Pair[]): Record<string, string> | undefined {
+  const record: Record<string, string> = {}
+  for (const pair of pairs) {
+    const key = pair.key.trim()
+    if (key) record[key] = pair.value
+  }
+  return Object.keys(record).length > 0 ? record : undefined
+}
+
+function recordToPairs(record: Record<string, string> | undefined): Pair[] {
+  return Object.entries(record ?? {}).map(([key, value]) => ({ key, value }))
+}
+
+function PairsEditor({
+  pairs,
+  onChange,
+  keyPlaceholder,
+  valuePlaceholder,
+  addLabel
+}: {
+  pairs: Pair[]
+  onChange: (pairs: Pair[]) => void
+  keyPlaceholder: string
+  valuePlaceholder: string
+  addLabel: string
+}): React.JSX.Element {
+  const update = (index: number, patch: Partial<Pair>): void =>
+    onChange(pairs.map((pair, i) => (i === index ? { ...pair, ...patch } : pair)))
+  return (
+    <div className="mcp-pairs-editor">
+      {pairs.map((pair, index) => (
+        <div className="mcp-pair-row" key={index}>
+          <input
+            className="settings-input mcp-pair-key"
+            value={pair.key}
+            placeholder={keyPlaceholder}
+            onChange={(e) => update(index, { key: e.target.value })}
+          />
+          <input
+            className="settings-input mcp-pair-value"
+            value={pair.value}
+            placeholder={valuePlaceholder}
+            onChange={(e) => update(index, { value: e.target.value })}
+          />
+          <Button size="small" variant="ghost" onClick={() => onChange(pairs.filter((_, i) => i !== index))}>✕</Button>
+        </div>
+      ))}
+      <div>
+        <Button size="small" variant="ghost" onClick={() => onChange([...pairs, { key: '', value: '' }])}>{addLabel}</Button>
+      </div>
+    </div>
+  )
 }
 
 const STATUS_TONE = { connected: 'success', starting: 'accent', error: 'danger', disabled: 'neutral' } as const
@@ -31,12 +73,13 @@ interface FormState {
   transport: McpTransport
   command: string
   args: string
-  env: string
+  env: Pair[]
   url: string
-  headers: string
+  authToken: string
+  headers: Pair[]
 }
 
-const EMPTY_FORM: FormState = { name: '', transport: 'stdio', command: '', args: '', env: '', url: '', headers: '' }
+const EMPTY_FORM: FormState = { name: '', transport: 'stdio', command: '', args: '', env: [], url: '', authToken: '', headers: [] }
 
 function ConnectionForm({ initial, onClose }: { initial: FormState; onClose: () => void }): React.JSX.Element {
   const [form, setForm] = useState(initial)
@@ -52,9 +95,10 @@ function ConnectionForm({ initial, onClose }: { initial: FormState; onClose: () 
       transport: form.transport,
       command: form.transport === 'stdio' ? form.command.trim() : undefined,
       args: form.transport === 'stdio' && form.args.trim() ? form.args.trim().split(/\s+/) : undefined,
-      env: form.transport === 'stdio' ? parsePairs(form.env) : undefined,
+      env: form.transport === 'stdio' ? pairsToRecord(form.env) : undefined,
       url: form.transport === 'http' ? form.url.trim() : undefined,
-      headers: form.transport === 'http' ? parsePairs(form.headers) : undefined
+      authToken: form.transport === 'http' ? form.authToken.trim() : undefined,
+      headers: form.transport === 'http' ? pairsToRecord(form.headers) : undefined
     }
     try {
       if (form.id) await OpenCode.mcpUpdate(form.id, input)
@@ -91,16 +135,16 @@ function ConnectionForm({ initial, onClose }: { initial: FormState; onClose: () 
             <span className="settings-row-label">Arguments</span>
             <input className="settings-input" value={form.args} placeholder="-y @upstash/context7-mcp@latest" onChange={(e) => patch({ args: e.target.value })} />
           </label>
-          <label className="settings-row mcp-pairs-row">
+          <div className="settings-row mcp-pairs-row">
             <span className="settings-row-label">Environment</span>
-            <textarea
-              className="settings-input mcp-pairs"
-              rows={2}
-              value={form.env}
-              placeholder={'SLACK_BOT_TOKEN=xoxb-…\nONE_PER_LINE=value'}
-              onChange={(e) => patch({ env: e.target.value })}
+            <PairsEditor
+              pairs={form.env}
+              onChange={(env) => patch({ env })}
+              keyPlaceholder="SLACK_BOT_TOKEN"
+              valuePlaceholder="xoxb-…"
+              addLabel="+ Add variable"
             />
-          </label>
+          </div>
         </>
       ) : (
         <>
@@ -108,16 +152,25 @@ function ConnectionForm({ initial, onClose }: { initial: FormState; onClose: () 
             <span className="settings-row-label">URL</span>
             <input className="settings-input" value={form.url} placeholder="https://mcp.example.com/mcp" onChange={(e) => patch({ url: e.target.value })} />
           </label>
-          <label className="settings-row mcp-pairs-row">
-            <span className="settings-row-label">Headers</span>
-            <textarea
-              className="settings-input mcp-pairs"
-              rows={2}
-              value={form.headers}
-              placeholder={'Authorization=Bearer …\nONE_PER_LINE=value'}
-              onChange={(e) => patch({ headers: e.target.value })}
+          <label className="settings-row">
+            <span className="settings-row-label">Bearer token</span>
+            <input
+              className="settings-input"
+              value={form.authToken}
+              placeholder="Access token — sent as Authorization: Bearer"
+              onChange={(e) => patch({ authToken: e.target.value })}
             />
           </label>
+          <div className="settings-row mcp-pairs-row">
+            <span className="settings-row-label">Extra headers</span>
+            <PairsEditor
+              pairs={form.headers}
+              onChange={(headers) => patch({ headers })}
+              keyPlaceholder="Authorization"
+              valuePlaceholder="Bearer …"
+              addLabel="+ Add header"
+            />
+          </div>
         </>
       )}
       <div className="mcp-form-hint">Secret values are stored encrypted with the system keychain. Saved secrets show as masked; leave them masked to keep them.</div>
@@ -288,9 +341,10 @@ export function McpSettings(): React.JSX.Element {
                   transport: view.connection.transport,
                   command: view.connection.command ?? '',
                   args: (view.connection.args ?? []).join(' '),
-                  env: pairsText(view.connection.env),
+                  env: recordToPairs(view.connection.env),
                   url: view.connection.url ?? '',
-                  headers: pairsText(view.connection.headers)
+                  authToken: view.connection.authToken ?? '',
+                  headers: recordToPairs(view.connection.headers)
                 })
               }}
             />
