@@ -21,7 +21,7 @@ export interface SessionInfo {
   model?: SessionModel
   parentID?: string
   lineage?: {
-    kind: 'fork' | 'clone' | 'relay'
+    kind: 'fork' | 'clone' | 'relay' | 'delegate'
     sourceThreadId: string
     sourceBackendId?: BackendId
   }
@@ -170,7 +170,7 @@ export interface ReviewRun {
 export interface SessionMeta {
   sessionId: string
   projectPath?: string
-  kind: 'main' | 'side' | 'fork'
+  kind: 'main' | 'side' | 'fork' | 'delegate'
   forkedFrom?: { sessionId: string; messageId?: string }
   gitBranch?: string
   reviews: ReviewRun[]

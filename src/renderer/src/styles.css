@@ -6316,6 +6316,123 @@ select:hover {
   gap: 8px;
 }
 
+.delegate-modal {
+  width: 580px;
+}
+
+.delegate-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.delegate-heading h3 {
+  margin-top: 5px;
+}
+
+.delegate-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.delegate-field > span,
+.delegate-fieldset legend {
+  color: var(--text);
+  font-weight: 650;
+  font-size: 12px;
+}
+
+.delegate-field textarea {
+  resize: vertical;
+  min-height: 92px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  padding: 10px 11px;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.delegate-field textarea:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+.delegate-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.delegate-fieldset legend {
+  margin-bottom: 7px;
+}
+
+.delegate-backends {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.delegate-backends > button,
+.delegate-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  text-align: left;
+}
+
+.delegate-backends > button {
+  cursor: pointer;
+}
+
+.delegate-backends > button:hover,
+.delegate-backends > button.selected {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.delegate-backends span:last-child,
+.delegate-choice > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.delegate-backends small,
+.delegate-choice small {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.delegate-choice input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.delegate-choice.disabled {
+  opacity: 0.5;
+}
+
+@media (max-width: 620px) {
+  .delegate-backends { grid-template-columns: 1fr; }
+}
+
 .btn-allow {
   background: var(--accent);
   color: #fff;

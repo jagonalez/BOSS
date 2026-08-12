@@ -68,6 +68,7 @@ export interface AppState {
   modelSwitch: { to: string; providerID?: string; sessionId?: string } | null
   commitPath: string | null
   renameTarget: string | null
+  delegateTarget: string | null
   confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; action: () => void } | null
   reviewFile: string | null
   browse: Record<string, BrowseNavigationState>
@@ -161,6 +162,7 @@ export const initialState: AppState = {
   modelSwitch: null,
   commitPath: null,
   renameTarget: null,
+  delegateTarget: null,
   confirm: null,
   reviewFile: null,
   browse: {},

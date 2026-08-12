@@ -3,7 +3,7 @@ import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
 import type { ReviewRun, SessionMeta } from '@shared/opencode'
-import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, ThreadCreationScope } from '@shared/backend'
+import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -886,6 +886,35 @@ export async function cloneThreadToBackend(threadId: string, backendId: BackendI
     if (!openSessionInWorkspace(session.id)) selectSession(session.id)
   } catch (error) {
     setSessionError(threadId, errorSummary(error))
+  }
+}
+
+export async function delegateThread(
+  threadId: string,
+  backendId: BackendId,
+  instruction: string,
+  placement: DelegatePlacement
+): Promise<boolean> {
+  try {
+    const preference = appStore.getState().defaultModels?.[backendId]
+    const session = await OpenCode.delegate(
+      threadId,
+      backendId,
+      instruction,
+      placement,
+      preference ? { model: preference } : undefined
+    )
+    applyBackendDefaultModel(session.id, backendId)
+    upsertSessionMeta(session.id, {
+      kind: 'delegate',
+      projectPath: session.projectPath ?? appStore.getState().projectPath,
+      forkedFrom: { sessionId: threadId }
+    })
+    await refreshSessions()
+    return true
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+    return false
   }
 }
 

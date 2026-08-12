@@ -34,6 +34,7 @@ async function openThread(thread: Pick<SupervisedThread, 'threadId' | 'projectPa
     await openProject(thread.projectPath)
   }
   selectSession(thread.threadId)
+  void OpenCode.acknowledgeAttention(thread.threadId).catch(() => {})
 }
 
 function ThreadCard({ thread, state, label }: {
@@ -136,6 +137,11 @@ export function CommandCenter(): React.JSX.Element {
       if (questions[thread.threadId]) return 'Answer needed'
       if (errors[thread.threadId]) return 'Run failed'
       if (threadBus?.messages.some((message) => message.fromThreadId === thread.threadId && message.status === 'failed')) return 'Thread message failed'
+      if (thread.attention?.kind === 'permission') return 'Permission needed'
+      if (thread.attention?.kind === 'question') return 'Answer needed'
+      if (thread.attention?.kind === 'completed') return 'Finished while you were away'
+      if (thread.attention?.kind === 'error') return thread.attention.detail ?? 'Run failed'
+      if (thread.attention?.kind === 'interrupted') return 'Run was interrupted'
       if (thread.lastRun?.status === 'error') return 'Last run failed'
       if (thread.lastRun?.status === 'interrupted') return 'Run was interrupted'
       return undefined

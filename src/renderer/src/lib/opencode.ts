@@ -12,7 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendModelPreference, BackendRequest, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
@@ -161,8 +161,12 @@ export const OpenCode = {
   supervision: () => backendRequest<SupervisionSnapshot>({ type: 'supervision.snapshot' }),
   searchTranscripts: (query: string, limit = 40) =>
     backendRequest<TranscriptSearchResult[]>({ type: 'supervision.search', query, limit }),
+  acknowledgeAttention: (threadId: string) =>
+    backendRequest<SupervisionSnapshot>({ type: 'supervision.acknowledge', threadId }),
   cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction, options }),
+  delegate: (threadId: string, backendId: BackendId, instruction: string, placement: DelegatePlacement, options?: BackendMessageOptions) =>
+    backendRequest<SessionInfo>({ type: 'thread.delegate', threadId, backendId, instruction, placement, options }),
   forkIntoWorktree: (threadId: string, instruction?: string, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.worktree.create', threadId, instruction, options }),
   listWorktrees: (threadId?: string) =>
@@ -182,7 +186,7 @@ export const OpenCode = {
   notifyWebhook: () => backendRequest<string>({ type: 'automation.webhook.get' }),
   setNotifyWebhook: (url: string) => backendRequest<string>({ type: 'automation.webhook.set', url }),
   mobileStatus: () => backendRequest<MobileAccessStatus>({ type: 'mobile.status' }),
-  mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean }) =>
+  mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean }) =>
     backendRequest<MobileAccessStatus>({ type: 'mobile.set', patch }),
   automationsList: () => backendRequest<AutomationsSnapshot>({ type: 'automation.list' }),
   createAutomation: (input: AutomationInput) => backendRequest<Automation>({ type: 'automation.create', input }),

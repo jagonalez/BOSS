@@ -6,6 +6,7 @@ import { Button, SettingsRow, StatusBadge } from './ui'
 export function MobileSettings(): React.JSX.Element {
   const [status, setStatus] = useState<MobileAccessStatus | null>(null)
   const [showToken, setShowToken] = useState(false)
+  const [showViewerToken, setShowViewerToken] = useState(false)
   const [busy, setBusy] = useState(false)
   const [webhook, setWebhook] = useState('')
   const [webhookSaved, setWebhookSaved] = useState(false)
@@ -90,6 +91,23 @@ export function MobileSettings(): React.JSX.Element {
                   Copy
                 </Button>
                 <Button size="small" variant="ghost" disabled={busy} onClick={() => void apply({ regenerateToken: true })}>
+                  Regenerate
+                </Button>
+              </div>
+            </SettingsRow>
+            <SettingsRow
+              title="Read-only sharing token"
+              description="Share this token when someone should review task status and transcripts without being able to reply, stop agents, approve permissions, or run automations."
+            >
+              <div className="row-inline">
+                <code className="mobile-token">{showViewerToken ? status.viewerToken : '••••••••••••'}</code>
+                <Button size="small" variant="ghost" onClick={() => setShowViewerToken((value) => !value)}>
+                  {showViewerToken ? 'Hide' : 'Show'}
+                </Button>
+                <Button size="small" variant="ghost" onClick={() => void navigator.clipboard.writeText(status.viewerToken)}>
+                  Copy
+                </Button>
+                <Button size="small" variant="ghost" disabled={busy} onClick={() => void apply({ regenerateViewerToken: true })}>
                   Regenerate
                 </Button>
               </div>

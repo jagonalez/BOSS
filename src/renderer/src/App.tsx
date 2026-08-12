@@ -12,6 +12,7 @@ import { applyTheme, loadTheme } from './lib/themes'
 import { CommitDialog } from './components/CommitDialog'
 import { RenameModal } from './components/RenameModal'
 import { ConfirmModal } from './components/ConfirmModal'
+import { DelegateModal } from './components/DelegateModal'
 import { SettingsModal } from './components/SettingsModal'
 import {
   refreshAgents,
@@ -69,7 +70,7 @@ export function App(): React.JSX.Element {
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const sessions = useStore(appStore, (s) => s.sessions)
   const workspaceProjectKey = useStore(appStore, (s) => s.projectWorkspace?.projectKey)
-  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget))
+  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget))
 
   useEffect(() => {
     loadArchived()
@@ -327,6 +328,7 @@ export function App(): React.JSX.Element {
       <CommitDialog />
       <RenameModal />
       <ConfirmModal />
+      <DelegateModal />
       <SettingsModal />
     </div>
   )

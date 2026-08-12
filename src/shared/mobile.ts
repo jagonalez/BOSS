@@ -3,6 +3,8 @@ export interface MobileAccessConfig {
   /** Fixed port so tailscale serve rules survive restarts. */
   port: number
   token: string
+  /** Separate credential that can inspect tasks but cannot send, stop, approve, or run anything. */
+  viewerToken: string
   /** Run `tailscale serve` automatically so the site is reachable on the tailnet. */
   tailscale: boolean
 }
