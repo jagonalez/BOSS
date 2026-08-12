@@ -42,6 +42,11 @@ interface CodexItem {
   arguments?: unknown
   result?: unknown
   error?: unknown
+  name?: string
+  input?: unknown
+  call_id?: string
+  callId?: string
+  output?: unknown
 }
 
 interface PendingApproval {
@@ -124,8 +129,12 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   {
     type: 'function',
     name: 'ralf_mcp_list',
-    description: 'List external MCP tools available through R.A.L.F. connections (Slack, Datadog, and other services).',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+    description: 'List external MCP tools available through R.A.L.F. connections (Slack, Datadog, and other services). Pass tool to get one tool\'s full input schema before calling it.',
+    inputSchema: {
+      type: 'object',
+      properties: { tool: { type: 'string', description: 'Optional: tool name from the catalog; returns its full input schema.' } },
+      additionalProperties: false
+    }
   },
   {
     type: 'function',
@@ -178,7 +187,36 @@ function itemPart(sessionId: string, messageId: string, item: CodexItem): Part |
     return { id: item.id, type: 'text', sessionID: sessionId, messageID: messageId, text: item.text ?? '' }
   }
   if (item.type === 'reasoning') {
-    return { id: item.id, type: 'reasoning', sessionID: sessionId, messageID: messageId, text: (item.summary ?? []).join('\n') }
+    // Blank line between summaries: single newlines collapse to spaces in markdown.
+    return { id: item.id, type: 'reasoning', sessionID: sessionId, messageID: messageId, text: (item.summary ?? []).join('\n\n') }
+  }
+  // Codex wraps R.A.L.F.-provided tools (ralf_mcp_call, thread tools) in its
+  // exec harness and reports them as custom tool call items.
+  if (item.type === 'customToolCall' || item.type === 'custom_tool_call') {
+    return {
+      id: item.call_id ?? item.callId ?? item.id,
+      type: 'tool',
+      sessionID: sessionId,
+      messageID: messageId,
+      state: {
+        status: item.status === 'failed' ? 'error' : item.status === 'completed' ? 'completed' : 'running',
+        tool: item.name ?? 'tool',
+        title: item.name,
+        input: item.input
+      }
+    }
+  }
+  if (item.type === 'customToolCallOutput' || item.type === 'custom_tool_call_output') {
+    const output = Array.isArray(item.output)
+      ? (item.output as Array<{ text?: string }>).map((entry) => entry.text ?? '').filter(Boolean).join('\n')
+      : item.output
+    return {
+      id: item.call_id ?? item.callId ?? item.id,
+      type: 'tool',
+      sessionID: sessionId,
+      messageID: messageId,
+      state: { status: 'completed', tool: 'tool', output }
+    }
   }
   if (item.type === 'commandExecution') {
     return {

@@ -390,26 +390,39 @@ export class McpHub {
   }
 
   /**
-   * Listing for the generic ralf_mcp_list agent tool: full input schemas and
-   * server instructions, so agents without native tool registration can still
-   * see the parameter contracts.
+   * Listing for the generic ralf_mcp_list agent tool. Without an argument it
+   * stays compact — names and trimmed descriptions — because full schemas for
+   * a large server run to tens of thousands of tokens. Passing a tool name
+   * returns that tool's complete definition.
    */
-  agentListing(): Array<{
-    connection: string
-    instructions?: string
-    tools: Array<{ tool: string; description?: string; inputSchema?: Record<string, unknown> }>
-  }> {
-    const listing: ReturnType<McpHub['agentListing']> = []
+  agentListing(toolName?: string): unknown {
+    if (toolName) {
+      const name = toolName.startsWith(MCP_TOOL_PREFIX) ? toolName.slice(MCP_TOOL_PREFIX.length) : toolName
+      for (const connection of this.connections) {
+        if (!connection.enabled || !name.startsWith(`${connection.slug}_`)) continue
+        const live = this.live.get(connection.id)
+        const tool = live?.tools.find((item) => item.name === name.slice(connection.slug.length + 1))
+        if (!tool) continue
+        return {
+          connection: connection.name,
+          tool: `${MCP_TOOL_PREFIX}${connection.slug}_${tool.name}`,
+          description: tool.description,
+          inputSchema: tool.inputSchema ?? { type: 'object', additionalProperties: true }
+        }
+      }
+      return { error: `Unknown tool "${toolName}". Call ralf_mcp_list without arguments for the catalog.` }
+    }
+    const listing: Array<Record<string, unknown>> = []
     for (const connection of this.connections) {
       const live = this.live.get(connection.id)
       if (!connection.enabled || !live) continue
       listing.push({
         connection: connection.name,
         instructions: live.instructions,
+        note: 'Call ralf_mcp_list with {"tool": "<name>"} to get a tool\'s full input schema before calling it.',
         tools: live.tools.map((tool) => ({
           tool: `${MCP_TOOL_PREFIX}${connection.slug}_${tool.name}`,
-          description: tool.description,
-          inputSchema: tool.inputSchema
+          description: (tool.description ?? '').slice(0, 200)
         }))
       })
     }

@@ -201,7 +201,7 @@ export class ThreadBus {
     }
     if (tool.startsWith(MCP_TOOL_PREFIX) || tool === 'ralf_mcp_list' || tool === 'ralf_mcp_call') {
       if (!this.mcpHub) throw new Error('R.A.L.F. MCP connections are not ready.')
-      if (tool === 'ralf_mcp_list') return this.mcpHub.agentListing()
+      if (tool === 'ralf_mcp_list') return this.mcpHub.agentListing(stringArg(args, 'tool') || undefined)
       if (tool === 'ralf_mcp_call') {
         const name = stringArg(args, 'tool')
         if (!name) throw new Error('Pass the tool name from ralf_mcp_list.')

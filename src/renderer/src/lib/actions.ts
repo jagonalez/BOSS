@@ -498,6 +498,7 @@ export async function runThreadReview(sessionID: string, target: string): Promis
     }
   ]
   try {
+    noteThreadSend(sessionID)
     await OpenCode.sendMessageAsync(sessionID, parts, { model: modelKey, agent, mode })
   } catch (err) {
     setSessionError(sessionID, errorSummary(err))
@@ -973,10 +974,44 @@ export async function loadMessages(sessionID: string): Promise<void> {
     appStore.setState((s) => ({
       messages: upsertMessagesFromList(s.messages, list)
     }))
+    const state = appStore.getState()
+    if (!state.sessionBusy[sessionID] && !recentlySent(sessionID)) finalizeStalledParts(sessionID)
     refreshStreaming()
   } catch {
     /* ignore */
   }
+}
+
+/** Wall-clock of the last renderer-initiated send per thread. Bridges the gap
+ * between sending and the backend's first busy event; after it expires, only
+ * live busy signals keep a thread marked as streaming, so threads whose runs
+ * were aborted or crashed (stale running parts, missing completions) settle. */
+const lastSendAt: Record<string, number> = {}
+const SEND_GRACE_MS = 20_000
+
+export function noteThreadSend(sessionId: string): void {
+  lastSendAt[sessionId] = Date.now()
+}
+
+function recentlySent(sessionId: string): boolean {
+  return Date.now() - (lastSendAt[sessionId] ?? 0) < SEND_GRACE_MS
+}
+
+/** An idle thread cannot have running parts; mark leftovers from aborted or
+ * failed runs as interrupted so step cards stop spinning. */
+export function finalizeStalledParts(sessionId: string): void {
+  const state = appStore.getState()
+  const msgs = state.messages[sessionId]
+  if (!msgs?.some((m) => m.parts.some((p) => p.state?.status === 'running' || p.state?.status === 'pending'))) return
+  const next = msgs.map((message) => ({
+    ...message,
+    parts: message.parts.map((part) =>
+      part.state?.status === 'running' || part.state?.status === 'pending'
+        ? { ...part, state: { ...part.state, status: 'interrupted' as const } }
+        : part
+    )
+  }))
+  appStore.setState((s) => ({ messages: { ...s.messages, [sessionId]: next } }))
 }
 
 export function refreshStreaming(sessionId?: string): void {
@@ -1002,7 +1037,10 @@ export function refreshStreaming(sessionId?: string): void {
     const awaiting =
       last !== undefined && (last.info.role === 'user' || (last.info.role === 'assistant' && !last.info.time?.completed))
     const busy = Boolean(s.sessionBusy[sid]) || Boolean(s.compacting[sid])
-    const working = runningPart || awaiting || busy
+    // Heuristics (stuck running parts, user-last message) only count near a
+    // send; afterwards the backend's busy signal is authoritative. Otherwise
+    // aborted runs look alive forever.
+    const working = busy || ((runningPart || awaiting) && recentlySent(sid))
     if (working !== Boolean(streaming[sid])) {
       streaming[sid] = working
       changed = true
@@ -1365,6 +1403,7 @@ export async function runCommand(sessionID: string, command: string, args: strin
   const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
   try {
     const backendId = cur.sessions.find((session) => session.id === sessionID)?.backendId ?? 'opencode'
+    noteThreadSend(sessionID)
     if (backendId === 'opencode') {
       await OpenCode.runCommand(sessionID, command, args, { agent, model: modelKey })
     } else {
@@ -1450,6 +1489,7 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     lastErrorBySession: { ...st.lastErrorBySession, [sessionID]: '' },
     streamingLocked: { ...st.streamingLocked, [sessionID]: false }
   }))
+  noteThreadSend(sessionID)
   try {
     await OpenCode.sendMessageAsync(sessionID, parts, options)
   } catch (err) {
