@@ -5439,6 +5439,14 @@ select:hover {
   background: var(--red-soft);
 }
 
+.review-publish-hint {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line-subtle);
+  color: var(--text-faint);
+  background: var(--surface-inset);
+  font-size: 11px;
+}
+
 .review-pr-summary,
 .review-compose,
 .review-submit {

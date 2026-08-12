@@ -29,6 +29,7 @@ import type {
   OptionalDownloadEvent,
   SiteInfo
 } from '@shared/ipc'
+import type { ProjectInfo } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, LayoutTemplate, ProjectWorkspace, TerminalStartLocation } from '@shared/workspace'
 import { Store } from '../lib/store'
@@ -101,6 +102,8 @@ export interface AppState {
   automations: AutomationsSnapshot | null
   mcpConnections: McpConnectionView[]
   projectPath: string
+  selectedCheckoutPath: string
+  projectCheckouts: ProjectInfo['checkouts']
   terminalStartLocation: TerminalStartLocation
   lastError: string | null
   lastErrorBySession: Record<string, string>
@@ -194,6 +197,8 @@ export const initialState: AppState = {
   automations: null,
   mcpConnections: [],
   projectPath: '',
+  selectedCheckoutPath: '',
+  projectCheckouts: [],
   terminalStartLocation: 'focused-checkout',
   lastError: null,
   lastErrorBySession: {},

@@ -1084,7 +1084,9 @@ export class BackendManager {
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
       case 'thread.list': return this.sessionsList()
-      case 'thread.create': return this.sessionCreate(request.backendId, request.title, undefined, request.scope)
+      case 'thread.create': return request.executionPath
+        ? this.createScopedThread(request.backendId, this.scopeFor(request.executionPath), request.title ?? 'Untitled thread')
+        : this.sessionCreate(request.backendId, request.title, undefined, request.scope)
       case 'thread.backend.set': return this.setEmptyThreadBackend(request.threadId, request.backendId)
       case 'thread.get': return this.sessionGet(request.threadId)
       case 'thread.delete': return this.sessionDelete(request.threadId)

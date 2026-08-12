@@ -20,6 +20,7 @@ import type { BackendManager } from './backend/manager'
 import type { BackendRequest } from '@shared/backend'
 import type { AsrTranscribeRequest, TtsSpeakRequest } from '@shared/ipc'
 import type { ReviewManager } from './review-manager'
+import { projectCheckouts } from './project-identity'
 
 export interface IpcDeps {
   server: OpenCodeServer
@@ -168,14 +169,29 @@ export function registerIpc(deps: IpcDeps): void {
     return true
   })
 
-  ipcMain.handle(IpcChannels.ProjectCurrent, () => ({
-    path: deps.backends.currentProject || deps.server.projectPath,
-    healthy: deps.server.info.healthy
-  }))
+  ipcMain.handle(IpcChannels.ProjectCurrent, () => {
+    const current = deps.backends.currentProject || deps.server.projectPath
+    const scope = deps.backends.scopeFor(current)
+    return {
+      path: scope.projectPath,
+      checkoutPath: scope.executionPath,
+      checkouts: projectCheckouts(scope.projectPath),
+      healthy: deps.server.info.healthy
+    }
+  })
 
   ipcMain.handle(IpcChannels.ProjectSet, async (_e, path: string) => {
-    await deps.backends.setProject(path)
-    return { path: deps.server.projectPath, healthy: deps.server.info.healthy }
+    // A linked worktree is a checkout within its repository project, not a
+    // second project. Keep project navigation canonical while review/files/
+    // terminal surfaces retain their own checkout-specific context paths.
+    const scope = deps.backends.scopeFor(path)
+    await deps.backends.setProject(scope.projectPath)
+    return {
+      path: scope.projectPath,
+      checkoutPath: scope.executionPath,
+      checkouts: projectCheckouts(scope.projectPath),
+      healthy: deps.server.info.healthy
+    }
   })
 
   ipcMain.handle(IpcChannels.ProjectChoose, async () => {
