@@ -4,8 +4,9 @@ import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { ChatView } from './components/ChatView'
 import { Workspace } from './components/Workspace'
-import { CommandCenter, EmptyProductPage } from './components/CommandCenter'
+import { CommandCenter } from './components/CommandCenter'
 import { SitesPage } from './components/SitesPage'
+import { AutomationsPage } from './components/AutomationsPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme } from './lib/themes'
 import { CommitDialog } from './components/CommitDialog'
@@ -22,6 +23,7 @@ import {
   refreshProviders,
   refreshSessions,
   refreshThreadBus,
+  refreshAutomations,
   refreshStreaming,
   loadMode,
   loadThreadPreferences,
@@ -51,6 +53,7 @@ async function refreshAll(): Promise<void> {
   void refreshAgents()
   void refreshConfig()
   void refreshThreadBus()
+  void refreshAutomations()
   const id = appStore.getState().activeSessionId
   if (id) {
     void loadMessages(id)
@@ -295,7 +298,7 @@ export function App(): React.JSX.Element {
 
   const page = (() => {
     if (activePage === 'command-center') return <CommandCenter />
-    if (activePage === 'automations') return <EmptyProductPage title="Automations" description="Scheduled and recurring agent work will live here." />
+    if (activePage === 'automations') return <AutomationsPage />
     if (activePage === 'sites') return <SitesPage />
     if (activePage === 'project') return <Workspace />
     return (

@@ -17,6 +17,7 @@ import type {
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, QueuedFollowUp } from '@shared/backend'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
+import type { AutomationsSnapshot } from '@shared/automation'
 import type {
   BrowseNavigationState,
   CloudflareSettings,
@@ -96,6 +97,7 @@ export interface AppState {
   threadBus: ThreadBusSnapshot | null
   qaPolicies: Record<string, QaPolicyState>
   qaDefault: QaPolicy
+  automations: AutomationsSnapshot | null
   projectPath: string
   lastError: string | null
   lastErrorBySession: Record<string, string>
@@ -186,6 +188,7 @@ export const initialState: AppState = {
   threadBus: null,
   qaPolicies: {},
   qaDefault: 'suggest',
+  automations: null,
   projectPath: '',
   lastError: null,
   lastErrorBySession: {},
@@ -356,6 +359,10 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       const threadId = props.threadId as string | undefined
       const followUps = props.followUps as QueuedFollowUp[] | undefined
       return threadId && followUps ? { followUps: { ...state.followUps, [threadId]: followUps } } : {}
+    }
+    case 'automations.updated': {
+      const snapshot = props.snapshot as AutomationsSnapshot | undefined
+      return snapshot ? { automations: snapshot } : {}
     }
     default:
       return {}

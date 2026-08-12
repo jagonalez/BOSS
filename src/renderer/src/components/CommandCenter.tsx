@@ -106,13 +106,3 @@ export function CommandCenter(): React.JSX.Element {
     </div>
   )
 }
-
-export function EmptyProductPage({ title, description }: { title: string; description: string }): React.JSX.Element {
-  return (
-    <div className="product-empty-page">
-      <span className="command-eyebrow">R.A.L.F.</span>
-      <h1>{title}</h1>
-      <p>{description}</p>
-    </div>
-  )
-}

@@ -551,6 +551,14 @@ export async function refreshThreadBus(threadId?: string): Promise<void> {
   }
 }
 
+export async function refreshAutomations(): Promise<void> {
+  try {
+    appStore.setState({ automations: await OpenCode.automationsList() })
+  } catch {
+    /* Automations may still be starting during the first renderer refresh. */
+  }
+}
+
 export async function setThreadBusPolicy(policy: CollaborationPolicy): Promise<void> {
   try {
     appStore.setState({ threadBus: await OpenCode.setThreadBusPolicy(policy) })

@@ -168,7 +168,8 @@ export class BackendManager {
   private readonly busyThreads = new Set<string>()
   private readonly followUpDeliveries = new Set<string>()
   private threadBus?: ThreadBus
-  private eventCb?: (event: Record<string, unknown>) => void
+  private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
+  private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private loaded = false
   private worktreeCleanupTimer?: NodeJS.Timeout
 
@@ -204,10 +205,35 @@ export class BackendManager {
   }
 
   onEvent(callback: (event: Record<string, unknown>) => void): () => void {
-    this.eventCb = callback
+    this.eventCbs.add(callback)
     return () => {
-      if (this.eventCb === callback) this.eventCb = undefined
+      this.eventCbs.delete(callback)
     }
+  }
+
+  emit(event: Record<string, unknown>): void {
+    for (const callback of this.eventCbs) callback(event)
+  }
+
+  scopeFor(projectPath: string): ProjectScope {
+    return projectPath ? projectScope(projectPath) : this.globalScope
+  }
+
+  isThreadBusy(threadId: string): boolean {
+    return this.busyThreads.has(threadId)
+  }
+
+  createScopedThread(
+    backendId: BackendId,
+    scope: ProjectScope,
+    title: string,
+    worktree?: WorktreeInfo
+  ): Promise<SessionInfo> {
+    return this.sessionCreateInScope(backendId, scope, title, undefined, worktree)
+  }
+
+  attachAutomations(automations: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.automations = automations
   }
 
   async start(projectPath?: string): Promise<void> {
@@ -437,7 +463,7 @@ export class BackendManager {
         this.busyThreads.delete(binding.id)
       }
     }
-    this.eventCb?.({ ...event, properties, backendId })
+    this.emit({ ...event, properties, backendId })
   }
 
   async descriptors(): Promise<BackendDescriptor[]> {
@@ -508,7 +534,7 @@ export class BackendManager {
     this.bindings.set(binding.id, binding)
     this.save()
     const session = this.session(binding, native)
-    this.eventCb?.({ type: 'session.created', properties: { info: session }, backendId })
+    this.emit({ type: 'session.created', properties: { info: session }, backendId })
     return session
   }
 
@@ -527,7 +553,7 @@ export class BackendManager {
     }
     this.bindings.delete(threadId)
     this.save()
-    this.eventCb?.({ type: 'session.deleted', properties: { info: this.session(binding) }, backendId: binding.backendId })
+    this.emit({ type: 'session.deleted', properties: { info: this.session(binding) }, backendId: binding.backendId })
   }
 
   async sessionRename(threadId: string, title: string): Promise<SessionInfo> {
@@ -538,7 +564,7 @@ export class BackendManager {
     binding.updatedAt = now()
     this.save()
     const session = this.session(binding, native)
-    this.eventCb?.({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
+    this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
     return session
   }
 
@@ -570,7 +596,7 @@ export class BackendManager {
   }
 
   private emitFollowUps(binding: ThreadBinding): void {
-    this.eventCb?.({
+    this.emit({
       type: 'thread.followups.updated',
       properties: { threadId: binding.id, followUps: binding.followUps ?? [] },
       backendId: binding.backendId
@@ -686,7 +712,7 @@ export class BackendManager {
         queueMicrotask(() => void this.deliverNextFollowUp(threadId))
       }
     } catch (error) {
-      this.eventCb?.({
+      this.emit({
         type: 'session.error',
         properties: { sessionID: threadId, error: error instanceof Error ? error.message : String(error) },
         backendId: binding.backendId
@@ -757,7 +783,7 @@ export class BackendManager {
   }
 
   emitThreadBus(snapshot: ThreadBusSnapshot): void {
-    this.eventCb?.({ type: 'thread.bus.updated', properties: { snapshot } })
+    this.emit({ type: 'thread.bus.updated', properties: { snapshot } })
   }
 
   async abort(threadId: string): Promise<void> {
@@ -894,6 +920,10 @@ export class BackendManager {
   }
 
   async handle(request: BackendRequest): Promise<unknown> {
+    if (request.type.startsWith('automation.')) {
+      if (!this.automations) throw new Error('Automations are not available.')
+      return this.automations.handle(request)
+    }
     switch (request.type) {
       case 'backend.list': return this.descriptors()
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
