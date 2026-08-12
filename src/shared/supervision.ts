@@ -1,0 +1,51 @@
+import type { BackendId } from './backend'
+
+export type RunStatus = 'running' | 'completed' | 'error' | 'interrupted'
+
+export interface RunMetrics {
+  status: RunStatus
+  startedAt: number
+  finishedAt?: number
+  durationMs: number
+  tokens?: number
+  toolCalls: number
+}
+
+export interface ThreadUsageTotals {
+  runs: number
+  durationMs: number
+  tokens?: number
+  tokenRuns: number
+  toolCalls: number
+}
+
+export interface SupervisedThread {
+  threadId: string
+  backendId: BackendId
+  title: string
+  projectPath: string
+  executionPath: string
+  updatedAt: number
+  worktreeBranch?: string
+  running: boolean
+  lastRun?: RunMetrics
+  usage: ThreadUsageTotals
+}
+
+export interface SupervisionSnapshot {
+  generatedAt: number
+  threads: SupervisedThread[]
+  totals: ThreadUsageTotals
+}
+
+export interface TranscriptSearchResult {
+  threadId: string
+  messageId: string
+  backendId: BackendId
+  title: string
+  projectPath: string
+  role: 'user' | 'assistant'
+  kind: 'message' | 'reasoning' | 'tool'
+  snippet: string
+  timestamp?: number
+}

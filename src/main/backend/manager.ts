@@ -23,6 +23,7 @@ import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
+import type { SupervisionSnapshot, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 
 interface ThreadBinding {
   id: string
@@ -1066,6 +1067,49 @@ export class BackendManager {
     return this.sessionGet(targetThreadId)
   }
 
+  supervisionSnapshot(): SupervisionSnapshot {
+    this.load()
+    const threads = [...this.bindings.values()].map((binding) => {
+      const usage = this.transcripts?.usage(binding.id) ?? {
+        totals: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
+      }
+      return {
+        threadId: binding.id,
+        backendId: binding.backendId,
+        title: binding.title ?? 'Untitled thread',
+        projectPath: binding.projectPath,
+        executionPath: binding.executionPath,
+        updatedAt: binding.updatedAt,
+        worktreeBranch: binding.worktree?.branch,
+        running: this.busyThreads.has(binding.id),
+        lastRun: usage.lastRun,
+        usage: usage.totals
+      }
+    }).sort((a, b) => b.updatedAt - a.updatedAt)
+    const totals = threads.reduce<ThreadUsageTotals>((value, thread) => ({
+      runs: value.runs + thread.usage.runs,
+      durationMs: value.durationMs + thread.usage.durationMs,
+      tokens: thread.usage.tokens === undefined ? value.tokens : (value.tokens ?? 0) + thread.usage.tokens,
+      tokenRuns: value.tokenRuns + thread.usage.tokenRuns,
+      toolCalls: value.toolCalls + thread.usage.toolCalls
+    }), { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 })
+    return { generatedAt: now(), threads, totals }
+  }
+
+  searchTranscripts(query: string, limit?: number): TranscriptSearchResult[] {
+    this.load()
+    if (!this.transcripts) return []
+    return this.transcripts.search(query, limit).flatMap((result) => {
+      const binding = this.bindings.get(result.threadId)
+      return binding ? [{
+        ...result,
+        backendId: binding.backendId,
+        title: binding.title ?? 'Untitled thread',
+        projectPath: binding.projectPath
+      }] : []
+    })
+  }
+
   async handle(request: BackendRequest): Promise<unknown> {
     if (request.type.startsWith('automation.')) {
       if (!this.automations) throw new Error('Automations are not available.')
@@ -1132,6 +1176,8 @@ export class BackendManager {
         const id = request.threadId ? this.binding(request.threadId).backendId : request.backendId ?? 'opencode'
         return (await this.ensureStarted(id)).modelsList()
       }
+      case 'supervision.snapshot': return this.supervisionSnapshot()
+      case 'supervision.search': return this.searchTranscripts(request.query, request.limit)
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction, request.options)
       case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction, request.options)
       case 'worktree.list': {

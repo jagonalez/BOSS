@@ -1,8 +1,10 @@
 import { mkdirSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { BackendId } from '@shared/backend'
 import type { MessageInfo, MessageWithParts, Part } from '@shared/opencode'
+import type { RunMetrics, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 
 interface TranscriptSource {
   threadId: string
@@ -33,6 +35,33 @@ interface PendingPart {
 }
 
 type RunStatus = 'running' | 'completed' | 'error' | 'interrupted'
+
+interface RunRow {
+  status: RunStatus
+  started_at: number
+  finished_at: number | null
+  tokens: number | null
+  tool_calls: number
+  token_baseline: number
+  token_reports_baseline: number
+  tool_calls_baseline: number
+}
+
+interface MetricCounters {
+  tokens: number
+  tokenReports: number
+  toolCalls: number
+}
+
+interface SearchPartRow {
+  thread_id: string
+  message_id: string
+  data_json: string
+  updated_at: number
+  role: 'user' | 'assistant'
+  message_json: string
+  backend_id: BackendId
+}
 
 const MAX_TOOL_OUTPUT_CHARS = 100_000
 
@@ -159,7 +188,24 @@ export class TranscriptStore {
         started_at INTEGER NOT NULL,
         finished_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS transcript_run_history (
+        run_id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        backend_id TEXT NOT NULL,
+        native_session_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        tokens INTEGER,
+        tool_calls INTEGER NOT NULL DEFAULT 0,
+        token_baseline INTEGER NOT NULL DEFAULT 0,
+        token_reports_baseline INTEGER NOT NULL DEFAULT 0,
+        tool_calls_baseline INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS transcript_run_history_thread
+        ON transcript_run_history(thread_id, started_at DESC);
     `)
+    this.ensureRunHistoryColumns()
     this.recoverInterruptedRuns()
   }
 
@@ -191,6 +237,22 @@ export class TranscriptStore {
     this.flush()
     this.transaction(() => {
       this.upsertThread(source)
+      const active = this.database.prepare(`
+        SELECT 1 FROM transcript_run_history
+        WHERE thread_id = ? AND status = 'running' LIMIT 1
+      `).get(source.threadId)
+      if (!active) {
+        const baseline = this.metricCounters(source.threadId)
+        this.database.prepare(`
+          INSERT INTO transcript_run_history(
+            run_id, thread_id, backend_id, native_session_id, status, started_at,
+            token_baseline, token_reports_baseline, tool_calls_baseline
+          ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)
+        `).run(
+          randomUUID(), source.threadId, source.backendId, source.nativeSessionId, Date.now(),
+          baseline.tokens, baseline.tokenReports, baseline.toolCalls
+        )
+      }
       this.database.prepare(`
         INSERT INTO transcript_runs(
           thread_id, backend_id, native_session_id, status, started_at, finished_at
@@ -214,6 +276,22 @@ export class TranscriptStore {
         SET status = ?, finished_at = ?
         WHERE thread_id = ? AND status = 'running'
       `).run(status, Date.now(), source.threadId)
+      const active = this.database.prepare(`
+        SELECT run_id, started_at, token_baseline, token_reports_baseline, tool_calls_baseline
+        FROM transcript_run_history
+        WHERE thread_id = ? AND status = 'running'
+        ORDER BY started_at DESC, rowid DESC LIMIT 1
+      `).get(source.threadId) as (Pick<RunRow,
+        'started_at' | 'token_baseline' | 'token_reports_baseline' | 'tool_calls_baseline'
+      > & { run_id: string }) | undefined
+      if (active) {
+        const metrics = this.metricsForRun(source.threadId, active)
+        this.database.prepare(`
+          UPDATE transcript_run_history
+          SET status = ?, finished_at = ?, tokens = ?, tool_calls = ?
+          WHERE run_id = ?
+        `).run(status, Date.now(), metrics.tokens ?? null, metrics.toolCalls, active.run_id)
+      }
       if (result.changes > 0) {
         this.markRunningParts(
           source.threadId,
@@ -311,12 +389,83 @@ export class TranscriptStore {
     return row?.present === 1
   }
 
+  usage(threadId: string): { lastRun?: RunMetrics; totals: ThreadUsageTotals } {
+    this.flush()
+    const rows = this.database.prepare(`
+      SELECT status, started_at, finished_at, tokens, tool_calls,
+             token_baseline, token_reports_baseline, tool_calls_baseline
+      FROM transcript_run_history
+      WHERE thread_id = ? ORDER BY started_at DESC, rowid DESC
+    `).all(threadId) as unknown as RunRow[]
+    const totals = rows.reduce<ThreadUsageTotals>((value, row) => ({
+      runs: value.runs + 1,
+      durationMs: value.durationMs + Math.max(0, (row.finished_at ?? Date.now()) - row.started_at),
+      tokens: row.tokens === null ? value.tokens : (value.tokens ?? 0) + row.tokens,
+      tokenRuns: value.tokenRuns + (row.tokens === null ? 0 : 1),
+      toolCalls: value.toolCalls + row.tool_calls
+    }), { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 })
+    const latest = rows[0]
+    const live = latest?.status === 'running' ? this.metricsForRun(threadId, latest) : undefined
+    return {
+      lastRun: latest ? {
+        status: latest.status,
+        startedAt: latest.started_at,
+        finishedAt: latest.finished_at ?? undefined,
+        durationMs: Math.max(0, (latest.finished_at ?? Date.now()) - latest.started_at),
+        tokens: live?.tokens ?? latest.tokens ?? undefined,
+        toolCalls: live?.toolCalls ?? latest.tool_calls
+      } : undefined,
+      totals
+    }
+  }
+
+  search(query: string, limit = 40): Array<Omit<TranscriptSearchResult, 'title' | 'projectPath'>> {
+    this.flush()
+    const clean = query.trim().toLowerCase()
+    if (clean.length < 2) return []
+    const pattern = `%${clean.replace(/[\\%_]/g, (value) => `\\${value}`)}%`
+    const rows = this.database.prepare(`
+      SELECT p.thread_id, p.message_id, p.data_json, p.updated_at,
+             m.role, m.data_json AS message_json, t.backend_id
+      FROM transcript_parts p
+      JOIN transcript_messages m
+        ON m.thread_id = p.thread_id AND m.message_id = p.message_id
+      JOIN transcript_threads t ON t.thread_id = p.thread_id
+      WHERE lower(p.data_json) LIKE ? ESCAPE '\\'
+      ORDER BY p.updated_at DESC LIMIT ?
+    `).all(pattern, Math.max(1, Math.min(limit, 100))) as unknown as SearchPartRow[]
+    return rows.flatMap((row) => {
+      const part = parseJson<Part>(row.data_json)
+      const message = parseJson<MessageInfo>(row.message_json)
+      if (!part || (part.type !== 'text' && part.type !== 'reasoning' && part.type !== 'tool')) return []
+      const raw = part.type === 'tool'
+        ? [part.state?.tool, part.state?.title, part.state?.input, part.state?.output]
+            .map((value) => typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value))
+            .filter(Boolean).join(' · ')
+        : part.text ?? part.state?.text ?? ''
+      const normalized = raw.replace(/\s+/g, ' ').trim()
+      const match = normalized.toLowerCase().indexOf(clean)
+      const start = Math.max(0, match - 70)
+      const snippet = `${start > 0 ? '…' : ''}${normalized.slice(start, start + 220)}${normalized.length > start + 220 ? '…' : ''}`
+      return [{
+        threadId: row.thread_id,
+        messageId: row.message_id,
+        backendId: row.backend_id,
+        role: row.role,
+        kind: part.type === 'text' ? 'message' as const : part.type,
+        snippet,
+        timestamp: message?.time?.created ?? part.time?.created ?? row.updated_at
+      }]
+    })
+  }
+
   deleteThread(threadId: string): void {
     this.flush()
     this.transaction(() => {
       this.database.prepare('DELETE FROM transcript_parts WHERE thread_id = ?').run(threadId)
       this.database.prepare('DELETE FROM transcript_messages WHERE thread_id = ?').run(threadId)
       this.database.prepare('DELETE FROM transcript_runs WHERE thread_id = ?').run(threadId)
+      this.database.prepare('DELETE FROM transcript_run_history WHERE thread_id = ?').run(threadId)
       this.database.prepare('DELETE FROM transcript_threads WHERE thread_id = ?').run(threadId)
     })
   }
@@ -394,6 +543,22 @@ export class TranscriptStore {
           'interrupted',
           'R.A.L.F. stopped before this step completed.'
         )
+        const history = this.database.prepare(`
+          SELECT run_id, started_at, token_baseline, token_reports_baseline, tool_calls_baseline
+          FROM transcript_run_history
+          WHERE thread_id = ? AND status = 'running'
+          ORDER BY started_at DESC, rowid DESC LIMIT 1
+        `).get(run.thread_id) as (Pick<RunRow,
+          'started_at' | 'token_baseline' | 'token_reports_baseline' | 'tool_calls_baseline'
+        > & { run_id: string }) | undefined
+        if (history) {
+          const metrics = this.metricsForRun(run.thread_id, history)
+          this.database.prepare(`
+            UPDATE transcript_run_history
+            SET status = 'interrupted', finished_at = ?, tokens = ?, tool_calls = ?
+            WHERE run_id = ?
+          `).run(Date.now(), metrics.tokens ?? null, metrics.toolCalls, history.run_id)
+        }
       }
       this.database.prepare(`
         UPDATE transcript_runs
@@ -401,6 +566,57 @@ export class TranscriptStore {
         WHERE status = 'running'
       `).run(Date.now())
     })
+  }
+
+  private metricCounters(threadId: string): MetricCounters {
+    const messageRows = this.database.prepare(`
+      SELECT data_json FROM transcript_messages
+      WHERE thread_id = ?
+    `).all(threadId) as unknown as Array<{ data_json: string }>
+    let tokens = 0
+    let tokenReports = 0
+    for (const row of messageRows) {
+      const message = parseJson<MessageInfo>(row.data_json)
+      if (typeof message?.tokens === 'number') {
+        tokens += message.tokens
+        tokenReports += 1
+      }
+    }
+    const partRows = this.database.prepare(`
+      SELECT data_json FROM transcript_parts WHERE thread_id = ?
+    `).all(threadId) as unknown as Array<{ data_json: string }>
+    const toolCalls = partRows.reduce((count, row) =>
+      count + (parseJson<Part>(row.data_json)?.type === 'tool' ? 1 : 0), 0)
+    return { tokens, tokenReports, toolCalls }
+  }
+
+  private metricsForRun(
+    threadId: string,
+    baseline: Pick<RunRow, 'token_baseline' | 'token_reports_baseline' | 'tool_calls_baseline'>
+  ): { tokens?: number; toolCalls: number } {
+    const current = this.metricCounters(threadId)
+    return {
+      tokens: current.tokenReports > baseline.token_reports_baseline
+        ? Math.max(0, current.tokens - baseline.token_baseline)
+        : undefined,
+      toolCalls: Math.max(0, current.toolCalls - baseline.tool_calls_baseline)
+    }
+  }
+
+  private ensureRunHistoryColumns(): void {
+    const columns = new Set((this.database.prepare(
+      'PRAGMA table_info(transcript_run_history)'
+    ).all() as unknown as Array<{ name: string }>).map((column) => column.name))
+    const additions = [
+      ['token_baseline', 'INTEGER NOT NULL DEFAULT 0'],
+      ['token_reports_baseline', 'INTEGER NOT NULL DEFAULT 0'],
+      ['tool_calls_baseline', 'INTEGER NOT NULL DEFAULT 0']
+    ] as const
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) {
+        this.database.exec(`ALTER TABLE transcript_run_history ADD COLUMN ${name} ${definition}`)
+      }
+    }
   }
 
   private markRunningParts(

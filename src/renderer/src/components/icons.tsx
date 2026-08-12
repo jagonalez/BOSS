@@ -48,6 +48,13 @@ export const ChatIcon = (p: IconProps): React.JSX.Element => (
   </Svg>
 )
 
+export const SearchIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-4-4" />
+  </Svg>
+)
+
 export const ReviewIcon = (p: IconProps): React.JSX.Element => (
   <Svg {...p}>
     <path d="M5 19 3 17l6-6 4 4 6-8 2 2-8 10-4-4-2 2Z" />

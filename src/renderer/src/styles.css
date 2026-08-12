@@ -2076,6 +2076,90 @@ textarea {
   gap: 18px;
 }
 
+.command-overview {
+  max-width: 1040px;
+  margin: -10px auto 18px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-pane);
+}
+
+.command-overview > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 13px 16px;
+  border-right: 1px solid var(--line-subtle);
+}
+
+.command-overview > div:last-child {
+  border-right: 0;
+}
+
+.command-overview strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+}
+
+.command-overview span {
+  color: var(--text-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.command-search {
+  max-width: 1040px;
+  height: 42px;
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 13px;
+  border: 1px solid var(--line-default);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  background: var(--surface-inset);
+}
+
+.command-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-default));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.command-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+}
+
+.command-search input::placeholder {
+  color: var(--text-faint);
+}
+
+.command-search > span {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
+.command-search-section {
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
 .command-section {
   min-width: 0;
   padding: 14px;
@@ -2184,6 +2268,65 @@ textarea {
 .command-session-time {
   color: var(--text-faint);
   font-size: 10.5px;
+}
+
+.command-session-main .command-session-metrics {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.command-search-result {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(140px, 0.32fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--surface-inset);
+  cursor: pointer;
+  text-align: left;
+}
+
+.command-search-result:hover {
+  border-color: var(--line-default);
+  color: var(--text);
+  background: var(--surface-raised);
+}
+
+.command-search-result-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.command-search-result-meta strong,
+.command-search-result-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-search-result-meta strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.command-search-result-meta small {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.command-search-snippet {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .command-session-time {
@@ -2653,6 +2796,27 @@ textarea {
 
   .command-section.command-recent {
     grid-column: auto;
+  }
+
+  .command-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .command-overview > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .command-overview > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line-subtle);
+  }
+
+  .command-search-result {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .command-search-snippet {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 }
 
