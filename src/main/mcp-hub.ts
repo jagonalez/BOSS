@@ -31,6 +31,7 @@ interface HubState {
 interface LiveConnection {
   client: McpClient
   tools: McpToolDefinition[]
+  instructions?: string
 }
 
 function slugify(name: string): string {
@@ -183,9 +184,9 @@ export class McpHub {
       ? new StdioMcpClient(connection.command ?? '', connection.args ?? [], secrets.env)
       : new HttpMcpClient(connection.url ?? '', secrets.headers)
     try {
-      await client.initialize()
+      const instructions = await client.initialize()
       const tools = await client.listTools()
-      this.live.set(connection.id, { client, tools })
+      this.live.set(connection.id, { client, tools, instructions })
       this.status.set(connection.id, { status: 'connected' })
     } catch (error) {
       await client.close().catch(() => {})
@@ -379,21 +380,51 @@ export class McpHub {
       if (!live.tools.some((tool) => tool.name === toolName)) continue
       const result = await live.client.callTool(toolName, args)
       const text = result.content
-        .map((item) => (typeof item.text === 'string' ? item.text : ''))
+        .map((item) => (typeof item.text === 'string' ? item.text : JSON.stringify(item)))
         .filter(Boolean)
         .join('\n')
       if (result.isError) throw new Error(text || 'The MCP tool reported an error.')
-      return text || JSON.stringify(result.content)
+      return text || '(empty result)'
     }
     throw new Error(`Unknown MCP tool: ${namespacedName}. Use ralf_mcp_list to see available tools.`)
   }
 
-  /** Compact listing for the generic ralf_mcp_list agent tool. */
-  agentListing(): Array<{ tool: string; description: string }> {
-    return this.agentToolDefinitions().map((definition) => ({
-      tool: definition.name,
-      description: definition.description
-    }))
+  /**
+   * Listing for the generic ralf_mcp_list agent tool: full input schemas and
+   * server instructions, so agents without native tool registration can still
+   * see the parameter contracts.
+   */
+  agentListing(): Array<{
+    connection: string
+    instructions?: string
+    tools: Array<{ tool: string; description?: string; inputSchema?: Record<string, unknown> }>
+  }> {
+    const listing: ReturnType<McpHub['agentListing']> = []
+    for (const connection of this.connections) {
+      const live = this.live.get(connection.id)
+      if (!connection.enabled || !live) continue
+      listing.push({
+        connection: connection.name,
+        instructions: live.instructions,
+        tools: live.tools.map((tool) => ({
+          tool: `${MCP_TOOL_PREFIX}${connection.slug}_${tool.name}`,
+          description: tool.description,
+          inputSchema: tool.inputSchema
+        }))
+      })
+    }
+    return listing
+  }
+
+  /** Server instructions of connected servers, for backends that surface MCP instructions. */
+  instructionsSummary(): string {
+    const parts: string[] = []
+    for (const connection of this.connections) {
+      const live = this.live.get(connection.id)
+      if (!connection.enabled || !live?.instructions) continue
+      parts.push(`## ${connection.name} (tools ${MCP_TOOL_PREFIX}${connection.slug}_*)\n${live.instructions}`)
+    }
+    return parts.join('\n\n')
   }
 
   async importScan(): Promise<McpImportCandidate[]> {

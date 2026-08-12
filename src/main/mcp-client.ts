@@ -29,10 +29,16 @@ interface JsonRpcResponse {
 }
 
 export interface McpClient {
-  initialize(): Promise<void>
+  /** Resolves to the server's usage instructions, when it provides any. */
+  initialize(): Promise<string | undefined>
   listTools(): Promise<McpToolDefinition[]>
   callTool(name: string, args: unknown): Promise<McpCallResult>
   close(): Promise<void>
+}
+
+function instructionsFromResult(result: unknown): string | undefined {
+  const instructions = (result as { instructions?: unknown })?.instructions
+  return typeof instructions === 'string' && instructions.trim() ? instructions.trim() : undefined
 }
 
 function rpcError(response: JsonRpcResponse): Error | null {
@@ -152,7 +158,7 @@ export class StdioMcpClient implements McpClient {
     })
   }
 
-  async initialize(): Promise<void> {
+  async initialize(): Promise<string | undefined> {
     const response = await this.request('initialize', {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
@@ -161,6 +167,7 @@ export class StdioMcpClient implements McpClient {
     const error = rpcError(response)
     if (error) throw error
     this.write({ jsonrpc: '2.0', method: 'notifications/initialized' })
+    return instructionsFromResult(response.result)
   }
 
   async listTools(): Promise<McpToolDefinition[]> {
@@ -265,7 +272,7 @@ export class HttpMcpClient implements McpClient {
     return response
   }
 
-  async initialize(): Promise<void> {
+  async initialize(): Promise<string | undefined> {
     const response = await this.request('initialize', {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
@@ -276,6 +283,7 @@ export class HttpMcpClient implements McpClient {
     await this.post({ jsonrpc: '2.0', method: 'notifications/initialized' }, false).catch(() => {
       /* Some servers reject the notification; tools still work. */
     })
+    return instructionsFromResult(response.result)
   }
 
   async listTools(): Promise<McpToolDefinition[]> {

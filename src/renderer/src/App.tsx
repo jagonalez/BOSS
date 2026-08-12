@@ -24,6 +24,7 @@ import {
   refreshSessions,
   refreshThreadBus,
   refreshAutomations,
+  syncAutomationThreadPreferences,
   refreshStreaming,
   loadMode,
   loadThreadPreferences,
@@ -200,6 +201,9 @@ export function App(): React.JSX.Element {
           break
         case 'config.updated':
           void refreshConfig()
+          break
+        case 'automations.updated':
+          syncAutomationThreadPreferences(appStore.getState().automations)
           break
         default:
           break

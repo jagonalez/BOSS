@@ -6,6 +6,7 @@ import type { ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
+import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
 import {
@@ -560,9 +561,31 @@ export async function refreshMcpConnections(): Promise<void> {
   }
 }
 
+/**
+ * Automation threads are created in the main process, so the renderer's
+ * per-thread mode and model maps never see them. Backfill both so the thread
+ * UI shows what the run actually uses.
+ */
+export function syncAutomationThreadPreferences(snapshot: AutomationsSnapshot | null): void {
+  if (!snapshot) return
+  const state = appStore.getState()
+  const automations = new Map(snapshot.automations.map((automation) => [automation.id, automation]))
+  for (const run of snapshot.runs) {
+    if (!run.threadId) continue
+    const automation = automations.get(run.automationId)
+    if (!automation) continue
+    if (!state.modesBySession[run.threadId]) setMode(automation.mode, run.threadId)
+    if (automation.model && !state.modelsBySession[run.threadId]) {
+      setModel(automation.model.modelID, run.threadId, automation.model.providerID)
+    }
+  }
+}
+
 export async function refreshAutomations(): Promise<void> {
   try {
-    appStore.setState({ automations: await OpenCode.automationsList() })
+    const snapshot = await OpenCode.automationsList()
+    appStore.setState({ automations: snapshot })
+    syncAutomationThreadPreferences(snapshot)
   } catch {
     /* Automations may still be starting during the first renderer refresh. */
   }
