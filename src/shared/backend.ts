@@ -18,6 +18,8 @@ export interface BackendCapabilities {
   images: boolean
   mcp: boolean
   interactiveQuestions: boolean
+  /** The backend enforces its own Auto policy; escalations must still be shown to the user. */
+  nativeAutoMode: boolean
 }
 
 export interface QueuedFollowUpAttachment {
