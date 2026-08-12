@@ -1867,7 +1867,7 @@ textarea {
   z-index: 100;
   top: calc(var(--workspace-tab-height) - 2px);
   left: 8px;
-  width: 220px;
+  width: min(220px, calc(100% - 16px));
   max-height: min(420px, calc(100% - var(--workspace-tab-height) - 8px));
   padding: 5px;
   overflow-y: auto;
@@ -1875,6 +1875,11 @@ textarea {
   border-radius: var(--radius);
   background: var(--surface-pane);
   box-shadow: 0 15px 44px rgba(0, 0, 0, 0.45);
+}
+
+.workspace-group.menu-anchored .workspace-add-menu {
+  right: var(--workspace-add-menu-right, 8px);
+  left: auto;
 }
 
 .workspace-menu-title {

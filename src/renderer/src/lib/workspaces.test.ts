@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bindTemplate, group, tab, templateFromWorkspace, walkTabs, workspaceView } from './workspaces.ts'
+import { bindTemplate, group, tab, templateFromWorkspace, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+
+test('workspace add menus align to their trigger and stay inside the pane', () => {
+  assert.equal(workspaceMenuRight(900, 100, 1_000), 100)
+  assert.equal(workspaceMenuRight(990, 100, 1_000), 10)
+  assert.equal(workspaceMenuRight(200, 100, 1_000), 672)
+  assert.equal(workspaceMenuRight(180, 100, 260), 8)
+})
 
 test('saved formats strip thread and checkout bindings', () => {
   const view = workspaceView('Main', group([
