@@ -108,6 +108,12 @@ export type BackendRequest =
   | { type: 'worktree.settings.set'; autoCleanupEnabled?: boolean; cleanupAfterDays?: number }
   | { type: 'worktree.remove'; worktreeId: string }
   | { type: 'thread.relay'; sourceThreadId: string; targetThreadId: string; instruction?: string }
+  | { type: 'automation.list' }
+  | { type: 'automation.create'; input: import('./automation').AutomationInput }
+  | { type: 'automation.update'; automationId: string; patch: Partial<import('./automation').AutomationInput> & { enabled?: boolean } }
+  | { type: 'automation.delete'; automationId: string }
+  | { type: 'automation.run'; automationId: string }
+  | { type: 'automation.stop'; automationId: string }
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
   | { type: 'thread.bus.clear-failures'; threadId?: string }
