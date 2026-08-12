@@ -10,9 +10,10 @@ import type { WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 import { McpSettings } from './McpSettings'
+import { MobileSettings } from './MobileSettings'
 import { ModelSelect, modelIsLocal } from './ModelSelect'
 
-type SettingsSection = 'agents' | 'connections' | 'mcp' | 'collaboration' | 'worktrees' | 'appearance' | 'voice'
+type SettingsSection = 'agents' | 'connections' | 'mcp' | 'mobile' | 'collaboration' | 'worktrees' | 'appearance' | 'voice'
 
 const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
   {
@@ -20,7 +21,8 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
     items: [
       { id: 'agents', label: 'Agent defaults' },
       { id: 'connections', label: 'Models & connections' },
-      { id: 'mcp', label: 'MCP connections' }
+      { id: 'mcp', label: 'MCP connections' },
+      { id: 'mobile', label: 'Mobile access' }
     ]
   },
   {
@@ -51,6 +53,10 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   mcp: {
     title: 'MCP connections',
     description: 'Connect MCP servers once; every backend and automation can use their tools through R.A.L.F.'
+  },
+  mobile: {
+    title: 'Mobile access',
+    description: 'Review threads and automations from your phone over your tailnet or an SSH tunnel.'
   },
   collaboration: {
     title: 'Collaboration',
@@ -320,6 +326,8 @@ export function SettingsModal(): React.JSX.Element | null {
             ) : null}
 
             {section === 'mcp' ? <McpSettings /> : null}
+
+            {section === 'mobile' ? <MobileSettings /> : null}
 
             {section === 'collaboration' ? (
               <div className="settings-group-stack">
