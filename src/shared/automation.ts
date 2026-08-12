@@ -4,6 +4,8 @@ export type AutomationWorkspace = 'worktree' | 'project' | 'none'
 export type AutomationOverlapPolicy = 'skip' | 'queue'
 export type AutomationRunTrigger = 'schedule' | 'manual' | 'catch-up'
 export type AutomationRunStatus = 'running' | 'success' | 'failure' | 'timeout' | 'skipped' | 'aborted'
+/** off = never notify; events = failures, timeouts, and runs that change files; always = every finished run. */
+export type AutomationNotifyMode = 'off' | 'events' | 'always'
 
 export interface AutomationSchedule {
   kind: 'cron' | 'manual'
@@ -23,7 +25,7 @@ export interface AutomationInput {
   workspace: AutomationWorkspace
   overlapPolicy: AutomationOverlapPolicy
   catchUp: boolean
-  notify: boolean
+  notify: AutomationNotifyMode
   maxRunMinutes: number
   keepRuns: number
 }
@@ -63,7 +65,7 @@ export const AUTOMATION_DEFAULTS = {
   workspace: 'worktree' as AutomationWorkspace,
   overlapPolicy: 'skip' as AutomationOverlapPolicy,
   catchUp: true,
-  notify: true,
+  notify: 'events' as AutomationNotifyMode,
   maxRunMinutes: 30,
   keepRuns: 50
 }

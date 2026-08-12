@@ -551,6 +551,14 @@ export async function refreshThreadBus(threadId?: string): Promise<void> {
   }
 }
 
+export async function refreshMcpConnections(): Promise<void> {
+  try {
+    appStore.setState({ mcpConnections: await OpenCode.mcpList() })
+  } catch {
+    /* MCP connections may still be starting during the first renderer refresh. */
+  }
+}
+
 export async function refreshAutomations(): Promise<void> {
   try {
     appStore.setState({ automations: await OpenCode.automationsList() })

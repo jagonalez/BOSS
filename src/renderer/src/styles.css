@@ -2320,6 +2320,59 @@ textarea {
   color: var(--yellow, #b58900);
 }
 
+.mcp-form,
+.mcp-import-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.mcp-pairs-row {
+  align-items: flex-start;
+}
+
+.mcp-pairs {
+  resize: vertical;
+  min-height: 44px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.mcp-form-hint {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.mcp-import-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.mcp-tools-line {
+  margin-top: 6px;
+}
+
+.mcp-tools-toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mcp-tools-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 /* ---------- Sites ---------- */
 
 .sites-page {
