@@ -219,7 +219,7 @@ export function registerIpc(deps: IpcDeps): void {
   })
 
   ipcMain.handle(IpcChannels.ReviewSnapshot, (_event, path: string) => deps.reviews.snapshot(path))
-  ipcMain.handle(IpcChannels.ReviewPullRequestDiff, (_event, path: string) => deps.reviews.pullRequestDiff(path))
+  ipcMain.handle(IpcChannels.ReviewChangeRequestDiff, (_event, path: string) => deps.reviews.changeRequestDiff(path))
   ipcMain.handle(IpcChannels.ReviewLocalAdd, (_event, body: { path: string; input: import('@shared/review').AddReviewCommentInput }) =>
     deps.reviews.addLocal(body.path, body.input)
   )

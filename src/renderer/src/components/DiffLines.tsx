@@ -1,18 +1,20 @@
 import React from 'react'
 import type { DiffLine } from '../lib/diff'
 import { langForPath, highlightCode } from '../lib/highlight'
-import type { AddReviewCommentInput, ReviewComment } from '@shared/review'
+import type { AddReviewCommentInput, ReviewComment, ReviewProviderSummary } from '@shared/review'
 
 export function DiffLines({
   lines,
   path,
   comments = [],
+  provider,
   canPublish = false,
   onAddComment
 }: {
   lines: DiffLine[]
   path?: string
   comments?: ReviewComment[]
+  provider?: ReviewProviderSummary
   canPublish?: boolean
   onAddComment?: (input: AddReviewCommentInput, publish: boolean) => Promise<void>
 }): React.JSX.Element {
@@ -72,7 +74,7 @@ export function DiffLines({
           {lineComments.map((comment) => (
             <div className={`diff-inline-comment ${comment.source}`} key={`${comment.source}-${comment.id}`}>
               <span className="review-avatar">{comment.author.login.slice(0, 1).toUpperCase()}</span>
-              <span><strong>{comment.author.login}</strong><small>{comment.source === 'local' ? 'Local note' : 'GitHub'} · {new Date(comment.createdAt).toLocaleString()}</small><p>{comment.body}</p></span>
+              <span><strong>{comment.author.login}</strong><small>{comment.source === 'local' ? 'Local note' : provider?.label ?? 'Remote'} · {new Date(comment.createdAt).toLocaleString()}</small><p>{comment.body}</p></span>
             </div>
           ))}
           {isCommenting ? (
@@ -81,7 +83,7 @@ export function DiffLines({
               <div>
                 <button className="btn-deny" onClick={() => setCommenting(null)}>Cancel</button>
                 <button className="btn-ghost" disabled={!body.trim() || saving} onClick={() => void save(false)}>Save local note</button>
-                {canPublish ? <button className="btn-allow" disabled={!body.trim() || saving} onClick={() => void save(true)}>Publish to GitHub</button> : null}
+                {canPublish && provider?.capabilities.publishInlineComment ? <button className="btn-allow" disabled={!body.trim() || saving} onClick={() => void save(true)}>Publish to {provider.label}</button> : null}
               </div>
             </div>
           ) : null}

@@ -8,14 +8,14 @@ import { ReviewIcon } from './icons'
 import type { AddReviewCommentInput, ReviewSnapshot, SubmitReviewEvent } from '@shared/review'
 import { ReviewConversation } from './ReviewConversation'
 
-type Scope = 'worktree' | 'staged' | 'compare' | 'commits' | 'pull-request' | 'conversation'
+type Scope = 'worktree' | 'staged' | 'compare' | 'commits' | 'change-request' | 'conversation'
 
 const SCOPE_LABELS: Record<Scope, string> = {
   worktree: 'Working tree',
   staged: 'Staged',
   compare: 'Compare',
   commits: 'Commits',
-  'pull-request': 'Pull request',
+  'change-request': 'Change request',
   conversation: 'Conversation'
 }
 
@@ -36,8 +36,8 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [reviewError, setReviewError] = useState('')
-  const visibleComments = scope === 'pull-request'
-    ? [...(reviewSnapshot?.pullRequest?.comments ?? []), ...(reviewSnapshot?.localComments ?? [])]
+  const visibleComments = scope === 'change-request'
+    ? [...(reviewSnapshot?.changeRequest?.comments ?? []), ...(reviewSnapshot?.localComments ?? [])]
     : reviewSnapshot?.localComments ?? []
 
   async function loadReview(): Promise<void> {
@@ -71,7 +71,7 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
 
   useEffect(() => {
     if (scope !== 'commits' && scope !== 'conversation') void loadScope()
-  }, [projectPath, scope, baseBranch, gitRefresh, reviewSnapshot?.pullRequest?.headRefOid])
+  }, [projectPath, scope, baseBranch, gitRefresh, reviewSnapshot?.changeRequest?.headRefOid])
 
   useEffect(() => {
     if (activeSessionId) markStaleReviews(activeSessionId, projectPath)
@@ -83,16 +83,16 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
     if (!projectPath) return
     setLoading(true)
     try {
-      const pullRequestFiles = scope === 'pull-request' && reviewSnapshot?.pullRequest
-        ? await window.ralf.reviewPullRequestDiff(projectPath)
+      const changeRequestFiles = scope === 'change-request' && reviewSnapshot?.changeRequest
+        ? await window.ralf.reviewChangeRequestDiff(projectPath)
         : undefined
-      const paths = pullRequestFiles?.map((file) => file.path)
+      const paths = changeRequestFiles?.map((file) => file.path)
         ?? await gitDiffFiles(projectPath, scope as 'worktree' | 'staged' | 'compare', baseBranch)
       const items: DiffFileData[] = []
       for (const p of paths) {
         try {
-          const text = pullRequestFiles
-            ? pullRequestFiles.find((file) => file.path === p)?.patch ?? ''
+          const text = changeRequestFiles
+            ? changeRequestFiles.find((file) => file.path === p)?.patch ?? ''
             : await gitFileDiff(projectPath, scope as 'worktree' | 'staged' | 'compare', p, baseBranch)
           const lines = parseGitDiff(text)
           items.push({
@@ -198,7 +198,7 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
     <div className="git-view">
       <div className="git-toolbar">
         <div className="git-scope">
-          {(Object.keys(SCOPE_LABELS) as Scope[]).filter((item) => item !== 'pull-request' || reviewSnapshot?.pullRequest).map((s) => (
+          {(Object.keys(SCOPE_LABELS) as Scope[]).filter((item) => item !== 'change-request' || reviewSnapshot?.changeRequest).map((s) => (
             <button key={s} className={`git-scope-btn ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
               {SCOPE_LABELS[s]}
             </button>
@@ -269,7 +269,7 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
           <DiffReview files={data} loading={loading} error={error} showList={false} comments={visibleComments} onAddComment={addReviewComment} />
         </div>
       ) : (
-        <DiffReview files={data} loading={loading} error={error} comments={visibleComments} canPublish={scope === 'pull-request'} onAddComment={addReviewComment} />
+        <DiffReview files={data} loading={loading} error={error} comments={visibleComments} provider={reviewSnapshot?.provider} canPublish={scope === 'change-request'} onAddComment={addReviewComment} />
       )}
     </div>
   )

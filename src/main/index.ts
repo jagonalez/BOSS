@@ -23,6 +23,7 @@ import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
 import { TranscriptStore } from './transcript-store'
 import { ReviewManager } from './review-manager'
+import { GitHubReviewProvider } from './github-review-provider'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -74,7 +75,9 @@ threadBus.attachQaTools(qaTools)
 const pty = new PTYManager(backendAuth)
 const speech = new SpeechManager()
 const sites = new SitesManager(() => backendMgr.currentProject || server.projectPath)
-const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments.json'))
+const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments.json'), [
+  new GitHubReviewProvider()
+])
 
 let ipcReady = false
 

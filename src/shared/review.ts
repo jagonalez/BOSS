@@ -1,5 +1,6 @@
 export type ReviewLineSide = 'LEFT' | 'RIGHT'
-export type ReviewCommentSource = 'local' | 'github'
+export type ReviewCommentSource = 'local' | 'remote'
+export type ReviewProviderId = string
 
 export interface ReviewAuthor {
   login: string
@@ -9,6 +10,7 @@ export interface ReviewAuthor {
 export interface ReviewComment {
   id: string
   source: ReviewCommentSource
+  providerId?: ReviewProviderId
   body: string
   author: ReviewAuthor
   createdAt: string
@@ -23,7 +25,7 @@ export interface ReviewComment {
   canDelete?: boolean
 }
 
-export interface PullRequestReview {
+export interface ChangeRequestReview {
   id: string
   author: ReviewAuthor
   body: string
@@ -32,17 +34,33 @@ export interface PullRequestReview {
   url?: string
 }
 
-export interface PullRequestCheck {
+export interface ChangeRequestCheck {
   name: string
   state: string
   bucket?: 'pass' | 'fail' | 'pending' | 'skipping' | 'cancel'
   url?: string
 }
 
-export interface PullRequestSummary {
-  provider: 'github'
+export interface ReviewProviderCapabilities {
+  canonicalDiff: boolean
+  publishOverallComment: boolean
+  publishInlineComment: boolean
+  replyToComment: boolean
+  submitVerdict: boolean
+}
+
+export interface ReviewProviderSummary {
+  id: ReviewProviderId
+  label: string
+  changeRequestLabel: string
+  capabilities: ReviewProviderCapabilities
+}
+
+export interface ChangeRequestSummary {
+  providerId: ReviewProviderId
   repository: string
-  number: number
+  id: string
+  displayId: string
   title: string
   url: string
   state: string
@@ -55,8 +73,8 @@ export interface PullRequestSummary {
   reviewDecision?: string
   mergeStateStatus?: string
   mergeable?: string
-  checks: PullRequestCheck[]
-  reviews: PullRequestReview[]
+  checks: ChangeRequestCheck[]
+  reviews: ChangeRequestReview[]
   comments: ReviewComment[]
 }
 
@@ -64,14 +82,13 @@ export interface ReviewSnapshot {
   repositoryRoot: string
   branch: string
   remoteUrl?: string
-  provider: 'github' | 'other' | 'none'
-  providerLabel?: string
-  pullRequest?: PullRequestSummary
+  provider?: ReviewProviderSummary
+  changeRequest?: ChangeRequestSummary
   localComments: ReviewComment[]
   syncError?: string
 }
 
-export interface PullRequestFileDiff {
+export interface ChangeRequestFileDiff {
   path: string
   patch: string
 }
