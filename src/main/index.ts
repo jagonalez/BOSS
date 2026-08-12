@@ -16,6 +16,7 @@ import { BackendManager } from './backend/manager'
 import { createBackend } from './backend/factory'
 import { ThreadBus } from './thread-bus'
 import { WorktreeManager } from './worktree-manager'
+import { AutomationManager } from './automation-manager'
 import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
 
@@ -45,6 +46,11 @@ const backendMgr = new BackendManager({
 }, worktrees, backendAuth)
 const threadBus = new ThreadBus(backendMgr)
 backendMgr.attachThreadBus(threadBus)
+const automations = new AutomationManager({
+  stateFile: join(app.getPath('userData'), 'automations.json'),
+  runsFile: join(app.getPath('userData'), 'automation-runs.json')
+}, backendMgr, worktrees)
+backendMgr.attachAutomations(automations)
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
@@ -179,6 +185,7 @@ app.whenReady().then(() => {
     }
     await backendMgr.start(saved.projectPath)
     sites.bind(openCodeBackend)
+    await automations.start()
   })()
 })
 
@@ -195,6 +202,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void automations.stop()
   void backendMgr.stop()
   void computerUse.dispose()
   void sites.stop()

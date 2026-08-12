@@ -16,6 +16,7 @@ import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOpt
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
+import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
 
 export class ApiError extends Error {
   constructor(
@@ -161,6 +162,13 @@ export const OpenCode = {
     backendRequest<WorktreeSettings>({ type: 'worktree.settings.set', ...patch }),
   removeWorktree: (worktreeId: string) =>
     backendRequest<WorktreeInfo>({ type: 'worktree.remove', worktreeId }),
+  automationsList: () => backendRequest<AutomationsSnapshot>({ type: 'automation.list' }),
+  createAutomation: (input: AutomationInput) => backendRequest<Automation>({ type: 'automation.create', input }),
+  updateAutomation: (automationId: string, patch: Partial<AutomationInput> & { enabled?: boolean }) =>
+    backendRequest<Automation>({ type: 'automation.update', automationId, patch }),
+  deleteAutomation: (automationId: string) => backendRequest<void>({ type: 'automation.delete', automationId }),
+  runAutomation: (automationId: string) => backendRequest<void>({ type: 'automation.run', automationId }),
+  stopAutomation: (automationId: string) => backendRequest<void>({ type: 'automation.stop', automationId }),
   relayToThread: (sourceThreadId: string, targetThreadId: string, instruction?: string) =>
     backendRequest<SessionInfo>({ type: 'thread.relay', sourceThreadId, targetThreadId, instruction }),
   threadBus: (threadId?: string) =>
