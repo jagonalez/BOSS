@@ -67,6 +67,12 @@ export type PrivacyPane = 'accessibility' | 'screenRecording'
 
 export interface ProjectInfo {
   path: string
+  checkoutPath: string
+  checkouts: Array<{
+    path: string
+    branch?: string
+    main: boolean
+  }>
   healthy: boolean
 }
 
@@ -159,6 +165,13 @@ export const IpcChannels = {
   TerminalData: 'terminal:data',
   TerminalExit: 'terminal:exit',
   GitRun: 'git:run',
+  ReviewSnapshot: 'review:snapshot',
+  ReviewChangeRequestDiff: 'review:change-request-diff',
+  ReviewLocalAdd: 'review:local-add',
+  ReviewLocalDelete: 'review:local-delete',
+  ReviewPublishComment: 'review:publish-comment',
+  ReviewReply: 'review:reply',
+  ReviewSubmit: 'review:submit',
   TtsStatus: 'tts:status',
   TtsSpeak: 'tts:speak',
   SpeechStatusChanged: 'speech:status-changed',
