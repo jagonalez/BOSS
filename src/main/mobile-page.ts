@@ -25,7 +25,10 @@ body {
   font: 15px/1.5 -apple-system, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   padding-bottom: env(safe-area-inset-bottom);
+  overflow-x: hidden; max-width: 100vw;
+  overflow-wrap: anywhere;
 }
+main { max-width: 100%; }
 #app { display: flex; flex-direction: column; min-height: 100dvh; }
 header {
   position: sticky; top: 0; z-index: 5;
