@@ -102,6 +102,20 @@ function isError(status?: string): boolean {
   return status === 'error' || status === 'interrupted' || status === 'cancelled'
 }
 
+function ReasoningNote({ text }: { text: string }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const long = text.length > 320 || text.split('\n').length > 6
+  return (
+    <div
+      className={`step-reasoning${long ? ' expandable' : ''}${long && !expanded ? ' clamped' : ''}`}
+      onClick={long ? () => setExpanded((value) => !value) : undefined}
+      title={long ? (expanded ? 'Collapse' : 'Show full reasoning') : undefined}
+    >
+      <MessageText text={text} />
+    </div>
+  )
+}
+
 function StatusDot({ status }: { status?: string }): React.JSX.Element | null {
   if (isRunning(status)) return <span className="spinner-sm" />
   if (isError(status)) return <span className="step-status-error">!</span>
@@ -224,11 +238,7 @@ export function StepCard({ message }: { message: MessageWithParts }): React.JSX.
               as separate parts sharing one id. */}
           {message.parts.map((part, index) => {
             if (part.type === 'reasoning' && (part.text ?? '').trim()) {
-              return (
-                <div className="step-reasoning" key={`${part.id}-${index}`}>
-                  <MessageText text={part.text ?? ''} />
-                </div>
-              )
+              return <ReasoningNote key={`${part.id}-${index}`} text={part.text ?? ''} />
             }
             if (part.type === 'tool') return <ToolDetail key={`${part.id}-${index}`} part={part} />
             return null
