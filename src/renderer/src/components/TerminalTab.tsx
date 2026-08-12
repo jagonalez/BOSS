@@ -6,9 +6,10 @@ import { useStore, appStore } from '../state/AppState'
 import type { BackendId } from '@shared/backend'
 import { getXtermTheme } from '../lib/themes'
 
-export function TerminalTab({ authBackendId }: { authBackendId?: BackendId }): React.JSX.Element {
+export function TerminalTab({ authBackendId, contextPath }: { authBackendId?: BackendId; contextPath?: string }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const projectPath = useStore(appStore, (s) => s.projectPath)
+  const cwd = contextPath || projectPath
 
   useEffect(() => {
     const el = containerRef.current
@@ -52,7 +53,7 @@ export function TerminalTab({ authBackendId }: { authBackendId?: BackendId }): R
 
     const initial = fit.proposeDimensions()
     void window.ralf
-      .terminalCreate(projectPath || undefined, initial?.cols ?? 80, initial?.rows ?? 24, authBackendId)
+      .terminalCreate(cwd || undefined, initial?.cols ?? 80, initial?.rows ?? 24, authBackendId)
       .then((id) => {
         if (cancelled) {
           window.ralf.terminalDispose(id)
@@ -83,7 +84,7 @@ export function TerminalTab({ authBackendId }: { authBackendId?: BackendId }): R
       if (termId) window.ralf.terminalDispose(termId)
       term.dispose()
     }
-  }, [projectPath, authBackendId])
+  }, [cwd, authBackendId])
 
   return <div className="terminal-view" ref={containerRef} />
 }

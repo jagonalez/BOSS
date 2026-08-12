@@ -3,11 +3,22 @@ export type AppPage = 'command-center' | 'automations' | 'sites' | 'project' | '
 export type WorkspaceTabKind = 'thread' | 'browser' | 'terminal' | 'review' | 'files'
 export type SplitDirection = 'horizontal' | 'vertical'
 export type DropPosition = 'center' | 'left' | 'right' | 'top' | 'bottom'
+export type TerminalStartLocation = 'focused-checkout' | 'project-root'
+
+export interface WorkspaceCheckoutBinding {
+  contextPath: string
+  worktreeId?: string
+  contextLabel?: string
+}
 
 export interface WorkspaceTab {
   id: string
   kind: WorkspaceTabKind
   sessionId?: string
+  /** Checkout used by terminal, review, and files. Once created, the tab stays pinned here. */
+  contextPath?: string
+  worktreeId?: string
+  contextLabel?: string
 }
 
 export interface WorkspaceGroup {

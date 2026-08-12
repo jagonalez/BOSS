@@ -15,10 +15,11 @@ const SCOPE_LABELS: Record<Scope, string> = {
   commits: 'Commits'
 }
 
-export function GitView(): React.JSX.Element {
-  const projectPath = useStore(appStore, (s) => s.projectPath)
+export function GitView({ contextPath, sessionId }: { contextPath?: string; sessionId?: string }): React.JSX.Element {
+  const projectRoot = useStore(appStore, (s) => s.projectPath)
+  const projectPath = contextPath || projectRoot
   const gitRefresh = useStore(appStore, (s) => s.gitRefresh)
-  const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
+  const activeSessionId = sessionId
   const reviews = useStore(appStore, (s) => (activeSessionId ? s.sessionMeta[activeSessionId]?.reviews ?? [] : []))
   const [scope, setScope] = useState<Scope>('worktree')
   const [branches, setBranches] = useState<string[]>([])
@@ -48,8 +49,8 @@ export function GitView(): React.JSX.Element {
   }, [projectPath, scope, baseBranch, gitRefresh])
 
   useEffect(() => {
-    if (activeSessionId) markStaleReviews(activeSessionId)
-  }, [activeSessionId, gitRefresh])
+    if (activeSessionId) markStaleReviews(activeSessionId, projectPath)
+  }, [activeSessionId, gitRefresh, projectPath])
 
   async function loadScope(): Promise<void> {
     setError('')
@@ -148,7 +149,8 @@ export function GitView(): React.JSX.Element {
             onClick={() =>
               void runThreadReview(
                 activeSessionId,
-                SCOPE_LABELS[scope] + (scope === 'compare' ? ` vs ${baseBranch}` : '')
+                SCOPE_LABELS[scope] + (scope === 'compare' ? ` vs ${baseBranch}` : ''),
+                projectPath
               )
             }
             title="Ask the agent to review the current changes in this thread"

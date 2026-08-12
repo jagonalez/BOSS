@@ -30,12 +30,13 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: HttpMethod, path: string, opts?: { query?: Record<string, string | number | boolean | undefined>; body?: unknown }): Promise<T> {
+async function request<T>(method: HttpMethod, path: string, opts?: { query?: Record<string, string | number | boolean | undefined>; body?: unknown; directory?: string }): Promise<T> {
   const res = await window.ralf.apiRequest({
     method,
     path,
     query: opts?.query,
-    body: opts?.body
+    body: opts?.body,
+    directory: opts?.directory
   })
   if (res.status === 0) {
     throw new ApiError(0, path, res.body)
@@ -200,8 +201,8 @@ export const OpenCode = {
     backendRequest<QaPolicyState>({ type: 'thread.qa.policy', threadId, policy }),
   qaDefault: () => backendRequest<QaPolicy>({ type: 'qa.default.get' }),
   setQaDefault: (policy: QaPolicy) => backendRequest<QaPolicy>({ type: 'qa.default.policy', policy }),
-  fileTree: (path = '') => request<FileNode[]>('GET', '/file', { query: { path } }),
-  fileContent: (path: string) => request<FileContent>('GET', '/file/content', { query: { path } }),
+  fileTree: (path = '', directory?: string) => request<FileNode[]>('GET', '/file', { query: { path }, directory }),
+  fileContent: (path: string, directory?: string) => request<FileContent>('GET', '/file/content', { query: { path }, directory }),
   projectList: () => request<Project[]>('GET', '/project'),
   projectCurrent: () => request<Project>('GET', '/project/current'),
   agents: () => request<Agent[]>('GET', '/agent'),
