@@ -21,12 +21,20 @@ function storeFile(): string {
 
 function contentParts(sessionId: string, messageId: string, content: unknown): Part[] {
   if (!Array.isArray(content)) return []
+  const firstTextIndex = content.findIndex((block) => (
+    Boolean(block) && typeof block === 'object' && (block as { type?: string }).type === 'text'
+  ))
   return content.flatMap<Part>((block, index): Part[] => {
     if (!block || typeof block !== 'object') return []
     const item = block as Record<string, unknown>
     if (item.type === 'text' || item.type === 'thinking') {
       return [{
-        id: `${messageId}-${String(item.type)}-${index}`,
+        // Claude's streaming deltas use this id for the first text block. Keep
+        // the completed message on that identity so the final event replaces
+        // the live projection instead of rendering a second copy.
+        id: item.type === 'text' && index === firstTextIndex
+          ? `${messageId}-text`
+          : `${messageId}-${String(item.type)}-${index}`,
         type: item.type === 'thinking' ? 'reasoning' as const : 'text' as const,
         sessionID: sessionId,
         messageID: messageId,

@@ -1024,6 +1024,19 @@ interface TurnGroup {
   assistants: MessageWithParts[]
 }
 
+function uniqueNarrativeParts(parts: Part[]): Part[] {
+  const seen = new Set<string>()
+  return parts.filter((part) => {
+    if (part.type !== 'text' && part.type !== 'reasoning') return true
+    const text = (part.text ?? part.state?.text ?? '').replace(/\s+/g, ' ').trim()
+    if (!text) return true
+    const key = `${part.messageID}\u0000${part.type}\u0000${text}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function groupTurns(messages: MessageWithParts[]): TurnGroup[] {
   const groups: TurnGroup[] = []
   let current: TurnGroup = { assistants: [] }
@@ -1040,7 +1053,7 @@ function groupTurns(messages: MessageWithParts[]): TurnGroup[] {
 }
 
 function combineAssistants(messages: MessageWithParts[]): MessageWithParts {
-  const parts = messages.flatMap((m) => m.parts)
+  const parts = uniqueNarrativeParts(messages.flatMap((m) => m.parts))
   const created = Math.min(...messages.map((m) => m.info.time?.created).filter((t): t is number => typeof t === 'number'))
   const completed = Math.max(...messages.map((m) => m.info.time?.completed).filter((t): t is number => typeof t === 'number'))
   return {
@@ -1065,11 +1078,9 @@ function TurnView({
   onCtx?: (e: React.MouseEvent, item: MessageWithParts) => void
 }): React.JSX.Element {
   const model = turn.assistants[0]?.info.model?.id
-  const texts = turn.assistants.flatMap((m) =>
-    m.parts
-      .filter((p) => p.type === 'text')
-      .map((p) => ({ key: p.id, part: p }))
-  )
+  const texts = uniqueNarrativeParts(turn.assistants.flatMap((m) => m.parts))
+    .filter((p) => p.type === 'text')
+    .map((part) => ({ key: part.id, part }))
   const speakable = texts
     .map(({ part }) => partText(part))
     .filter(Boolean)
