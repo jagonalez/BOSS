@@ -256,22 +256,6 @@ function upsertPart(messages: Record<string, MessageWithParts[]>, part: Part): R
   return { ...messages, [part.sessionID]: next }
 }
 
-export function upsertMessagesFromList(messages: Record<string, MessageWithParts[]>, incoming: MessageWithParts[]): Record<string, MessageWithParts[]> {
-  let next = messages
-  for (const item of incoming) {
-    const sessionID = item.info.sessionID
-    const list = [...(next[sessionID] ?? [])]
-    const idx = list.findIndex((m) => m.info.id === item.info.id)
-    if (idx >= 0) {
-      list[idx] = item
-    } else {
-      list.push(item)
-    }
-    next = { ...next, [sessionID]: list }
-  }
-  return next
-}
-
 export function applyEvent(state: AppState, ev: Record<string, unknown>): Partial<AppState> {
   const props = (ev.properties ?? {}) as Record<string, unknown>
   switch (ev.type) {
