@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import type { MessageWithParts, Part } from '@shared/opencode'
 import { unifiedDiff, type DiffLine } from '../lib/diff'
 import { openReviewFile, selectSession } from '../lib/actions'
+import { MessageText } from '../lib/text'
 import { ChevronIcon, ReviewIcon } from './icons'
 
 function formatDuration(ms: number): string {
@@ -189,15 +190,11 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
 export function StepCard({ message }: { message: MessageWithParts }): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const tools = message.parts.filter((p) => p.type === 'tool')
-  const reasoning = message.parts
-    .filter((p) => p.type === 'reasoning')
-    .map((p) => p.text ?? '')
-    .filter(Boolean)
-    .join('\n\n')
+  const hasReasoning = message.parts.some((p) => p.type === 'reasoning' && (p.text ?? '').trim())
   const files = editStats(message.parts)
   const duration = messageDurationMs(message)
 
-  if (tools.length === 0 && !reasoning && files.size === 0) return null
+  if (tools.length === 0 && !hasReasoning && files.size === 0) return null
 
   const running = tools.some((p) => isRunning(p.state?.status))
   const failed = tools.some((p) => isError(p.state?.status))
@@ -222,10 +219,20 @@ export function StepCard({ message }: { message: MessageWithParts }): React.JSX.
       </button>
       {open && (
         <div className="step-details">
-          {reasoning ? <div className="step-reasoning">{reasoning}</div> : null}
-          {tools.map((tool) => (
-            <ToolDetail key={tool.id} part={tool} />
-          ))}
+          {/* Chronological order: reasoning stays next to the tool calls it explains.
+              Keys include the index because Claude emits tool_use and tool_result
+              as separate parts sharing one id. */}
+          {message.parts.map((part, index) => {
+            if (part.type === 'reasoning' && (part.text ?? '').trim()) {
+              return (
+                <div className="step-reasoning" key={`${part.id}-${index}`}>
+                  <MessageText text={part.text ?? ''} />
+                </div>
+              )
+            }
+            if (part.type === 'tool') return <ToolDetail key={`${part.id}-${index}`} part={part} />
+            return null
+          })}
           {files.size > 0 && (
             <div className="step-files">
               <div className="step-files-label">Edited files — click to review</div>
