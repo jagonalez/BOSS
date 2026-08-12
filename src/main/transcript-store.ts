@@ -17,6 +17,7 @@ interface StoredMessageRow {
 }
 
 interface StoredPartRow {
+  part_id?: string
   message_id: string
   data_json: string
 }
@@ -90,6 +91,12 @@ function parseJson<T>(value: string): T | undefined {
   } catch {
     return undefined
   }
+}
+
+function narrativeKey(part: Part): string | undefined {
+  if (part.type !== 'text' && part.type !== 'reasoning') return undefined
+  const text = (part.text ?? part.state?.text ?? '').replace(/\s+/g, ' ').trim()
+  return text ? `${part.type}\u0000${text}` : undefined
 }
 
 /**
@@ -247,6 +254,11 @@ export class TranscriptStore {
         message.parts.forEach((part, partIndex) => {
           this.upsertPart(source, normalizePart({ ...part, sessionID: source.threadId }), partIndex * 1024)
         })
+        this.removeSupersededNarrativeParts(
+          source.threadId,
+          message.info.id,
+          new Set(message.parts.map((part) => part.id))
+        )
       })
     })
   }
@@ -263,15 +275,23 @@ export class TranscriptStore {
     if (!selected.length) return []
 
     const partRows = this.database.prepare(`
-      SELECT message_id, data_json
+      SELECT message_id, part_id, data_json
       FROM transcript_parts
       WHERE thread_id = ?
       ORDER BY message_id ASC, position ASC, updated_at ASC
     `).all(threadId) as unknown as StoredPartRow[]
     const partsByMessage = new Map<string, Part[]>()
+    const narrativeByMessage = new Map<string, Set<string>>()
     for (const row of partRows) {
       const part = parseJson<Part>(row.data_json)
       if (!part) continue
+      const key = narrativeKey(part)
+      if (key) {
+        const seen = narrativeByMessage.get(row.message_id) ?? new Set<string>()
+        if (seen.has(key)) continue
+        seen.add(key)
+        narrativeByMessage.set(row.message_id, seen)
+      }
       const parts = partsByMessage.get(row.message_id) ?? []
       parts.push(part)
       partsByMessage.set(row.message_id, parts)
@@ -404,6 +424,37 @@ export class TranscriptStore {
         state: { ...part.state, status, error }
       }
       update.run(JSON.stringify(next), Date.now(), threadId, row.message_id, row.part_id)
+    }
+  }
+
+  private removeSupersededNarrativeParts(
+    threadId: string,
+    messageId: string,
+    authoritativePartIds: Set<string>
+  ): void {
+    const rows = this.database.prepare(`
+      SELECT message_id, part_id, data_json
+      FROM transcript_parts
+      WHERE thread_id = ? AND message_id = ?
+      ORDER BY position ASC, updated_at ASC
+    `).all(threadId, messageId) as unknown as Array<Required<StoredPartRow>>
+    const authoritativeKeys = new Set<string>()
+    for (const row of rows) {
+      if (!authoritativePartIds.has(row.part_id)) continue
+      const part = parseJson<Part>(row.data_json)
+      const key = part ? narrativeKey(part) : undefined
+      if (key) authoritativeKeys.add(key)
+    }
+    if (!authoritativeKeys.size) return
+    const remove = this.database.prepare(`
+      DELETE FROM transcript_parts
+      WHERE thread_id = ? AND message_id = ? AND part_id = ?
+    `)
+    for (const row of rows) {
+      if (authoritativePartIds.has(row.part_id)) continue
+      const part = parseJson<Part>(row.data_json)
+      const key = part ? narrativeKey(part) : undefined
+      if (key && authoritativeKeys.has(key)) remove.run(threadId, messageId, row.part_id)
     }
   }
 
