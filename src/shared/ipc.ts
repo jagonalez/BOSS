@@ -160,7 +160,7 @@ export const IpcChannels = {
   TerminalExit: 'terminal:exit',
   GitRun: 'git:run',
   ReviewSnapshot: 'review:snapshot',
-  ReviewPullRequestDiff: 'review:pull-request-diff',
+  ReviewChangeRequestDiff: 'review:change-request-diff',
   ReviewLocalAdd: 'review:local-add',
   ReviewLocalDelete: 'review:local-delete',
   ReviewPublishComment: 'review:publish-comment',

@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState } from 'react'
 import type { DiffLine } from '../lib/diff'
 import { DiffLines } from './DiffLines'
 import { ChevronIcon } from './icons'
-import type { AddReviewCommentInput, ReviewComment } from '@shared/review'
+import type { AddReviewCommentInput, ReviewComment, ReviewProviderSummary } from '@shared/review'
 
 export interface DiffFileData {
   path: string
@@ -17,6 +17,7 @@ export function DiffReview({
   error,
   showList = true,
   comments = [],
+  provider,
   canPublish = false,
   onAddComment
 }: {
@@ -25,6 +26,7 @@ export function DiffReview({
   error?: string
   showList?: boolean
   comments?: ReviewComment[]
+  provider?: ReviewProviderSummary
   canPublish?: boolean
   onAddComment?: (input: AddReviewCommentInput, publish: boolean) => Promise<void>
 }): React.JSX.Element {
@@ -146,7 +148,7 @@ export function DiffReview({
                     <span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span>
                   </span>
                 </button>
-                {!isCollapsed ? <DiffLines lines={f.lines} path={f.path} comments={comments} canPublish={canPublish} onAddComment={onAddComment} /> : null}
+                {!isCollapsed ? <DiffLines lines={f.lines} path={f.path} comments={comments} provider={provider} canPublish={canPublish} onAddComment={onAddComment} /> : null}
               </div>
             )
           })}
