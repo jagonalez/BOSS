@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import type { Automation, AutomationInput, AutomationRun } from '@shared/automation'
+import type { Automation, AutomationInput, AutomationNotifyMode, AutomationRun } from '@shared/automation'
 import { AUTOMATION_DEFAULTS } from '@shared/automation'
 import type { BackendId, BackendModeId } from '@shared/backend'
 import { OpenCode } from '../lib/opencode'
@@ -88,7 +88,7 @@ interface EditorState {
   workspace: 'worktree' | 'project'
   overlapPolicy: 'skip' | 'queue'
   catchUp: boolean
-  notify: boolean
+  notify: AutomationNotifyMode
   maxRunMinutes: number
   keepRuns: number
 }
@@ -374,9 +374,13 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
           <input type="checkbox" checked={draft.catchUp} onChange={(e) => patch({ catchUp: e.target.checked })} />
           <span>Run once at launch when a scheduled run was missed</span>
         </label>
-        <label className="settings-check">
-          <input type="checkbox" checked={draft.notify} onChange={(e) => patch({ notify: e.target.checked })} />
-          <span>Notify on failures and on runs that change files</span>
+        <label className="settings-row">
+          <span className="settings-row-label">Notifications</span>
+          <select className="settings-select" value={draft.notify} onChange={(e) => patch({ notify: e.target.value as AutomationNotifyMode })}>
+            <option value="events">Failures and runs that change files</option>
+            <option value="always">Every run (good for digests)</option>
+            <option value="off">Off</option>
+          </select>
         </label>
       </details>
       {error ? <div className="automation-error">{error}</div> : null}

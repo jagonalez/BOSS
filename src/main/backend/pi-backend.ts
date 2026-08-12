@@ -456,6 +456,23 @@ export default function (pi: ExtensionAPI) {
     }),
     execute: (_id, args, signal) => call("ralf_threads_spawn_worktree", args, signal)
   })
+  pi.registerTool({
+    name: "ralf_mcp_list",
+    label: "List R.A.L.F. MCP tools",
+    description: "List external MCP tools available through R.A.L.F. connections (Slack, Datadog, and other services).",
+    parameters: Type.Object({}),
+    execute: (_id, args, signal) => call("ralf_mcp_list", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_mcp_call",
+    label: "Call R.A.L.F. MCP tool",
+    description: "Call an external MCP tool listed by ralf_mcp_list.",
+    parameters: Type.Object({
+      tool: Type.String({ description: "Tool name from ralf_mcp_list." }),
+      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
+    }),
+    execute: (_id, args, signal) => call("ralf_mcp_call", args, signal)
+  })
 }
 `
   }

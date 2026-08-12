@@ -194,6 +194,21 @@ export const spawn_worktree = tool({
   },
   execute(args, context) { return call("ralf_threads_spawn_worktree", args, context) }
 })
+
+export const mcp_list = tool({
+  description: "List external MCP tools available through R.A.L.F. connections (Slack, Datadog, and other services).",
+  args: {},
+  execute(args, context) { return call("ralf_mcp_list", args, context) }
+})
+
+export const mcp_call = tool({
+  description: "Call an external MCP tool listed by ralf_mcp_list.",
+  args: {
+    tool: tool.schema.string().describe("Tool name from ralf_mcp_list"),
+    arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional()
+  },
+  execute(args, context) { return call("ralf_mcp_call", args, context) }
+})
 `
   }
 

@@ -242,7 +242,8 @@ export class ClaudeBackend implements Backend {
       'mcp__ralf_thread_bus__ralf_threads_send',
       'mcp__ralf_thread_bus__ralf_threads_reply',
       'mcp__ralf_thread_bus__ralf_threads_spawn_worktree',
-      ...QA_TOOL_DEFINITIONS.map((tool) => `mcp__ralf_thread_bus__${tool.name}`)
+      ...QA_TOOL_DEFINITIONS.map((tool) => `mcp__ralf_thread_bus__${tool.name}`),
+      ...(this.threadBus?.agentToolNames() ?? []).map((name) => `mcp__ralf_thread_bus__${name}`)
     ].join(',')
     const args = [
       '-p',
