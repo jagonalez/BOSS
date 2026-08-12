@@ -80,6 +80,7 @@ export interface BackendMessageOptions {
 export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'backend.auth.status' }
+  | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
   | { type: 'thread.list' }
   | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope }
   | { type: 'thread.get'; threadId: string }

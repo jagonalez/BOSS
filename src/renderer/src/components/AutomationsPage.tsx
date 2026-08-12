@@ -6,6 +6,7 @@ import type { BackendId, BackendModeId } from '@shared/backend'
 import { OpenCode } from '../lib/opencode'
 import { refreshAutomations, refreshBackendModels, selectSession } from '../lib/actions'
 import { ChatIcon, ChevronIcon, PlusIcon, ReloadIcon, RenameIcon, SendIcon, StopIcon, TrashIcon } from './icons'
+import { ModelSelect } from './ModelSelect'
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts
@@ -267,16 +268,18 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
           ))}
         </select>
       </label>
-      <label className="settings-row">
+      <div className="settings-row">
         <span className="settings-row-label">Model</span>
-        <select className="settings-select" value={draft.modelKey} onChange={(e) => patch({ modelKey: e.target.value })}>
-          <option value="">Backend default</option>
-          {models.map((model) => {
-            const key = `${model.provider || draft.backendId}/${model.id}`
-            return <option key={key} value={key}>{model.name ?? model.id}</option>
-          })}
-        </select>
-      </label>
+        <ModelSelect
+          backendId={draft.backendId}
+          models={models}
+          selected={draft.modelKey
+            ? { providerID: draft.modelKey.split('/')[0], modelID: draft.modelKey.split('/').slice(1).join('/') }
+            : undefined}
+          emptyLabel="Backend default"
+          onPick={(model) => patch({ modelKey: model ? `${model.provider || draft.backendId}/${model.id}` : '' })}
+        />
+      </div>
       <label className="settings-row">
         <span className="settings-row-label">Mode</span>
         <select className="settings-select" value={draft.mode} onChange={(e) => patch({ mode: e.target.value as BackendModeId })}>

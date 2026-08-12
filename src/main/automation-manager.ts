@@ -376,15 +376,14 @@ export class AutomationManager {
       run.threadId = thread.id
       if (worktree) await this.worktrees!.setOwner(worktree.id, thread.id)
       await this.persistAndEmit()
+      const preference = automation.model ?? this.backends.defaultModel(automation.backendId)
       await this.backends.handle({
         type: 'thread.send',
         threadId: thread.id,
         parts: [{ type: 'text', text: runHeader(automation) }],
         options: {
           mode: automation.mode,
-          model: automation.model
-            ? { providerID: automation.model.providerID, modelID: automation.model.modelID }
-            : undefined,
+          model: preference ? { providerID: preference.providerID, modelID: preference.modelID } : undefined,
           strictTools: true
         }
       })
