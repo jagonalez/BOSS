@@ -29,7 +29,13 @@ export class PTYManager {
       env: process.env as Record<string, string>
     })
     pty.onData((data) => this.onData?.(id, data))
-    pty.onExit(({ exitCode }) => this.onExit?.(id, exitCode))
+    pty.onExit(({ exitCode }) => {
+      // A naturally exited shell is no longer a live resource. Remove it
+      // before notifying the renderer so unmount disposal is an idempotent
+      // no-op rather than trying to kill an already-dead PTY.
+      this.sessions.delete(id)
+      this.onExit?.(id, exitCode)
+    })
     this.sessions.set(id, { pty })
     if (auth?.initialInput) {
       setTimeout(() => {

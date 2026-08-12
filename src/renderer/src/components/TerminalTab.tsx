@@ -6,10 +6,21 @@ import { useStore, appStore } from '../state/AppState'
 import type { BackendId } from '@shared/backend'
 import { getXtermTheme } from '../lib/themes'
 
-export function TerminalTab({ authBackendId, contextPath }: { authBackendId?: BackendId; contextPath?: string }): React.JSX.Element {
+export function TerminalTab({
+  authBackendId,
+  contextPath,
+  onExit
+}: {
+  authBackendId?: BackendId
+  contextPath?: string
+  onExit?: (code: number) => void
+}): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
+  const onExitRef = useRef(onExit)
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const cwd = contextPath || projectPath
+
+  onExitRef.current = onExit
 
   useEffect(() => {
     const el = containerRef.current
@@ -44,7 +55,9 @@ export function TerminalTab({ authBackendId, contextPath }: { authBackendId?: Ba
       if (evt.id === termId) term.write(evt.data)
     })
     const offExit = window.ralf.onTerminalExit((evt) => {
-      if (evt.id === termId) term.write(`\r\n\x1b[90m[process exited: ${evt.code}]\x1b[0m\r\n`)
+      if (evt.id !== termId) return
+      term.write(`\r\n\x1b[90m[process exited: ${evt.code}]\x1b[0m\r\n`)
+      onExitRef.current?.(evt.code)
     })
 
     term.onData((data) => {
