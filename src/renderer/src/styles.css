@@ -2059,8 +2059,16 @@ textarea {
   background: var(--yellow);
 }
 
-.command-connection.connected span {
-  background: var(--green);
+.command-connection.degraded,
+.server-pill.degraded {
+  border-color: color-mix(in srgb, var(--red) 30%, var(--line-default));
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.command-connection.degraded span,
+.server-pill.degraded .status-dot {
+  background: var(--red);
 }
 
 .command-grid {
@@ -4341,23 +4349,6 @@ textarea {
   border-radius: var(--radius);
   color: var(--text-muted);
   font-size: 13px;
-}
-
-.composer-compact {
-  background: var(--surface-control);
-  border: 1px solid var(--line-default);
-  color: var(--text-muted);
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.12s ease, border-color 0.12s ease;
-}
-
-.composer-compact:hover {
-  color: var(--accent-hover);
-  border-color: var(--accent-dim, var(--accent));
 }
 
 .tool-detail-open {
