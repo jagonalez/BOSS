@@ -154,7 +154,14 @@ export function App(): React.JSX.Element {
         case 'permission.updated': {
           const props = (ev.properties ?? {}) as { sessionID?: string; id?: string }
           const mode = modeForSession(props.sessionID)
-          if (mode !== 'ask') {
+          const session = appStore.getState().sessions.find((item) => item.id === props.sessionID)
+          const backend = appStore.getState().backends.find((item) => item.id === session?.backendId)
+          const hostAutoResponse = mode === 'plan'
+            ? 'reject'
+            : mode === 'auto' && !backend?.capabilities.nativeAutoMode
+              ? 'once'
+              : undefined
+          if (hostAutoResponse) {
             if (props.sessionID) {
               appStore.setState((st) => {
                 const permissions = { ...st.permissions }
@@ -163,7 +170,7 @@ export function App(): React.JSX.Element {
               })
             }
             if (props.sessionID && props.id) {
-              void autoRespond(props.sessionID, props.id, mode === 'auto' ? 'once' : 'reject')
+              void autoRespond(props.sessionID, props.id, hostAutoResponse)
             }
             break
           }
