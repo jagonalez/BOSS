@@ -10,8 +10,10 @@ export interface McpConnectionInput {
   env?: Record<string, string>
   /** http: server URL. */
   url?: string
-  /** http: bearer token, sent as "Authorization: Bearer <token>"; stored encrypted. */
+  /** http: credential sent in the Authorization header; stored encrypted. */
   authToken?: string
+  /** http: Authorization scheme prefix ("Bearer", "Basic", "token", …). Empty sends the bare token. */
+  authScheme?: string
   /** http: extra request headers; values are stored encrypted. */
   headers?: Record<string, string>
 }

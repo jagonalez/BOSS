@@ -76,10 +76,11 @@ interface FormState {
   env: Pair[]
   url: string
   authToken: string
+  authScheme: string
   headers: Pair[]
 }
 
-const EMPTY_FORM: FormState = { name: '', transport: 'stdio', command: '', args: '', env: [], url: '', authToken: '', headers: [] }
+const EMPTY_FORM: FormState = { name: '', transport: 'stdio', command: '', args: '', env: [], url: '', authToken: '', authScheme: 'Bearer', headers: [] }
 
 function ConnectionForm({ initial, onClose }: { initial: FormState; onClose: () => void }): React.JSX.Element {
   const [form, setForm] = useState(initial)
@@ -98,6 +99,7 @@ function ConnectionForm({ initial, onClose }: { initial: FormState; onClose: () 
       env: form.transport === 'stdio' ? pairsToRecord(form.env) : undefined,
       url: form.transport === 'http' ? form.url.trim() : undefined,
       authToken: form.transport === 'http' ? form.authToken.trim() : undefined,
+      authScheme: form.transport === 'http' ? form.authScheme.trim() : undefined,
       headers: form.transport === 'http' ? pairsToRecord(form.headers) : undefined
     }
     try {
@@ -152,15 +154,24 @@ function ConnectionForm({ initial, onClose }: { initial: FormState; onClose: () 
             <span className="settings-row-label">URL</span>
             <input className="settings-input" value={form.url} placeholder="https://mcp.example.com/mcp" onChange={(e) => patch({ url: e.target.value })} />
           </label>
-          <label className="settings-row">
-            <span className="settings-row-label">Bearer token</span>
-            <input
-              className="settings-input"
-              value={form.authToken}
-              placeholder="Access token — sent as Authorization: Bearer"
-              onChange={(e) => patch({ authToken: e.target.value })}
-            />
-          </label>
+          <div className="settings-row mcp-pairs-row">
+            <span className="settings-row-label">Authorization</span>
+            <div className="mcp-pair-row mcp-auth-row">
+              <input
+                className="settings-input mcp-pair-key"
+                value={form.authScheme}
+                placeholder="Bearer"
+                title='Scheme prefix ("Bearer", "Basic", "token", …). Leave empty to send the bare token.'
+                onChange={(e) => patch({ authScheme: e.target.value })}
+              />
+              <input
+                className="settings-input mcp-pair-value"
+                value={form.authToken}
+                placeholder="Access token"
+                onChange={(e) => patch({ authToken: e.target.value })}
+              />
+            </div>
+          </div>
           <div className="settings-row mcp-pairs-row">
             <span className="settings-row-label">Extra headers</span>
             <PairsEditor
@@ -324,12 +335,17 @@ export function McpSettings(): React.JSX.Element {
           <Button size="small" onClick={() => { setImporting(false); setForm({ ...EMPTY_FORM }) }}>Add connection…</Button>
           <Button size="small" variant="ghost" onClick={() => { setForm(null); setImporting(true) }}>Import from other apps…</Button>
         </div>
-        {form ? <ConnectionForm initial={form} onClose={() => setForm(null)} /> : null}
+        {form && !form.id ? <ConnectionForm initial={form} onClose={() => setForm(null)} /> : null}
         {importing ? <ImportPanel onDone={() => setImporting(false)} /> : null}
       </section>
       <section className="settings-card settings-card-list">
         {connections.length > 0 ? (
-          connections.map((view) => (
+          connections.map((view) => view.connection.id === form?.id ? (
+            <div className="settings-connection-card mcp-card" key={view.connection.id}>
+              <div className="settings-connection-header"><h2>Editing {view.connection.name}</h2></div>
+              <ConnectionForm initial={form} onClose={() => setForm(null)} />
+            </div>
+          ) : (
             <ConnectionCard
               key={view.connection.id}
               view={view}
@@ -344,6 +360,7 @@ export function McpSettings(): React.JSX.Element {
                   env: recordToPairs(view.connection.env),
                   url: view.connection.url ?? '',
                   authToken: view.connection.authToken ?? '',
+                  authScheme: view.connection.authScheme ?? 'Bearer',
                   headers: recordToPairs(view.connection.headers)
                 })
               }}
