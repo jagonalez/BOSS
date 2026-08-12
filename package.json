@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:transcripts": "node --experimental-strip-types --test src/main/transcript-store.test.ts",
     "test:workspaces": "node --experimental-strip-types --test src/renderer/src/lib/workspaces.test.ts",
+    "test:projects": "node --experimental-strip-types --test src/main/project-identity.test.ts",
+    "test:review": "node --experimental-strip-types --test src/main/review-manager.test.ts src/main/github-review-provider.test.ts src/renderer/src/lib/themes.test.ts",
     "test:claude": "node --experimental-strip-types --test src/main/backend/claude-backend.test.ts",
     "fetch:opencode": "node scripts/fetch-opencode.mjs",
     "fetch:cua-driver": "bash scripts/fetch-cua-driver.sh",
