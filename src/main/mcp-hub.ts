@@ -160,7 +160,10 @@ export class McpHub {
   private connectionSecrets(connection: StoredConnection): { env: Record<string, string>; headers: Record<string, string> } {
     const headers = decryptValues(connection.headers, connection.secretsEncrypted)
     const token = decryptValue(connection.authToken, connection.secretsEncrypted)
-    if (token) headers.Authorization = `Bearer ${token}`
+    if (token) {
+      const scheme = connection.authScheme?.trim()
+      headers.Authorization = scheme ? `${scheme} ${token}` : token
+    }
     return {
       env: decryptValues(connection.env, connection.secretsEncrypted),
       headers
@@ -308,13 +311,15 @@ export class McpHub {
       url: patch.url ?? connection.url,
       env: patch.env,
       headers: patch.headers,
-      authToken: patch.authToken
+      authToken: patch.authToken,
+      authScheme: patch.authScheme ?? connection.authScheme
     })
     connection.name = clean.name
     connection.transport = clean.transport
     connection.command = clean.command
     connection.args = clean.args
     connection.url = clean.url
+    connection.authScheme = clean.authScheme
     if (patch.env !== undefined) {
       connection.env = this.mergeSecrets(clean.env, connection.env, connection.secretsEncrypted, available)
       connection.secretsEncrypted = available

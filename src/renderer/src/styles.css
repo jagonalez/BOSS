@@ -2345,6 +2345,15 @@ textarea {
   gap: 6px;
 }
 
+.mcp-auth-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-auth-row .mcp-pair-key {
+  flex: 0 0 26%;
+}
+
 .mcp-pair-key {
   flex: 0 0 38%;
   font-family: var(--font-mono, monospace);
