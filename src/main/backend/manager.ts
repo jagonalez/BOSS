@@ -640,6 +640,44 @@ export class BackendManager {
     return this.session(binding, native)
   }
 
+  async setEmptyThreadBackend(threadId: string, backendId: BackendId): Promise<SessionInfo> {
+    const binding = this.binding(threadId)
+    if (binding.backendId === backendId) return this.sessionGet(threadId)
+    if (this.busyThreads.has(threadId) || binding.followUps?.length) {
+      throw new Error('Wait for this thread to finish before changing its backend.')
+    }
+    if (this.transcripts?.messages(threadId).some((message) => message.info.role === 'user')) {
+      throw new Error('Only a blank thread can change backends. Continue it in another backend instead.')
+    }
+
+    const previousBackend = await this.ensureStarted(binding.backendId)
+    const nativeMessages = await previousBackend.messagesList(binding.nativeSessionId)
+    if (nativeMessages.some((message) => message.info.role === 'user')) {
+      throw new Error('Only a blank thread can change backends. Continue it in another backend instead.')
+    }
+
+    const nextBackend = await this.ensureStarted(backendId)
+    const nextNative = await nextBackend.sessionCreate(binding.title, binding.executionPath || undefined)
+    const previousNativeSessionId = binding.nativeSessionId
+    const previousOwnership = binding.nativeSessionOwnership
+    binding.backendId = backendId
+    binding.nativeSessionId = nextNative.id
+    binding.nativeSessionOwnership = 'ralf'
+    if (previousOwnership === 'ralf') {
+      // The binding already points at the replacement so an old backend's
+      // session.deleted event cannot remove the preserved R.A.L.F. thread.
+      await previousBackend.sessionDelete(previousNativeSessionId).catch(() => {})
+    }
+
+    binding.title = binding.title ?? nextNative.title
+    binding.updatedAt = now()
+    this.transcripts?.deleteThread(threadId)
+    this.save()
+    const session = this.session(binding, nextNative)
+    this.emit({ type: 'session.updated', properties: { info: session }, backendId })
+    return session
+  }
+
   async sessionDelete(threadId: string): Promise<void> {
     const binding = this.binding(threadId)
     if (binding.nativeSessionOwnership === 'ralf') {
@@ -1047,6 +1085,7 @@ export class BackendManager {
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return this.sessionCreate(request.backendId, request.title, undefined, request.scope)
+      case 'thread.backend.set': return this.setEmptyThreadBackend(request.threadId, request.backendId)
       case 'thread.get': return this.sessionGet(request.threadId)
       case 'thread.delete': return this.sessionDelete(request.threadId)
       case 'thread.rename': return this.sessionRename(request.threadId, request.title)

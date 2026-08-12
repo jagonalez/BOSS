@@ -743,8 +743,10 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     const current = (sid && state.modelsBySession[sid]) || state.model
     const currentProvider = (sid && state.modelProvidersBySession?.[sid]) || state.modelProvider
     if (to === current && providerID === currentProvider) return
-    const hasMessages = sid ? (state.messages[sid]?.length ?? 0) > 0 : false
-    if (hasMessages) {
+    const hasUserMessage = sid
+      ? (state.messages[sid] ?? []).some((message) => message.info.role === 'user')
+      : false
+    if (hasUserMessage) {
       appStore.setState({ modelSwitch: { to, providerID, sessionId: sid ?? undefined } })
     } else {
       setModel(to, sid, providerID)

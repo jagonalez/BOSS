@@ -83,6 +83,7 @@ export type BackendRequest =
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
   | { type: 'thread.list' }
   | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope }
+  | { type: 'thread.backend.set'; threadId: string; backendId: BackendId }
   | { type: 'thread.get'; threadId: string }
   | { type: 'thread.delete'; threadId: string }
   | { type: 'thread.rename'; threadId: string; title: string }
