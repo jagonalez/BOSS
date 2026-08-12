@@ -535,11 +535,12 @@ export class ThreadBus {
     const reply = (result: unknown): void => this.json(response, 200, { jsonrpc: '2.0', id: input.id, result })
     if (input.method === 'initialize') {
       const requested = typeof input.params?.protocolVersion === 'string' ? input.params.protocolVersion : ''
+      const hubInstructions = this.mcpHub?.instructionsSummary()
       reply({
         protocolVersion: requested === '2025-03-26' ? requested : '2025-06-18',
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'ralf-agent-tools', version: '1.0.0' },
-        instructions: QA_GUIDANCE
+        instructions: hubInstructions ? `${QA_GUIDANCE}\n\n${hubInstructions}` : QA_GUIDANCE
       })
       return
     }
