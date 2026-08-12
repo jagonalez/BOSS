@@ -855,6 +855,39 @@ export async function cloneThreadToBackend(threadId: string, backendId: BackendI
   }
 }
 
+export async function setEmptyThreadBackend(threadId: string, backendId: BackendId): Promise<void> {
+  const source = appStore.getState().sessions.find((session) => session.id === threadId)
+  if (!source || (source.backendId ?? 'opencode') === backendId) return
+  try {
+    await OpenCode.setThreadBackend(threadId, backendId)
+    appStore.setState((state) => {
+      const modelsBySession = { ...state.modelsBySession }
+      const modelProvidersBySession = { ...(state.modelProvidersBySession ?? {}) }
+      const variantsBySession = { ...state.variantsBySession }
+      const modesBySession = { ...state.modesBySession }
+      const providersBySession = { ...state.providersBySession }
+      delete modelsBySession[threadId]
+      delete modelProvidersBySession[threadId]
+      delete variantsBySession[threadId]
+      delete modesBySession[threadId]
+      delete providersBySession[threadId]
+      persistThreadPreference('ralf.modelsBySession', modelsBySession)
+      persistThreadPreference('ralf.modelProvidersBySession', modelProvidersBySession)
+      persistThreadPreference('ralf.variantsBySession', variantsBySession)
+      persistThreadPreference('ralf.modesBySession', modesBySession)
+      return { modelsBySession, modelProvidersBySession, variantsBySession, modesBySession, providersBySession }
+    })
+    applyBackendDefaultModel(threadId, backendId)
+    const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
+    setMode(defaultMode, threadId)
+    await refreshSessions()
+    await refreshProviders(threadId)
+    await loadMessages(threadId)
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+  }
+}
+
 export async function relayThreadToThread(sourceThreadId: string, targetThreadId: string): Promise<void> {
   try {
     await OpenCode.relayToThread(sourceThreadId, targetThreadId)
