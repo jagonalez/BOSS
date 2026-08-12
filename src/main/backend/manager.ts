@@ -10,6 +10,7 @@ import type {
   BackendRequest,
   BackendCapabilities,
   BackendMessageOptions,
+  BackendModelPreference,
   QueuedFollowUp,
   QueuedFollowUpAttachment,
   ThreadCreationScope
@@ -171,6 +172,7 @@ export class BackendManager {
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
+  private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
   private loaded = false
   private worktreeCleanupTimer?: NodeJS.Timeout
 
@@ -218,6 +220,34 @@ export class BackendManager {
 
   scopeFor(projectPath: string): ProjectScope {
     return projectPath ? projectScope(projectPath) : this.globalScope
+  }
+
+  private defaultModelsFile(): string {
+    return join(app.getPath('userData'), 'backend-defaults.json')
+  }
+
+  private loadDefaultModels(): void {
+    if (this.defaultModels) return
+    try {
+      this.defaultModels = JSON.parse(readFileSync(this.defaultModelsFile(), 'utf8')) as Partial<Record<BackendId, BackendModelPreference>>
+    } catch {
+      this.defaultModels = {}
+    }
+  }
+
+  setDefaultModels(defaults: Partial<Record<BackendId, BackendModelPreference>>): void {
+    this.defaultModels = { ...defaults }
+    try {
+      writeFileSync(this.defaultModelsFile(), JSON.stringify(this.defaultModels, null, 2))
+    } catch {
+      /* Defaults keep working in memory if persistence is unavailable. */
+    }
+  }
+
+  defaultModel(backendId: BackendId): BackendModelPreference | undefined {
+    this.loadDefaultModels()
+    const preference = this.defaultModels?.[backendId]
+    return preference ? { ...preference } : undefined
   }
 
   isThreadBusy(threadId: string): boolean {
@@ -936,6 +966,7 @@ export class BackendManager {
     switch (request.type) {
       case 'backend.list': return this.descriptors()
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
+      case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return this.sessionCreate(request.backendId, request.title, undefined, request.scope)
       case 'thread.get': return this.sessionGet(request.threadId)

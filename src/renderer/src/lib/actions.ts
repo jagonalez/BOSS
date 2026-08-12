@@ -245,6 +245,7 @@ export function setDefaultModel(backendId: BackendId, model: BackendModelDescrip
       delete defaultModels[backendId]
     }
     persistThreadPreference('ralf.defaultModels', defaultModels)
+    void OpenCode.setBackendDefaults(defaultModels).catch(() => {})
     return { defaultModels }
   })
 }
@@ -643,6 +644,7 @@ export function loadThreadPreferences(): void {
     const defaultModels = JSON.parse(localStorage.getItem('ralf.defaultModels') ?? '{}') as Partial<Record<BackendId, BackendModelPreference>>
     const modelProvider = localStorage.getItem('ralf.modelProvider')
     appStore.setState({ modelsBySession, modelProvidersBySession, variantsBySession, modesBySession, defaultModels, modelProvider })
+    void OpenCode.setBackendDefaults(defaultModels).catch(() => {})
   } catch {
     /* Ignore malformed preferences and retain safe defaults. */
   }

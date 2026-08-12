@@ -12,7 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendRequest, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendModelPreference, BackendRequest, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
@@ -110,6 +110,8 @@ function modelVariants(variants?: unknown): string[] {
 export const OpenCode = {
   listBackends: () => backendRequest<BackendDescriptor[]>({ type: 'backend.list' }),
   backendAuthStatus: () => backendRequest<BackendAuthStatus[]>({ type: 'backend.auth.status' }),
+  setBackendDefaults: (defaults: Partial<Record<BackendId, BackendModelPreference>>) =>
+    backendRequest<void>({ type: 'backend.defaults.set', defaults }),
   listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
   createSession: (title?: string, backendId: BackendId = 'opencode', scope: ThreadCreationScope = 'current') =>
     backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, scope }),
