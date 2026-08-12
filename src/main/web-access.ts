@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { BackendRequest } from '../shared/backend'
-import type { MobileAccessConfig, MobileAccessStatus } from '../shared/mobile'
+import { mobileRequestAllowed, type MobileAccessConfig, type MobileAccessRole, type MobileAccessStatus } from '../shared/mobile'
 import { MOBILE_PAGE } from './mobile-page'
 
 /**
@@ -36,18 +36,6 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'automation.list',
   'automation.run',
   'automation.stop'
-])
-
-const READ_ONLY_REQUESTS = new Set<BackendRequest['type']>([
-  'backend.list',
-  'supervision.snapshot',
-  'supervision.search',
-  'thread.list',
-  'thread.get',
-  'thread.messages',
-  'thread.todos',
-  'thread.diff',
-  'automation.list'
 ])
 
 /** Event types the mobile page reacts to; the rest are desktop concerns. */
@@ -223,7 +211,7 @@ export class WebAccess {
     this.onChange?.()
   }
 
-  private access(request: IncomingMessage): 'control' | 'read-only' | null {
+  private access(request: IncomingMessage): MobileAccessRole | null {
     const url = new URL(request.url ?? '/', 'http://localhost')
     const supplied = request.headers.authorization?.startsWith('Bearer ')
       ? request.headers.authorization.slice(7)
@@ -288,7 +276,7 @@ export class WebAccess {
               this.json(response, 403, { error: `"${payload.type}" is not available over mobile access.` })
               return
             }
-            if (access === 'read-only' && !READ_ONLY_REQUESTS.has(payload.type)) {
+            if (!mobileRequestAllowed(payload.type, access)) {
               this.json(response, 403, { error: `"${payload.type}" requires a control token.` })
               return
             }
