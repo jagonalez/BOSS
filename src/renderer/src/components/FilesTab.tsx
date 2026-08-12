@@ -56,8 +56,11 @@ function FileNodeRow({
   )
 }
 
-export function FilesTab(): React.JSX.Element {
-  const files = useStore(appStore, (s) => s.files)
+export function FilesTab({ contextPath }: { contextPath?: string }): React.JSX.Element {
+  const projectPath = useStore(appStore, (s) => s.projectPath)
+  const gitRefresh = useStore(appStore, (s) => s.gitRefresh)
+  const directory = contextPath || projectPath
+  const [files, setFiles] = useState<FileNode[] | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [tabs, setTabs] = useState<Array<{ path: string; text: string }>>([])
   const [activePath, setActivePath] = useState<string | null>(null)
@@ -79,12 +82,13 @@ export function FilesTab(): React.JSX.Element {
   }
 
   useEffect(() => {
-    if (!files) {
-      void OpenCode.fileTree()
-        .then((tree) => appStore.setState({ files: tree }))
-        .catch(() => {})
-    }
-  }, [files])
+    setFiles(null)
+    setExpanded(new Set())
+    setTabs([])
+    setActivePath(null)
+    if (!directory) return
+    void OpenCode.fileTree('', directory).then(setFiles).catch(() => setFiles([]))
+  }, [directory, gitRefresh])
 
   const toggle = async (path: string): Promise<void> => {
     const next = new Set(expanded)
@@ -92,12 +96,12 @@ export function FilesTab(): React.JSX.Element {
       next.delete(path)
     } else {
       next.add(path)
-      const tree = await OpenCode.fileTree(path).catch(() => [])
+      const tree = await OpenCode.fileTree(path, directory).catch(() => [])
       const update = (nodes: FileNode[]): FileNode[] =>
         nodes.map((node) =>
           node.path === path ? { ...node, children: tree } : { ...node, children: node.children ? update(node.children) : node.children }
         )
-      appStore.setState({ files: files ? update(files) : files })
+      setFiles((current) => current ? update(current) : current)
     }
     setExpanded(next)
   }
@@ -108,7 +112,7 @@ export function FilesTab(): React.JSX.Element {
       return
     }
     try {
-      const file = await OpenCode.fileContent(path)
+      const file = await OpenCode.fileContent(path, directory)
       setTabs((prev) => [...prev, { path, text: file.content }])
       setActivePath(path)
     } catch {

@@ -8,7 +8,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, DropPosition, SplitDirection, WorkspaceTabKind } from '@shared/workspace'
+import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind } from '@shared/workspace'
 import {
   activeWorkspaceView,
   activateTab,
@@ -37,7 +37,22 @@ import {
 } from './workspaces'
 
 export function initializeWorkspaceState(): void {
-  appStore.setState({ layoutTemplates: loadTemplates() })
+  let terminalStartLocation: TerminalStartLocation = 'focused-checkout'
+  try {
+    if (localStorage.getItem('ralf.terminalStartLocation') === 'project-root') terminalStartLocation = 'project-root'
+  } catch {
+    /* Retain the focused-checkout default. */
+  }
+  appStore.setState({ layoutTemplates: loadTemplates(), terminalStartLocation })
+}
+
+export function setTerminalStartLocation(value: TerminalStartLocation): void {
+  appStore.setState({ terminalStartLocation: value })
+  try {
+    localStorage.setItem('ralf.terminalStartLocation', value)
+  } catch {
+    /* The in-memory setting still applies for this run. */
+  }
 }
 
 export function showPage(page: AppPage): void {
@@ -152,10 +167,14 @@ export function activateWorkspaceTab(groupId: string, tabId: string): void {
   }))
   const active = next ? findTab(activeWorkspaceView(next).root, tabId)?.tab : undefined
   if (active?.kind === 'thread' && active.sessionId) selectSession(active.sessionId, false)
-  if (active?.kind === 'review') void refreshDiff(appStore.getState().activeSessionId)
 }
 
-export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, sessionId?: string): void {
+export function addWorkspaceTab(
+  groupId: string,
+  kind: WorkspaceTabKind,
+  sessionId?: string,
+  checkout?: WorkspaceCheckoutBinding
+): void {
   const workspace = currentWorkspace()
   if (!workspace) return
   const view = activeWorkspaceView(workspace)
@@ -167,14 +186,16 @@ export function addWorkspaceTab(groupId: string, kind: WorkspaceTabKind, session
     }
   }
   if (kind === 'review' || kind === 'files') {
-    const existing = walkTabs(view.root).find((item) => item.kind === kind)
+    const existing = walkTabs(view.root).find((item) =>
+      item.kind === kind && item.contextPath === checkout?.contextPath
+    )
     if (existing) {
       const location = findTab(view.root, existing.id)
       if (location) activateWorkspaceTab(location.group.id, existing.id)
       return
     }
   }
-  const created = tab(kind, sessionId)
+  const created = tab(kind, sessionId, checkout)
   updateWorkspaceView((item) => ({
     ...item,
     root: addTab(item.root, groupId, created),
@@ -191,7 +212,8 @@ export function openBackendLogin(backendId: BackendId): void {
   }
   const view = activeWorkspaceView(workspace)
   const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
-  const created = tab('terminal')
+  const contextPath = appStore.getState().projectPath
+  const created = tab('terminal', undefined, contextPath ? { contextPath, contextLabel: 'Main' } : undefined)
   updateWorkspaceView((item) => ({
     ...item,
     root: addTab(item.root, groupId, created),
@@ -354,7 +376,19 @@ export function applyLayoutTemplate(templateId: string): void {
   const sessions = [focused, ...state.sessions.map((item) => item.id)].filter(
     (id, index, all): id is string => Boolean(id) && all.indexOf(id) === index
   )
-  const nextView = bindTemplate(template, view.name, sessions)
+  const activeSession = state.sessions.find((item) => item.id === (focused ?? state.activeSessionId))
+  const useFocused = state.terminalStartLocation === 'focused-checkout'
+  const contextPath = useFocused
+    ? activeSession?.executionPath ?? activeSession?.worktree?.path ?? state.projectPath
+    : state.projectPath
+  const checkout: WorkspaceCheckoutBinding | undefined = contextPath
+    ? {
+        contextPath,
+        worktreeId: useFocused ? activeSession?.worktree?.id : undefined,
+        contextLabel: useFocused && activeSession?.worktree?.branch ? activeSession.worktree.branch : 'Main'
+      }
+    : undefined
+  const nextView = bindTemplate(template, view.name, sessions, checkout)
   const next = updateActiveWorkspaceView(workspace, () => ({ ...nextView, id: view.id, name: view.name }))
   saveWorkspace(next)
   appStore.setState({ projectWorkspace: next })
@@ -462,8 +496,8 @@ export function sessionMetaFor(sessionId: string): SessionMeta | undefined {
   return appStore.getState().sessionMeta[sessionId]
 }
 
-export async function runThreadReview(sessionID: string, target: string): Promise<void> {
-  const projectPath = appStore.getState().projectPath
+export async function runThreadReview(sessionID: string, target: string, contextPath?: string): Promise<void> {
+  const projectPath = contextPath || appStore.getState().projectPath
   let baseSha = ''
   try {
     const r = await window.ralf.gitRun(projectPath, ['rev-parse', 'HEAD'])
@@ -506,8 +540,8 @@ export async function runThreadReview(sessionID: string, target: string): Promis
   await loadMessages(sessionID)
 }
 
-export function markStaleReviews(sessionID: string): void {
-  const projectPath = appStore.getState().projectPath
+export function markStaleReviews(sessionID: string, contextPath?: string): void {
+  const projectPath = contextPath || appStore.getState().projectPath
   void (async () => {
     let head = ''
     try {

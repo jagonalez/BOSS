@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
@@ -122,6 +122,7 @@ export function SettingsModal(): React.JSX.Element | null {
   const qaDefault = useStore(appStore, (s) => s.qaDefault)
   const computerUse = useStore(appStore, (s) => s.computerUse)
   const computerUsePerms = useStore(appStore, (s) => s.computerUsePerms)
+  const terminalStartLocation = useStore(appStore, (s) => s.terminalStartLocation)
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
@@ -380,6 +381,18 @@ export function SettingsModal(): React.JSX.Element | null {
                   </label>
                 </section>
                 <section className="settings-card settings-card-list">
+                  <SettingsRow
+                    title="New terminal location"
+                    description="Chooses a checkout when a terminal tab is created. Existing terminals stay pinned to their original folder."
+                  >
+                    <Select
+                      value={terminalStartLocation}
+                      onChange={(event) => setTerminalStartLocation(event.target.value as 'focused-checkout' | 'project-root')}
+                    >
+                      <option value="focused-checkout">Focused thread’s checkout</option>
+                      <option value="project-root">Project root</option>
+                    </Select>
+                  </SettingsRow>
                   <SettingsRow title="Inactive threshold" description="Opening or using a worktree thread resets its timer.">
                   <Select
                     value={worktreeSettings?.cleanupAfterDays ?? 30}

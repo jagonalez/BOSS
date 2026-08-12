@@ -6,6 +6,7 @@ import type {
   WorkspaceGroup,
   WorkspaceNode,
   WorkspaceTab,
+  WorkspaceCheckoutBinding,
   WorkspaceTabKind,
   WorkspaceView
 } from '@shared/workspace'
@@ -20,8 +21,8 @@ export function workspaceId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${sequence.toString(36)}`
 }
 
-export function tab(kind: WorkspaceTabKind, sessionId?: string): WorkspaceTab {
-  return { id: workspaceId('tab'), kind, sessionId }
+export function tab(kind: WorkspaceTabKind, sessionId?: string, checkout?: WorkspaceCheckoutBinding): WorkspaceTab {
+  return { id: workspaceId('tab'), kind, sessionId, ...checkout }
 }
 
 export function group(tabs: WorkspaceTab[] = []): WorkspaceGroup {
@@ -53,7 +54,10 @@ export function split(
 }
 
 function cloneTab(item: WorkspaceTab, stripBindings: boolean): WorkspaceTab {
-  return tab(item.kind, stripBindings ? undefined : item.sessionId)
+  const checkout = stripBindings || !item.contextPath
+    ? undefined
+    : { contextPath: item.contextPath, worktreeId: item.worktreeId, contextLabel: item.contextLabel }
+  return tab(item.kind, stripBindings ? undefined : item.sessionId, checkout)
 }
 
 export function cloneLayout(node: WorkspaceNode, stripBindings = false): WorkspaceNode {
@@ -118,6 +122,21 @@ function isNode(value: unknown): value is WorkspaceNode {
   return node.type === 'split' && typeof node.id === 'string' && isNode(node.first) && isNode(node.second)
 }
 
+function bindLegacyToolTabs(node: WorkspaceNode, projectKey: string): WorkspaceNode {
+  if (!projectKey || projectKey.startsWith('__')) return node
+  if (node.type === 'split') {
+    return { ...node, first: bindLegacyToolTabs(node.first, projectKey), second: bindLegacyToolTabs(node.second, projectKey) }
+  }
+  return {
+    ...node,
+    tabs: node.tabs.map((item) =>
+      !item.contextPath && (item.kind === 'terminal' || item.kind === 'review' || item.kind === 'files')
+        ? { ...item, contextPath: projectKey, contextLabel: 'Main' }
+        : item
+    )
+  }
+}
+
 function readJson<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -162,6 +181,7 @@ export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWo
   ) {
     const views = saved.views.map((view, index) => ({
       ...view,
+      root: bindLegacyToolTabs(view.root, projectKey),
       name: /^Workspace(?: \d+)?$/.test(view.name) ? (index === 0 ? 'Main' : `View ${index + 1}`) : view.name
     }))
     return { ...saved, views }
@@ -175,7 +195,8 @@ export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWo
     updatedAt?: number
   }>>(LEGACY_WORKSPACES_KEY, {})[projectKey]
   if (legacy?.version === 2 && legacy.root && isNode(legacy.root)) {
-    const view = workspaceView('Main', legacy.root)
+    const root = bindLegacyToolTabs(legacy.root, projectKey)
+    const view = workspaceView('Main', root)
     if (legacy.focusedGroupId && findGroup(legacy.root, legacy.focusedGroupId)) view.focusedGroupId = legacy.focusedGroupId
     return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: legacy.updatedAt ?? Date.now() }
   }
@@ -344,7 +365,12 @@ export function reorderTab(root: WorkspaceNode, groupId: string, tabId: string, 
   })
 }
 
-export function bindTemplate(template: LayoutTemplate, name: string, sessionIds: string[]): WorkspaceView {
+export function bindTemplate(
+  template: LayoutTemplate,
+  name: string,
+  sessionIds: string[],
+  checkout?: WorkspaceCheckoutBinding
+): WorkspaceView {
   const root = cloneLayout(template.root, true)
   let sessionIndex = 0
   let reviewBound = false
@@ -361,7 +387,13 @@ export function bindTemplate(template: LayoutTemplate, name: string, sessionIds:
         filesBound = true
       }
       return true
-    }).map((item) => item.kind === 'thread' ? { ...item, sessionId: sessionIds[sessionIndex++] } : item)
+    }).map((item) => {
+      if (item.kind === 'thread') return { ...item, sessionId: sessionIds[sessionIndex++] }
+      if (checkout && (item.kind === 'terminal' || item.kind === 'review' || item.kind === 'files')) {
+        return { ...item, ...checkout }
+      }
+      return item
+    })
     return { ...node, tabs, activeTabId: tabs[0]?.id ?? null }
   }
   const bound = bind(root)
