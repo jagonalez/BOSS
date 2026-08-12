@@ -25,11 +25,23 @@ const components: Components = {
   )
 }
 
+/**
+ * Chat-style line breaks: agents write one item per line, but markdown folds
+ * single newlines into spaces. Convert them to hard breaks (trailing two
+ * spaces) outside fenced code blocks, where whitespace must stay untouched.
+ */
+function hardBreaks(text: string): string {
+  return text
+    .split(/(```[\s\S]*?(?:```|$))/)
+    .map((segment) => segment.startsWith('```') ? segment : segment.replace(/([^\n])\n(?!\n)/g, '$1  \n'))
+    .join('')
+}
+
 export function MessageText({ text }: { text: string }): React.JSX.Element {
   return (
     <div className="md">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {text}
+        {hardBreaks(text)}
       </ReactMarkdown>
     </div>
   )

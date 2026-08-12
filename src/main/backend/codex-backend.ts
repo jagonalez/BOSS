@@ -1,5 +1,8 @@
+import { app } from 'electron'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
@@ -290,8 +293,80 @@ export class CodexBackend implements Backend {
   private liveText = new Map<string, string>()
   /** codex thread/read omits custom tool call items (the shape used for
    * R.A.L.F.-provided tools), so parts seen live are re-merged into every
-   * history reload. Keyed by message id, then part id. */
+   * history reload. Persisted to disk so runs stay reviewable after a
+   * restart. Keyed by message id, then part id. */
   private readonly livePartCache = new Map<string, Map<string, Part>>()
+  /** Native thread id -> message ids, for pruning on thread deletion. */
+  private readonly livePartThreads = new Map<string, Set<string>>()
+  private livePartsLoaded = false
+  private livePartsSaveTimer?: NodeJS.Timeout
+
+  private livePartsFile(): string {
+    return join(app.getPath('userData'), 'codex-live-parts.json')
+  }
+
+  private loadLiveParts(): void {
+    if (this.livePartsLoaded) return
+    this.livePartsLoaded = true
+    try {
+      const parsed = JSON.parse(readFileSync(this.livePartsFile(), 'utf8')) as {
+        version?: number
+        threads?: Record<string, Record<string, Part[]>>
+      }
+      if (parsed.version !== 1 || !parsed.threads) return
+      for (const [threadId, byMessage] of Object.entries(parsed.threads)) {
+        const messageIds = new Set<string>()
+        for (const [messageId, parts] of Object.entries(byMessage)) {
+          messageIds.add(messageId)
+          const map = new Map<string, Part>()
+          for (const part of parts) map.set(part.id, part)
+          this.livePartCache.set(messageId, map)
+        }
+        this.livePartThreads.set(threadId, messageIds)
+      }
+    } catch {
+      /* First launch starts with no cached parts. */
+    }
+  }
+
+  private saveLiveParts(): void {
+    if (this.livePartsSaveTimer) return
+    this.livePartsSaveTimer = setTimeout(() => {
+      this.livePartsSaveTimer = undefined
+      const threads: Record<string, Record<string, Part[]>> = {}
+      const threadIds = [...this.livePartThreads.keys()].slice(-200)
+      for (const threadId of threadIds) {
+        const byMessage: Record<string, Part[]> = {}
+        for (const messageId of this.livePartThreads.get(threadId) ?? []) {
+          const parts = this.livePartCache.get(messageId)
+          if (parts?.size) byMessage[messageId] = [...parts.values()]
+        }
+        if (Object.keys(byMessage).length) threads[threadId] = byMessage
+      }
+      try {
+        writeFileSync(this.livePartsFile(), JSON.stringify({ version: 1, threads }))
+      } catch {
+        /* Parts stay available in memory if persistence is unavailable. */
+      }
+    }, 500)
+    this.livePartsSaveTimer.unref()
+  }
+
+  private cacheLivePart(threadId: string, messageId: string, part: Part): void {
+    this.loadLiveParts()
+    const state = part.state
+    const bounded = state && typeof state.output === 'string' && state.output.length > 20_000
+      ? { ...part, state: { ...state, output: `${state.output.slice(0, 20_000)}\n[truncated]` } }
+      : part
+    const cached = this.livePartCache.get(messageId) ?? new Map<string, Part>()
+    const existing = cached.get(bounded.id)
+    cached.set(bounded.id, existing ? { ...existing, ...bounded, state: { ...existing.state, ...bounded.state } } : bounded)
+    this.livePartCache.set(messageId, cached)
+    const messageIds = this.livePartThreads.get(threadId) ?? new Set<string>()
+    messageIds.add(messageId)
+    this.livePartThreads.set(threadId, messageIds)
+    this.saveLiveParts()
+  }
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
   private version = ''
@@ -509,10 +584,7 @@ export class CodexBackend implements Backend {
           const part = itemPart(sessionId, messageId, item)
           if (part) {
             if (item.type === 'customToolCall' || item.type === 'custom_tool_call' || item.type === 'customToolCallOutput' || item.type === 'custom_tool_call_output') {
-              const cached = this.livePartCache.get(messageId) ?? new Map<string, Part>()
-              const existing = cached.get(part.id)
-              cached.set(part.id, existing ? { ...existing, ...part, state: { ...existing.state, ...part.state } } : part)
-              this.livePartCache.set(messageId, cached)
+              this.cacheLivePart(sessionId, messageId, part)
             }
             this.emit({ type: 'message.part.updated', part })
           }
@@ -571,6 +643,10 @@ export class CodexBackend implements Backend {
   async sessionDelete(id: string): Promise<void> {
     await this.request('thread/delete', { threadId: id })
     this.loadedThreads.delete(id)
+    this.loadLiveParts()
+    for (const messageId of this.livePartThreads.get(id) ?? []) this.livePartCache.delete(messageId)
+    this.livePartThreads.delete(id)
+    this.saveLiveParts()
   }
 
   async sessionRename(id: string, title: string): Promise<SessionInfo> {
@@ -598,6 +674,7 @@ export class CodexBackend implements Backend {
   async messagesList(sessionId: string, limit?: number): Promise<MessageWithParts[]> {
     const result = await this.request('thread/read', { threadId: sessionId, includeTurns: true }) as { thread: CodexThread }
     const messages = (result.thread.turns ?? []).flatMap((turn) => turnMessages(sessionId, turn))
+    this.loadLiveParts()
     for (const message of messages) {
       const cached = this.livePartCache.get(message.info.id)
       if (!cached) continue
