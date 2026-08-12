@@ -17,6 +17,7 @@ import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
+import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 
 export class ApiError extends Error {
   constructor(
@@ -162,6 +163,12 @@ export const OpenCode = {
     backendRequest<WorktreeSettings>({ type: 'worktree.settings.set', ...patch }),
   removeWorktree: (worktreeId: string) =>
     backendRequest<WorktreeInfo>({ type: 'worktree.remove', worktreeId }),
+  mcpList: () => backendRequest<McpConnectionView[]>({ type: 'mcp.list' }),
+  mcpAdd: (input: McpConnectionInput) => backendRequest<McpConnectionView>({ type: 'mcp.add', input }),
+  mcpUpdate: (connectionId: string, patch: Partial<McpConnectionInput> & { enabled?: boolean }) =>
+    backendRequest<McpConnectionView>({ type: 'mcp.update', connectionId, patch }),
+  mcpRemove: (connectionId: string) => backendRequest<void>({ type: 'mcp.remove', connectionId }),
+  mcpImportScan: () => backendRequest<McpImportCandidate[]>({ type: 'mcp.import.scan' }),
   automationsList: () => backendRequest<AutomationsSnapshot>({ type: 'automation.list' }),
   createAutomation: (input: AutomationInput) => backendRequest<Automation>({ type: 'automation.create', input }),
   updateAutomation: (automationId: string, patch: Partial<AutomationInput> & { enabled?: boolean }) =>

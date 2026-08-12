@@ -92,6 +92,11 @@ export class AutomationManager {
     try {
       const parsed = JSON.parse(await readFile(this.options.stateFile, 'utf8')) as Partial<AutomationState>
       if (parsed.version === 1 && Array.isArray(parsed.automations)) this.automations = parsed.automations
+      for (const automation of this.automations) {
+        // Migrate the pre-notify-mode boolean field.
+        const legacy = automation.notify as unknown
+        if (typeof legacy === 'boolean') automation.notify = legacy ? 'events' : 'off'
+      }
     } catch {
       /* First launch starts with no automations. */
     }
@@ -520,6 +525,8 @@ export class AutomationManager {
       this.notify(automation, `"${automation.name}" ${status === 'timeout' ? 'timed out' : 'failed'}${run.error ? `: ${run.error}` : '.'}`)
     } else if (status === 'success' && run.changedFiles > 0) {
       this.notify(automation, `"${automation.name}" finished with ${run.changedFiles} changed file${run.changedFiles === 1 ? '' : 's'}.`)
+    } else if (status === 'success' && automation.notify === 'always') {
+      this.notify(automation, `"${automation.name}": ${run.summary ?? 'finished.'}`)
     }
 
     await this.pruneRuns(automation)
@@ -551,7 +558,7 @@ export class AutomationManager {
   }
 
   private notify(automation: Automation, body: string): void {
-    if (!automation.notify) return
+    if (automation.notify === 'off') return
     try {
       new Notification({ title: 'R.A.L.F. automation', body }).show()
     } catch {

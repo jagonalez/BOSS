@@ -16,6 +16,8 @@ import type {
 } from '@shared/thread-bus'
 import { projectScope } from './project-identity'
 import type { QaTools } from './qa-tools'
+import { MCP_TOOL_PREFIX } from '@shared/mcp'
+import type { McpHub } from './mcp-hub'
 
 interface LegacyThreadBusState {
   version: 1
@@ -84,6 +86,7 @@ export class ThreadBus {
   private port = 0
   private readonly deliveryLocks = new Set<string>()
   private qaTools?: QaTools
+  private mcpHub?: McpHub
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
@@ -91,6 +94,10 @@ export class ThreadBus {
 
   attachQaTools(qaTools: QaTools): void {
     this.qaTools = qaTools
+  }
+
+  attachMcpHub(mcpHub: McpHub): void {
+    this.mcpHub = mcpHub
   }
 
   qaStatus(threadId: string) {
@@ -191,6 +198,26 @@ export class ThreadBus {
     if (tool.startsWith('ralf_browser_') || tool === 'ralf_computer') {
       if (!this.qaTools) throw new Error('R.A.L.F. QA tools are not ready.')
       return this.qaTools.call(caller.id, tool as QaAgentTool, args)
+    }
+    if (tool.startsWith(MCP_TOOL_PREFIX) || tool === 'ralf_mcp_list' || tool === 'ralf_mcp_call') {
+      if (!this.mcpHub) throw new Error('R.A.L.F. MCP connections are not ready.')
+      if (tool === 'ralf_mcp_list') return this.mcpHub.agentListing()
+      if (tool === 'ralf_mcp_call') {
+        const name = stringArg(args, 'tool')
+        if (!name) throw new Error('Pass the tool name from ralf_mcp_list.')
+        const argumentsJson = stringArg(args, 'argumentsJson')
+        const inline = (args as Record<string, unknown> | undefined)?.arguments
+        let toolArgs: unknown = inline && typeof inline === 'object' ? inline : {}
+        if (argumentsJson) {
+          try {
+            toolArgs = JSON.parse(argumentsJson)
+          } catch {
+            throw new Error('argumentsJson must be a valid JSON object.')
+          }
+        }
+        return this.mcpHub.callAgentTool(name, toolArgs)
+      }
+      return this.mcpHub.callAgentTool(tool, args)
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
@@ -465,7 +492,8 @@ export class ThreadBus {
         description: tool.description,
         inputSchema: tool.inputSchema,
         annotations: { readOnlyHint: tool.readOnly }
-      }))
+      })),
+      ...(this.mcpHub?.agentToolDefinitions() ?? [])
     ]
   }
 
@@ -546,12 +574,17 @@ export class ThreadBus {
     this.json(response, 200, { jsonrpc: '2.0', id: input.id, error: { code: -32601, message: 'Method not found.' } })
   }
 
-  async start(): Promise<ThreadBusConnection> {
-    if (this.server) return {
+  private connection(): ThreadBusConnection {
+    return {
       url: `http://127.0.0.1:${this.port}`,
       token: this.token,
-      tokenFor: (backendId, nativeThreadId) => this.callerToken(backendId, nativeThreadId)
+      tokenFor: (backendId, nativeThreadId) => this.callerToken(backendId, nativeThreadId),
+      agentToolNames: () => (this.mcpHub?.agentToolDefinitions() ?? []).map((definition) => definition.name)
     }
+  }
+
+  async start(): Promise<ThreadBusConnection> {
+    if (this.server) return this.connection()
     this.token = randomBytes(32).toString('hex')
     this.server = createServer((request, response) => {
       if (request.url === '/agent-call') {
@@ -572,11 +605,7 @@ export class ThreadBus {
         resolveStart()
       })
     })
-    return {
-      url: `http://127.0.0.1:${this.port}`,
-      token: this.token,
-      tokenFor: (backendId, nativeThreadId) => this.callerToken(backendId, nativeThreadId)
-    }
+    return this.connection()
   }
 
   async stop(): Promise<void> {

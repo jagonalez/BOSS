@@ -17,6 +17,7 @@ import { createBackend } from './backend/factory'
 import { ThreadBus } from './thread-bus'
 import { WorktreeManager } from './worktree-manager'
 import { AutomationManager } from './automation-manager'
+import { McpHub } from './mcp-hub'
 import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
 
@@ -51,6 +52,12 @@ const automations = new AutomationManager({
   runsFile: join(app.getPath('userData'), 'automation-runs.json')
 }, backendMgr, worktrees)
 backendMgr.attachAutomations(automations)
+const mcpHub = new McpHub(join(app.getPath('userData'), 'mcp-connections.json'))
+backendMgr.attachMcpHub(mcpHub)
+threadBus.attachMcpHub(mcpHub)
+mcpHub.setOnChange(() => {
+  void mcpHub.list().then((connections) => backendMgr.emit({ type: 'mcp.updated', properties: { connections } })).catch(() => {})
+})
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
@@ -185,6 +192,7 @@ app.whenReady().then(() => {
     }
     await backendMgr.start(saved.projectPath)
     sites.bind(openCodeBackend)
+    await mcpHub.start()
     await automations.start()
   })()
 })
@@ -203,6 +211,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   void automations.stop()
+  void mcpHub.stop()
   void backendMgr.stop()
   void computerUse.dispose()
   void sites.stop()

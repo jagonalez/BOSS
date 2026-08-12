@@ -46,6 +46,8 @@ export interface ThreadBusConnection {
   url: string
   token: string
   tokenFor(backendId: BackendId, nativeThreadId: string): string
+  /** Names of MCP-hub tools currently available to agents, mcp_<slug>_<tool>. */
+  agentToolNames(): string[]
 }
 
 export type ThreadBusAgentTool =
@@ -54,6 +56,9 @@ export type ThreadBusAgentTool =
   | 'ralf_threads_send'
   | 'ralf_threads_reply'
   | 'ralf_threads_spawn_worktree'
+  | 'ralf_mcp_list'
+  | 'ralf_mcp_call'
+  | `mcp_${string}`
   | QaAgentTool
 
 export interface ThreadBusToolCall {
