@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { BackendId } from '@shared/backend'
 import type { MessageWithParts } from '@shared/opencode'
+import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult, type QaAgentTool, type QaPolicy } from '@shared/qa'
 import type {
   CollaborationPolicy,
   ThreadBusAgentTool,
@@ -14,6 +15,7 @@ import type {
   ThreadBusThread
 } from '@shared/thread-bus'
 import { projectScope } from './project-identity'
+import type { QaTools } from './qa-tools'
 
 interface LegacyThreadBusState {
   version: 1
@@ -81,9 +83,34 @@ export class ThreadBus {
   private token = ''
   private port = 0
   private readonly deliveryLocks = new Set<string>()
+  private qaTools?: QaTools
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
+  }
+
+  attachQaTools(qaTools: QaTools): void {
+    this.qaTools = qaTools
+  }
+
+  qaStatus(threadId: string) {
+    if (!this.qaTools) throw new Error('QA tools are not available.')
+    return this.qaTools.status(threadId)
+  }
+
+  setQaPolicy(threadId: string, policy: QaPolicy | null) {
+    if (!this.qaTools) throw new Error('QA tools are not available.')
+    return this.qaTools.setPolicy(threadId, policy)
+  }
+
+  qaDefault(): QaPolicy {
+    if (!this.qaTools) throw new Error('QA tools are not available.')
+    return this.qaTools.default()
+  }
+
+  setQaDefault(policy: QaPolicy) {
+    if (!this.qaTools) throw new Error('QA tools are not available.')
+    return this.qaTools.setDefault(policy)
   }
 
   private load(): void {
@@ -161,6 +188,10 @@ export class ThreadBus {
   async agentCall(backendId: BackendId, nativeThreadId: string, tool: ThreadBusAgentTool, args: unknown): Promise<unknown> {
     const caller = this.host.threadForNative(backendId, nativeThreadId)
     if (!caller) throw new Error('R.A.L.F. could not identify the calling thread.')
+    if (tool.startsWith('ralf_browser_') || tool === 'ralf_computer') {
+      if (!this.qaTools) throw new Error('R.A.L.F. QA tools are not ready.')
+      return this.qaTools.call(caller.id, tool as QaAgentTool, args)
+    }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
     if (!['ralf_threads_list', 'ralf_threads_read', 'ralf_threads_send', 'ralf_threads_reply', 'ralf_threads_spawn_worktree'].includes(tool)) {
@@ -428,7 +459,13 @@ export class ThreadBus {
           required: ['instruction'],
           additionalProperties: false
         }
-      }
+      },
+      ...QA_TOOL_DEFINITIONS.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: { readOnlyHint: tool.readOnly }
+      }))
     ]
   }
 
@@ -473,7 +510,8 @@ export class ThreadBus {
       reply({
         protocolVersion: requested === '2025-03-26' ? requested : '2025-06-18',
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'ralf-thread-bus', version: '1.0.0' }
+        serverInfo: { name: 'ralf-agent-tools', version: '1.0.0' },
+        instructions: QA_GUIDANCE
       })
       return
     }
@@ -489,7 +527,17 @@ export class ThreadBus {
       }
       try {
         const result = await this.agentCall('claude', nativeThreadId, name as ThreadBusAgentTool, input.params?.arguments)
-        reply({ content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: false })
+        if (isAgentToolResult(result)) {
+          reply({
+            content: [
+              { type: 'text', text: result.text },
+              ...(result.image ? [{ type: 'image', mimeType: result.image.mimeType, data: result.image.data }] : [])
+            ],
+            isError: false
+          })
+        } else {
+          reply({ content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], isError: false })
+        }
       } catch (error) {
         reply({ content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }], isError: true })
       }

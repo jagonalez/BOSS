@@ -88,3 +88,7 @@ export type BackendRequest =
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
   | { type: 'thread.bus.clear-failures'; threadId?: string }
+  | { type: 'thread.qa.get'; threadId: string }
+  | { type: 'thread.qa.policy'; threadId: string; policy: import('./qa').QaPolicy | null }
+  | { type: 'qa.default.get' }
+  | { type: 'qa.default.policy'; policy: import('./qa').QaPolicy }

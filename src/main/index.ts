@@ -17,6 +17,7 @@ import { createBackend } from './backend/factory'
 import { ThreadBus } from './thread-bus'
 import { WorktreeManager } from './worktree-manager'
 import { BackendAuth } from './backend-auth'
+import { QaTools } from './qa-tools'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -47,12 +48,13 @@ backendMgr.attachThreadBus(threadBus)
 
 const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
-computerUse.bind(openCodeBackend)
+let browse: BrowseManager | null = null
+const qaTools = new QaTools(() => browse, computerUse)
+threadBus.attachQaTools(qaTools)
 const pty = new PTYManager(backendAuth)
 const speech = new SpeechManager()
 const sites = new SitesManager(() => backendMgr.currentProject || server.projectPath)
 
-let browse: BrowseManager | null = null
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {

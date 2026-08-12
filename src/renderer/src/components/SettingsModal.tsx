@@ -2,11 +2,12 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, importNativeThreads, openBackendLogin, refreshBackendAuth, refreshBackendModels, setDefaultModel, setEngine, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
+import { clearThreadBusFailures, importNativeThreads, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshQaDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setThreadBusPolicy, setTtsVoice, speakText } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
 import type { WorktreeSettings } from '@shared/worktree'
+import type { QaPolicy } from '@shared/qa'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 
 type SettingsSection = 'agents' | 'connections' | 'collaboration' | 'worktrees' | 'appearance' | 'voice'
@@ -213,6 +214,7 @@ export function SettingsModal(): React.JSX.Element | null {
   const backendModels = useStore(appStore, (s) => s.backendModels ?? {})
   const backendModelsLoading = useStore(appStore, (s) => s.backendModelsLoading ?? false)
   const defaultModels = useStore(appStore, (s) => s.defaultModels ?? {})
+  const qaDefault = useStore(appStore, (s) => s.qaDefault)
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [importStatus, setImportStatus] = useState('')
@@ -223,6 +225,7 @@ export function SettingsModal(): React.JSX.Element | null {
     void OpenCode.worktreeSettings().then(setWorktreeSettings).catch(() => {})
     void refreshBackendAuth()
     void refreshBackendModels()
+    void refreshQaDefault()
   }, [open])
 
   useEffect(() => {
@@ -304,6 +307,16 @@ export function SettingsModal(): React.JSX.Element | null {
                 </section>
 
                 <section className="settings-card settings-card-list">
+                  <SettingsRow
+                    title="Agent QA"
+                    description="Default for threads without an override. Suggest allows browser inspection; native inspection also uses the Computer use switch. Use /qa auto, /qa suggest, /qa off, or /qa default inside a thread to change only that thread."
+                  >
+                    <Select value={qaDefault} onChange={(event) => void setQaDefault(event.target.value as QaPolicy)}>
+                      <option value="suggest">Suggest — inspect only</option>
+                      <option value="automatic">Automatic — allow scoped actions</option>
+                      <option value="off">Off</option>
+                    </Select>
+                  </SettingsRow>
                   <SettingsRow
                     title="Existing OpenCode sessions"
                     description={<>Import native sessions when you want them to appear as R.A.L.F. threads.{importStatus ? <span className="settings-inline-status"> {importStatus}</span> : null}</>}

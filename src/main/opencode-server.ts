@@ -117,6 +117,7 @@ export class OpenCodeServer {
     const toolsDir = join(this.threadBusConfigDir, 'tools')
     mkdirSync(toolsDir, { recursive: true })
     writeFileSync(join(toolsDir, 'ralf_threads.ts'), this.threadToolSource())
+    writeFileSync(join(toolsDir, 'ralf.ts'), this.qaToolSource())
   }
 
   private threadToolSource(): string {
@@ -133,7 +134,21 @@ async function call(name, args, context) {
   })
   const payload = await response.json()
   if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. thread tool failed.")
-  return JSON.stringify(payload.result, null, 2)
+  const result = payload.result
+  if (result && result.__ralfToolResult) {
+    return {
+      title: "R.A.L.F. QA",
+      output: result.text,
+      metadata: { ralfQa: true },
+      attachments: result.image ? [{
+        type: "file",
+        mime: result.image.mimeType,
+        url: "data:" + result.image.mimeType + ";base64," + result.image.data,
+        filename: "ralf-qa.png"
+      }] : []
+    }
+  }
+  return JSON.stringify(result, null, 2)
 }
 
 export const list = tool({
@@ -178,6 +193,75 @@ export const spawn_worktree = tool({
     instruction: tool.schema.string().describe("Concrete implementation task for the new worktree thread")
   },
   execute(args, context) { return call("ralf_threads_spawn_worktree", args, context) }
+})
+`
+  }
+
+  private qaToolSource(): string {
+    return `import { tool } from "@opencode-ai/plugin"
+
+async function call(name, args, context) {
+  const url = process.env.RALF_THREAD_BUS_URL
+  const token = process.env.RALF_THREAD_BUS_TOKEN
+  if (!url || !token) throw new Error("R.A.L.F. QA tools are unavailable.")
+  const response = await fetch(url + "/agent-call", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ backendId: "opencode", nativeThreadId: context.sessionID, tool: name, arguments: args })
+  })
+  const payload = await response.json()
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. QA tool failed.")
+  const result = payload.result
+  return {
+    title: "R.A.L.F. QA",
+    output: result.text,
+    metadata: { ralfQa: true },
+    attachments: result.image ? [{
+      type: "file",
+      mime: result.image.mimeType,
+      url: "data:" + result.image.mimeType + ";base64," + result.image.data,
+      filename: "ralf-qa.png"
+    }] : []
+  }
+}
+
+export const browser_tabs = tool({
+  description: "List browser tiles open in the R.A.L.F. workspace. Use this before other browser tools.",
+  args: {},
+  execute(args, context) { return call("ralf_browser_tabs", args, context) }
+})
+export const browser_navigate = tool({
+  description: "Navigate a R.A.L.F. browser tile to an HTTP or HTTPS URL. Requires Automatic QA.",
+  args: { tabId: tool.schema.string(), url: tool.schema.string() },
+  execute(args, context) { return call("ralf_browser_navigate", args, context) }
+})
+export const browser_snapshot = tool({
+  description: "Read visible page text and indexed interactive elements from a R.A.L.F. browser tile.",
+  args: { tabId: tool.schema.string() },
+  execute(args, context) { return call("ralf_browser_snapshot", args, context) }
+})
+export const browser_screenshot = tool({
+  description: "Capture a rendered R.A.L.F. browser tile for visual QA.",
+  args: { tabId: tool.schema.string() },
+  execute(args, context) { return call("ralf_browser_screenshot", args, context) }
+})
+export const browser_click = tool({
+  description: "Click a ref returned by ralf_browser_snapshot. Requires Automatic QA; inspect again afterward.",
+  args: { tabId: tool.schema.string(), ref: tool.schema.string() },
+  execute(args, context) { return call("ralf_browser_click", args, context) }
+})
+export const browser_type = tool({
+  description: "Type into a ref returned by ralf_browser_snapshot. Requires Automatic QA.",
+  args: { tabId: tool.schema.string(), ref: tool.schema.string(), text: tool.schema.string(), submit: tool.schema.boolean().optional() },
+  execute(args, context) { return call("ralf_browser_type", args, context) }
+})
+export const computer = tool({
+  description: "Inspect or operate a native app through scoped R.A.L.F. Computer Use. Input actions require Automatic QA.",
+  args: {
+    operation: tool.schema.enum(["list_apps", "list_windows", "get_window_state", "get_desktop_state", "screenshot", "zoom", "click", "type_text", "press_key", "hotkey", "scroll", "wait"]),
+    arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional()
+  },
+  execute(args, context) { return call("ralf_computer", args, context) }
 })
 `
   }

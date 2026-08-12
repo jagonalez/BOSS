@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
+import { QA_GUIDANCE } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 
 type RpcRequest = { id?: string; type: string; [key: string]: unknown }
@@ -318,10 +319,84 @@ async function call(name, args, signal) {
   })
   const payload = await response.json()
   if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. thread tool failed.")
-  return { content: [{ type: "text", text: JSON.stringify(payload.result, null, 2) }], details: payload.result }
+  const result = payload.result
+  if (result && result.__ralfToolResult) {
+    return {
+      content: [
+        { type: "text", text: result.text },
+        ...(result.image ? [{ type: "image", data: result.image.data, mimeType: result.image.mimeType }] : [])
+      ],
+      details: result
+    }
+  }
+  return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result }
 }
 
 export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "ralf_browser_tabs",
+    label: "List R.A.L.F. browser tabs",
+    description: "List browser tiles open in this R.A.L.F. workspace.",
+    parameters: Type.Object({}),
+    promptSnippet: "Inspect R.A.L.F. browser tabs",
+    promptGuidelines: [${JSON.stringify(QA_GUIDANCE)}],
+    execute: (_id, args, signal) => call("ralf_browser_tabs", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_browser_navigate",
+    label: "Navigate R.A.L.F. browser",
+    description: "Navigate a R.A.L.F. browser tile. Requires Automatic QA.",
+    parameters: Type.Object({ tabId: Type.String(), url: Type.String() }),
+    execute: (_id, args, signal) => call("ralf_browser_navigate", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_browser_snapshot",
+    label: "Inspect R.A.L.F. browser",
+    description: "Read visible page text and indexed interactive elements.",
+    parameters: Type.Object({ tabId: Type.String() }),
+    execute: (_id, args, signal) => call("ralf_browser_snapshot", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_browser_screenshot",
+    label: "Screenshot R.A.L.F. browser",
+    description: "Capture a rendered browser tile for visual QA.",
+    parameters: Type.Object({ tabId: Type.String() }),
+    execute: (_id, args, signal) => call("ralf_browser_screenshot", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_browser_click",
+    label: "Click R.A.L.F. browser",
+    description: "Click a ref from ralf_browser_snapshot. Requires Automatic QA.",
+    parameters: Type.Object({ tabId: Type.String(), ref: Type.String() }),
+    execute: (_id, args, signal) => call("ralf_browser_click", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_browser_type",
+    label: "Type in R.A.L.F. browser",
+    description: "Type into a ref from ralf_browser_snapshot. Requires Automatic QA.",
+    parameters: Type.Object({
+      tabId: Type.String(),
+      ref: Type.String(),
+      text: Type.String(),
+      submit: Type.Optional(Type.Boolean({ default: false }))
+    }),
+    execute: (_id, args, signal) => call("ralf_browser_type", args, signal)
+  })
+  pi.registerTool({
+    name: "ralf_computer",
+    label: "R.A.L.F. Computer Use",
+    description: "Inspect or operate a native app through scoped R.A.L.F. Computer Use. Input actions require Automatic QA.",
+    parameters: Type.Object({
+      operation: Type.Union([
+        Type.Literal("list_apps"), Type.Literal("list_windows"), Type.Literal("get_window_state"),
+        Type.Literal("get_desktop_state"), Type.Literal("screenshot"), Type.Literal("zoom"),
+        Type.Literal("click"), Type.Literal("type_text"), Type.Literal("press_key"),
+        Type.Literal("hotkey"), Type.Literal("scroll"), Type.Literal("wait")
+      ]),
+      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
+    }),
+    execute: (_id, args, signal) => call("ralf_computer", args, signal)
+  })
   pi.registerTool({
     name: "ralf_threads_list",
     label: "List R.A.L.F. threads",

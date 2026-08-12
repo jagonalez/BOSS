@@ -15,6 +15,7 @@ import type {
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendRequest, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
+import type { QaPolicy, QaPolicyState } from '@shared/qa'
 
 export class ApiError extends Error {
   constructor(
@@ -158,6 +159,12 @@ export const OpenCode = {
     backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.policy', policy, threadId }),
   clearThreadBusFailures: (threadId?: string) =>
     backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.clear-failures', threadId }),
+  qaPolicy: (threadId: string) =>
+    backendRequest<QaPolicyState>({ type: 'thread.qa.get', threadId }),
+  setQaPolicy: (threadId: string, policy: QaPolicy | null) =>
+    backendRequest<QaPolicyState>({ type: 'thread.qa.policy', threadId, policy }),
+  qaDefault: () => backendRequest<QaPolicy>({ type: 'qa.default.get' }),
+  setQaDefault: (policy: QaPolicy) => backendRequest<QaPolicy>({ type: 'qa.default.policy', policy }),
   fileTree: (path = '') => request<FileNode[]>('GET', '/file', { query: { path } }),
   fileContent: (path: string) => request<FileContent>('GET', '/file/content', { query: { path } }),
   projectList: () => request<Project[]>('GET', '/project'),

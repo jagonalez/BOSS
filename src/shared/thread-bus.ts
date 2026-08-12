@@ -1,4 +1,5 @@
 import type { BackendId } from './backend'
+import type { QaAgentTool } from './qa'
 
 export type CollaborationPolicy = 'off' | 'read' | 'collaborate'
 export type ThreadBusMessageStatus = 'queued' | 'delivered' | 'failed'
@@ -53,6 +54,7 @@ export type ThreadBusAgentTool =
   | 'ralf_threads_send'
   | 'ralf_threads_reply'
   | 'ralf_threads_spawn_worktree'
+  | QaAgentTool
 
 export interface ThreadBusToolCall {
   nativeThreadId: string

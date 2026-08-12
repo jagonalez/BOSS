@@ -853,6 +853,24 @@ export class BackendManager {
           : this.currentScope
         return this.threadBus.clearFailures(scope.projectId, scope.projectPath)
       }
+      case 'thread.qa.get': {
+        if (!this.threadBus) throw new Error('QA tools are not available.')
+        this.binding(request.threadId)
+        return this.threadBus.qaStatus(request.threadId)
+      }
+      case 'thread.qa.policy': {
+        if (!this.threadBus) throw new Error('QA tools are not available.')
+        this.binding(request.threadId)
+        return this.threadBus.setQaPolicy(request.threadId, request.policy)
+      }
+      case 'qa.default.get': {
+        if (!this.threadBus) throw new Error('QA tools are not available.')
+        return this.threadBus.qaDefault()
+      }
+      case 'qa.default.policy': {
+        if (!this.threadBus) throw new Error('QA tools are not available.')
+        return this.threadBus.setQaDefault(request.policy)
+      }
     }
   }
 }

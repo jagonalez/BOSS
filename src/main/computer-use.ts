@@ -1,13 +1,27 @@
 import { app, systemPreferences } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { mkdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ComputerUsePermissions, ComputerUseStatus, PrivacyPane } from '@shared/ipc'
-import type { Backend } from './backend/backend'
+import type { AgentToolResult } from '@shared/qa'
 
-const MCP_SERVER_NAME = 'cua-driver'
 const HOST_BUNDLE_ID = 'dev.ralf.app'
+const ALLOWED_TOOLS = new Set([
+  'list_apps',
+  'list_windows',
+  'get_window_state',
+  'get_desktop_state',
+  'screenshot',
+  'zoom',
+  'click',
+  'type_text',
+  'press_key',
+  'hotkey',
+  'scroll',
+  'wait'
+])
 
 function resolveCuaBin(): string {
   const exe = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver'
@@ -46,8 +60,6 @@ function socketPath(): string {
 }
 
 export class ComputerUse {
-  private backend: Backend | null = null
-  private registered = false
   private enabled = false
   private error: string | undefined
   private daemon: ChildProcess | null = null
@@ -55,17 +67,11 @@ export class ComputerUse {
 
   onStatusChange?: (status: ComputerUseStatus) => void
 
-  bind(backend: Backend | null): void {
-    this.backend = backend
-    if (this.enabled) void this.register()
-    else this.emit()
-  }
-
   get status(): ComputerUseStatus {
     return {
-      supported: this.backend?.supportsMcp() ?? false,
+      supported: true,
       enabled: this.enabled,
-      running: this.registered,
+      running: Boolean(this.daemon && this.socket && isSocketReady(this.socket)),
       error: this.error
     }
   }
@@ -106,58 +112,76 @@ export class ComputerUse {
 
   async setEnabled(on: boolean): Promise<ComputerUseStatus> {
     this.enabled = on
-    if (on) await this.register()
-    else {
-      await this.unregister()
-    }
+    if (on) await this.start()
+    else this.stopDaemon()
     this.emit()
     return this.status
   }
 
-  private async unregister(): Promise<void> {
-    this.registered = false
+  private async start(): Promise<void> {
     this.error = undefined
-    if (this.backend) await this.backend.unregisterMcpServer(MCP_SERVER_NAME).catch(() => {})
-    this.stopDaemon()
-  }
-
-  private async register(): Promise<void> {
-    this.registered = false
-    this.error = undefined
-    const backend = this.backend
-    if (!backend) return
-    if (!backend.supportsMcp()) {
-      this.error = 'Computer use is not supported on this backend'
-      this.emit()
-      return
-    }
     const bin = resolveCuaBin()
-    if (!isFile(bin)) {
-      this.error = 'cua-driver is not installed (see cua.ai/docs/how-to-guides/driver/install)'
-      this.emit()
-      return
-    }
     this.stopDaemon()
     this.socket = socketPath()
     try {
       await this.startDaemon(bin)
-      const ok = await backend
-        .registerMcpServer(MCP_SERVER_NAME, {
-          type: 'local',
-          command: [bin, 'mcp', '--socket', this.socket],
-          environment: { CUA_DRIVER_EMBEDDED: '1' }
-        })
-        .catch((err: unknown) => {
-          this.error = String((err as Error).message ?? err)
-          return false
-        })
-      this.registered = ok
-      if (!ok && !this.error) this.error = 'Failed to register computer use'
     } catch (err) {
-      this.error = String((err as Error).message ?? err)
+      const code = (err as NodeJS.ErrnoException).code
+      this.error = code === 'ENOENT'
+        ? 'cua-driver is not installed (see cua.ai/docs/how-to-guides/driver/install)'
+        : String((err as Error).message ?? err)
       this.stopDaemon()
     }
     this.emit()
+  }
+
+  async call(tool: string, args: Record<string, unknown>): Promise<AgentToolResult> {
+    if (!ALLOWED_TOOLS.has(tool)) throw new Error(`Computer tool “${tool}” is not available in R.A.L.F.'s scoped QA surface.`)
+    if (!this.enabled || !this.daemon || !isSocketReady(this.socket)) {
+      throw new Error('Computer Use is disabled. Enable Automatic QA or turn on Computer Use before trying again.')
+    }
+    const bin = resolveCuaBin()
+    const screenshotDir = join(tmpdir(), 'ralf-qa')
+    mkdirSync(screenshotDir, { recursive: true })
+    const screenshotPath = join(screenshotDir, `${randomUUID()}.png`)
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = spawn(bin, [
+        'call',
+        tool,
+        JSON.stringify(args),
+        '--socket', this.socket,
+        '--screenshot-out-file', screenshotPath
+      ], {
+        env: { ...process.env, CUA_DRIVER_EMBEDDED: '1', CUA_DRIVER_HOST_BUNDLE_ID: HOST_BUNDLE_ID },
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+      let stdout = ''
+      let stderr = ''
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM')
+        reject(new Error(`Computer tool ${tool} timed out.`))
+      }, 60_000)
+      child.stdout?.on('data', (chunk) => { if (stdout.length < 2_000_000) stdout += String(chunk) })
+      child.stderr?.on('data', (chunk) => { if (stderr.length < 100_000) stderr += String(chunk) })
+      child.on('error', (error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+      child.on('exit', (code) => {
+        clearTimeout(timer)
+        if (code === 0) resolve(stdout.trim() || `Computer tool ${tool} completed.`)
+        else reject(new Error(stderr.trim() || stdout.trim() || `Computer tool ${tool} failed with exit code ${code}.`))
+      })
+    })
+    let image: AgentToolResult['image']
+    try {
+      image = { mimeType: 'image/png', data: readFileSync(screenshotPath).toString('base64') }
+    } catch {
+      /* Most computer tools do not return an image. */
+    } finally {
+      try { unlinkSync(screenshotPath) } catch { /* ignore */ }
+    }
+    return { __ralfToolResult: true, text: output.slice(0, 80_000), image }
   }
 
   /** Spawn the embedded daemon as Ralf's child so TCC attributes to Ralf. */
@@ -177,7 +201,6 @@ export class ComputerUse {
       })
       child.on('exit', () => {
         this.daemon = null
-        this.registered = false
         this.emit()
       })
       child.on('error', (err) => {
@@ -211,7 +234,8 @@ export class ComputerUse {
   /** Emergency stop — kill the daemon and drop the MCP registration. */
   async emergencyStop(): Promise<void> {
     this.enabled = false
-    await this.unregister()
+    this.stopDaemon()
+    this.emit()
   }
 
   private emit(): void {
@@ -220,6 +244,6 @@ export class ComputerUse {
 
   async dispose(): Promise<void> {
     this.enabled = false
-    await this.unregister()
+    this.stopDaemon()
   }
 }

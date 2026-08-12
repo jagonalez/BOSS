@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
+import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { textFromParts } from './manager'
 
@@ -240,7 +241,8 @@ export class ClaudeBackend implements Backend {
       'mcp__ralf_thread_bus__ralf_threads_read',
       'mcp__ralf_thread_bus__ralf_threads_send',
       'mcp__ralf_thread_bus__ralf_threads_reply',
-      'mcp__ralf_thread_bus__ralf_threads_spawn_worktree'
+      'mcp__ralf_thread_bus__ralf_threads_spawn_worktree',
+      ...QA_TOOL_DEFINITIONS.map((tool) => `mcp__ralf_thread_bus__${tool.name}`)
     ].join(',')
     const args = [
       '-p',
@@ -248,6 +250,7 @@ export class ClaudeBackend implements Backend {
       '--verbose',
       '--include-partial-messages',
       '--permission-mode', mode,
+      '--append-system-prompt', QA_GUIDANCE,
       ...(threadBusConfig ? ['--mcp-config', threadBusConfig, '--allowedTools', allowedThreadTools] : []),
       ...(hasHistory ? ['--resume', sessionId] : ['--session-id', sessionId]),
       ...(options?.model?.modelID ? ['--model', options.model.modelID] : []),
@@ -285,7 +288,7 @@ export class ClaudeBackend implements Backend {
               this.emit({
                 type: 'session.error',
                 sessionID: sessionId,
-                error: `Claude Code could not load R.A.L.F. thread tools: ${value.mcp_server_errors.map(String).join('; ')}`
+                error: `Claude Code could not load R.A.L.F. agent tools: ${value.mcp_server_errors.map(String).join('; ')}`
               })
             } else if (value.type === 'assistant') {
               const message = value.message as { id?: string; content?: unknown; model?: string } | undefined
