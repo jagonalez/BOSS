@@ -67,6 +67,12 @@ export type PrivacyPane = 'accessibility' | 'screenRecording'
 
 export interface ProjectInfo {
   path: string
+  checkoutPath: string
+  checkouts: Array<{
+    path: string
+    branch?: string
+    main: boolean
+  }>
   healthy: boolean
 }
 

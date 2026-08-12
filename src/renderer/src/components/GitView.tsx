@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { parseGitDiff } from '../lib/diff'
 import { gitBranches, gitCommitFiles, gitCurrentBranch, gitDiffFiles, gitFileDiff, gitLog, gitShow } from '../lib/git'
-import { markStaleReviews, runThreadReview } from '../lib/actions'
+import { markStaleReviews, runCheckoutReview } from '../lib/actions'
 import { DiffReview, type DiffFileData } from './DiffReview'
 import { ReviewIcon } from './icons'
 import type { AddReviewCommentInput, ReviewSnapshot, SubmitReviewEvent } from '@shared/review'
@@ -19,7 +19,17 @@ const SCOPE_LABELS: Record<Scope, string> = {
   conversation: 'Conversation'
 }
 
-export function GitView({ contextPath, sessionId }: { contextPath?: string; sessionId?: string }): React.JSX.Element {
+export function GitView({
+  contextPath,
+  sessionId,
+  groupId,
+  reviewTabId
+}: {
+  contextPath?: string
+  sessionId?: string
+  groupId: string
+  reviewTabId: string
+}): React.JSX.Element {
   const projectRoot = useStore(appStore, (s) => s.projectPath)
   const projectPath = contextPath || projectRoot
   const gitRefresh = useStore(appStore, (s) => s.gitRefresh)
@@ -36,20 +46,23 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [reviewError, setReviewError] = useState('')
+  const reviewRequest = useRef(0)
   const visibleComments = scope === 'change-request'
     ? [...(reviewSnapshot?.changeRequest?.comments ?? []), ...(reviewSnapshot?.localComments ?? [])]
     : reviewSnapshot?.localComments ?? []
 
   async function loadReview(): Promise<void> {
     if (!projectPath) return
+    const request = ++reviewRequest.current
     setReviewLoading(true)
     setReviewError('')
     try {
-      setReviewSnapshot(await window.ralf.reviewSnapshot(projectPath))
+      const snapshot = await window.ralf.reviewSnapshot(projectPath)
+      if (request === reviewRequest.current) setReviewSnapshot(snapshot)
     } catch (err) {
-      setReviewError(String((err as Error).message ?? err))
+      if (request === reviewRequest.current) setReviewError(String((err as Error).message ?? err))
     } finally {
-      setReviewLoading(false)
+      if (request === reviewRequest.current) setReviewLoading(false)
     }
   }
 
@@ -213,17 +226,20 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
             ))}
           </select>
         )}
-        {activeSessionId && scope !== 'conversation' ? (
+        {projectPath && scope !== 'conversation' ? (
           <button
             className="btn-ghost"
-            onClick={() =>
-              void runThreadReview(
-                activeSessionId,
+            onClick={() => {
+              setError('')
+              void runCheckoutReview(
+                groupId,
+                reviewTabId,
                 SCOPE_LABELS[scope] + (scope === 'compare' ? ` vs ${baseBranch}` : ''),
-                projectPath
-              )
-            }
-            title="Ask the agent to review the current changes in this thread"
+                projectPath,
+                activeSessionId
+              ).catch((err) => setError(String((err as Error).message ?? err)))
+            }}
+            title="Run an agent review in this checkout"
           >
             <ReviewIcon size={14} /> Run review
           </button>
@@ -239,6 +255,12 @@ export function GitView({ contextPath, sessionId }: { contextPath?: string; sess
             </span>
           ))}
         </div>
+      ) : null}
+      {reviewSnapshot?.provider && !reviewSnapshot.changeRequest && reviewSnapshot.syncError ? (
+        <div className="review-sync-error">{reviewSnapshot.syncError} Remote publishing is unavailable for this checkout; local notes still work.</div>
+      ) : null}
+      {reviewSnapshot?.changeRequest && scope !== 'change-request' && scope !== 'conversation' ? (
+        <div className="review-publish-hint">Publish inline comments to {reviewSnapshot.provider?.label ?? 'the remote'} from the Change request view. This view saves checkout-local notes.</div>
       ) : null}
       {scope === 'conversation' ? (
         <ReviewConversation

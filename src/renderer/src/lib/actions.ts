@@ -31,6 +31,7 @@ import {
   tab,
   templateFromWorkspace,
   updateActiveWorkspaceView,
+  updateGroup,
   walkGroups,
   walkTabs,
   workspaceView
@@ -475,8 +476,12 @@ async function ensureProject(path: string | null): Promise<void> {
   const cur = appStore.getState()
   if (cur.projectPath === path) return
   try {
-    await window.ralf.projectSet(path)
-    appStore.setState({ projectPath: path })
+    const info = await window.ralf.projectSet(path)
+    appStore.setState({
+      projectPath: info.path,
+      selectedCheckoutPath: info.checkoutPath,
+      projectCheckouts: info.checkouts
+    })
     await refreshSessions()
     await refreshProjects()
   } catch {
@@ -538,6 +543,40 @@ export async function runThreadReview(sessionID: string, target: string, context
     setSessionError(sessionID, errorSummary(err))
   }
   await loadMessages(sessionID)
+}
+
+export async function runCheckoutReview(
+  groupId: string,
+  reviewTabId: string,
+  target: string,
+  contextPath: string,
+  existingSessionId?: string
+): Promise<void> {
+  const state = appStore.getState()
+  const existing = existingSessionId
+    ? state.sessions.find((session) => session.id === existingSessionId && (session.executionPath ?? session.worktree?.path) === contextPath)
+    : undefined
+  let session = existing
+  if (!session) {
+    const backendId = state.engine
+    const title = `Review · ${target}`
+    session = await OpenCode.createSessionInPath(contextPath, title, backendId)
+    applyBackendDefaultModel(session.id, backendId)
+    upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? state.projectPath })
+    await refreshSessions()
+    const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
+    setMode(defaultMode, session.id)
+    await refreshProviders(session.id)
+    updateWorkspaceView((view) => ({
+      ...view,
+      root: updateGroup(view.root, groupId, (group) => ({
+        ...group,
+        tabs: group.tabs.map((item) => item.id === reviewTabId ? { ...item, sessionId: session!.id } : item)
+      }))
+    }))
+  }
+  addWorkspaceTab(groupId, 'thread', session.id)
+  await runThreadReview(session.id, target, contextPath)
 }
 
 export function markStaleReviews(sessionID: string, contextPath?: string): void {
@@ -644,7 +683,19 @@ export async function clearThreadBusFailures(): Promise<void> {
 
 export async function refreshProjects(): Promise<void> {
   try {
-    appStore.setState({ projects: await OpenCode.projectList() })
+    const listed = await OpenCode.projectList()
+    const state = appStore.getState()
+    const checkoutPaths = new Set(state.projectCheckouts.map((checkout) => checkout.path))
+    const projects = listed.map((project) => {
+      const path = project.worktree ?? project.directory ?? project.path ?? ''
+      return path && checkoutPaths.has(path) && state.projectPath
+        ? { ...project, path: state.projectPath, directory: undefined, worktree: undefined }
+        : project
+    }).filter((project, index, all) => {
+      const path = project.worktree ?? project.directory ?? project.path ?? ''
+      return all.findIndex((candidate) => (candidate.worktree ?? candidate.directory ?? candidate.path ?? '') === path) === index
+    })
+    appStore.setState({ projects })
   } catch {
     /* ignore */
   }
@@ -1274,6 +1325,8 @@ export async function openProject(path: string): Promise<void> {
   }
   appStore.setState({
     projectPath: info.path,
+    selectedCheckoutPath: info.checkoutPath,
+    projectCheckouts: info.checkouts,
     activePage: 'project',
     activeSessionId: null,
     sessions: [],
@@ -1735,7 +1788,11 @@ export async function openReviewFile(path: string): Promise<void> {
 export async function refreshProject(): Promise<void> {
   try {
     const info = await window.ralf.projectCurrent()
-    appStore.setState({ projectPath: info.path })
+    appStore.setState({
+      projectPath: info.path,
+      selectedCheckoutPath: info.checkoutPath,
+      projectCheckouts: info.checkouts
+    })
   } catch {
     /* ignore */
   }
@@ -1745,12 +1802,21 @@ export async function openProjectFolder(): Promise<void> {
   try {
     const path = await window.ralf.projectChoose()
     if (!path) return
-    appStore.setState({ projectPath: path, activePage: 'project', activeSessionId: null, sessions: [], messages: {}, diffs: null })
-    await window.ralf.projectSet(path)
+    const info = await window.ralf.projectSet(path)
+    appStore.setState({
+      projectPath: info.path,
+      selectedCheckoutPath: info.checkoutPath,
+      projectCheckouts: info.checkouts,
+      activePage: 'project',
+      activeSessionId: null,
+      sessions: [],
+      messages: {},
+      diffs: null
+    })
     await refreshSessions()
     await refreshProjects()
-    const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === path)?.id
-    loadProjectWorkspace(path, preferred)
+    const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
+    loadProjectWorkspace(info.path, preferred)
   } catch (err) {
     console.error('open project folder:', err)
   }
