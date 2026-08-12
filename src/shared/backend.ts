@@ -129,20 +129,20 @@ export type BackendRequest =
   | { type: 'mcp.import.scan' }
   | { type: 'mobile.status' }
   | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean } }
-  | { type: 'team.snapshot'; viaPeer?: boolean; actorId?: string; actorName?: string }
+  | { type: 'team.snapshot'; viaPeer?: boolean; actorId?: string; actorName?: string; protocol?: import('./team').TeamProtocolVersion }
   | { type: 'team.create'; name: string; brief?: string; memberName?: string }
   | { type: 'team.close' }
   | { type: 'team.identity.set'; name: string }
-  | { type: 'team.board.update'; boardId: string; name?: string; brief?: string; viaPeer?: boolean; actorId?: string; actorName?: string }
-  | { type: 'team.task.create'; boardId: string; input: import('./team').TeamTaskInput; viaPeer?: boolean; actorId?: string; actorName?: string }
-  | { type: 'team.task.update'; boardId: string; taskId: string; patch: import('./team').TeamTaskPatch; expectedRevision?: number; viaPeer?: boolean; actorId?: string; actorName?: string }
-  | { type: 'team.task.delete'; boardId: string; taskId: string; viaPeer?: boolean; actorId?: string; actorName?: string }
-  | { type: 'team.task.claim'; boardId: string; taskId: string; release?: boolean; viaPeer?: boolean; actorId?: string; actorName?: string }
+  | { type: 'team.board.update'; boardId: string; name?: string; brief?: string; viaPeer?: boolean; actorId?: string; actorName?: string; protocol?: import('./team').TeamProtocolVersion }
+  | { type: 'team.task.create'; boardId: string; input: import('./team').TeamTaskInput; viaPeer?: boolean; actorId?: string; actorName?: string; protocol?: import('./team').TeamProtocolVersion }
+  | { type: 'team.task.update'; boardId: string; taskId: string; patch: import('./team').TeamTaskPatch; expectedRevision?: number; viaPeer?: boolean; actorId?: string; actorName?: string; protocol?: import('./team').TeamProtocolVersion }
+  | { type: 'team.task.delete'; boardId: string; taskId: string; viaPeer?: boolean; actorId?: string; actorName?: string; protocol?: import('./team').TeamProtocolVersion }
+  | { type: 'team.task.claim'; boardId: string; taskId: string; release?: boolean; viaPeer?: boolean; actorId?: string; actorName?: string; protocol?: import('./team').TeamProtocolVersion }
   | { type: 'team.task.start'; input: import('./team').TeamStartTaskInput }
   | { type: 'team.plan.start'; input: import('./team').TeamStartPlanningInput }
   | { type: 'team.connect'; url: string; token: string; memberName: string }
   | { type: 'team.disconnect' }
-  | { type: 'team.peer.join'; member: import('./team').TeamMember; viaPeer: true }
+  | { type: 'team.peer.join'; member: import('./team').TeamMember; viaPeer: true; protocol: import('./team').TeamProtocolVersion }
   | { type: 'team.access' }
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }

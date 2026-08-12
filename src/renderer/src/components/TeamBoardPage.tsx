@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import type { BackendId } from '@shared/backend'
 import type { MobileAccessStatus } from '@shared/mobile'
 import {
+  TEAM_PROTOCOL,
   TEAM_TASK_STATUSES,
   type TeamSnapshot,
   type TeamTask,
@@ -105,7 +106,7 @@ function SetupView({ identityName }: { identityName: string }): React.JSX.Elemen
         <label>Team token<input value={token} onChange={(event) => setToken(event.target.value)} placeholder="Paste the team-only token" /></label>
         <div className="team-form-actions"><button className="btn-ghost" onClick={() => setMode('choose')}>Back</button><button className="btn-allow" disabled={busy || !url.trim() || !token.trim() || !memberName.trim()} onClick={() => void run(() => OpenCode.connectTeam(url, token, memberName))}>{busy ? 'Connecting…' : 'Join board'}</button></div>
       </div> : null}
-      <small className="team-lab-note">Experimental: peer connections use your existing Tailscale remote-access server. The team token is restricted to board operations.</small>
+      <small className="team-lab-note">Experimental · Collaboration protocol v{TEAM_PROTOCOL.current}. Peer connections use your existing Tailscale remote-access server. The team token is restricted to board operations.</small>
     </div>
   )
 }
@@ -289,9 +290,11 @@ export function TeamBoardPage(): React.JSX.Element {
 
   return <div className="team-page">
     <header className="team-header">
-      <div><div className="team-eyebrow"><span className={`team-live-dot ${connected ? '' : 'offline'}`} />{team.mode === 'host' ? 'Hosting' : connected ? 'Connected' : 'Offline copy'} · Experimental</div><h1>{board.name}</h1><p>{board.tasks.length} tasks · {board.members.length} people</p></div>
+      <div><div className="team-eyebrow"><span className={`team-live-dot ${connected ? '' : 'offline'}`} />{team.mode === 'host' ? 'Hosting' : connected ? 'Connected' : 'Offline copy'} · Protocol v{team.protocol.current} · Experimental</div><h1>{board.name}</h1><p>{board.tasks.length} tasks · {board.members.length} people</p></div>
       <div className="team-header-actions"><button className="btn-secondary" disabled={!connected} onClick={() => setPlanning(true)}>Plan with agent</button><button className="btn-secondary" disabled={!connected} onClick={() => setNewTask(true)}><PlusIcon size={14} /> Add task</button><button className="btn-ghost" onClick={closeOrLeave}>{team.mode === 'host' ? 'Close board' : 'Leave board'}</button></div>
     </header>
+
+    {!connected && team.connection?.error ? <div className="team-connection-error"><strong>Live sync paused.</strong><span>{team.connection.error}</span></div> : null}
 
     <section className="team-context-row">
       <div className="team-brief-card">
@@ -299,7 +302,7 @@ export function TeamBoardPage(): React.JSX.Element {
         {editingBrief ? <textarea value={brief} onChange={(event) => setBrief(event.target.value)} autoFocus /> : <p>{board.brief || 'No shared brief yet. Add the objective, constraints, and decisions everyone needs.'}</p>}
       </div>
       <div className="team-people-card"><div className="team-section-title"><span>People</span></div><div className="team-member-list">{board.members.map((member) => <div className={`team-member ${member.id === me ? 'self' : ''}`} key={member.id}><span>{member.name.slice(0, 1).toUpperCase()}</span><div><strong>{member.name}{member.id === me ? ' (you)' : ''}</strong><small>{member.deviceName ?? 'R.A.L.F. peer'} · {timeAgo(member.lastSeenAt)}</small></div></div>)}</div></div>
-      {team.mode === 'host' ? <div className="team-share-card"><div className="team-section-title"><span>Invite</span></div>{mobile?.running ? <><p>Share these over your tailnet. The token only grants access to this board.</p><button onClick={() => void copy(shareUrl, 'url')}><span>{shareUrl}</span><CopyIcon size={13} />{copied === 'url' ? 'Copied' : 'Copy'}</button><button onClick={() => void copy(accessToken, 'token')}><span className="team-token">{accessToken}</span><CopyIcon size={13} />{copied === 'token' ? 'Copied' : 'Copy token'}</button></> : <><p>Turn on Mobile & Tailscale access in Settings to invite another R.A.L.F.</p><button onClick={() => appStore.setState({ settingsOpen: true })}>Open Settings</button></>}</div> : null}
+      {team.mode === 'host' ? <div className="team-share-card"><div className="team-section-title"><span>Invite · v{team.protocol.current}</span></div>{mobile?.running ? <><p>Share these over your tailnet. The token only grants access to this versioned board protocol.</p><button onClick={() => void copy(shareUrl, 'url')}><span>{shareUrl}</span><CopyIcon size={13} />{copied === 'url' ? 'Copied' : 'Copy'}</button><button onClick={() => void copy(accessToken, 'token')}><span className="team-token">{accessToken}</span><CopyIcon size={13} />{copied === 'token' ? 'Copied' : 'Copy token'}</button></> : <><p>Turn on Mobile & Tailscale access in Settings to invite another R.A.L.F.</p><button onClick={() => appStore.setState({ settingsOpen: true })}>Open Settings</button></>}</div> : null}
     </section>
 
     <div className="team-board" aria-label="Team task board">{COLUMNS.map((column) => {

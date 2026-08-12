@@ -7,6 +7,9 @@ import type { BackendRequest } from '../shared/backend.ts'
 import type { TeamSnapshot } from '../shared/team.ts'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application builds use bundler resolution.
+import { TEAM_PROTOCOL, teamProtocolsCompatible } from '../shared/team.ts'
+// Node's type-stripping test runner requires the explicit extension.
+// @ts-expect-error Application builds use bundler resolution.
 import { TeamBoardManager, type TeamTaskHost } from './team-board-manager.ts'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application builds use bundler resolution.
@@ -169,4 +172,37 @@ test('team tokens cannot control private desktop capabilities', () => {
   assert.equal(webAccessRequestAllowed('team', 'thread.permission'), false)
   assert.equal(webAccessRequestAllowed('team', 'automation.run'), false)
   assert.equal(webAccessRequestAllowed('control', 'thread.send'), true)
+})
+
+test('negotiates collaboration protocol ranges and rejects incompatible peers', async () => {
+  const host = manager('protocol-host').manager
+  await host.handle({ type: 'team.create', name: 'Versioned team', memberName: 'Host' })
+  assert.equal(teamProtocolsCompatible(TEAM_PROTOCOL), true)
+  assert.equal(teamProtocolsCompatible({ current: 2, minimumCompatible: 1 }), true)
+  assert.equal(teamProtocolsCompatible({ current: 2, minimumCompatible: 2 }), false)
+  assert.equal(teamProtocolsCompatible(undefined), false)
+
+  const compatible = await host.handle({
+    type: 'team.snapshot',
+    viaPeer: true,
+    actorId: 'future-peer',
+    actorName: 'Future peer',
+    protocol: { current: 2, minimumCompatible: 1 }
+  }) as TeamSnapshot
+  assert.equal(compatible.protocol.current, TEAM_PROTOCOL.current)
+
+  await assert.rejects(host.handle({
+    type: 'team.snapshot',
+    viaPeer: true,
+    actorId: 'too-new-peer',
+    actorName: 'Too new',
+    protocol: { current: 2, minimumCompatible: 2 }
+  }), /Update R\.A\.L\.F\. on the older device/)
+
+  await assert.rejects(host.handle({
+    type: 'team.snapshot',
+    viaPeer: true,
+    actorId: 'unversioned-peer',
+    actorName: 'Old peer'
+  }), /unversioned protocol/)
 })

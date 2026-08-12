@@ -4,6 +4,28 @@ export type TeamTaskStatus = 'proposed' | 'ready' | 'claimed' | 'working' | 'blo
 export type TeamExecutionState = 'starting' | 'running' | 'waiting' | 'needs-attention' | 'stopped'
 export type TeamAgentTool = 'ralf_team_board_read' | 'ralf_team_tasks_propose' | 'ralf_team_task_publish'
 
+export interface TeamProtocolVersion {
+  current: number
+  minimumCompatible: number
+}
+
+/** Increment current for every wire-format or semantic protocol change. Keep
+ * minimumCompatible at the oldest version that can safely understand it. */
+export const TEAM_PROTOCOL: TeamProtocolVersion = { current: 1, minimumCompatible: 1 }
+
+export function teamProtocolsCompatible(remote: TeamProtocolVersion | undefined): boolean {
+  if (!remote) return false
+  if (!Number.isInteger(remote.current) || !Number.isInteger(remote.minimumCompatible)) return false
+  if (remote.current < 1 || remote.minimumCompatible < 1 || remote.minimumCompatible > remote.current) return false
+  return TEAM_PROTOCOL.current >= remote.minimumCompatible && remote.current >= TEAM_PROTOCOL.minimumCompatible
+}
+
+export function assertCompatibleTeamProtocol(remote: TeamProtocolVersion | undefined): asserts remote is TeamProtocolVersion {
+  if (teamProtocolsCompatible(remote)) return
+  const remoteLabel = remote ? `v${remote.current} (minimum v${remote.minimumCompatible})` : 'an unversioned protocol'
+  throw new Error(`This team host uses ${remoteLabel}, but this R.A.L.F. supports collaboration protocol v${TEAM_PROTOCOL.current} (minimum v${TEAM_PROTOCOL.minimumCompatible}). Update R.A.L.F. on the older device before reconnecting.`)
+}
+
 export interface TeamMember {
   id: string
   name: string
@@ -65,10 +87,12 @@ export interface TeamConnectionView {
   url: string
   connected: boolean
   error?: string
+  protocol: TeamProtocolVersion
 }
 
 export interface TeamSnapshot {
   mode: 'none' | 'host' | 'peer'
+  protocol: TeamProtocolVersion
   identity: TeamMember
   board?: TeamBoard
   connection?: TeamConnectionView

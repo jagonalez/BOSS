@@ -5,11 +5,12 @@ import { hostname, userInfo } from 'node:os'
 import type { BackendId, BackendRequest } from '../shared/backend'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application builds use bundler resolution.
-import { normalizeTaskInput, normalizeTeamUrl, planningPrompt, taskPrompt } from '../shared/team.ts'
+import { assertCompatibleTeamProtocol, normalizeTaskInput, normalizeTeamUrl, planningPrompt, taskPrompt, TEAM_PROTOCOL } from '../shared/team.ts'
 import type {
   TeamAccessInfo,
   TeamBoard,
   TeamMember,
+  TeamProtocolVersion,
   TeamSnapshot,
   TeamStartTaskInput,
   TeamStartPlanningInput,
@@ -24,6 +25,7 @@ interface TeamConnection {
   url: string
   token: string
   boardId: string
+  protocol: TeamProtocolVersion
   lastError?: string
   cachedBoard?: TeamBoard
 }
@@ -111,7 +113,7 @@ export class TeamBoardManager {
           identity: parsed.identity,
           accessToken: parsed.accessToken,
           hosted: parsed.hosted,
-          connection: parsed.connection,
+          connection: parsed.connection ? { ...parsed.connection, protocol: parsed.connection.protocol ?? { ...TEAM_PROTOCOL } } : undefined,
           localBindings: Array.isArray(parsed.localBindings) ? parsed.localBindings : []
         }
       }
@@ -189,6 +191,7 @@ export class TeamBoardManager {
     }
     return {
       mode: board ? 'host' : 'none',
+      protocol: { ...TEAM_PROTOCOL },
       identity: clone(actor ?? this.state.identity),
       board: board ? clone(board) : undefined
     }
@@ -214,17 +217,21 @@ export class TeamBoardManager {
   private peerSnapshot(snapshot: TeamSnapshot, connected = true, error?: string): TeamSnapshot {
     const connection = this.state.connection
     if (!connection) return snapshot
+    assertCompatibleTeamProtocol(snapshot.protocol)
     const boardChanged = Boolean(snapshot.board && snapshot.board.revision !== connection.cachedBoard?.revision)
-    const connectionChanged = connection.lastError !== error
+    const protocolChanged = connection.protocol.current !== snapshot.protocol.current
+      || connection.protocol.minimumCompatible !== snapshot.protocol.minimumCompatible
+    const connectionChanged = connection.lastError !== error || protocolChanged
     if (snapshot.board && boardChanged) connection.cachedBoard = clone(snapshot.board)
     if (connectionChanged) connection.lastError = error
+    if (protocolChanged) connection.protocol = clone(snapshot.protocol)
     if (boardChanged || connectionChanged) this.save()
     return {
       ...snapshot,
       mode: 'peer',
       identity: clone(this.state.identity),
       board: snapshot.board ? clone(snapshot.board) : connection.cachedBoard ? clone(connection.cachedBoard) : undefined,
-      connection: { url: connection.url, connected, error }
+      connection: { url: connection.url, connected, error, protocol: clone(connection.protocol) }
     }
   }
 
@@ -233,7 +240,8 @@ export class TeamBoardManager {
       ...request,
       viaPeer: true,
       actorId: this.state.identity.id,
-      actorName: this.state.identity.name
+      actorName: this.state.identity.name,
+      protocol: { ...TEAM_PROTOCOL }
     } as BackendRequest
   }
 
@@ -245,7 +253,18 @@ export class TeamBoardManager {
       return this.peerSnapshot(snapshot)
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      return this.peerSnapshot({ mode: 'peer', identity: this.state.identity }, false, detail)
+      const connection = this.state.connection
+      if (connection.lastError !== detail) {
+        connection.lastError = detail
+        this.save()
+      }
+      return {
+        mode: 'peer',
+        protocol: clone(connection.protocol),
+        identity: clone(this.state.identity),
+        board: connection.cachedBoard ? clone(connection.cachedBoard) : undefined,
+        connection: { url: connection.url, connected: false, error: detail, protocol: clone(connection.protocol) }
+      }
     }
   }
 
@@ -543,6 +562,9 @@ export class TeamBoardManager {
 
   async handle(request: BackendRequest): Promise<unknown> {
     this.load()
+    if ('viaPeer' in request && request.viaPeer) {
+      assertCompatibleTeamProtocol('protocol' in request ? request.protocol : undefined)
+    }
     const isPeer = Boolean(this.state.connection && !('viaPeer' in request && request.viaPeer))
     switch (request.type) {
       case 'team.snapshot':
@@ -575,12 +597,13 @@ export class TeamBoardManager {
         const response = await fetch(`${url}/api/request`, {
           method: 'POST',
           headers: { authorization: `Bearer ${request.token.trim()}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ type: 'team.peer.join', member: this.state.identity, viaPeer: true } satisfies BackendRequest),
+          body: JSON.stringify({ type: 'team.peer.join', member: this.state.identity, viaPeer: true, protocol: TEAM_PROTOCOL } satisfies BackendRequest),
           signal: AbortSignal.timeout(12_000)
         })
         const payload = await response.json() as { ok?: boolean; result?: TeamSnapshot; error?: string }
         if (!response.ok || !payload.ok || !payload.result?.board) throw new Error(payload.error || 'The team host did not accept this connection.')
-        this.state.connection = { url, token: request.token.trim(), boardId: payload.result.board.id, cachedBoard: clone(payload.result.board) }
+        assertCompatibleTeamProtocol(payload.result.protocol)
+        this.state.connection = { url, token: request.token.trim(), boardId: payload.result.board.id, protocol: clone(payload.result.protocol), cachedBoard: clone(payload.result.board) }
         this.save()
         this.emit()
         return this.peerSnapshot(payload.result)
