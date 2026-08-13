@@ -18,7 +18,7 @@ import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path'
 import type { CloudflareSettings, SiteInfo } from '@shared/ipc'
 import type { Backend } from './backend/backend'
 
-const MCP_SERVER_NAME = 'ralf-sites'
+const MCP_SERVER_NAME = 'boss-sites'
 const CF_API = 'https://api.cloudflare.com/client/v4'
 
 const MIME: Record<string, string> = {
@@ -543,8 +543,8 @@ export class SitesManager {
         command: [process.execPath, script],
         environment: {
           ELECTRON_RUN_AS_NODE: '1',
-          RALF_SITES_CONTROL_URL: `http://127.0.0.1:${this.controlPort}`,
-          RALF_SITES_SECRET: this.controlSecret
+          BOSS_SITES_CONTROL_URL: `http://127.0.0.1:${this.controlPort}`,
+          BOSS_SITES_SECRET: this.controlSecret
         }
       })
       .catch(() => false)

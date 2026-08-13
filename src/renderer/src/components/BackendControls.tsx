@@ -46,7 +46,7 @@ export function BackendControls({ sessionId }: { sessionId: string }): React.JSX
     appStore.setState({
       confirm: {
         title: `Continue in ${label}?`,
-        message: `R.A.L.F. will create a new ${label} thread with a bounded handoff of this conversation. The original ${BACKEND_SHORT_LABELS[backendId]} thread remains unchanged.`,
+        message: `BOSS will create a new ${label} thread with a bounded handoff of this conversation. The original ${BACKEND_SHORT_LABELS[backendId]} thread remains unchanged.`,
         confirmLabel: `Continue in ${label}`,
         action: () => void cloneThreadToBackend(sessionId, target)
       }
@@ -94,7 +94,7 @@ export function BackendControls({ sessionId }: { sessionId: string }): React.JSX
                 appStore.setState({
                   confirm: {
                     title: `Send context to “${target.title || 'Untitled'}”?`,
-                    message: 'R.A.L.F. will send a bounded transcript and changed-file summary as a new message. The target agent may begin working immediately.',
+                    message: 'BOSS will send a bounded transcript and changed-file summary as a new message. The target agent may begin working immediately.',
                     confirmLabel: 'Send context',
                     action: () => void relayThreadToThread(sessionId, target.id)
                   }

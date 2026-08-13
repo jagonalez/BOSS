@@ -11,6 +11,7 @@ import { PTYManager } from './pty-manager'
 import { SpeechManager } from './speech'
 import { SitesManager } from './sites'
 import { registerIpc, type IpcDeps } from './ipc'
+import { IpcChannels } from '@shared/ipc'
 import { loadState } from './state-store'
 import { BackendManager } from './backend/manager'
 import { createBackend } from './backend/factory'
@@ -22,8 +23,16 @@ import { WebAccess } from './web-access'
 import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
 import { TranscriptStore } from './transcript-store'
+import { UpdateChecker } from './updates'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
+
+// Dev runs get their own userData so a broken dev build cannot corrupt the
+// installed app's workspaces, transcripts, and backend config. This must run
+// before anything below reads app.getPath('userData').
+if (process.env.ELECTRON_RENDERER_URL) {
+  app.setPath('userData', `${app.getPath('userData')}-dev`)
+}
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -65,7 +74,7 @@ const webAccess = new WebAccess(join(app.getPath('userData'), 'mobile-access.jso
 backendMgr.attachMobile(webAccess)
 webAccess.setOnChange(() => backendMgr.emit({ type: 'mobile.updated', properties: { status: webAccess.status() } }))
 
-const optional = new OptionalDeps(process.env.RALF_OPTIONAL_CDN)
+const optional = new OptionalDeps(process.env.BOSS_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
 let browse: BrowseManager | null = null
 const qaTools = new QaTools(() => browse, computerUse)
@@ -73,11 +82,12 @@ threadBus.attachQaTools(qaTools)
 const pty = new PTYManager(backendAuth)
 const speech = new SpeechManager()
 const sites = new SitesManager(() => backendMgr.currentProject || server.projectPath)
+const updates = new UpdateChecker()
 
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates }
 }
 
 function registerIpcOnce(): void {
@@ -109,7 +119,7 @@ function createWindow(): void {
   win.setMenuBarVisibility(false)
 
   win.webContents.on('console-message', (event) => {
-    if (process.env.RALF_DEBUG) {
+    if (process.env.BOSS_DEBUG) {
       process.stderr.write(`[renderer:${event.level}] ${event.message} (${event.sourceId}:${event.lineNumber})\n`)
     }
   })
@@ -201,6 +211,11 @@ app.whenReady().then(() => {
     await mcpHub.start()
     await automations.start()
     await webAccess.start()
+    // Runs last and unawaited: an update check must never delay startup.
+    void updates.check().then((status) => {
+      if (!status.available || !mainWindow || mainWindow.isDestroyed()) return
+      mainWindow.webContents.send(IpcChannels.UpdateChanged, status)
+    })
   })()
 })
 

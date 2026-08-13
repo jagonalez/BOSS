@@ -63,24 +63,24 @@ export interface ThemeDef {
   id: string
   label: string
   description: string
-  category: 'R.A.L.F.' | 'Community' | 'Accessibility'
+  category: 'BOSS' | 'Community' | 'Accessibility'
   appearance: 'dark' | 'light'
   colors: ThemeColors
   syntax: SyntaxPalette
   terminal: TerminalPalette
 }
 
-// Community palettes follow their upstream projects so R.A.L.F., Highlight.js,
+// Community palettes follow their upstream projects so BOSS, Highlight.js,
 // and xterm share one visual source of truth:
 // - Tokyo Night Moon: github.com/folke/tokyonight.nvim (Apache-2.0)
 // - Catppuccin: github.com/catppuccin/palette (MIT)
 // - Rosé Pine: github.com/rose-pine/palette (MIT)
 export const THEMES: ThemeDef[] = [
   {
-    id: 'ralf-dark',
-    label: 'R.A.L.F. Dark',
+    id: 'boss-dark',
+    label: 'BOSS Dark',
     description: 'Neutral developer UI',
-    category: 'R.A.L.F.',
+    category: 'BOSS',
     appearance: 'dark',
     colors: {
       canvas: '#0d1117', sidebar: '#090d13', surface: '#161b22', surfaceRaised: '#21262d', inset: '#010409', hover: '#1f252d', selected: '#252d38',
@@ -98,10 +98,10 @@ export const THEMES: ThemeDef[] = [
     }
   },
   {
-    id: 'ralf-light',
-    label: 'R.A.L.F. Light',
+    id: 'boss-light',
+    label: 'BOSS Light',
     description: 'Crisp and understated',
-    category: 'R.A.L.F.',
+    category: 'BOSS',
     appearance: 'light',
     colors: {
       canvas: '#f6f8fa', sidebar: '#f0f3f6', surface: '#ffffff', surfaceRaised: '#f3f4f6', inset: '#eef1f4', hover: '#eaeef2', selected: '#dbeafe',
@@ -205,17 +205,17 @@ export const THEMES: ThemeDef[] = [
 ]
 
 const LEGACY_THEME_IDS: Record<string, string> = {
-  graphite: 'ralf-dark',
-  carbon: 'ralf-dark',
+  graphite: 'boss-dark',
+  carbon: 'boss-dark',
   ink: 'tokyo-night-moon',
   'midnight-purple': 'rose-pine-moon',
   dracula: 'rose-pine-moon',
   orchid: 'rose-pine-moon',
-  ember: 'ralf-dark',
-  paper: 'ralf-light',
+  ember: 'boss-dark',
+  paper: 'boss-light',
   signal: 'high-contrast',
-  'solarized-dark': 'ralf-dark',
-  'solarized-light': 'ralf-light'
+  'solarized-dark': 'boss-dark',
+  'solarized-light': 'boss-light'
 }
 
 function resolveTheme(id: string): ThemeDef {
@@ -286,7 +286,7 @@ function syntaxCss(theme: ThemeDef): string {
 }
 
 export function getTheme(id?: string): ThemeDef {
-  return resolveTheme(id ?? document.documentElement.dataset.theme ?? 'ralf-dark')
+  return resolveTheme(id ?? document.documentElement.dataset.theme ?? 'boss-dark')
 }
 
 export function getXtermTheme(id?: string): Record<string, string> {
@@ -318,19 +318,19 @@ export function applyTheme(id: string): void {
   style.textContent = syntaxCss(theme)
 
   try {
-    localStorage.setItem('ralf.theme', theme.id)
+    localStorage.setItem('boss.theme', theme.id)
   } catch {
     /* ignore */
   }
-  window.dispatchEvent(new CustomEvent('ralf:theme-changed', { detail: { id: theme.id } }))
+  window.dispatchEvent(new CustomEvent('boss:theme-changed', { detail: { id: theme.id } }))
 }
 
 export function loadTheme(): string {
   try {
-    const saved = localStorage.getItem('ralf.theme')
+    const saved = localStorage.getItem('boss.theme')
     if (saved) return resolveTheme(saved).id
   } catch {
     /* ignore */
   }
-  return 'ralf-dark'
+  return 'boss-dark'
 }

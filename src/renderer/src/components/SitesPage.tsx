@@ -65,10 +65,10 @@ function SiteRow({ site }: { site: SiteInfo }): React.JSX.Element {
       </div>
       {site.status === 'error' && site.error ? <div className="site-error">{site.error}</div> : null}
       <div className="site-card-actions">
-        <button className="btn-ghost" onClick={() => void openSiteInBrowser(site.localUrl)} title="Open in Ralf's browser tab">
-          <GlobeIcon size={13} /> Open in Ralf
+        <button className="btn-ghost" onClick={() => void openSiteInBrowser(site.localUrl)} title="Open in BOSS's browser tab">
+          <GlobeIcon size={13} /> Open in BOSS
         </button>
-        <button className="btn-ghost" onClick={() => void window.ralf.openExternal(url)} title="Open in default browser">
+        <button className="btn-ghost" onClick={() => void window.boss.openExternal(url)} title="Open in default browser">
           <ExternalIcon size={13} /> Open external
         </button>
         <button className="btn-ghost" onClick={doCopy} title="Copy URL">
@@ -208,14 +208,14 @@ export function SitesPage(): React.JSX.Element {
 
   useEffect(() => {
     void refreshSites()
-    void window.ralf.sitesCfGet().then((cf) => appStore.setState({ cloudflare: cf })).catch(() => {})
+    void window.boss.sitesCfGet().then((cf) => appStore.setState({ cloudflare: cf })).catch(() => {})
   }, [])
 
   return (
     <div className="command-center sites-page">
       <header className="command-header">
         <div>
-          <span className="command-eyebrow">Ralf</span>
+          <span className="command-eyebrow">BOSS</span>
           <h1>Sites</h1>
           <p>Publish a folder of static files to preview it locally and optionally deploy it to Cloudflare Workers.</p>
         </div>

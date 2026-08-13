@@ -17,7 +17,7 @@ type SettingsSection = 'agents' | 'connections' | 'mcp' | 'mobile' | 'collaborat
 
 const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
   {
-    label: 'R.A.L.F.',
+    label: 'BOSS',
     items: [
       { id: 'agents', label: 'Agent defaults' },
       { id: 'connections', label: 'Models & connections' },
@@ -44,7 +44,7 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
 const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: string }> = {
   agents: {
     title: 'Agent defaults',
-    description: 'Choose how new R.A.L.F. threads start.'
+    description: 'Choose how new BOSS threads start.'
   },
   connections: {
     title: 'Models & connections',
@@ -52,7 +52,7 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   },
   mcp: {
     title: 'MCP connections',
-    description: 'Connect MCP servers once; every backend and automation can use their tools through R.A.L.F.'
+    description: 'Connect MCP servers once; every backend and automation can use their tools through BOSS'
   },
   mobile: {
     title: 'Mobile access',
@@ -64,7 +64,7 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   },
   worktrees: {
     title: 'Git worktrees',
-    description: 'Manage the isolated worktrees R.A.L.F. creates for project threads.'
+    description: 'Manage the isolated worktrees BOSS creates for project threads.'
   },
   appearance: {
     title: 'Appearance',
@@ -76,7 +76,7 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   }
 }
 
-const THEME_CATEGORIES = ['R.A.L.F.', 'Community', 'Accessibility'] as const
+const THEME_CATEGORIES = ['BOSS', 'Community', 'Accessibility'] as const
 
 function providerIsLocal(provider: string, models: BackendModelDescriptor[], backendId: BackendId): boolean {
   return models.some((model) => (model.provider || backendId) === provider && modelIsLocal(model, backendId))
@@ -139,8 +139,8 @@ export function SettingsModal(): React.JSX.Element | null {
     const syncTheme = (event: Event): void => {
       setCurrentTheme((event as CustomEvent<{ id?: string }>).detail?.id ?? loadTheme())
     }
-    window.addEventListener('ralf:theme-changed', syncTheme)
-    return () => window.removeEventListener('ralf:theme-changed', syncTheme)
+    window.addEventListener('boss:theme-changed', syncTheme)
+    return () => window.removeEventListener('boss:theme-changed', syncTheme)
   }, [])
 
   if (!open) return null
@@ -158,7 +158,7 @@ export function SettingsModal(): React.JSX.Element | null {
       <header className="settings-page-titlebar">
         <div className="settings-page-title">
           <strong>Settings</strong>
-          <span>Configure R.A.L.F. across projects</span>
+          <span>Configure BOSS across projects</span>
         </div>
         <Button variant="primary" size="small" onClick={() => appStore.setState({ settingsOpen: false })}>Done</Button>
       </header>
@@ -262,7 +262,7 @@ export function SettingsModal(): React.JSX.Element | null {
                 <div className="settings-connections-explainer">
                   <div>
                     <strong>Backends own their model access</strong>
-                    <p>R.A.L.F. discovers the providers already configured in each agent. Local models stay on your machine; credentials remain in the backend's own store.</p>
+                    <p>BOSS discovers the providers already configured in each agent. Local models stay on your machine; credentials remain in the backend's own store.</p>
                   </div>
                 </div>
                 <section className="settings-connections-panel">
@@ -376,7 +376,7 @@ export function SettingsModal(): React.JSX.Element | null {
                     />
                     <span>
                       <span className="settings-row-label">Clean up inactive worktrees</span>
-                      <span className="settings-row-hint">Only clean worktrees created by R.A.L.F. are eligible. Dirty or locked worktrees are always kept.</span>
+                      <span className="settings-row-hint">Only clean worktrees created by BOSS are eligible. Dirty or locked worktrees are always kept.</span>
                     </span>
                   </label>
                 </section>
@@ -422,7 +422,7 @@ export function SettingsModal(): React.JSX.Element | null {
                 <div className="settings-card-heading">
                   <div>
                     <h2>Theme</h2>
-                    <p>Applied immediately across every R.A.L.F. window.</p>
+                    <p>Applied immediately across every BOSS window.</p>
                   </div>
                 </div>
                 <div className="settings-theme-families">
