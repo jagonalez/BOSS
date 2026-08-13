@@ -287,7 +287,7 @@ function ImportPanel({ onDone }: { onDone: () => void }): React.JSX.Element {
   if (fresh.length === 0) {
     return (
       <div className="command-empty">
-        No importable servers found. Servers already in R.A.L.F. are skipped.
+        No importable servers found. Servers already in BOSS are skipped.
         <div><Button size="small" variant="ghost" onClick={onDone}>Close</Button></div>
       </div>
     )
@@ -327,8 +327,8 @@ export function McpSettings(): React.JSX.Element {
         <div className="settings-card-heading">
           <h2>MCP connections</h2>
           <p>
-            Connect MCP servers once, in R.A.L.F. — every backend and every automation can then use their tools.
-            Claude Code sees them directly; other agents use ralf_mcp_list and ralf_mcp_call.
+            Connect MCP servers once, in BOSS — every backend and every automation can then use their tools.
+            Claude Code sees them directly; other agents use boss_mcp_list and boss_mcp_call.
           </p>
         </div>
         <div className="settings-connection-actions">

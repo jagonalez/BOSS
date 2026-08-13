@@ -41,7 +41,7 @@ import {
 export function initializeWorkspaceState(): void {
   let terminalStartLocation: TerminalStartLocation = 'focused-checkout'
   try {
-    if (localStorage.getItem('ralf.terminalStartLocation') === 'project-root') terminalStartLocation = 'project-root'
+    if (localStorage.getItem('boss.terminalStartLocation') === 'project-root') terminalStartLocation = 'project-root'
   } catch {
     /* Retain the focused-checkout default. */
   }
@@ -51,7 +51,7 @@ export function initializeWorkspaceState(): void {
 export function setTerminalStartLocation(value: TerminalStartLocation): void {
   appStore.setState({ terminalStartLocation: value })
   try {
-    localStorage.setItem('ralf.terminalStartLocation', value)
+    localStorage.setItem('boss.terminalStartLocation', value)
   } catch {
     /* The in-memory setting still applies for this run. */
   }
@@ -280,7 +280,7 @@ export function setDefaultModel(backendId: BackendId, model: BackendModelDescrip
     } else {
       delete defaultModels[backendId]
     }
-    persistThreadPreference('ralf.defaultModels', defaultModels)
+    persistThreadPreference('boss.defaultModels', defaultModels)
     void OpenCode.setBackendDefaults(defaultModels).catch(() => {})
     return { defaultModels }
   })
@@ -428,7 +428,7 @@ export function removeLayoutTemplate(templateId: string): void {
 }
 function persistSessionMeta(meta: Record<string, SessionMeta>): void {
   try {
-    localStorage.setItem('ralf.sessionMeta', JSON.stringify(meta))
+    localStorage.setItem('boss.sessionMeta', JSON.stringify(meta))
   } catch {
     /* ignore */
   }
@@ -436,7 +436,7 @@ function persistSessionMeta(meta: Record<string, SessionMeta>): void {
 
 export function loadSessionMeta(): void {
   try {
-    const parsed = JSON.parse(localStorage.getItem('ralf.sessionMeta') ?? '{}')
+    const parsed = JSON.parse(localStorage.getItem('boss.sessionMeta') ?? '{}')
     if (parsed && typeof parsed === 'object') appStore.setState({ sessionMeta: parsed })
   } catch {
     /* ignore */
@@ -463,7 +463,7 @@ export function clearAttention(): void {
 
 export function loadChatOrder(): void {
   try {
-    const parsed = JSON.parse(localStorage.getItem('ralf.chatOrder') ?? '[]')
+    const parsed = JSON.parse(localStorage.getItem('boss.chatOrder') ?? '[]')
     if (Array.isArray(parsed)) appStore.setState({ chatOrder: parsed.filter((x) => typeof x === 'string') })
   } catch {
     /* ignore */
@@ -473,7 +473,7 @@ export function loadChatOrder(): void {
 export function setChatOrder(ids: string[]): void {
   appStore.setState({ chatOrder: ids })
   try {
-    localStorage.setItem('ralf.chatOrder', JSON.stringify(ids))
+    localStorage.setItem('boss.chatOrder', JSON.stringify(ids))
   } catch {
     /* ignore */
   }
@@ -488,7 +488,7 @@ async function ensureProject(path: string | null): Promise<void> {
   const cur = appStore.getState()
   if (cur.projectPath === path) return
   try {
-    const info = await window.ralf.projectSet(path)
+    const info = await window.boss.projectSet(path)
     appStore.setState({
       projectPath: info.path,
       selectedCheckoutPath: info.checkoutPath,
@@ -517,7 +517,7 @@ export async function runThreadReview(sessionID: string, target: string, context
   const projectPath = contextPath || appStore.getState().projectPath
   let baseSha = ''
   try {
-    const r = await window.ralf.gitRun(projectPath, ['rev-parse', 'HEAD'])
+    const r = await window.boss.gitRun(projectPath, ['rev-parse', 'HEAD'])
     if (r.code === 0) baseSha = r.stdout.trim()
   } catch {
     /* ignore */
@@ -596,7 +596,7 @@ export function markStaleReviews(sessionID: string, contextPath?: string): void 
   void (async () => {
     let head = ''
     try {
-      const r = await window.ralf.gitRun(projectPath, ['rev-parse', 'HEAD'])
+      const r = await window.boss.gitRun(projectPath, ['rev-parse', 'HEAD'])
       if (r.code === 0) head = r.stdout.trim()
     } catch {
       /* ignore */
@@ -781,12 +781,12 @@ function persistThreadPreference(key: string, value: unknown): void {
 
 export function loadThreadPreferences(): void {
   try {
-    const modelsBySession = JSON.parse(localStorage.getItem('ralf.modelsBySession') ?? '{}') as Record<string, string>
-    const modelProvidersBySession = JSON.parse(localStorage.getItem('ralf.modelProvidersBySession') ?? '{}') as Record<string, string>
-    const variantsBySession = JSON.parse(localStorage.getItem('ralf.variantsBySession') ?? '{}') as Record<string, string | null>
-    const modesBySession = JSON.parse(localStorage.getItem('ralf.modesBySession') ?? '{}') as Record<string, BackendModeId>
-    const defaultModels = JSON.parse(localStorage.getItem('ralf.defaultModels') ?? '{}') as Partial<Record<BackendId, BackendModelPreference>>
-    const modelProvider = localStorage.getItem('ralf.modelProvider')
+    const modelsBySession = JSON.parse(localStorage.getItem('boss.modelsBySession') ?? '{}') as Record<string, string>
+    const modelProvidersBySession = JSON.parse(localStorage.getItem('boss.modelProvidersBySession') ?? '{}') as Record<string, string>
+    const variantsBySession = JSON.parse(localStorage.getItem('boss.variantsBySession') ?? '{}') as Record<string, string | null>
+    const modesBySession = JSON.parse(localStorage.getItem('boss.modesBySession') ?? '{}') as Record<string, BackendModeId>
+    const defaultModels = JSON.parse(localStorage.getItem('boss.defaultModels') ?? '{}') as Partial<Record<BackendId, BackendModelPreference>>
+    const modelProvider = localStorage.getItem('boss.modelProvider')
     appStore.setState({ modelsBySession, modelProvidersBySession, variantsBySession, modesBySession, defaultModels, modelProvider })
     void OpenCode.setBackendDefaults(defaultModels).catch(() => {})
   } catch {
@@ -827,24 +827,24 @@ export function setModel(id: string, sessionId: string | null = appStore.getStat
       if (providerID) modelProvidersBySession[sessionId] = providerID
       else delete modelProvidersBySession[sessionId]
       const variantsBySession = { ...state.variantsBySession, [sessionId]: null }
-      persistThreadPreference('ralf.modelsBySession', modelsBySession)
-      persistThreadPreference('ralf.modelProvidersBySession', modelProvidersBySession)
-      persistThreadPreference('ralf.variantsBySession', variantsBySession)
+      persistThreadPreference('boss.modelsBySession', modelsBySession)
+      persistThreadPreference('boss.modelProvidersBySession', modelProvidersBySession)
+      persistThreadPreference('boss.variantsBySession', variantsBySession)
       return { modelsBySession, modelProvidersBySession, variantsBySession }
     })
     return
   }
   appStore.setState({ model: id, modelProvider: providerID ?? null, variant: null })
   try {
-    localStorage.setItem('ralf.model', id)
-    if (providerID) localStorage.setItem('ralf.modelProvider', providerID)
-    else localStorage.removeItem('ralf.modelProvider')
+    localStorage.setItem('boss.model', id)
+    if (providerID) localStorage.setItem('boss.modelProvider', providerID)
+    else localStorage.removeItem('boss.modelProvider')
   } catch { /* ignore */ }
 }
 
 export function loadVariant(): void {
   try {
-    const saved = localStorage.getItem('ralf.variant')
+    const saved = localStorage.getItem('boss.variant')
     appStore.setState({ variant: saved || null })
   } catch {
     /* ignore */
@@ -855,15 +855,15 @@ export function setVariant(v: string | null, sessionId: string | null = appStore
   if (sessionId) {
     appStore.setState((state) => {
       const variantsBySession = { ...state.variantsBySession, [sessionId]: v }
-      persistThreadPreference('ralf.variantsBySession', variantsBySession)
+      persistThreadPreference('boss.variantsBySession', variantsBySession)
       return { variantsBySession }
     })
     return
   }
   appStore.setState({ variant: v })
   try {
-    if (v) localStorage.setItem('ralf.variant', v)
-    else localStorage.removeItem('ralf.variant')
+    if (v) localStorage.setItem('boss.variant', v)
+    else localStorage.removeItem('boss.variant')
   } catch {
     /* ignore */
   }
@@ -879,7 +879,7 @@ function modelKeyWithVariant(model: string | null, sessionId?: string): { provid
 
 export function loadMode(): void {
   try {
-    const saved = localStorage.getItem('ralf.mode')
+    const saved = localStorage.getItem('boss.mode')
     if (saved === 'auto' || saved === 'ask' || saved === 'plan' || saved === 'accept-edits') appStore.setState({ mode: saved })
   } catch {
     /* ignore */
@@ -889,18 +889,18 @@ export function loadMode(): void {
 export async function loadEngine(): Promise<void> {
   try {
     const backends = await OpenCode.listBackends()
-    const saved = localStorage.getItem('ralf.engine') as BackendId | null
+    const saved = localStorage.getItem('boss.engine') as BackendId | null
     const engine = backends.some((backend) => backend.id === saved && backend.available)
       ? saved!
       : backends.find((backend) => backend.available)?.id ?? 'opencode'
     appStore.setState({ backends, engine })
-    localStorage.setItem('ralf.engine', engine)
+    localStorage.setItem('boss.engine', engine)
     return
   } catch {
     /* main unreachable; fall back to saved preference below */
   }
   try {
-    const saved = localStorage.getItem('ralf.engine') as BackendId | null
+    const saved = localStorage.getItem('boss.engine') as BackendId | null
     if (saved && ['opencode', 'pi', 'codex', 'claude'].includes(saved)) appStore.setState({ engine: saved })
   } catch {
     /* ignore */
@@ -911,14 +911,14 @@ export function setMode(id: BackendModeId, sessionId: string | null = appStore.g
   if (sessionId) {
     appStore.setState((state) => {
       const modesBySession = { ...state.modesBySession, [sessionId]: id }
-      persistThreadPreference('ralf.modesBySession', modesBySession)
+      persistThreadPreference('boss.modesBySession', modesBySession)
       return { modesBySession }
     })
     return
   }
   appStore.setState({ mode: id })
   try {
-    localStorage.setItem('ralf.mode', id)
+    localStorage.setItem('boss.mode', id)
   } catch {
     /* ignore */
   }
@@ -927,7 +927,7 @@ export function setMode(id: BackendModeId, sessionId: string | null = appStore.g
 export async function setEngine(id: BackendId): Promise<void> {
   try {
     appStore.setState({ engine: id })
-    localStorage.setItem('ralf.engine', id)
+    localStorage.setItem('boss.engine', id)
   } catch {
     /* ignore */
   }
@@ -968,10 +968,10 @@ export async function setEmptyThreadBackend(threadId: string, backendId: Backend
       delete variantsBySession[threadId]
       delete modesBySession[threadId]
       delete providersBySession[threadId]
-      persistThreadPreference('ralf.modelsBySession', modelsBySession)
-      persistThreadPreference('ralf.modelProvidersBySession', modelProvidersBySession)
-      persistThreadPreference('ralf.variantsBySession', variantsBySession)
-      persistThreadPreference('ralf.modesBySession', modesBySession)
+      persistThreadPreference('boss.modelsBySession', modelsBySession)
+      persistThreadPreference('boss.modelProvidersBySession', modelProvidersBySession)
+      persistThreadPreference('boss.variantsBySession', variantsBySession)
+      persistThreadPreference('boss.modesBySession', modesBySession)
       return { modelsBySession, modelProvidersBySession, variantsBySession, modesBySession, providersBySession }
     })
     applyBackendDefaultModel(threadId, backendId)
@@ -997,7 +997,7 @@ export async function relayThreadToThread(sourceThreadId: string, targetThreadId
 
 export function loadAgent(): void {
   try {
-    const saved = localStorage.getItem('ralf.agent')
+    const saved = localStorage.getItem('boss.agent')
     if (saved) appStore.setState({ agent: saved })
   } catch {
     /* ignore */
@@ -1007,7 +1007,7 @@ export function loadAgent(): void {
 export function setAgent(id: string): void {
   appStore.setState({ agent: id })
   try {
-    localStorage.setItem('ralf.agent', id)
+    localStorage.setItem('boss.agent', id)
   } catch {
     /* ignore */
   }
@@ -1075,17 +1075,17 @@ export function resolveDefaultModel(sessionId?: string): void {
       delete modelsBySession[sessionId]
       delete modelProvidersBySession[sessionId]
       delete variantsBySession[sessionId]
-      persistThreadPreference('ralf.modelsBySession', modelsBySession)
-      persistThreadPreference('ralf.modelProvidersBySession', modelProvidersBySession)
-      persistThreadPreference('ralf.variantsBySession', variantsBySession)
+      persistThreadPreference('boss.modelsBySession', modelsBySession)
+      persistThreadPreference('boss.modelProvidersBySession', modelProvidersBySession)
+      persistThreadPreference('boss.variantsBySession', variantsBySession)
       return { modelsBySession, modelProvidersBySession, variantsBySession }
     })
   } else if (current) {
     appStore.setState({ model: null, modelProvider: null, variant: null })
   }
   try {
-    const saved = localStorage.getItem('ralf.model')
-    const savedProvider = localStorage.getItem('ralf.modelProvider')
+    const saved = localStorage.getItem('boss.model')
+    const savedProvider = localStorage.getItem('boss.modelProvider')
     if (saved && valid(saved, savedProvider)) {
       setModel(saved, sessionId ?? null, savedProvider ?? undefined)
       return
@@ -1295,7 +1295,7 @@ export async function setQaDefault(policy: QaPolicy): Promise<void> {
   try {
     appStore.setState({ qaDefault: await OpenCode.setQaDefault(policy) })
     if (policy === 'automatic') {
-      const computerUse = await window.ralf.computerUseStatus().catch(() => appStore.getState().computerUse)
+      const computerUse = await window.boss.computerUseStatus().catch(() => appStore.getState().computerUse)
       appStore.setState({ computerUse })
     }
   } catch (error) {
@@ -1329,7 +1329,7 @@ export async function newGlobalChat(): Promise<void> {
 export async function openProject(path: string): Promise<void> {
   let info
   try {
-    info = await window.ralf.projectSet(path)
+    info = await window.boss.projectSet(path)
   } catch (err) {
     console.error('open project:', err)
     await refreshProject()
@@ -1388,10 +1388,10 @@ export async function deleteSession(id: string): Promise<void> {
       delete variantsBySession[id]
       delete modesBySession[id]
       delete providersBySession[id]
-      persistThreadPreference('ralf.modelsBySession', modelsBySession)
-      persistThreadPreference('ralf.modelProvidersBySession', modelProvidersBySession)
-      persistThreadPreference('ralf.variantsBySession', variantsBySession)
-      persistThreadPreference('ralf.modesBySession', modesBySession)
+      persistThreadPreference('boss.modelsBySession', modelsBySession)
+      persistThreadPreference('boss.modelProvidersBySession', modelProvidersBySession)
+      persistThreadPreference('boss.variantsBySession', variantsBySession)
+      persistThreadPreference('boss.modesBySession', modesBySession)
       return {
         archived: s.archived.filter((x) => x !== id),
         modelsBySession,
@@ -1409,7 +1409,7 @@ export async function deleteSession(id: string): Promise<void> {
 
 function persistArchived(archived: string[]): void {
   try {
-    localStorage.setItem('ralf.archived', JSON.stringify(archived))
+    localStorage.setItem('boss.archived', JSON.stringify(archived))
   } catch {
     /* ignore */
   }
@@ -1417,7 +1417,7 @@ function persistArchived(archived: string[]): void {
 
 export function loadArchived(): void {
   try {
-    const parsed = JSON.parse(localStorage.getItem('ralf.archived') ?? '[]')
+    const parsed = JSON.parse(localStorage.getItem('boss.archived') ?? '[]')
     if (Array.isArray(parsed)) appStore.setState({ archived: parsed.filter((x) => typeof x === 'string') })
   } catch {
     /* ignore */
@@ -1757,7 +1757,7 @@ export async function abortRun(sessionID?: string): Promise<void> {
 }
 export async function refreshOptional(): Promise<void> {
   try {
-    appStore.setState({ optional: await window.ralf.optionalList() })
+    appStore.setState({ optional: await window.boss.optionalList() })
   } catch {
     /* ignore */
   }
@@ -1765,7 +1765,7 @@ export async function refreshOptional(): Promise<void> {
 
 export async function toggleComputerUse(on: boolean): Promise<void> {
   try {
-    const status = await window.ralf.setComputerUse(on)
+    const status = await window.boss.setComputerUse(on)
     appStore.setState({ computerUse: status })
     if (on) {
       await refreshComputerUsePermissions(true)
@@ -1777,12 +1777,12 @@ export async function toggleComputerUse(on: boolean): Promise<void> {
 
 export async function refreshComputerUsePermissions(promptIfMissing = false): Promise<void> {
   try {
-    const perms = await window.ralf.computerUsePermissions()
+    const perms = await window.boss.computerUsePermissions()
     appStore.setState({ computerUsePerms: perms })
     if (promptIfMissing && perms.available) {
-      if (!perms.accessibility) await window.ralf.requestComputerUsePermission('accessibility').catch(() => {})
-      if (!perms.screenRecording) await window.ralf.requestComputerUsePermission('screenRecording').catch(() => {})
-      const next = await window.ralf.computerUsePermissions().catch(() => perms)
+      if (!perms.accessibility) await window.boss.requestComputerUsePermission('accessibility').catch(() => {})
+      if (!perms.screenRecording) await window.boss.requestComputerUsePermission('screenRecording').catch(() => {})
+      const next = await window.boss.computerUsePermissions().catch(() => perms)
       appStore.setState({ computerUsePerms: next })
     }
   } catch {
@@ -1799,7 +1799,7 @@ export async function openReviewFile(path: string): Promise<void> {
 
 export async function refreshProject(): Promise<void> {
   try {
-    const info = await window.ralf.projectCurrent()
+    const info = await window.boss.projectCurrent()
     appStore.setState({
       projectPath: info.path,
       selectedCheckoutPath: info.checkoutPath,
@@ -1812,9 +1812,9 @@ export async function refreshProject(): Promise<void> {
 
 export async function openProjectFolder(): Promise<void> {
   try {
-    const path = await window.ralf.projectChoose()
+    const path = await window.boss.projectChoose()
     if (!path) return
-    const info = await window.ralf.projectSet(path)
+    const info = await window.boss.projectSet(path)
     appStore.setState({
       projectPath: info.path,
       selectedCheckoutPath: info.checkoutPath,
@@ -1836,9 +1836,9 @@ export async function openProjectFolder(): Promise<void> {
 
 export function loadSpeechPrefs(): void {
   try {
-    const voice = localStorage.getItem('ralf.ttsVoice')
+    const voice = localStorage.getItem('boss.ttsVoice')
     if (voice) appStore.setState({ ttsVoice: voice })
-    const speakAloud = localStorage.getItem('ralf.speakAloud')
+    const speakAloud = localStorage.getItem('boss.speakAloud')
     if (speakAloud !== null) appStore.setState({ speakAloud: speakAloud === '1' })
   } catch {
     /* ignore */
@@ -1848,7 +1848,7 @@ export function loadSpeechPrefs(): void {
 export function setTtsVoice(voice: string): void {
   appStore.setState({ ttsVoice: voice })
   try {
-    localStorage.setItem('ralf.ttsVoice', voice)
+    localStorage.setItem('boss.ttsVoice', voice)
   } catch {
     /* ignore */
   }
@@ -1857,7 +1857,7 @@ export function setTtsVoice(voice: string): void {
 export function setSpeakAloud(on: boolean): void {
   appStore.setState({ speakAloud: on })
   try {
-    localStorage.setItem('ralf.speakAloud', on ? '1' : '0')
+    localStorage.setItem('boss.speakAloud', on ? '1' : '0')
   } catch {
     /* ignore */
   }
@@ -1870,7 +1870,7 @@ export async function speakText(text: string): Promise<void> {
   const trimmed = text.trim()
   if (!trimmed) return
   try {
-    const result = await window.ralf.ttsSpeak({ text: trimmed, voice: cur.ttsVoice })
+    const result = await window.boss.ttsSpeak({ text: trimmed, voice: cur.ttsVoice })
     if (!result.ok) {
       if (result.error) appStore.setState({ lastError: `TTS: ${result.error}` })
       return
@@ -1942,7 +1942,7 @@ async function transcribeMicSegment(): Promise<void> {
   try {
     const pcm = micSession.drain()
     if (pcm.length < 8000) return // less than ~0.5s — wait for more
-    const { text, error } = await window.ralf.asrTranscribe({ pcm })
+    const { text, error } = await window.boss.asrTranscribe({ pcm })
     if (error) {
       appStore.setState({ lastError: `Speech input: ${error}` })
       return
@@ -1978,7 +1978,7 @@ async function stopAsrRecording(): Promise<void> {
     return
   }
   try {
-    const { text, error } = await window.ralf.asrTranscribe({ pcm })
+    const { text, error } = await window.boss.asrTranscribe({ pcm })
     if (error) {
       appStore.setState({ lastError: `Speech input: ${error}` })
       return
@@ -1995,7 +1995,7 @@ export function applySpeechStatus(status: { tts: TtsStatus; asr: AsrStatus }): v
 
 export async function refreshSites(): Promise<void> {
   try {
-    appStore.setState({ sites: await window.ralf.sitesList() })
+    appStore.setState({ sites: await window.boss.sitesList() })
   } catch {
     /* ignore */
   }
@@ -2003,7 +2003,7 @@ export async function refreshSites(): Promise<void> {
 
 export async function refreshCloudflare(): Promise<void> {
   try {
-    appStore.setState({ cloudflare: await window.ralf.sitesCfGet() })
+    appStore.setState({ cloudflare: await window.boss.sitesCfGet() })
   } catch {
     /* ignore */
   }
@@ -2011,9 +2011,9 @@ export async function refreshCloudflare(): Promise<void> {
 
 export async function publishSiteFromPicker(): Promise<void> {
   try {
-    const folder = await window.ralf.sitesChooseFolder()
+    const folder = await window.boss.sitesChooseFolder()
     if (!folder) return
-    const site = await window.ralf.sitesPublish(folder)
+    const site = await window.boss.sitesPublish(folder)
     appStore.setState((s) => ({ sites: [site, ...s.sites.filter((item) => item.id !== site.id)] }))
   } catch (err) {
     appStore.setState({ lastError: errorSummary(err) })
@@ -2022,7 +2022,7 @@ export async function publishSiteFromPicker(): Promise<void> {
 
 export async function removeSite(id: string): Promise<void> {
   try {
-    await window.ralf.sitesRemove(id)
+    await window.boss.sitesRemove(id)
     appStore.setState((s) => ({ sites: s.sites.filter((site) => site.id !== id) }))
   } catch (err) {
     appStore.setState({ lastError: errorSummary(err) })
@@ -2032,7 +2032,7 @@ export async function removeSite(id: string): Promise<void> {
 export async function deploySite(id: string): Promise<void> {
   appStore.setState((s) => ({ siteDeploying: { ...s.siteDeploying, [id]: true } }))
   try {
-    const site = await window.ralf.sitesDeploy(id)
+    const site = await window.boss.sitesDeploy(id)
     appStore.setState((s) => ({
       sites: s.sites.map((item) => (item.id === id ? site : item)),
       siteDeploying: { ...s.siteDeploying, [id]: false }
@@ -2049,7 +2049,7 @@ export async function deploySite(id: string): Promise<void> {
 export async function unpublishSite(id: string): Promise<void> {
   appStore.setState((s) => ({ siteUnpublishing: { ...s.siteUnpublishing, [id]: true } }))
   try {
-    const site = await window.ralf.sitesUnpublish(id)
+    const site = await window.boss.sitesUnpublish(id)
     appStore.setState((s) => ({
       sites: s.sites.map((item) => (item.id === id ? site : item)),
       siteUnpublishing: { ...s.siteUnpublishing, [id]: false }
@@ -2065,7 +2065,7 @@ export async function unpublishSite(id: string): Promise<void> {
 
 export async function setCloudflareConfig(token: string, accountId: string): Promise<boolean> {
   try {
-    appStore.setState({ cloudflare: await window.ralf.sitesCfSet(token, accountId) })
+    appStore.setState({ cloudflare: await window.boss.sitesCfSet(token, accountId) })
     return true
   } catch (err) {
     appStore.setState({ lastError: errorSummary(err) })
@@ -2075,7 +2075,7 @@ export async function setCloudflareConfig(token: string, accountId: string): Pro
 
 export async function clearCloudflareConfig(): Promise<void> {
   try {
-    appStore.setState({ cloudflare: await window.ralf.sitesCfClear() })
+    appStore.setState({ cloudflare: await window.boss.sitesCfClear() })
   } catch (err) {
     appStore.setState({ lastError: errorSummary(err) })
   }
@@ -2087,20 +2087,20 @@ export async function openSiteInBrowser(url: string): Promise<void> {
   let workspace = state.projectWorkspace
   if (!workspace) {
     if (!state.projectPath) {
-      void window.ralf.openExternal(url)
+      void window.boss.openExternal(url)
       return
     }
     loadProjectWorkspace(state.projectPath)
     workspace = appStore.getState().projectWorkspace
   }
   if (!workspace) {
-    void window.ralf.openExternal(url)
+    void window.boss.openExternal(url)
     return
   }
   const view = activeWorkspaceView(workspace)
   const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0]?.id
   if (!groupId) {
-    void window.ralf.openExternal(url)
+    void window.boss.openExternal(url)
     return
   }
   const created = tab('browser')
@@ -2111,6 +2111,6 @@ export async function openSiteInBrowser(url: string): Promise<void> {
   }))
   const browseId = `workspace-${created.id}`
   setTimeout(() => {
-    void window.ralf.browseNavigate(browseId, url)
+    void window.boss.browseNavigate(browseId, url)
   }, 120)
 }

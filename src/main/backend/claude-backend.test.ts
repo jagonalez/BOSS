@@ -4,7 +4,7 @@ import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
 import { claudePermissionMode, claudePermissionResponse, parseClaudePermission } from './claude-protocol.ts'
 
-test('maps R.A.L.F. modes to current Claude permission modes', () => {
+test('maps BOSS modes to current Claude permission modes', () => {
   assert.equal(claudePermissionMode('ask'), 'manual')
   assert.equal(claudePermissionMode('accept-edits'), 'acceptEdits')
   assert.equal(claudePermissionMode('auto'), 'auto')

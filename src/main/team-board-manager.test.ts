@@ -22,14 +22,14 @@ afterEach(() => {
 })
 
 function manager(name = 'host'): { manager: TeamBoardManager; prompts: string[]; events: Record<string, unknown>[] } {
-  const directory = mkdtempSync(join(tmpdir(), `ralf-team-${name}-`))
+  const directory = mkdtempSync(join(tmpdir(), `boss-team-${name}-`))
   temporaryDirectories.push(directory)
   const prompts: string[] = []
   const events: Record<string, unknown>[] = []
   const host: TeamTaskHost = {
     async startTeamTask(input) {
       prompts.push(input.prompt)
-      return { threadId: 'local-thread-1', worktreeBranch: input.worktree ? 'ralf/team-task-1' : undefined }
+      return { threadId: 'local-thread-1', worktreeBranch: input.worktree ? 'boss/team-task-1' : undefined }
     },
     emit(event) { events.push(event) }
   }
@@ -67,16 +67,16 @@ test('hosts a board and starts claimed work in a private local thread', async ()
   assert.equal(task.status, 'working')
   assert.equal(task.assigneeName, 'Jeremy')
   assert.equal(task.execution?.backendId, 'codex')
-  assert.equal(task.execution?.worktreeBranch, 'ralf/team-task-1')
+  assert.equal(task.execution?.worktreeBranch, 'boss/team-task-1')
   assert.ok(!('threadId' in task.execution!))
   assert.ok(!('projectPath' in task.execution!))
   assert.match(setup.prompts[0], /Ship the onboarding fix/)
   assert.match(setup.prompts[0], /New users can sign up/)
   assert.match(setup.prompts[0], /private conversation stays on this machine/)
 
-  const visible = await setup.manager.agentCall('local-thread-1', 'ralf_team_board_read', {}) as { currentTaskId?: string }
+  const visible = await setup.manager.agentCall('local-thread-1', 'boss_team_board_read', {}) as { currentTaskId?: string }
   assert.equal(visible.currentTaskId, taskId)
-  const published = await setup.manager.agentCall('local-thread-1', 'ralf_team_task_publish', {
+  const published = await setup.manager.agentCall('local-thread-1', 'boss_team_task_publish', {
     update: 'Implementation is ready for a teammate to verify.',
     status: 'review'
   }) as { status: string; updates: Array<{ body: string }> }
@@ -96,8 +96,8 @@ test('a planning agent can propose tasks but cannot publish another thread task'
     input: { boardId: state.board!.id, backendId: 'claude', projectPath: '/private/local/project' }
   }) as { threadId: string }
   assert.match(setup.prompts[0], /Prepare the launch/)
-  assert.match(setup.prompts[0], /ralf_team_tasks_propose/)
-  const board = await setup.manager.agentCall(planning.threadId, 'ralf_team_tasks_propose', {
+  assert.match(setup.prompts[0], /boss_team_tasks_propose/)
+  const board = await setup.manager.agentCall(planning.threadId, 'boss_team_tasks_propose', {
     tasks: [
       { title: 'Write migration guide', summary: 'Cover rollback.', acceptanceCriteria: ['Reviewed by support'], projectHint: 'docs' },
       { title: 'Exercise upgrade path', projectHint: 'api' }
@@ -107,7 +107,7 @@ test('a planning agent can propose tasks but cannot publish another thread task'
   assert.deepEqual(board.tasks.map((task) => task.title), ['Write migration guide', 'Exercise upgrade path'])
   assert.ok(board.tasks.every((task) => task.status === 'proposed'))
   await assert.rejects(
-    setup.manager.agentCall(planning.threadId, 'ralf_team_task_publish', { status: 'done' }),
+    setup.manager.agentCall(planning.threadId, 'boss_team_task_publish', { status: 'done' }),
     /not started from a team task/
   )
 })
@@ -121,7 +121,7 @@ test('rejects stale task edits instead of overwriting a teammate', async () => {
   await setup.manager.handle({ type: 'team.task.update', boardId, taskId: task.id, patch: { summary: 'Fresh edit' }, expectedRevision: task.revision })
   await assert.rejects(
     setup.manager.handle({ type: 'team.task.update', boardId, taskId: task.id, patch: { summary: 'Stale edit' }, expectedRevision: task.revision }),
-    /changed on another R\.A\.L\.F/
+    /changed on another BOSS/
   )
 })
 
@@ -197,7 +197,7 @@ test('negotiates collaboration protocol ranges and rejects incompatible peers', 
     actorId: 'too-new-peer',
     actorName: 'Too new',
     protocol: { current: 2, minimumCompatible: 2 }
-  }), /Update R\.A\.L\.F\. on the older device/)
+  }), /Update BOSS on the older device/)
 
   await assert.rejects(host.handle({
     type: 'team.snapshot',

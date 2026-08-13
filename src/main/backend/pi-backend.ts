@@ -175,9 +175,9 @@ class PiRpcSession {
       env: {
         ...process.env,
         ...(this.threadBus ? {
-          RALF_THREAD_BUS_URL: this.threadBus.url,
-          RALF_THREAD_BUS_TOKEN: this.threadBus.tokenFor('pi', this.sessionId),
-          RALF_NATIVE_THREAD_ID: this.sessionId
+          BOSS_THREAD_BUS_URL: this.threadBus.url,
+          BOSS_THREAD_BUS_TOKEN: this.threadBus.tokenFor('pi', this.sessionId),
+          BOSS_NATIVE_THREAD_ID: this.sessionId
         } : {})
       }
     })
@@ -306,9 +306,9 @@ export class PiBackend implements Backend {
 
   configureThreadBus(connection: ThreadBusConnection): void {
     this.threadBus = connection
-    const directory = join(app.getPath('userData'), 'pi-ralf')
+    const directory = join(app.getPath('userData'), 'pi-boss')
     mkdirSync(directory, { recursive: true })
-    this.threadBusExtension = join(directory, 'ralf_threads.ts')
+    this.threadBusExtension = join(directory, 'boss_threads.ts')
     writeFileSync(this.threadBusExtension, this.threadToolSource())
   }
 
@@ -317,10 +317,10 @@ export class PiBackend implements Backend {
 import { Type } from "typebox"
 
 async function call(name, args, signal) {
-  const url = process.env.RALF_THREAD_BUS_URL
-  const token = process.env.RALF_THREAD_BUS_TOKEN
-  const nativeThreadId = process.env.RALF_NATIVE_THREAD_ID
-  if (!url || !token || !nativeThreadId) throw new Error("R.A.L.F. thread collaboration is unavailable.")
+  const url = process.env.BOSS_THREAD_BUS_URL
+  const token = process.env.BOSS_THREAD_BUS_TOKEN
+  const nativeThreadId = process.env.BOSS_NATIVE_THREAD_ID
+  if (!url || !token || !nativeThreadId) throw new Error("BOSS thread collaboration is unavailable.")
   const response = await fetch(url + "/agent-call", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer " + token },
@@ -328,9 +328,9 @@ async function call(name, args, signal) {
     signal
   })
   const payload = await response.json()
-  if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. thread tool failed.")
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "BOSS thread tool failed.")
   const result = payload.result
-  if (result && result.__ralfToolResult) {
+  if (result && result.__bossToolResult) {
     return {
       content: [
         { type: "text", text: result.text },
@@ -344,58 +344,58 @@ async function call(name, args, signal) {
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
-    name: "ralf_browser_tabs",
-    label: "List R.A.L.F. browser tabs",
-    description: "List browser tiles open in this R.A.L.F. workspace.",
+    name: "boss_browser_tabs",
+    label: "List BOSS browser tabs",
+    description: "List browser tiles open in this BOSS workspace.",
     parameters: Type.Object({}),
-    promptSnippet: "Inspect R.A.L.F. browser tabs",
+    promptSnippet: "Inspect BOSS browser tabs",
     promptGuidelines: [${JSON.stringify(QA_GUIDANCE)}],
-    execute: (_id, args, signal) => call("ralf_browser_tabs", args, signal)
+    execute: (_id, args, signal) => call("boss_browser_tabs", args, signal)
   })
   pi.registerTool({
-    name: "ralf_browser_navigate",
-    label: "Navigate R.A.L.F. browser",
-    description: "Navigate a R.A.L.F. browser tile. Requires Automatic QA.",
+    name: "boss_browser_navigate",
+    label: "Navigate BOSS browser",
+    description: "Navigate a BOSS browser tile. Requires Automatic QA.",
     parameters: Type.Object({ tabId: Type.String(), url: Type.String() }),
-    execute: (_id, args, signal) => call("ralf_browser_navigate", args, signal)
+    execute: (_id, args, signal) => call("boss_browser_navigate", args, signal)
   })
   pi.registerTool({
-    name: "ralf_browser_snapshot",
-    label: "Inspect R.A.L.F. browser",
+    name: "boss_browser_snapshot",
+    label: "Inspect BOSS browser",
     description: "Read visible page text and indexed interactive elements.",
     parameters: Type.Object({ tabId: Type.String() }),
-    execute: (_id, args, signal) => call("ralf_browser_snapshot", args, signal)
+    execute: (_id, args, signal) => call("boss_browser_snapshot", args, signal)
   })
   pi.registerTool({
-    name: "ralf_browser_screenshot",
-    label: "Screenshot R.A.L.F. browser",
+    name: "boss_browser_screenshot",
+    label: "Screenshot BOSS browser",
     description: "Capture a rendered browser tile for visual QA.",
     parameters: Type.Object({ tabId: Type.String() }),
-    execute: (_id, args, signal) => call("ralf_browser_screenshot", args, signal)
+    execute: (_id, args, signal) => call("boss_browser_screenshot", args, signal)
   })
   pi.registerTool({
-    name: "ralf_browser_click",
-    label: "Click R.A.L.F. browser",
-    description: "Click a ref from ralf_browser_snapshot. Requires Automatic QA.",
+    name: "boss_browser_click",
+    label: "Click BOSS browser",
+    description: "Click a ref from boss_browser_snapshot. Requires Automatic QA.",
     parameters: Type.Object({ tabId: Type.String(), ref: Type.String() }),
-    execute: (_id, args, signal) => call("ralf_browser_click", args, signal)
+    execute: (_id, args, signal) => call("boss_browser_click", args, signal)
   })
   pi.registerTool({
-    name: "ralf_browser_type",
-    label: "Type in R.A.L.F. browser",
-    description: "Type into a ref from ralf_browser_snapshot. Requires Automatic QA.",
+    name: "boss_browser_type",
+    label: "Type in BOSS browser",
+    description: "Type into a ref from boss_browser_snapshot. Requires Automatic QA.",
     parameters: Type.Object({
       tabId: Type.String(),
       ref: Type.String(),
       text: Type.String(),
       submit: Type.Optional(Type.Boolean({ default: false }))
     }),
-    execute: (_id, args, signal) => call("ralf_browser_type", args, signal)
+    execute: (_id, args, signal) => call("boss_browser_type", args, signal)
   })
   pi.registerTool({
-    name: "ralf_computer",
-    label: "R.A.L.F. Computer Use",
-    description: "Inspect or operate a native app through scoped R.A.L.F. Computer Use. Input actions require Automatic QA.",
+    name: "boss_computer",
+    label: "BOSS Computer Use",
+    description: "Inspect or operate a native app through scoped BOSS Computer Use. Input actions require Automatic QA.",
     parameters: Type.Object({
       operation: Type.Union([
         Type.Literal("list_apps"), Type.Literal("list_windows"), Type.Literal("get_window_state"),
@@ -405,68 +405,68 @@ export default function (pi: ExtensionAPI) {
       ]),
       arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
     }),
-    execute: (_id, args, signal) => call("ralf_computer", args, signal)
+    execute: (_id, args, signal) => call("boss_computer", args, signal)
   })
   pi.registerTool({
-    name: "ralf_threads_list",
-    label: "List R.A.L.F. threads",
+    name: "boss_threads_list",
+    label: "List BOSS threads",
     description: "List other threads in this project that use the same backend.",
     parameters: Type.Object({}),
-    execute: (_id, args, signal) => call("ralf_threads_list", args, signal)
+    execute: (_id, args, signal) => call("boss_threads_list", args, signal)
   })
   pi.registerTool({
-    name: "ralf_threads_read",
-    label: "Read R.A.L.F. thread",
+    name: "boss_threads_read",
+    label: "Read BOSS thread",
     description: "Read recent messages from another same-project, same-backend thread.",
     parameters: Type.Object({
-      threadId: Type.String({ description: "R.A.L.F. thread id returned by ralf_threads_list." }),
+      threadId: Type.String({ description: "BOSS thread id returned by boss_threads_list." }),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 8 }))
     }),
-    execute: (_id, args, signal) => call("ralf_threads_read", args, signal)
+    execute: (_id, args, signal) => call("boss_threads_read", args, signal)
   })
   pi.registerTool({
-    name: "ralf_threads_send",
-    label: "Send R.A.L.F. thread message",
+    name: "boss_threads_send",
+    label: "Send BOSS thread message",
     description: "Send a bounded message to another same-project, same-backend thread.",
     parameters: Type.Object({
-      threadId: Type.String({ description: "R.A.L.F. thread id returned by ralf_threads_list." }),
+      threadId: Type.String({ description: "BOSS thread id returned by boss_threads_list." }),
       message: Type.String({ description: "Message to send to the other agent." }),
       expectsReply: Type.Optional(Type.Boolean({ default: true })),
       maxTurns: Type.Optional(Type.Integer({ minimum: 1, maximum: 8, default: 4 }))
     }),
-    execute: (_id, args, signal) => call("ralf_threads_send", args, signal)
+    execute: (_id, args, signal) => call("boss_threads_send", args, signal)
   })
   pi.registerTool({
-    name: "ralf_threads_reply",
-    label: "Reply to R.A.L.F. thread message",
-    description: "Reply once to a R.A.L.F. thread message addressed to this thread.",
+    name: "boss_threads_reply",
+    label: "Reply to BOSS thread message",
+    description: "Reply once to a BOSS thread message addressed to this thread.",
     parameters: Type.Object({
-      messageId: Type.String({ description: "Message id from the incoming R.A.L.F. thread message." }),
+      messageId: Type.String({ description: "Message id from the incoming BOSS thread message." }),
       message: Type.String({ description: "Reply to send to the other agent." }),
       expectsReply: Type.Optional(Type.Boolean({ default: false }))
     }),
-    execute: (_id, args, signal) => call("ralf_threads_reply", args, signal)
+    execute: (_id, args, signal) => call("boss_threads_reply", args, signal)
   })
   pi.registerTool({
-    name: "ralf_threads_spawn_worktree",
-    label: "Spawn R.A.L.F. worktree thread",
+    name: "boss_threads_spawn_worktree",
+    label: "Spawn BOSS worktree thread",
     description: "Fork this conversation into a new thread in an isolated Git worktree.",
     parameters: Type.Object({
       instruction: Type.String({ description: "Concrete implementation task for the new worktree thread." })
     }),
-    execute: (_id, args, signal) => call("ralf_threads_spawn_worktree", args, signal)
+    execute: (_id, args, signal) => call("boss_threads_spawn_worktree", args, signal)
   })
   pi.registerTool({
-    name: "ralf_team_board_read",
-    label: "Read R.A.L.F. Team Board",
+    name: "boss_team_board_read",
+    label: "Read BOSS Team Board",
     description: "Read the shared team brief, people, tasks, and public updates. Private transcripts are excluded.",
     parameters: Type.Object({}),
-    execute: (_id, args, signal) => call("ralf_team_board_read", args, signal)
+    execute: (_id, args, signal) => call("boss_team_board_read", args, signal)
   })
   pi.registerTool({
-    name: "ralf_team_tasks_propose",
-    label: "Propose R.A.L.F. team tasks",
-    description: "Propose structured tasks on the connected R.A.L.F. team board.",
+    name: "boss_team_tasks_propose",
+    label: "Propose BOSS team tasks",
+    description: "Propose structured tasks on the connected BOSS team board.",
     parameters: Type.Object({
       tasks: Type.Array(Type.Object({
         title: Type.String(),
@@ -475,34 +475,34 @@ export default function (pi: ExtensionAPI) {
         projectHint: Type.Optional(Type.String())
       }), { minItems: 1, maxItems: 20 })
     }),
-    execute: (_id, args, signal) => call("ralf_team_tasks_propose", args, signal)
+    execute: (_id, args, signal) => call("boss_team_tasks_propose", args, signal)
   })
   pi.registerTool({
-    name: "ralf_team_task_publish",
-    label: "Publish R.A.L.F. team update",
+    name: "boss_team_task_publish",
+    label: "Publish BOSS team update",
     description: "Publish a concise update or status for the team task that started this thread. Never publishes the private transcript.",
     parameters: Type.Object({
       update: Type.Optional(Type.String()),
       status: Type.Optional(Type.Union([Type.Literal("working"), Type.Literal("blocked"), Type.Literal("review"), Type.Literal("done")]))
     }),
-    execute: (_id, args, signal) => call("ralf_team_task_publish", args, signal)
+    execute: (_id, args, signal) => call("boss_team_task_publish", args, signal)
   })
   pi.registerTool({
-    name: "ralf_mcp_list",
-    label: "List R.A.L.F. MCP tools",
-    description: "List external MCP tools available through R.A.L.F. connections. Pass tool to get one tool's full input schema before calling it.",
+    name: "boss_mcp_list",
+    label: "List BOSS MCP tools",
+    description: "List external MCP tools available through BOSS connections. Pass tool to get one tool's full input schema before calling it.",
     parameters: Type.Object({ tool: Type.Optional(Type.String({ description: "Tool name from the catalog; returns its full input schema." })) }),
-    execute: (_id, args, signal) => call("ralf_mcp_list", args, signal)
+    execute: (_id, args, signal) => call("boss_mcp_list", args, signal)
   })
   pi.registerTool({
-    name: "ralf_mcp_call",
-    label: "Call R.A.L.F. MCP tool",
-    description: "Call an external MCP tool listed by ralf_mcp_list.",
+    name: "boss_mcp_call",
+    label: "Call BOSS MCP tool",
+    description: "Call an external MCP tool listed by boss_mcp_list.",
     parameters: Type.Object({
-      tool: Type.String({ description: "Tool name from ralf_mcp_list." }),
+      tool: Type.String({ description: "Tool name from boss_mcp_list." }),
       arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
     }),
-    execute: (_id, args, signal) => call("ralf_mcp_call", args, signal)
+    execute: (_id, args, signal) => call("boss_mcp_call", args, signal)
   })
 }
 `

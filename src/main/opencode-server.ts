@@ -57,7 +57,7 @@ async function fetchHealth(base: string, auth: string): Promise<Health | null> {
       headers: { Authorization: auth }
     })
     if (!res.ok) {
-      if (process.env.RALF_DEBUG) {
+      if (process.env.BOSS_DEBUG) {
         process.stderr.write(`[opencode] health status ${res.status}\n`)
       }
       return null
@@ -65,7 +65,7 @@ async function fetchHealth(base: string, auth: string): Promise<Health | null> {
     const json = (await res.json()) as { healthy?: boolean; version?: string }
     return { healthy: Boolean(json.healthy), version: String(json.version ?? '') }
   } catch (err) {
-    if (process.env.RALF_DEBUG) {
+    if (process.env.BOSS_DEBUG) {
       const cause = (err as Error).cause as { code?: string } | undefined
       process.stderr.write(`[opencode] health fetch error: ${(err as Error).message} code=${cause?.code}\n`)
     }
@@ -110,42 +110,42 @@ export class OpenCodeServer {
   configureThreadBus(connection: ThreadBusConnection): void {
     this.threadBus = connection
     if (process.env.OPENCODE_CONFIG_DIR) {
-      if (process.env.RALF_DEBUG) process.stderr.write('[opencode] OPENCODE_CONFIG_DIR is already set; R.A.L.F. thread tools were not injected.\n')
+      if (process.env.BOSS_DEBUG) process.stderr.write('[opencode] OPENCODE_CONFIG_DIR is already set; BOSS thread tools were not injected.\n')
       return
     }
-    this.threadBusConfigDir = join(app.getPath('userData'), 'opencode-ralf')
+    this.threadBusConfigDir = join(app.getPath('userData'), 'opencode-boss')
     const toolsDir = join(this.threadBusConfigDir, 'tools')
     mkdirSync(toolsDir, { recursive: true })
-    writeFileSync(join(toolsDir, 'ralf_threads.ts'), this.threadToolSource())
-    writeFileSync(join(toolsDir, 'ralf_team.ts'), this.teamToolSource())
-    writeFileSync(join(toolsDir, 'ralf.ts'), this.qaToolSource())
+    writeFileSync(join(toolsDir, 'boss_threads.ts'), this.threadToolSource())
+    writeFileSync(join(toolsDir, 'boss_team.ts'), this.teamToolSource())
+    writeFileSync(join(toolsDir, 'boss.ts'), this.qaToolSource())
   }
 
   private teamToolSource(): string {
     return `import { tool } from "@opencode-ai/plugin"
 
 async function call(name, args, context) {
-  const url = process.env.RALF_THREAD_BUS_URL
-  const token = process.env.RALF_THREAD_BUS_TOKEN
-  if (!url || !token) throw new Error("R.A.L.F. Team Board is unavailable.")
+  const url = process.env.BOSS_THREAD_BUS_URL
+  const token = process.env.BOSS_THREAD_BUS_TOKEN
+  if (!url || !token) throw new Error("BOSS Team Board is unavailable.")
   const response = await fetch(url + "/agent-call", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer " + token },
     body: JSON.stringify({ backendId: "opencode", nativeThreadId: context.sessionID, tool: name, arguments: args })
   })
   const payload = await response.json()
-  if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. team tool failed.")
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "BOSS team tool failed.")
   return JSON.stringify(payload.result, null, 2)
 }
 
 export const board_read = tool({
-  description: "Read the connected R.A.L.F. team brief, tasks, people, and public updates. Private transcripts are excluded.",
+  description: "Read the connected BOSS team brief, tasks, people, and public updates. Private transcripts are excluded.",
   args: {},
-  execute(args, context) { return call("ralf_team_board_read", args, context) }
+  execute(args, context) { return call("boss_team_board_read", args, context) }
 })
 
 export const tasks_propose = tool({
-  description: "Propose structured tasks on the connected R.A.L.F. team board.",
+  description: "Propose structured tasks on the connected BOSS team board.",
   args: {
     tasks: tool.schema.array(tool.schema.object({
       title: tool.schema.string(),
@@ -154,7 +154,7 @@ export const tasks_propose = tool({
       projectHint: tool.schema.string().optional()
     })).min(1).max(20)
   },
-  execute(args, context) { return call("ralf_team_tasks_propose", args, context) }
+  execute(args, context) { return call("boss_team_tasks_propose", args, context) }
 })
 
 export const task_publish = tool({
@@ -163,7 +163,7 @@ export const task_publish = tool({
     update: tool.schema.string().optional(),
     status: tool.schema.enum(["working", "blocked", "review", "done"]).optional()
   },
-  execute(args, context) { return call("ralf_team_task_publish", args, context) }
+  execute(args, context) { return call("boss_team_task_publish", args, context) }
 })
 `
   }
@@ -172,27 +172,27 @@ export const task_publish = tool({
     return `import { tool } from "@opencode-ai/plugin"
 
 async function call(name, args, context) {
-  const url = process.env.RALF_THREAD_BUS_URL
-  const token = process.env.RALF_THREAD_BUS_TOKEN
-  if (!url || !token) throw new Error("R.A.L.F. thread collaboration is unavailable.")
+  const url = process.env.BOSS_THREAD_BUS_URL
+  const token = process.env.BOSS_THREAD_BUS_TOKEN
+  if (!url || !token) throw new Error("BOSS thread collaboration is unavailable.")
   const response = await fetch(url + "/agent-call", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer " + token },
     body: JSON.stringify({ backendId: "opencode", nativeThreadId: context.sessionID, tool: name, arguments: args })
   })
   const payload = await response.json()
-  if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. thread tool failed.")
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "BOSS thread tool failed.")
   const result = payload.result
-  if (result && result.__ralfToolResult) {
+  if (result && result.__bossToolResult) {
     return {
-      title: "R.A.L.F. QA",
+      title: "BOSS QA",
       output: result.text,
-      metadata: { ralfQa: true },
+      metadata: { bossQa: true },
       attachments: result.image ? [{
         type: "file",
         mime: result.image.mimeType,
         url: "data:" + result.image.mimeType + ";base64," + result.image.data,
-        filename: "ralf-qa.png"
+        filename: "boss-qa.png"
       }] : []
     }
   }
@@ -200,64 +200,64 @@ async function call(name, args, context) {
 }
 
 export const list = tool({
-  description: "List other R.A.L.F. threads in this project using OpenCode.",
+  description: "List other BOSS threads in this project using OpenCode.",
   args: {},
-  execute(args, context) { return call("ralf_threads_list", args, context) }
+  execute(args, context) { return call("boss_threads_list", args, context) }
 })
 
 export const read = tool({
-  description: "Read a bounded recent transcript from another R.A.L.F. OpenCode thread.",
+  description: "Read a bounded recent transcript from another BOSS OpenCode thread.",
   args: {
-    threadId: tool.schema.string().describe("R.A.L.F. thread id returned by ralf_threads_list"),
+    threadId: tool.schema.string().describe("BOSS thread id returned by boss_threads_list"),
     limit: tool.schema.number().min(1).max(20).optional()
   },
-  execute(args, context) { return call("ralf_threads_read", args, context) }
+  execute(args, context) { return call("boss_threads_read", args, context) }
 })
 
 export const send = tool({
-  description: "Send a durable message to another R.A.L.F. OpenCode thread. Busy targets queue it.",
+  description: "Send a durable message to another BOSS OpenCode thread. Busy targets queue it.",
   args: {
-    threadId: tool.schema.string().describe("Target R.A.L.F. thread id"),
+    threadId: tool.schema.string().describe("Target BOSS thread id"),
     message: tool.schema.string().describe("Concise context, question, or requested task"),
     expectsReply: tool.schema.boolean().optional(),
     maxTurns: tool.schema.number().min(1).max(8).optional()
   },
-  execute(args, context) { return call("ralf_threads_send", args, context) }
+  execute(args, context) { return call("boss_threads_send", args, context) }
 })
 
 export const reply = tool({
-  description: "Reply to a R.A.L.F. thread message addressed to this thread.",
+  description: "Reply to a BOSS thread message addressed to this thread.",
   args: {
-    messageId: tool.schema.string().describe("Message id from the incoming R.A.L.F. thread message"),
+    messageId: tool.schema.string().describe("Message id from the incoming BOSS thread message"),
     message: tool.schema.string().describe("Reply for the sending thread"),
     expectsReply: tool.schema.boolean().optional()
   },
-  execute(args, context) { return call("ralf_threads_reply", args, context) }
+  execute(args, context) { return call("boss_threads_reply", args, context) }
 })
 
 export const spawn_worktree = tool({
-  description: "Fork this conversation into a new R.A.L.F. thread in an isolated Git worktree.",
+  description: "Fork this conversation into a new BOSS thread in an isolated Git worktree.",
   args: {
     instruction: tool.schema.string().describe("Concrete implementation task for the new worktree thread")
   },
-  execute(args, context) { return call("ralf_threads_spawn_worktree", args, context) }
+  execute(args, context) { return call("boss_threads_spawn_worktree", args, context) }
 })
 
 export const mcp_list = tool({
-  description: "List external MCP tools available through R.A.L.F. connections. Pass tool to get one tool's full input schema before calling it.",
+  description: "List external MCP tools available through BOSS connections. Pass tool to get one tool's full input schema before calling it.",
   args: {
     tool: tool.schema.string().optional().describe("Tool name from the catalog; returns its full input schema")
   },
-  execute(args, context) { return call("ralf_mcp_list", args, context) }
+  execute(args, context) { return call("boss_mcp_list", args, context) }
 })
 
 export const mcp_call = tool({
-  description: "Call an external MCP tool listed by ralf_mcp_list.",
+  description: "Call an external MCP tool listed by boss_mcp_list.",
   args: {
-    tool: tool.schema.string().describe("Tool name from ralf_mcp_list"),
+    tool: tool.schema.string().describe("Tool name from boss_mcp_list"),
     arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional()
   },
-  execute(args, context) { return call("ralf_mcp_call", args, context) }
+  execute(args, context) { return call("boss_mcp_call", args, context) }
 })
 `
   }
@@ -266,74 +266,74 @@ export const mcp_call = tool({
     return `import { tool } from "@opencode-ai/plugin"
 
 async function call(name, args, context) {
-  const url = process.env.RALF_THREAD_BUS_URL
-  const token = process.env.RALF_THREAD_BUS_TOKEN
-  if (!url || !token) throw new Error("R.A.L.F. QA tools are unavailable.")
+  const url = process.env.BOSS_THREAD_BUS_URL
+  const token = process.env.BOSS_THREAD_BUS_TOKEN
+  if (!url || !token) throw new Error("BOSS QA tools are unavailable.")
   const response = await fetch(url + "/agent-call", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer " + token },
     body: JSON.stringify({ backendId: "opencode", nativeThreadId: context.sessionID, tool: name, arguments: args })
   })
   const payload = await response.json()
-  if (!response.ok || !payload.ok) throw new Error(payload.error || "R.A.L.F. QA tool failed.")
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "BOSS QA tool failed.")
   const result = payload.result
   return {
-    title: "R.A.L.F. QA",
+    title: "BOSS QA",
     output: result.text,
-    metadata: { ralfQa: true },
+    metadata: { bossQa: true },
     attachments: result.image ? [{
       type: "file",
       mime: result.image.mimeType,
       url: "data:" + result.image.mimeType + ";base64," + result.image.data,
-      filename: "ralf-qa.png"
+      filename: "boss-qa.png"
     }] : []
   }
 }
 
 export const browser_tabs = tool({
-  description: "List browser tiles open in the R.A.L.F. workspace. Use this before other browser tools.",
+  description: "List browser tiles open in the BOSS workspace. Use this before other browser tools.",
   args: {},
-  execute(args, context) { return call("ralf_browser_tabs", args, context) }
+  execute(args, context) { return call("boss_browser_tabs", args, context) }
 })
 export const browser_navigate = tool({
-  description: "Navigate a R.A.L.F. browser tile to an HTTP or HTTPS URL. Requires Automatic QA.",
+  description: "Navigate a BOSS browser tile to an HTTP or HTTPS URL. Requires Automatic QA.",
   args: { tabId: tool.schema.string(), url: tool.schema.string() },
-  execute(args, context) { return call("ralf_browser_navigate", args, context) }
+  execute(args, context) { return call("boss_browser_navigate", args, context) }
 })
 export const browser_snapshot = tool({
-  description: "Read visible page text and indexed interactive elements from a R.A.L.F. browser tile.",
+  description: "Read visible page text and indexed interactive elements from a BOSS browser tile.",
   args: { tabId: tool.schema.string() },
-  execute(args, context) { return call("ralf_browser_snapshot", args, context) }
+  execute(args, context) { return call("boss_browser_snapshot", args, context) }
 })
 export const browser_screenshot = tool({
-  description: "Capture a rendered R.A.L.F. browser tile for visual QA.",
+  description: "Capture a rendered BOSS browser tile for visual QA.",
   args: { tabId: tool.schema.string() },
-  execute(args, context) { return call("ralf_browser_screenshot", args, context) }
+  execute(args, context) { return call("boss_browser_screenshot", args, context) }
 })
 export const browser_click = tool({
-  description: "Click a ref returned by ralf_browser_snapshot. Requires Automatic QA; inspect again afterward.",
+  description: "Click a ref returned by boss_browser_snapshot. Requires Automatic QA; inspect again afterward.",
   args: { tabId: tool.schema.string(), ref: tool.schema.string() },
-  execute(args, context) { return call("ralf_browser_click", args, context) }
+  execute(args, context) { return call("boss_browser_click", args, context) }
 })
 export const browser_type = tool({
-  description: "Type into a ref returned by ralf_browser_snapshot. Requires Automatic QA.",
+  description: "Type into a ref returned by boss_browser_snapshot. Requires Automatic QA.",
   args: { tabId: tool.schema.string(), ref: tool.schema.string(), text: tool.schema.string(), submit: tool.schema.boolean().optional() },
-  execute(args, context) { return call("ralf_browser_type", args, context) }
+  execute(args, context) { return call("boss_browser_type", args, context) }
 })
 export const computer = tool({
-  description: "Inspect or operate a native app through scoped R.A.L.F. Computer Use. Input actions require Automatic QA.",
+  description: "Inspect or operate a native app through scoped BOSS Computer Use. Input actions require Automatic QA.",
   args: {
     operation: tool.schema.enum(["list_apps", "list_windows", "get_window_state", "get_desktop_state", "screenshot", "zoom", "click", "type_text", "press_key", "hotkey", "scroll", "wait"]),
     arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional()
   },
-  execute(args, context) { return call("ralf_computer", args, context) }
+  execute(args, context) { return call("boss_computer", args, context) }
 })
 `
   }
 
   async setProject(path: string): Promise<void> {
     if (!path || path === this.cwd) return
-    if (process.env.RALF_SERVER_URL) {
+    if (process.env.BOSS_SERVER_URL) {
       throw new Error('cannot switch project while connected to an external server')
     }
     if (!isDirectory(path)) {
@@ -366,13 +366,13 @@ export const computer = tool({
 
   async start(): Promise<void> {
     this.suppressRestart = false
-    const extUrl = process.env.RALF_SERVER_URL
-    const extPass = process.env.RALF_SERVER_PASSWORD
+    const extUrl = process.env.BOSS_SERVER_URL
+    const extPass = process.env.BOSS_SERVER_PASSWORD
     if (extUrl && extPass) {
       const parsed = new URL(extUrl)
       this.port = Number(parsed.port || 80)
       this.password = extPass
-      if (process.env.RALF_DEBUG) process.stderr.write(`[opencode] connecting to external server ${extUrl}\n`)
+      if (process.env.BOSS_DEBUG) process.stderr.write(`[opencode] connecting to external server ${extUrl}\n`)
       await this.waitForHealth()
       return
     }
@@ -386,20 +386,20 @@ export const computer = tool({
         OPENCODE_SERVER_PASSWORD: this.password,
         OPENCODE_SERVER_USERNAME: 'opencode',
         ...(this.threadBus ? {
-          RALF_THREAD_BUS_URL: this.threadBus.url,
-          RALF_THREAD_BUS_TOKEN: this.threadBus.token
+          BOSS_THREAD_BUS_URL: this.threadBus.url,
+          BOSS_THREAD_BUS_TOKEN: this.threadBus.token
         } : {}),
         ...(this.threadBusConfigDir ? { OPENCODE_CONFIG_DIR: this.threadBusConfigDir } : {})
       },
       stdio: ['ignore', 'pipe', 'pipe']
     })
     this.proc = proc
-    if (process.env.RALF_DEBUG) process.stderr.write(`[opencode] spawning ${bin} on port ${this.port} cwd=${this.cwd}\n`)
+    if (process.env.BOSS_DEBUG) process.stderr.write(`[opencode] spawning ${bin} on port ${this.port} cwd=${this.cwd}\n`)
     proc.stdout?.on('data', (d) => {
-      if (process.env.RALF_DEBUG) process.stderr.write(`[opencode:out] ${d}`)
+      if (process.env.BOSS_DEBUG) process.stderr.write(`[opencode:out] ${d}`)
     })
     proc.stderr?.on('data', (d) => {
-      if (process.env.RALF_DEBUG) process.stderr.write(`[opencode] ${d}`)
+      if (process.env.BOSS_DEBUG) process.stderr.write(`[opencode] ${d}`)
     })
     proc.on('error', (err) => {
       this.proc = null
@@ -410,7 +410,7 @@ export const computer = tool({
       if (code === 'ENOENT') {
         this.fallbackToPath = true
       }
-      if (process.env.RALF_DEBUG) process.stderr.write(`[opencode] spawn error: ${err.message}\n`)
+      if (process.env.BOSS_DEBUG) process.stderr.write(`[opencode] spawn error: ${err.message}\n`)
       this.scheduleRestart(1, null)
     })
     proc.on('exit', (code, signal) => {
@@ -425,7 +425,7 @@ export const computer = tool({
   private scheduleRestart(code: number | null, signal: NodeJS.Signals | null): void {
     this.attempts += 1
     const delay = Math.min(1000 * 2 ** this.attempts, 15000)
-    if (process.env.RALF_DEBUG) {
+    if (process.env.BOSS_DEBUG) {
       process.stderr.write(`[opencode] exited (${code ?? signal}), restarting in ${delay}ms\n`)
     }
     this.restartTimer = setTimeout(() => {
@@ -447,7 +447,7 @@ export const computer = tool({
       }
       await new Promise((r) => setTimeout(r, 200))
     }
-    if (process.env.RALF_DEBUG) process.stderr.write('[opencode] health check timed out\n')
+    if (process.env.BOSS_DEBUG) process.stderr.write('[opencode] health check timed out\n')
     this.emitStatus()
   }
 

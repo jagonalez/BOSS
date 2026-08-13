@@ -1,6 +1,6 @@
 {
-  "name": "ralf",
-  "productName": "R.A.L.F.",
+  "name": "boss",
+  "productName": "BOSS",
   "version": "0.1.0",
   "description": "Configurable multi-backend desktop workspace for coding agents",
   "main": "./out/main/index.js",
@@ -12,8 +12,10 @@
     "start": "electron-vite preview",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "test:transcripts": "node --experimental-strip-types --test src/main/transcript-store.test.ts",
     "test:workspaces": "node --experimental-strip-types --test src/renderer/src/lib/workspaces.test.ts",
+    "test:version": "node --experimental-strip-types --test src/shared/version.test.ts",
     "test:projects": "node --experimental-strip-types --test src/main/project-identity.test.ts",
     "test:review": "node --experimental-strip-types --test src/main/review-manager.test.ts src/main/github-review-provider.test.ts src/renderer/src/lib/themes.test.ts",
     "test:claude": "node --experimental-strip-types --test src/main/backend/claude-backend.test.ts",
@@ -21,7 +23,8 @@
     "fetch:opencode": "node scripts/fetch-opencode.mjs",
     "fetch:cua-driver": "bash scripts/fetch-cua-driver.sh",
     "pack": "electron-vite build && electron-builder --dir",
-    "dist": "electron-vite build && electron-builder"
+    "dist": "electron-vite build && electron-builder",
+    "release": "bash scripts/release.sh"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
@@ -48,8 +51,8 @@
     "vite": "^6.1.0"
   },
   "build": {
-    "appId": "dev.ralf.app",
-    "productName": "R.A.L.F.",
+    "appId": "dev.boss.app",
+    "productName": "BOSS",
     "files": [
       "out/**/*",
       "resources/**/*"

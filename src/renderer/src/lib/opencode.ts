@@ -32,7 +32,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: HttpMethod, path: string, opts?: { query?: Record<string, string | number | boolean | undefined>; body?: unknown; directory?: string }): Promise<T> {
-  const res = await window.ralf.apiRequest({
+  const res = await window.boss.apiRequest({
     method,
     path,
     query: opts?.query,
@@ -49,7 +49,7 @@ async function request<T>(method: HttpMethod, path: string, opts?: { query?: Rec
 }
 
 async function backendRequest<T>(req: BackendRequest): Promise<T> {
-  return window.ralf.backendRequest(req) as Promise<T>
+  return window.boss.backendRequest(req) as Promise<T>
 }
 
 export interface ModelOption {

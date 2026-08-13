@@ -34,29 +34,29 @@ export function TerminalTab({ authBackendId, contextPath }: { authBackendId?: Ba
       try {
         fit.fit()
         const dims = fit.proposeDimensions()
-        if (termId && dims) window.ralf.terminalResize(termId, dims.cols, dims.rows)
+        if (termId && dims) window.boss.terminalResize(termId, dims.cols, dims.rows)
       } catch {
         /* ignore */
       }
     }
 
-    const offData = window.ralf.onTerminalData((evt) => {
+    const offData = window.boss.onTerminalData((evt) => {
       if (evt.id === termId) term.write(evt.data)
     })
-    const offExit = window.ralf.onTerminalExit((evt) => {
+    const offExit = window.boss.onTerminalExit((evt) => {
       if (evt.id === termId) term.write(`\r\n\x1b[90m[process exited: ${evt.code}]\x1b[0m\r\n`)
     })
 
     term.onData((data) => {
-      if (termId) window.ralf.terminalWrite(termId, data)
+      if (termId) window.boss.terminalWrite(termId, data)
     })
 
     const initial = fit.proposeDimensions()
-    void window.ralf
+    void window.boss
       .terminalCreate(cwd || undefined, initial?.cols ?? 80, initial?.rows ?? 24, authBackendId)
       .then((id) => {
         if (cancelled) {
-          window.ralf.terminalDispose(id)
+          window.boss.terminalDispose(id)
           return
         }
         termId = id
@@ -71,17 +71,17 @@ export function TerminalTab({ authBackendId, contextPath }: { authBackendId?: Ba
     const onThemeChanged = (): void => {
       term.options.theme = getXtermTheme()
     }
-    window.addEventListener('ralf:theme-changed', onThemeChanged)
+    window.addEventListener('boss:theme-changed', onThemeChanged)
 
     return () => {
       cancelled = true
       clearTimeout(focusTimer)
       ro.disconnect()
       window.removeEventListener('resize', fitNow)
-      window.removeEventListener('ralf:theme-changed', onThemeChanged)
+      window.removeEventListener('boss:theme-changed', onThemeChanged)
       offData()
       offExit()
-      if (termId) window.ralf.terminalDispose(termId)
+      if (termId) window.boss.terminalDispose(termId)
       term.dispose()
     }
   }, [cwd, authBackendId])

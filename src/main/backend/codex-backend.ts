@@ -63,18 +63,18 @@ interface PendingApproval {
 const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   {
     type: 'function',
-    name: 'ralf_threads_list',
-    description: 'List other R.A.L.F. threads in this project that use the same backend.',
+    name: 'boss_threads_list',
+    description: 'List other BOSS threads in this project that use the same backend.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
     type: 'function',
-    name: 'ralf_threads_read',
-    description: 'Read a bounded recent transcript from another same-project, same-backend R.A.L.F. thread.',
+    name: 'boss_threads_read',
+    description: 'Read a bounded recent transcript from another same-project, same-backend BOSS thread.',
     inputSchema: {
       type: 'object',
       properties: {
-        threadId: { type: 'string', description: 'R.A.L.F. thread id returned by ralf_threads_list.' },
+        threadId: { type: 'string', description: 'BOSS thread id returned by boss_threads_list.' },
         limit: { type: 'number', description: 'Number of recent messages to read, from 1 to 20.' }
       },
       required: ['threadId'],
@@ -83,12 +83,12 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   },
   {
     type: 'function',
-    name: 'ralf_threads_send',
-    description: 'Send a durable message to another same-project, same-backend R.A.L.F. thread. Busy targets queue the message.',
+    name: 'boss_threads_send',
+    description: 'Send a durable message to another same-project, same-backend BOSS thread. Busy targets queue the message.',
     inputSchema: {
       type: 'object',
       properties: {
-        threadId: { type: 'string', description: 'Target R.A.L.F. thread id.' },
+        threadId: { type: 'string', description: 'Target BOSS thread id.' },
         message: { type: 'string', description: 'Concise context, question, or requested task.' },
         expectsReply: { type: 'boolean', description: 'Whether the target should reply.' },
         maxTurns: { type: 'number', description: 'Maximum messages in this exchange, from 1 to 8.' }
@@ -99,12 +99,12 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   },
   {
     type: 'function',
-    name: 'ralf_threads_reply',
-    description: 'Reply to a R.A.L.F. thread message addressed to this thread.',
+    name: 'boss_threads_reply',
+    description: 'Reply to a BOSS thread message addressed to this thread.',
     inputSchema: {
       type: 'object',
       properties: {
-        messageId: { type: 'string', description: 'Message id included in the incoming R.A.L.F. message.' },
+        messageId: { type: 'string', description: 'Message id included in the incoming BOSS message.' },
         message: { type: 'string', description: 'Reply for the sending thread.' },
         expectsReply: { type: 'boolean', description: 'Whether another response is useful.' }
       },
@@ -114,8 +114,8 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   },
   {
     type: 'function',
-    name: 'ralf_threads_spawn_worktree',
-    description: 'Fork this conversation into a new R.A.L.F. thread running in an isolated Git worktree.',
+    name: 'boss_threads_spawn_worktree',
+    description: 'Fork this conversation into a new BOSS thread running in an isolated Git worktree.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -139,8 +139,8 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   })),
   {
     type: 'function',
-    name: 'ralf_mcp_list',
-    description: 'List external MCP tools available through R.A.L.F. connections (Slack, Datadog, and other services). Pass tool to get one tool\'s full input schema before calling it.',
+    name: 'boss_mcp_list',
+    description: 'List external MCP tools available through BOSS connections (Slack, Datadog, and other services). Pass tool to get one tool\'s full input schema before calling it.',
     inputSchema: {
       type: 'object',
       properties: { tool: { type: 'string', description: 'Optional: tool name from the catalog; returns its full input schema.' } },
@@ -149,12 +149,12 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   },
   {
     type: 'function',
-    name: 'ralf_mcp_call',
-    description: 'Call an external MCP tool listed by ralf_mcp_list.',
+    name: 'boss_mcp_call',
+    description: 'Call an external MCP tool listed by boss_mcp_list.',
     inputSchema: {
       type: 'object',
       properties: {
-        tool: { type: 'string', description: 'Tool name from ralf_mcp_list.' },
+        tool: { type: 'string', description: 'Tool name from boss_mcp_list.' },
         arguments: { type: 'object', description: 'Arguments for the tool.', additionalProperties: true }
       },
       required: ['tool'],
@@ -215,7 +215,7 @@ function itemPart(sessionId: string, messageId: string, item: CodexItem): Part |
     // Blank line between summaries: single newlines collapse to spaces in markdown.
     return { id: item.id, type: 'reasoning', sessionID: sessionId, messageID: messageId, text: (item.summary ?? []).join('\n\n') }
   }
-  // Codex wraps R.A.L.F.-provided tools (ralf_mcp_call, thread tools) in its
+  // Codex wraps BOSS-provided tools (boss_mcp_call, thread tools) in its
   // exec harness and reports them as custom tool call items.
   if (item.type === 'customToolCall' || item.type === 'custom_tool_call') {
     return {
@@ -359,7 +359,7 @@ export class CodexBackend implements Backend {
       this.emit({ type: 'server.disconnected' })
     })
     await this.request('initialize', {
-      clientInfo: { name: 'ralf_desktop', title: 'R.A.L.F.', version: '0.1.0' },
+      clientInfo: { name: 'boss_desktop', title: 'BOSS', version: '0.1.0' },
       capabilities: {
         experimentalApi: true,
         requestAttestation: false
@@ -452,8 +452,8 @@ export class CodexBackend implements Backend {
   private handleServerRequest(id: RpcId, method: string, params: Record<string, unknown>): void {
     if (method === 'item/tool/call') {
       const tool = String(params.tool ?? '') as ThreadBusAgentTool
-      if (!this.threadBusHandler || (!tool.startsWith('ralf_threads_') && !tool.startsWith('ralf_team_') && !tool.startsWith('ralf_browser_') && !tool.startsWith('ralf_mcp_') && tool !== 'ralf_computer')) {
-        this.respond(id, { contentItems: [{ type: 'inputText', text: 'Unknown R.A.L.F. tool.' }], success: false })
+      if (!this.threadBusHandler || (!tool.startsWith('boss_threads_') && !tool.startsWith('boss_team_') && !tool.startsWith('boss_browser_') && !tool.startsWith('boss_mcp_') && tool !== 'boss_computer')) {
+        this.respond(id, { contentItems: [{ type: 'inputText', text: 'Unknown BOSS tool.' }], success: false })
         return
       }
       void this.threadBusHandler({
@@ -496,7 +496,7 @@ export class CodexBackend implements Backend {
       })
       return
     }
-    // R.A.L.F. cannot safely render these request types yet. Resolve them conservatively.
+    // BOSS cannot safely render these request types yet. Resolve them conservatively.
     if (method === 'item/tool/requestUserInput' || method === 'mcpServer/elicitation/request') {
       this.respond(id, { action: 'cancel', content: null })
     } else {

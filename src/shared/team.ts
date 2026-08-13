@@ -2,7 +2,7 @@ import type { BackendId } from './backend'
 
 export type TeamTaskStatus = 'proposed' | 'ready' | 'claimed' | 'working' | 'blocked' | 'review' | 'done'
 export type TeamExecutionState = 'starting' | 'running' | 'waiting' | 'needs-attention' | 'stopped'
-export type TeamAgentTool = 'ralf_team_board_read' | 'ralf_team_tasks_propose' | 'ralf_team_task_publish'
+export type TeamAgentTool = 'boss_team_board_read' | 'boss_team_tasks_propose' | 'boss_team_task_publish'
 
 export interface TeamProtocolVersion {
   current: number
@@ -23,7 +23,7 @@ export function teamProtocolsCompatible(remote: TeamProtocolVersion | undefined)
 export function assertCompatibleTeamProtocol(remote: TeamProtocolVersion | undefined): asserts remote is TeamProtocolVersion {
   if (teamProtocolsCompatible(remote)) return
   const remoteLabel = remote ? `v${remote.current} (minimum v${remote.minimumCompatible})` : 'an unversioned protocol'
-  throw new Error(`This team host uses ${remoteLabel}, but this R.A.L.F. supports collaboration protocol v${TEAM_PROTOCOL.current} (minimum v${TEAM_PROTOCOL.minimumCompatible}). Update R.A.L.F. on the older device before reconnecting.`)
+  throw new Error(`This team host uses ${remoteLabel}, but this BOSS supports collaboration protocol v${TEAM_PROTOCOL.current} (minimum v${TEAM_PROTOCOL.minimumCompatible}). Update BOSS on the older device before reconnecting.`)
 }
 
 export interface TeamMember {
@@ -150,14 +150,14 @@ export const TEAM_TASK_STATUSES: TeamTaskStatus[] = [
 
 export const TEAM_AGENT_TOOL_DEFINITIONS = [
   {
-    name: 'ralf_team_board_read' as const,
-    description: 'Read the shared R.A.L.F. team brief, people, tasks, and public updates. Private agent transcripts are never included.',
+    name: 'boss_team_board_read' as const,
+    description: 'Read the shared BOSS team brief, people, tasks, and public updates. Private agent transcripts are never included.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     readOnly: true
   },
   {
-    name: 'ralf_team_tasks_propose' as const,
-    description: 'Propose structured tasks on the connected R.A.L.F. team board for people to discuss and claim.',
+    name: 'boss_team_tasks_propose' as const,
+    description: 'Propose structured tasks on the connected BOSS team board for people to discuss and claim.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -184,7 +184,7 @@ export const TEAM_AGENT_TOOL_DEFINITIONS = [
     readOnly: false
   },
   {
-    name: 'ralf_team_task_publish' as const,
+    name: 'boss_team_task_publish' as const,
     description: 'Publish a concise team-visible update or status for the team task that started this thread. Never publishes the private transcript.',
     inputSchema: {
       type: 'object',
@@ -222,7 +222,7 @@ export function taskPrompt(board: TeamBoard, task: TeamTask): string {
     .map((id) => board.tasks.find((item) => item.id === id)?.title)
     .filter(Boolean)
   return [
-    '[R.A.L.F. TEAM TASK]',
+    '[BOSS TEAM TASK]',
     `Team: ${board.name}`,
     board.brief ? `Shared brief:\n${board.brief}` : '',
     `Task: ${task.title}`,
@@ -237,9 +237,9 @@ export function taskPrompt(board: TeamBoard, task: TeamTask): string {
 
 export function planningPrompt(board: TeamBoard): string {
   return [
-    '[R.A.L.F. TEAM PLANNING]',
+    '[BOSS TEAM PLANNING]',
     `Team: ${board.name}`,
     board.brief ? `Shared brief:\n${board.brief}` : 'The shared brief is currently empty. Ask the developer for the intended outcome and constraints.',
-    'Help the developer turn this brief into a small, coherent set of independently claimable tasks. Read the current board with ralf_team_board_read, discuss assumptions and sequencing, then use ralf_team_tasks_propose only when the developer agrees with the proposed breakdown. Do not assign tasks or start work. Private planning conversation stays on this machine; only the task cards you explicitly propose are shared.'
+    'Help the developer turn this brief into a small, coherent set of independently claimable tasks. Read the current board with boss_team_board_read, discuss assumptions and sequencing, then use boss_team_tasks_propose only when the developer agrees with the proposed breakdown. Do not assign tasks or start work. Private planning conversation stays on this machine; only the task cards you explicitly propose are shared.'
   ].join('\n\n')
 }

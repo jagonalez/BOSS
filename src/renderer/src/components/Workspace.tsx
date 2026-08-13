@@ -32,7 +32,7 @@ import { activeWorkspaceView, walkTabs } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
-const TAB_DRAG_TYPE = 'application/x-ralf-workspace-tab'
+const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
 
 const TAB_TYPES: Array<{
   kind: WorkspaceTabKind

@@ -102,11 +102,11 @@ export function Sidebar(): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null)
   const projectsRef = useRef<HTMLDivElement>(null)
   const [sidebarHidden, setSidebarHidden] = useState(() => {
-    try { return localStorage.getItem('ralf.sidebarHidden') === 'true' } catch { return false }
+    try { return localStorage.getItem('boss.sidebarHidden') === 'true' } catch { return false }
   })
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
-      const saved = Number(localStorage.getItem('ralf.sidebarWidth'))
+      const saved = Number(localStorage.getItem('boss.sidebarWidth'))
       return Number.isFinite(saved) && saved >= 210 ? saved : 268
     } catch {
       return 268
@@ -114,7 +114,7 @@ export function Sidebar(): React.JSX.Element {
   })
   const [projectsH, setProjectsH] = useState<number | null>(() => {
     try {
-      const saved = Number(localStorage.getItem('ralf.sidebarProjectsH'))
+      const saved = Number(localStorage.getItem('boss.sidebarProjectsH'))
       return Number.isFinite(saved) && saved > 0 ? saved : null
     } catch {
       return null
@@ -187,7 +187,7 @@ export function Sidebar(): React.JSX.Element {
       const h = Math.min(Math.max(60, startH + (ev.clientY - startY)), 480)
       setProjectsH(h)
       try {
-        localStorage.setItem('ralf.sidebarProjectsH', String(h))
+        localStorage.setItem('boss.sidebarProjectsH', String(h))
       } catch {
         /* ignore */
       }
@@ -204,7 +204,7 @@ export function Sidebar(): React.JSX.Element {
 
   const setHidden = (hidden: boolean): void => {
     setSidebarHidden(hidden)
-    try { localStorage.setItem('ralf.sidebarHidden', String(hidden)) } catch { /* ignore */ }
+    try { localStorage.setItem('boss.sidebarHidden', String(hidden)) } catch { /* ignore */ }
   }
 
   const onWidthDividerDown = (event: React.MouseEvent): void => {
@@ -214,7 +214,7 @@ export function Sidebar(): React.JSX.Element {
     const onMove = (next: MouseEvent): void => {
       const width = Math.min(480, Math.max(210, startWidth + next.clientX - startX))
       setSidebarWidth(width)
-      try { localStorage.setItem('ralf.sidebarWidth', String(width)) } catch { /* ignore */ }
+      try { localStorage.setItem('boss.sidebarWidth', String(width)) } catch { /* ignore */ }
     }
     const onUp = (): void => {
       window.removeEventListener('mousemove', onMove)
@@ -263,7 +263,7 @@ export function Sidebar(): React.JSX.Element {
     <aside className="sidebar" style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
       <div className="sidebar-head">
         <div className="logo">
-          <span>R.A.L.F.</span>
+          <span>BOSS</span>
         </div>
         <IconButton className="sidebar-collapse" label="Hide sidebar" onClick={() => setHidden(true)}>
           <PanelIcon size={14} />
@@ -398,7 +398,7 @@ export function Sidebar(): React.JSX.Element {
                   }
                 })
               )}
-              {menuItem('Open in Finder', () => void window.ralf.openPath(ctx.project!))}
+              {menuItem('Open in Finder', () => void window.boss.openPath(ctx.project!))}
             </>
           ) : ctx.session ? (
             <>
@@ -409,7 +409,7 @@ export function Sidebar(): React.JSX.Element {
                 appStore.setState({
                   confirm: {
                     title: 'Fork into a Git worktree?',
-                    message: 'R.A.L.F. will create an isolated branch from this thread\'s current HEAD and continue the conversation there. The original thread remains unchanged.',
+                    message: 'BOSS will create an isolated branch from this thread\'s current HEAD and continue the conversation there. The original thread remains unchanged.',
                     confirmLabel: 'Create worktree',
                     action: () => void forkSessionIntoWorktree(ctx.session!.id)
                   }
@@ -419,7 +419,7 @@ export function Sidebar(): React.JSX.Element {
                 appStore.setState({
                   confirm: {
                     title: 'Remove this worktree?',
-                    message: `R.A.L.F. will remove the worktree folder for ${ctx.session!.worktree!.branch}. Git refuses if it contains uncommitted or untracked work; the branch and conversation will be kept.`,
+                    message: `BOSS will remove the worktree folder for ${ctx.session!.worktree!.branch}. Git refuses if it contains uncommitted or untracked work; the branch and conversation will be kept.`,
                     confirmLabel: 'Remove worktree',
                     destructive: true,
                     action: () => void removeSessionWorktree(ctx.session!.id)
@@ -434,7 +434,7 @@ export function Sidebar(): React.JSX.Element {
                       appStore.setState({
                         confirm: {
                           title: `Continue in ${BACKEND_SHORT_LABELS[backend.id]}?`,
-                          message: 'R.A.L.F. will create a new thread with a bounded context handoff. The original thread remains unchanged.',
+                          message: 'BOSS will create a new thread with a bounded context handoff. The original thread remains unchanged.',
                           confirmLabel: `Continue in ${BACKEND_SHORT_LABELS[backend.id]}`,
                           action: () => void cloneThreadToBackend(ctx.session!.id, backend.id)
                         }
@@ -460,7 +460,7 @@ export function Sidebar(): React.JSX.Element {
                 appStore.setState({
                   confirm: {
                     title: 'Remove thread?',
-                    message: 'Remove this thread from R.A.L.F.? Some backends may retain their own native history.',
+                    message: 'Remove this thread from BOSS? Some backends may retain their own native history.',
                     confirmLabel: 'Remove',
                     destructive: true,
                     action: () => void deleteSession(ctx.session!.id)

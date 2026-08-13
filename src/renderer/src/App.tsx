@@ -14,6 +14,7 @@ import { CommitDialog } from './components/CommitDialog'
 import { RenameModal } from './components/RenameModal'
 import { ConfirmModal } from './components/ConfirmModal'
 import { SettingsModal } from './components/SettingsModal'
+import { UpdateBanner } from './components/UpdateBanner'
 import {
   refreshAgents,
   refreshConfig,
@@ -105,10 +106,10 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     let refreshTimer: number | undefined
 
-    document.documentElement.dataset.platform = window.ralf.platform()
-    void window.ralf.subscribeEvents()
+    document.documentElement.dataset.platform = window.boss.platform()
+    void window.boss.subscribeEvents()
 
-    const offEvent = window.ralf.onEvent((data) => {
+    const offEvent = window.boss.onEvent((data) => {
       let ev: Record<string, unknown>
       try {
         ev = JSON.parse(data) as Record<string, unknown>
@@ -227,7 +228,7 @@ export function App(): React.JSX.Element {
       }
     })
 
-    const offStatus = window.ralf.onServerStatusChanged((info) => {
+    const offStatus = window.boss.onServerStatusChanged((info) => {
       appStore.setState({
         serverUrl: info.url,
         serverVersion: info.version,
@@ -235,28 +236,28 @@ export function App(): React.JSX.Element {
       })
     })
 
-    const offProgress = window.ralf.onOptionalProgress((evt) => {
+    const offProgress = window.boss.onOptionalProgress((evt) => {
       appStore.setState((s) => ({
         optionalProgress: { ...s.optionalProgress, [evt.id]: evt }
       }))
       if (evt.phase === 'done') void refreshOptional()
     })
 
-    const offSpeech = window.ralf.onSpeechStatusChanged(applySpeechStatus)
+    const offSpeech = window.boss.onSpeechStatusChanged(applySpeechStatus)
 
-    const offSites = window.ralf.onSitesChanged((sites) => appStore.setState({ sites }))
-    void window.ralf
+    const offSites = window.boss.onSitesChanged((sites) => appStore.setState({ sites }))
+    void window.boss
       .sitesCfGet()
       .then((cf) => appStore.setState({ cloudflare: cf }))
       .catch(() => {})
-    void window.ralf
+    void window.boss
       .sitesList()
       .then((sites) => appStore.setState({ sites }))
       .catch(() => {})
 
-    void window.ralf.ttsStatus().then((st) => applySpeechStatus({ tts: st, asr: appStore.getState().asr }))
+    void window.boss.ttsStatus().then((st) => applySpeechStatus({ tts: st, asr: appStore.getState().asr }))
 
-    void window.ralf
+    void window.boss
       .serverInfo()
       .then((info) => {
         appStore.setState({
@@ -270,11 +271,11 @@ export function App(): React.JSX.Element {
 
     void refreshOptional()
     void refreshProject()
-    void window.ralf
+    void window.boss
       .computerUseStatus()
       .then((st) => appStore.setState({ computerUse: st }))
       .catch(() => {})
-    void window.ralf
+    void window.boss
       .computerUsePermissions()
       .then((perms) => appStore.setState({ computerUsePerms: perms }))
       .catch(() => {})
@@ -286,7 +287,7 @@ export function App(): React.JSX.Element {
       offSpeech()
       offSites()
       window.clearTimeout(refreshTimer)
-      void window.ralf.unsubscribeEvents()
+      void window.boss.unsubscribeEvents()
     }
   }, [])
 
@@ -300,7 +301,7 @@ export function App(): React.JSX.Element {
     }
     const onFocus = (): void => {
       clearAttention()
-      void window.ralf.computerUsePermissions().then((perms) => appStore.setState({ computerUsePerms: perms }))
+      void window.boss.computerUsePermissions().then((perms) => appStore.setState({ computerUsePerms: perms }))
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('focus', onFocus)
@@ -313,8 +314,8 @@ export function App(): React.JSX.Element {
   const attention = useStore(appStore, (s) => s.attention)
   useEffect(() => {
     document.title = attention
-      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'error' ? '✕ ' : '✓ '}R.A.L.F.`
-      : 'R.A.L.F.'
+      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'error' ? '✕ ' : '✓ '}BOSS`
+      : 'BOSS'
   }, [attention])
 
   const page = (() => {
@@ -335,6 +336,7 @@ export function App(): React.JSX.Element {
     <div className="app">
       <Sidebar />
       <div className="main">
+        <UpdateBanner />
         {page}
       </div>
       <ModelSwitchModal />

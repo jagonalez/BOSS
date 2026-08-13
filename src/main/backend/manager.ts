@@ -29,7 +29,7 @@ interface ThreadBinding {
   id: string
   backendId: BackendId
   nativeSessionId: string
-  nativeSessionOwnership: 'ralf' | 'imported'
+  nativeSessionOwnership: 'boss' | 'imported'
   projectId: string
   projectPath: string
   executionPath: string
@@ -326,7 +326,7 @@ export class BackendManager {
           const scope = projectScope(legacy.projectPath)
           const binding: ThreadBinding = {
             ...legacy,
-            nativeSessionOwnership: legacy.backendId === 'opencode' ? 'imported' : 'ralf',
+            nativeSessionOwnership: legacy.backendId === 'opencode' ? 'imported' : 'boss',
             projectId: scope.projectId,
             projectPath: scope.projectPath,
             executionPath: scope.executionPath
@@ -336,8 +336,8 @@ export class BackendManager {
         this.save()
       }
     } catch {
-      /* Preserve pre-R.A.L.F. OpenCode sessions once on first launch or migration. */
-      /* First R.A.L.F. launch starts with no thread bindings. */
+      /* Preserve pre-BOSS OpenCode sessions once on first launch or migration. */
+      /* First BOSS launch starts with no thread bindings. */
     }
     this.migrateLegacyCodexParts()
   }
@@ -407,7 +407,7 @@ export class BackendManager {
 
   private binding(threadId: string): ThreadBinding {
     const binding = this.bindings.get(threadId)
-    if (!binding) throw new Error(`R.A.L.F. thread not found: ${threadId}`)
+    if (!binding) throw new Error(`BOSS thread not found: ${threadId}`)
     this.backends[binding.backendId].setSessionDirectory?.(binding.nativeSessionId, binding.executionPath)
     if (binding.worktree?.status === 'active') void this.worktrees?.touch(binding.worktree.id)
     return binding
@@ -627,7 +627,7 @@ export class BackendManager {
   ): Promise<SessionInfo> {
     const backend = await this.ensureStarted(backendId)
     const native = await backend.sessionCreate(title, scope.executionPath || undefined)
-    const binding = this.registerNative(backendId, native, 'ralf', lineage)
+    const binding = this.registerNative(backendId, native, 'boss', lineage)
     binding.title = title ?? native.title
     binding.projectId = scope.projectId
     binding.projectPath = scope.projectPath
@@ -669,10 +669,10 @@ export class BackendManager {
     const previousOwnership = binding.nativeSessionOwnership
     binding.backendId = backendId
     binding.nativeSessionId = nextNative.id
-    binding.nativeSessionOwnership = 'ralf'
-    if (previousOwnership === 'ralf') {
+    binding.nativeSessionOwnership = 'boss'
+    if (previousOwnership === 'boss') {
       // The binding already points at the replacement so an old backend's
-      // session.deleted event cannot remove the preserved R.A.L.F. thread.
+      // session.deleted event cannot remove the preserved BOSS thread.
       await previousBackend.sessionDelete(previousNativeSessionId).catch(() => {})
     }
 
@@ -687,7 +687,7 @@ export class BackendManager {
 
   async sessionDelete(threadId: string): Promise<void> {
     const binding = this.binding(threadId)
-    if (binding.nativeSessionOwnership === 'ralf') {
+    if (binding.nativeSessionOwnership === 'boss') {
       const backend = await this.ensureStarted(binding.backendId)
       await backend.sessionDelete(binding.nativeSessionId)
     }
@@ -951,7 +951,7 @@ export class BackendManager {
     const backend = await this.ensureStarted(source.backendId)
     const native = await backend.fork(source.nativeSessionId, messageId)
     if (native.id === source.nativeSessionId) return this.clone(threadId, source.backendId)
-    const binding = this.registerNative(source.backendId, native, 'ralf', {
+    const binding = this.registerNative(source.backendId, native, 'boss', {
       kind: 'fork',
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
@@ -971,7 +971,7 @@ export class BackendManager {
     const diffs = await sourceBackend.diffGet(source.nativeSessionId).catch(() => [])
     const diffSummary = diffs.slice(0, 30).map((diff) => `- ${diff.path}: ${diff.status ?? 'changed'}`).join('\n')
     return [
-      '[R.A.L.F. CONTEXT HANDOFF]',
+      '[BOSS CONTEXT HANDOFF]',
       `Source thread: ${source.title ?? sourceThreadId}`,
       `Source backend: ${source.backendId}`,
       `Project: ${source.projectId === 'global' ? 'Global chat' : source.projectPath}`,

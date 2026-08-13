@@ -7581,3 +7581,46 @@ select:hover {
   .team-share-card { grid-column: auto; }
   .team-form-row { flex-direction: column; }
 }
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--type-control);
+  color: var(--text);
+}
+
+.update-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.update-banner-action {
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--type-control);
+  cursor: pointer;
+}
+
+.update-banner-action:hover {
+  background: var(--accent-hover);
+}
+
+.update-banner-dismiss {
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.update-banner-dismiss:hover {
+  color: var(--text);
+}

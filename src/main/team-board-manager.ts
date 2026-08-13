@@ -199,7 +199,7 @@ export class TeamBoardManager {
 
   private async remoteRequest<T>(request: BackendRequest): Promise<T> {
     const connection = this.state.connection
-    if (!connection) throw new Error('This R.A.L.F. is not connected to a team host.')
+    if (!connection) throw new Error('This BOSS is not connected to a team host.')
     const response = await fetch(`${connection.url}/api/request`, {
       method: 'POST',
       headers: {
@@ -366,7 +366,7 @@ export class TeamBoardManager {
     const task = board.tasks.find((item) => item.id === request.taskId)
     if (!task) throw new Error('That task no longer exists.')
     if (request.expectedRevision !== undefined && task.revision !== request.expectedRevision) {
-      throw new Error('This task changed on another R.A.L.F. Refresh it before saving your changes.')
+      throw new Error('This task changed on another BOSS. Refresh it before saving your changes.')
     }
     this.patchTask(task, request.patch, actor)
     board.updatedAt = now()
@@ -507,15 +507,15 @@ export class TeamBoardManager {
 
   async agentCall(threadId: string, tool: TeamAgentTool, args: unknown): Promise<unknown> {
     this.load()
-    if (tool === 'ralf_team_board_read') {
+    if (tool === 'boss_team_board_read') {
       const state = await this.snapshot()
-      if (!state.board) throw new Error('This R.A.L.F. is not connected to a team board.')
+      if (!state.board) throw new Error('This BOSS is not connected to a team board.')
       const binding = this.state.localBindings.find((item) => item.threadId === threadId && item.boardId === state.board?.id)
       return { board: state.board, currentTaskId: binding?.taskId }
     }
-    if (tool === 'ralf_team_tasks_propose') {
+    if (tool === 'boss_team_tasks_propose') {
       const state = await this.snapshot()
-      if (!state.board) throw new Error('This R.A.L.F. is not connected to a team board.')
+      if (!state.board) throw new Error('This BOSS is not connected to a team board.')
       const tasks = args && typeof args === 'object' ? (args as { tasks?: unknown }).tasks : undefined
       if (!Array.isArray(tasks) || tasks.length === 0) throw new Error('Pass at least one proposed task.')
       if (tasks.length > 20) throw new Error('Propose at most 20 tasks at a time.')
@@ -539,7 +539,7 @@ export class TeamBoardManager {
       }
       return result.board
     }
-    if (tool === 'ralf_team_task_publish') {
+    if (tool === 'boss_team_task_publish') {
       const binding = this.state.localBindings.find((item) => item.threadId === threadId)
       if (!binding) throw new Error('This thread was not started from a team task.')
       const input = args && typeof args === 'object' ? args as { update?: unknown; status?: unknown } : {}
@@ -557,7 +557,7 @@ export class TeamBoardManager {
       }) as TeamSnapshot
       return result.board?.tasks.find((task) => task.id === binding.taskId)
     }
-    throw new Error('Unknown R.A.L.F. team tool.')
+    throw new Error('Unknown BOSS team tool.')
   }
 
   async handle(request: BackendRequest): Promise<unknown> {
@@ -618,7 +618,7 @@ export class TeamBoardManager {
       case 'team.peer.join': {
         if (!request.viaPeer) throw new Error('Invalid peer join request.')
         const board = this.state.hosted
-        if (!board) throw new Error('This R.A.L.F. is not hosting a team board.')
+        if (!board) throw new Error('This BOSS is not hosting a team board.')
         this.touchMember(board, request.member)
         this.save()
         this.emit()

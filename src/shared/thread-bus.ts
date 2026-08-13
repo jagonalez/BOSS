@@ -52,13 +52,13 @@ export interface ThreadBusConnection {
 }
 
 export type ThreadBusAgentTool =
-  | 'ralf_threads_list'
-  | 'ralf_threads_read'
-  | 'ralf_threads_send'
-  | 'ralf_threads_reply'
-  | 'ralf_threads_spawn_worktree'
-  | 'ralf_mcp_list'
-  | 'ralf_mcp_call'
+  | 'boss_threads_list'
+  | 'boss_threads_read'
+  | 'boss_threads_send'
+  | 'boss_threads_reply'
+  | 'boss_threads_spawn_worktree'
+  | 'boss_mcp_list'
+  | 'boss_mcp_call'
   | `mcp_${string}`
   | TeamAgentTool
   | QaAgentTool
