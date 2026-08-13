@@ -17,6 +17,23 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+# Notarization runs inside `npm run dist`. Check the credentials up front rather
+# than after a multi-minute build, and fail rather than silently shipping an
+# unsigned build that auto-update cannot install.
+# electron-builder reads the team id from APPLE_TEAM_ID, not from the config.
+export APPLE_TEAM_ID="${APPLE_TEAM_ID:-78UU74XQFK}"
+
+if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]; then
+  echo "APPLE_ID and APPLE_APP_SPECIFIC_PASSWORD must be set to notarize." >&2
+  echo "Create an app-specific password at appleid.apple.com." >&2
+  exit 1
+fi
+
+if ! security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
+  echo "No Developer ID Application certificate in the keychain." >&2
+  exit 1
+fi
+
 # npm version creates the commit and the vX.Y.Z tag.
 NEW_VERSION="$(npm version "$BUMP" --no-git-tag-version)"
 VERSION="${NEW_VERSION#v}"
