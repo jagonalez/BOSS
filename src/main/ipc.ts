@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import {
   IpcChannels,
   type ApiRequest,
@@ -22,6 +23,7 @@ import type { BackendRequest } from '@shared/backend'
 import type { AsrTranscribeRequest, TtsSpeakRequest } from '@shared/ipc'
 import type { ReviewManager } from './review-manager'
 import { projectCheckouts } from './project-identity'
+import { loadState, saveState } from './state-store'
 
 export interface IpcDeps {
   server: OpenCodeServer
@@ -188,12 +190,32 @@ export function registerIpc(deps: IpcDeps): void {
     // terminal surfaces retain their own checkout-specific context paths.
     const scope = deps.backends.scopeFor(path)
     await deps.backends.setProject(scope.projectPath)
+    // Record the project here rather than in OpenCodeServer.setProject, so a
+    // project opened without opencode is still remembered and still listed.
+    if (scope.projectPath) {
+      const known = loadState().projects ?? []
+      saveState({
+        projectPath: scope.projectPath,
+        projects: known.includes(scope.projectPath) ? known : [...known, scope.projectPath]
+      })
+    }
     return {
       path: scope.projectPath,
       checkoutPath: scope.executionPath,
       checkouts: projectCheckouts(scope.projectPath),
       healthy: deps.server.info.healthy
     }
+  })
+
+  ipcMain.handle(IpcChannels.ProjectList, () =>
+    (loadState().projects ?? []).filter((path) => existsSync(path))
+  )
+
+  ipcMain.handle(IpcChannels.ProjectForget, (_e, path: string) => {
+    const known = loadState().projects ?? []
+    const next = known.filter((candidate) => candidate !== path)
+    saveState({ projects: next })
+    return next
   })
 
   ipcMain.handle(IpcChannels.ProjectChoose, async () => {

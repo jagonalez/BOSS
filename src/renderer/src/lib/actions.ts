@@ -2,7 +2,7 @@ import { appStore, type Attachment } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
-import type { ReviewRun, SessionMeta } from '@shared/opencode'
+import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
@@ -683,7 +683,12 @@ export async function clearThreadBusFailures(): Promise<void> {
 
 export async function refreshProjects(): Promise<void> {
   try {
-    const listed = await OpenCode.projectList()
+    // BOSS owns the project list. opencode only knows a directory once it has
+    // served a session there, so sourcing the list from it hid freshly opened
+    // projects and emptied the sidebar whenever opencode was not running.
+    // A backend's own projects are offered for import, never merged silently.
+    const owned = await window.boss.projectList().catch((): string[] => [])
+    const listed: Project[] = owned.map((path) => ({ id: path, path }))
     const state = appStore.getState()
     const checkoutPaths = new Set(state.projectCheckouts.map((checkout) => checkout.path))
     const projects = listed.map((project) => {
