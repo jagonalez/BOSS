@@ -21,7 +21,7 @@ import {
 import { ChatIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
-import { useProjectColor } from '../lib/project-color'
+import { useCheckoutColor } from '../lib/checkout-color'
 
 /** Threads shown per project before "Show N more". */
 const THREADS_PER_PROJECT = 20
@@ -65,7 +65,7 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
   const preferredModel = useStore(appStore, (s) => s.modelsBySession[session.id])
   const model = preferredModel ?? session.model?.id
   const backend = BACKEND_SHORT_LABELS[session.backendId ?? 'opencode']
-  const rowColor = useProjectColor(session.projectPath)
+  const rowColor = useCheckoutColor(session.executionPath ?? session.worktree?.path ?? session.projectPath)
   const details = [
     backend,
     model?.split('/').pop(),

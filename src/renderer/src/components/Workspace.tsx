@@ -31,7 +31,7 @@ import {
 import { activeWorkspaceView, groupThreadId, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
-import { useProjectColor } from '../lib/project-color'
+import { useCheckoutColor } from '../lib/checkout-color'
 
 const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
 
@@ -128,10 +128,11 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
   const agentDriven = useStore(appStore, (state) =>
     item.kind === 'browser' && Boolean(state.browseAgentActivity[`workspace-${item.id}`])
   )
-  const threadProject = useStore(appStore, (state) =>
-    state.sessions.find((session) => session.id === item.sessionId)?.projectPath
-  )
-  const threadColor = useProjectColor(threadProject)
+  const threadProject = useStore(appStore, (state) => {
+    const session = state.sessions.find((candidate) => candidate.id === item.sessionId)
+    return session?.executionPath ?? session?.worktree?.path ?? session?.projectPath
+  })
+  const threadColor = useCheckoutColor(threadProject)
 
   return (
     <>
@@ -351,7 +352,7 @@ function PaneOwner({ group }: { group: WorkspaceGroup }): React.JSX.Element | nu
   // appears. Workspaces mix projects on purpose, so this is the only cue that
   // says which threads belong together. Called before the early return: hooks
   // cannot sit behind a condition.
-  const hue = useProjectColor(session?.projectPath)
+  const hue = useCheckoutColor(session?.executionPath ?? session?.worktree?.path ?? session?.projectPath)
   if (!session) return null
 
   return (
