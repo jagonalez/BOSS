@@ -1,7 +1,6 @@
 import { app, BrowserWindow, session, shell } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createHash } from 'node:crypto'
 import { OpenCodeServer, resolveOpenCodeBin } from './opencode-server'
 import { ApiClient } from './api-client'
 import { EventStream } from './event-stream'
@@ -31,22 +30,24 @@ import { GitHubReviewProvider } from './github-review-provider'
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
 // Dev runs get their own userData so a broken dev build cannot corrupt the
-// installed app's workspaces, transcripts, and backend config. The suffix
-// includes a hash of the checkout path, because the single-instance lock is
-// keyed on userData: without it, a second clone of BOSS silently loses the
-// lock to the first and exits. This must run before anything below reads
-// app.getPath('userData').
+// installed app's workspaces, transcripts, and backend config. Every checkout
+// shares that one dev profile, so threads and settings follow you between
+// clones. The single-instance lock is keyed on userData, so running two clones
+// at once needs BOSS_PROFILE to separate them. This must run before anything
+// below reads app.getPath('userData').
 if (process.env.ELECTRON_RENDERER_URL) {
-  const checkout = createHash('sha256').update(app.getAppPath()).digest('hex').slice(0, 8)
-  app.setPath('userData', `${app.getPath('userData')}-dev-${checkout}`)
+  const profile = process.env.BOSS_PROFILE?.trim()
+  const suffix = profile ? `-dev-${profile.replace(/[^A-Za-z0-9_-]/g, '-')}` : '-dev'
+  app.setPath('userData', `${app.getPath('userData')}${suffix}`)
 }
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
-  // Exiting silently here looks identical to a crash. Say which profile is
-  // already held, since a checkout elsewhere on disk claims the same lock.
+  // Exiting silently here looks identical to a crash. Name the profile that is
+  // taken, since another checkout on disk shares it.
   process.stderr.write(
-    `[boss] another instance already owns ${app.getPath('userData')} — focusing it and exiting.\n`
+    `[boss] another instance already owns ${app.getPath('userData')} — focusing it and exiting.\n` +
+      '[boss] to run a second checkout at the same time, set BOSS_PROFILE=<name>.\n'
   )
   app.quit()
 }
