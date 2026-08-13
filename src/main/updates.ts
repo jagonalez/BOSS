@@ -7,7 +7,7 @@ import { isNewer } from '@shared/version'
 
 const execFileAsync = promisify(execFile)
 
-const REPO = 'jagonalez/boss'
+const REPO = 'jagonalez/ralf'
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`
 

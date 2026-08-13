@@ -24,9 +24,16 @@ fi
 # avoids electron-builder's deprecation warning.
 export APPLE_TEAM_ID="${APPLE_TEAM_ID:-78UU74XQFK}"
 
-if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]; then
+# Apple holds first submissions of an app identity for in-depth analysis, which
+# has run past a day. SKIP_NOTARIZE=1 cuts a signed but unnotarized release
+# rather than blocking the terminal on Apple's queue.
+if [ "${SKIP_NOTARIZE:-}" = "1" ]; then
+  echo "==> SKIP_NOTARIZE=1: signing without notarization"
+  unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD
+elif [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]; then
   echo "APPLE_ID and APPLE_APP_SPECIFIC_PASSWORD must be set to notarize." >&2
-  echo "Create an app-specific password at appleid.apple.com." >&2
+  echo "Create an app-specific password at appleid.apple.com," >&2
+  echo "or re-run with SKIP_NOTARIZE=1 to cut a signed-only build." >&2
   exit 1
 fi
 
@@ -39,6 +46,18 @@ fi
 NEW_VERSION="$(npm version "$BUMP" --no-git-tag-version)"
 VERSION="${NEW_VERSION#v}"
 echo "==> Releasing $NEW_VERSION"
+
+# Notarization can block for a day, so interrupting a release is expected.
+# Put the version back rather than leaving a bumped package.json that the
+# dirty-tree check above would reject on the next attempt.
+restore_version() {
+  local status=$?
+  if [ "$status" -ne 0 ] && [ -z "${RELEASE_PUBLISHED:-}" ]; then
+    git checkout -- package.json package-lock.json 2>/dev/null || true
+    echo "==> Release aborted; version restored." >&2
+  fi
+}
+trap restore_version EXIT INT TERM
 
 echo "==> Typechecking"
 npm run typecheck
@@ -55,14 +74,16 @@ if [ ! -f "$DMG" ]; then
   exit 1
 fi
 
+# Past this point the version is committed, so the abort trap must not revert it.
 git add package.json package-lock.json
 git commit -m "Release $NEW_VERSION"
+RELEASE_PUBLISHED=1
 git tag "$NEW_VERSION"
 git push origin HEAD --tags
 
 echo "==> Publishing $DMG"
 gh release create "$NEW_VERSION" "$DMG" \
-  --repo jagonalez/boss \
+  --repo jagonalez/ralf \
   --title "$NEW_VERSION" \
   --generate-notes
 
