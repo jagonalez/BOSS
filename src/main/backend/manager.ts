@@ -652,13 +652,9 @@ export class BackendManager {
     const nativeSessions = needsOpenCode
       ? await this.ensureStarted('opencode').then((backend) => backend.sessionsList()).catch(() => [])
       : []
-    const currentProjectId = this.currentScope.projectId
-
-    const current = [...this.bindings.values()].filter((binding) => {
-      if (!this.projectPath) return true
-      return binding.projectId === currentProjectId || binding.projectId === 'global'
-    })
-    return current
+    // Every thread, not just the open project's: the sidebar lists threads
+    // under each project, so filtering here left the others permanently empty.
+    return [...this.bindings.values()]
       .map((binding) => {
         const native = binding.backendId === 'opencode'
           ? nativeSessions.find((session) => session.id === binding.nativeSessionId)
