@@ -149,7 +149,7 @@ export class WorktreeManager {
     const id = randomUUID()
     const shortId = id.slice(0, 8)
     const name = slug(input.title ?? 'thread')
-    const branch = `ralf/${name}-${shortId}`
+    const branch = `boss/${name}-${shortId}`
     const repoKey = `${slug(basename(repoRoot))}-${createHash('sha256').update(repoRoot).digest('hex').slice(0, 8)}`
     const worktreePath = join(this.options.root, repoKey, `${name}-${shortId}`)
     await mkdir(dirname(worktreePath), { recursive: true })
@@ -202,7 +202,7 @@ export class WorktreeManager {
   async remove(id: string): Promise<WorktreeInfo> {
     await this.load()
     const item = this.state.worktrees.find((worktree) => worktree.id === id)
-    if (!item) throw new Error('R.A.L.F. worktree not found.')
+    if (!item) throw new Error('BOSS worktree not found.')
     if (item.status === 'removed') return { ...item }
     const status = await git(item.path, ['status', '--porcelain', '--untracked-files=all'])
     if (status.trim()) throw new Error('This worktree has uncommitted or untracked changes and was not removed.')

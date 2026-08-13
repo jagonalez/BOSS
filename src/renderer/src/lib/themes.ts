@@ -23,6 +23,14 @@ export interface ThemeColors {
   purple: string
   cyan: string
   shadow: string
+  diffAdditionBg: string
+  diffAdditionGutter: string
+  diffAdditionText: string
+  diffDeletionBg: string
+  diffDeletionGutter: string
+  diffDeletionText: string
+  diffHunkBg: string
+  diffHunkText: string
 }
 
 export interface SyntaxPalette {
@@ -63,30 +71,31 @@ export interface ThemeDef {
   id: string
   label: string
   description: string
-  category: 'R.A.L.F.' | 'Community' | 'Accessibility'
+  category: 'BOSS' | 'Community' | 'Accessibility'
   appearance: 'dark' | 'light'
   colors: ThemeColors
   syntax: SyntaxPalette
   terminal: TerminalPalette
 }
 
-// Community palettes follow their upstream projects so R.A.L.F., Highlight.js,
+// Community palettes follow their upstream projects so BOSS, Highlight.js,
 // and xterm share one visual source of truth:
 // - Tokyo Night Moon: github.com/folke/tokyonight.nvim (Apache-2.0)
 // - Catppuccin: github.com/catppuccin/palette (MIT)
 // - Rosé Pine: github.com/rose-pine/palette (MIT)
 export const THEMES: ThemeDef[] = [
   {
-    id: 'ralf-dark',
-    label: 'R.A.L.F. Dark',
+    id: 'boss-dark',
+    label: 'BOSS Dark',
     description: 'Neutral developer UI',
-    category: 'R.A.L.F.',
+    category: 'BOSS',
     appearance: 'dark',
     colors: {
       canvas: '#0d1117', sidebar: '#090d13', surface: '#161b22', surfaceRaised: '#21262d', inset: '#010409', hover: '#1f252d', selected: '#252d38',
       border: '#30363d', borderStrong: '#484f58', text: '#f0f6fc', textMuted: '#b1bac4', textSubtle: '#7d8590', accent: '#58a6ff', accentHover: '#79c0ff',
       accentSoft: 'rgba(56, 139, 253, 0.17)', success: '#3fb950', successSoft: 'rgba(46, 160, 67, 0.16)', warning: '#d29922', warningSoft: 'rgba(187, 128, 9, 0.16)',
-      danger: '#f85149', dangerSoft: 'rgba(248, 81, 73, 0.16)', purple: '#bc8cff', cyan: '#39c5cf', shadow: 'rgba(1, 4, 9, 0.7)'
+      danger: '#f85149', dangerSoft: 'rgba(248, 81, 73, 0.16)', purple: '#bc8cff', cyan: '#39c5cf', shadow: 'rgba(1, 4, 9, 0.7)',
+      diffAdditionBg: '#12261b', diffAdditionGutter: '#1b4728', diffAdditionText: '#d8f3df', diffDeletionBg: '#321b1d', diffDeletionGutter: '#64262b', diffDeletionText: '#ffd8d5', diffHunkBg: '#202a44', diffHunkText: '#a5c8ff'
     },
     syntax: {
       foreground: '#e6edf3', comment: '#8b949e', keyword: '#ff7b72', string: '#a5d6ff', number: '#79c0ff', title: '#d2a8ff', variable: '#ffa657',
@@ -98,16 +107,17 @@ export const THEMES: ThemeDef[] = [
     }
   },
   {
-    id: 'ralf-light',
-    label: 'R.A.L.F. Light',
+    id: 'boss-light',
+    label: 'BOSS Light',
     description: 'Crisp and understated',
-    category: 'R.A.L.F.',
+    category: 'BOSS',
     appearance: 'light',
     colors: {
       canvas: '#f6f8fa', sidebar: '#f0f3f6', surface: '#ffffff', surfaceRaised: '#f3f4f6', inset: '#eef1f4', hover: '#eaeef2', selected: '#dbeafe',
       border: '#d0d7de', borderStrong: '#afb8c1', text: '#1f2328', textMuted: '#59636e', textSubtle: '#818b98', accent: '#0969da', accentHover: '#0550ae',
       accentSoft: 'rgba(9, 105, 218, 0.11)', success: '#1a7f37', successSoft: 'rgba(26, 127, 55, 0.11)', warning: '#9a6700', warningSoft: 'rgba(154, 103, 0, 0.11)',
-      danger: '#cf222e', dangerSoft: 'rgba(207, 34, 46, 0.10)', purple: '#8250df', cyan: '#1b7c83', shadow: 'rgba(31, 35, 40, 0.18)'
+      danger: '#cf222e', dangerSoft: 'rgba(207, 34, 46, 0.10)', purple: '#8250df', cyan: '#1b7c83', shadow: 'rgba(31, 35, 40, 0.18)',
+      diffAdditionBg: '#dafbe1', diffAdditionGutter: '#aceebb', diffAdditionText: '#1f2328', diffDeletionBg: '#ffebe9', diffDeletionGutter: '#ffcecb', diffDeletionText: '#1f2328', diffHunkBg: '#ddf4ff', diffHunkText: '#0550ae'
     },
     syntax: {
       foreground: '#24292f', comment: '#6e7781', keyword: '#cf222e', string: '#0a3069', number: '#0550ae', title: '#8250df', variable: '#953800',
@@ -128,7 +138,8 @@ export const THEMES: ThemeDef[] = [
       canvas: '#222436', sidebar: '#1e2030', surface: '#282a3f', surfaceRaised: '#2f334d', inset: '#191b29', hover: '#2f334d', selected: '#394b70',
       border: '#3b4261', borderStrong: '#545c7e', text: '#c8d3f5', textMuted: '#a9b8e8', textSubtle: '#737aa2', accent: '#82aaff', accentHover: '#65bcff',
       accentSoft: 'rgba(130, 170, 255, 0.17)', success: '#c3e88d', successSoft: 'rgba(195, 232, 141, 0.13)', warning: '#ffc777', warningSoft: 'rgba(255, 199, 119, 0.13)',
-      danger: '#ff757f', dangerSoft: 'rgba(255, 117, 127, 0.14)', purple: '#c099ff', cyan: '#86e1fc', shadow: 'rgba(17, 18, 30, 0.66)'
+      danger: '#ff757f', dangerSoft: 'rgba(255, 117, 127, 0.14)', purple: '#c099ff', cyan: '#86e1fc', shadow: 'rgba(17, 18, 30, 0.66)',
+      diffAdditionBg: '#2a3b39', diffAdditionGutter: '#3b594a', diffAdditionText: '#d8edce', diffDeletionBg: '#49303d', diffDeletionGutter: '#6b3b48', diffDeletionText: '#ffd8df', diffHunkBg: '#303b5d', diffHunkText: '#b7ceff'
     },
     syntax: {
       foreground: '#c8d3f5', comment: '#636da6', keyword: '#c099ff', string: '#c3e88d', number: '#ff966c', title: '#82aaff', variable: '#fca7ea',
@@ -149,7 +160,8 @@ export const THEMES: ThemeDef[] = [
       canvas: '#1e1e2e', sidebar: '#181825', surface: '#252536', surfaceRaised: '#313244', inset: '#11111b', hover: '#313244', selected: '#3b3c52',
       border: '#45475a', borderStrong: '#585b70', text: '#cdd6f4', textMuted: '#bac2de', textSubtle: '#7f849c', accent: '#89b4fa', accentHover: '#b4befe',
       accentSoft: 'rgba(137, 180, 250, 0.16)', success: '#a6e3a1', successSoft: 'rgba(166, 227, 161, 0.13)', warning: '#f9e2af', warningSoft: 'rgba(249, 226, 175, 0.13)',
-      danger: '#f38ba8', dangerSoft: 'rgba(243, 139, 168, 0.14)', purple: '#cba6f7', cyan: '#94e2d5', shadow: 'rgba(10, 10, 16, 0.66)'
+      danger: '#f38ba8', dangerSoft: 'rgba(243, 139, 168, 0.14)', purple: '#cba6f7', cyan: '#94e2d5', shadow: 'rgba(10, 10, 16, 0.66)',
+      diffAdditionBg: '#25372d', diffAdditionGutter: '#36513d', diffAdditionText: '#d8f0d5', diffDeletionBg: '#402a35', diffDeletionGutter: '#623748', diffDeletionText: '#ffdce7', diffHunkBg: '#30314c', diffHunkText: '#cdd8ff'
     },
     syntax: {
       foreground: '#cdd6f4', comment: '#6c7086', keyword: '#cba6f7', string: '#a6e3a1', number: '#fab387', title: '#89b4fa', variable: '#f5c2e7',
@@ -170,7 +182,8 @@ export const THEMES: ThemeDef[] = [
       canvas: '#232136', sidebar: '#1f1d2e', surface: '#2a273f', surfaceRaised: '#393552', inset: '#191724', hover: '#312e49', selected: '#393552',
       border: '#44405f', borderStrong: '#56516f', text: '#e0def4', textMuted: '#b5b1cc', textSubtle: '#908caa', accent: '#c4a7e7', accentHover: '#d7c2ee',
       accentSoft: 'rgba(196, 167, 231, 0.16)', success: '#9ccfd8', successSoft: 'rgba(156, 207, 216, 0.13)', warning: '#f6c177', warningSoft: 'rgba(246, 193, 119, 0.13)',
-      danger: '#eb6f92', dangerSoft: 'rgba(235, 111, 146, 0.14)', purple: '#c4a7e7', cyan: '#9ccfd8', shadow: 'rgba(15, 13, 25, 0.65)'
+      danger: '#eb6f92', dangerSoft: 'rgba(235, 111, 146, 0.14)', purple: '#c4a7e7', cyan: '#9ccfd8', shadow: 'rgba(15, 13, 25, 0.65)',
+      diffAdditionBg: '#283c45', diffAdditionGutter: '#365662', diffAdditionText: '#d9f0f2', diffDeletionBg: '#422938', diffDeletionGutter: '#613548', diffDeletionText: '#ffdce7', diffHunkBg: '#34304e', diffHunkText: '#dbc5f3'
     },
     syntax: {
       foreground: '#e0def4', comment: '#6e6a86', keyword: '#c4a7e7', string: '#f6c177', number: '#ea9a97', title: '#9ccfd8', variable: '#ebbcba',
@@ -191,7 +204,8 @@ export const THEMES: ThemeDef[] = [
       canvas: '#050607', sidebar: '#090b0d', surface: '#0e1114', surfaceRaised: '#15191e', inset: '#020304', hover: '#1b2026', selected: '#222a32',
       border: '#333b44', borderStrong: '#66717c', text: '#ffffff', textMuted: '#c7cdd4', textSubtle: '#929ba5', accent: '#66b0ff', accentHover: '#a2d0ff',
       accentSoft: 'rgba(102, 176, 255, 0.2)', success: '#62e69a', successSoft: 'rgba(98, 230, 154, 0.18)', warning: '#ffd166', warningSoft: 'rgba(255, 209, 102, 0.18)',
-      danger: '#ff7b86', dangerSoft: 'rgba(255, 123, 134, 0.18)', purple: '#c7a2ff', cyan: '#66e3ea', shadow: 'rgba(0, 0, 0, 0.8)'
+      danger: '#ff7b86', dangerSoft: 'rgba(255, 123, 134, 0.18)', purple: '#c7a2ff', cyan: '#66e3ea', shadow: 'rgba(0, 0, 0, 0.8)',
+      diffAdditionBg: '#123322', diffAdditionGutter: '#17502e', diffAdditionText: '#e0ffe9', diffDeletionBg: '#3a181d', diffDeletionGutter: '#68262d', diffDeletionText: '#ffe5e7', diffHunkBg: '#172d4a', diffHunkText: '#c4ddff'
     },
     syntax: {
       foreground: '#f2f5f8', comment: '#8c98a4', keyword: '#d3b2ff', string: '#a2e58e', number: '#ffc27d', title: '#8fc2ff', variable: '#ff9ca8',
@@ -205,17 +219,17 @@ export const THEMES: ThemeDef[] = [
 ]
 
 const LEGACY_THEME_IDS: Record<string, string> = {
-  graphite: 'ralf-dark',
-  carbon: 'ralf-dark',
+  graphite: 'boss-dark',
+  carbon: 'boss-dark',
   ink: 'tokyo-night-moon',
   'midnight-purple': 'rose-pine-moon',
   dracula: 'rose-pine-moon',
   orchid: 'rose-pine-moon',
-  ember: 'ralf-dark',
-  paper: 'ralf-light',
+  ember: 'boss-dark',
+  paper: 'boss-light',
   signal: 'high-contrast',
-  'solarized-dark': 'ralf-dark',
-  'solarized-light': 'ralf-light'
+  'solarized-dark': 'boss-dark',
+  'solarized-light': 'boss-light'
 }
 
 function resolveTheme(id: string): ThemeDef {
@@ -261,7 +275,15 @@ function themeTokens(theme: ThemeDef): Record<`--${string}`, string> {
     '--line-soft': color.border,
     '--line-strong': color.borderStrong,
     '--focus-ring': color.accent,
-    '--shadow-lg': `0 18px 52px ${color.shadow}`
+    '--shadow-lg': `0 18px 52px ${color.shadow}`,
+    '--diff-add-bg': color.diffAdditionBg,
+    '--diff-add-gutter': color.diffAdditionGutter,
+    '--diff-add-text': color.diffAdditionText,
+    '--diff-del-bg': color.diffDeletionBg,
+    '--diff-del-gutter': color.diffDeletionGutter,
+    '--diff-del-text': color.diffDeletionText,
+    '--diff-hunk-bg': color.diffHunkBg,
+    '--diff-hunk-text': color.diffHunkText
   }
 }
 
@@ -286,7 +308,7 @@ function syntaxCss(theme: ThemeDef): string {
 }
 
 export function getTheme(id?: string): ThemeDef {
-  return resolveTheme(id ?? document.documentElement.dataset.theme ?? 'ralf-dark')
+  return resolveTheme(id ?? document.documentElement.dataset.theme ?? 'boss-dark')
 }
 
 export function getXtermTheme(id?: string): Record<string, string> {
@@ -318,19 +340,19 @@ export function applyTheme(id: string): void {
   style.textContent = syntaxCss(theme)
 
   try {
-    localStorage.setItem('ralf.theme', theme.id)
+    localStorage.setItem('boss.theme', theme.id)
   } catch {
     /* ignore */
   }
-  window.dispatchEvent(new CustomEvent('ralf:theme-changed', { detail: { id: theme.id } }))
+  window.dispatchEvent(new CustomEvent('boss:theme-changed', { detail: { id: theme.id } }))
 }
 
 export function loadTheme(): string {
   try {
-    const saved = localStorage.getItem('ralf.theme')
+    const saved = localStorage.getItem('boss.theme')
     if (saved) return resolveTheme(saved).id
   } catch {
     /* ignore */
   }
-  return 'ralf-dark'
+  return 'boss-dark'
 }

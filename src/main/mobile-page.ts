@@ -11,7 +11,7 @@ export const MOBILE_PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0d10">
-<title>R.A.L.F.</title>
+<title>BOSS</title>
 <style>
 :root {
   --bg: #0b0d10; --pane: #14171d; --inset: #1a1e26; --line: #242a35;
@@ -111,7 +111,7 @@ input, textarea { font-size: 16px !important; }
 <div id="app"></div>
 <script>
 'use strict';
-var token = localStorage.getItem('ralf.token') || '';
+var token = localStorage.getItem('boss.token') || '';
 var view = { name: 'threads' };
 var threads = [];
 var supervision = { threads: [], totals: {} };
@@ -135,7 +135,7 @@ function api(request) {
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
     body: JSON.stringify(request)
   }).then(function (res) {
-    if (res.status === 401) { token = ''; localStorage.removeItem('ralf.token'); render(); throw new Error('unauthorized'); }
+    if (res.status === 401) { token = ''; localStorage.removeItem('boss.token'); render(); throw new Error('unauthorized'); }
     return res.json();
   }).then(function (payload) {
     if (payload && payload.ok === false) throw new Error(payload.error || 'request failed');
@@ -275,7 +275,7 @@ function renderThread() {
 
 function render() {
   if (!token) {
-    app.innerHTML = '<div class="pair"><h1>R.A.L.F.</h1>' +
+    app.innerHTML = '<div class="pair"><h1>BOSS</h1>' +
       '<p style="color:var(--muted);margin-top:8px">Paste the access token from Settings → Mobile access on your desktop.</p>' +
       '<input id="tok" type="password" placeholder="access token" autocomplete="off">' +
       '<button class="btn primary" style="width:100%" onclick="pair()">Connect</button>' +
@@ -283,7 +283,7 @@ function render() {
     return;
   }
   var body = '';
-  var title = 'R.A.L.F.';
+  var title = 'BOSS';
   var headerExtra = '';
   if (view.name === 'thread') {
     var t = null;
@@ -310,7 +310,7 @@ window.pair = function () {
   var input = document.getElementById('tok');
   token = (input && input.value || '').trim();
   api({ type: 'thread.list' }).then(function () {
-    localStorage.setItem('ralf.token', token);
+    localStorage.setItem('boss.token', token);
     boot();
   }).catch(function (e) {
     token = '';

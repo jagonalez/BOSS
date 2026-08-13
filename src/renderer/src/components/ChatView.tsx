@@ -968,7 +968,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
               className="composer-attach"
               disabled={!supportsAttachments}
               onClick={() => fileInputRef.current?.click()}
-              title={supportsAttachments ? 'Attach file or image' : `${backendLabel} attachments are not wired into R.A.L.F. yet`}
+              title={supportsAttachments ? 'Attach file or image' : `${backendLabel} attachments are not wired into BOSS yet`}
             >
               <AttachmentIcon size={16} />
             </button>

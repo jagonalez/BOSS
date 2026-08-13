@@ -33,7 +33,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: HttpMethod, path: string, opts?: { query?: Record<string, string | number | boolean | undefined>; body?: unknown; directory?: string }): Promise<T> {
-  const res = await window.ralf.apiRequest({
+  const res = await window.boss.apiRequest({
     method,
     path,
     query: opts?.query,
@@ -50,7 +50,7 @@ async function request<T>(method: HttpMethod, path: string, opts?: { query?: Rec
 }
 
 async function backendRequest<T>(req: BackendRequest): Promise<T> {
-  return window.ralf.backendRequest(req) as Promise<T>
+  return window.boss.backendRequest(req) as Promise<T>
 }
 
 export interface ModelOption {
@@ -119,6 +119,8 @@ export const OpenCode = {
   listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
   createSession: (title?: string, backendId: BackendId = 'opencode', scope: ThreadCreationScope = 'current') =>
     backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, scope }),
+  createSessionInPath: (executionPath: string, title?: string, backendId: BackendId = 'opencode') =>
+    backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, executionPath }),
   setThreadBackend: (threadId: string, backendId: BackendId) =>
     backendRequest<SessionInfo>({ type: 'thread.backend.set', threadId, backendId }),
   deleteSession: (id: string) => backendRequest<void>({ type: 'thread.delete', threadId: id }),

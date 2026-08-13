@@ -6,9 +6,9 @@ import { DEFAULT_TTS_VOICE } from '@shared/speech'
 export { DEFAULT_TTS_VOICE }
 
 // Shared model store. Defaults to a common cache under the user's home so
-// multiple apps can reuse the same weights; override with RALF_MODEL_CACHE.
+// multiple apps can reuse the same weights; override with BOSS_MODEL_CACHE.
 function resolveModelCache(): string {
-  return process.env.RALF_MODEL_CACHE ?? join(homedir(), '.cache', 'ralf', 'models')
+  return process.env.BOSS_MODEL_CACHE ?? join(homedir(), '.cache', 'boss', 'models')
 }
 
 export class SpeechManager {

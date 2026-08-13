@@ -68,14 +68,14 @@ const MAX_TOOL_OUTPUT_CHARS = 100_000
 function boundedOutput(value: unknown): unknown {
   if (typeof value === 'string') {
     return value.length > MAX_TOOL_OUTPUT_CHARS
-      ? `${value.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n[output truncated by R.A.L.F.]`
+      ? `${value.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n[output truncated by BOSS]`
       : value
   }
   if (value === undefined) return undefined
   try {
     const serialized = JSON.stringify(value)
     return serialized.length > MAX_TOOL_OUTPUT_CHARS
-      ? `${serialized.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n[output truncated by R.A.L.F.]`
+      ? `${serialized.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n[output truncated by BOSS]`
       : value
   } catch {
     return String(value)
@@ -129,10 +129,10 @@ function narrativeKey(part: Part): string | undefined {
 }
 
 /**
- * Durable, backend-neutral projection of the events R.A.L.F. has observed.
+ * Durable, backend-neutral projection of the events BOSS has observed.
  *
  * Backends remain responsible for their native sessions. This store owns the
- * transcript shown by R.A.L.F., so a lossy native history response can update
+ * transcript shown by BOSS, so a lossy native history response can update
  * known content but can never erase richer tool/activity parts seen live.
  */
 export class TranscriptStore {
@@ -541,7 +541,7 @@ export class TranscriptStore {
         this.markRunningParts(
           run.thread_id,
           'interrupted',
-          'R.A.L.F. stopped before this step completed.'
+          'BOSS stopped before this step completed.'
         )
         const history = this.database.prepare(`
           SELECT run_id, started_at, token_baseline, token_reports_baseline, tool_calls_baseline

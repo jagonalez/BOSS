@@ -31,7 +31,7 @@ interface ThreadBinding {
   id: string
   backendId: BackendId
   nativeSessionId: string
-  nativeSessionOwnership: 'ralf' | 'imported'
+  nativeSessionOwnership: 'boss' | 'imported'
   projectId: string
   projectPath: string
   executionPath: string
@@ -76,7 +76,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
     label: 'OpenCode',
     description: 'OpenCode server with native sessions, permissions, tools, and providers.',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
       { id: 'auto', label: 'Auto', description: 'approve supported actions automatically' },
@@ -87,14 +87,14 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Pi',
     description: 'Pi coding agent over its native JSONL RPC protocol.',
     command: 'pi',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false },
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [{ id: 'auto', label: 'Approved', description: 'Pi RPC runs with its approved tool policy' }]
   },
   codex: {
     label: 'Codex',
     description: 'Codex CLI through the supported app-server JSON-RPC protocol.',
     command: 'codex',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'request approval when Codex needs to leave its sandbox' },
       { id: 'auto', label: 'Auto', description: 'run inside the workspace sandbox without approval prompts' },
@@ -105,10 +105,11 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: false, mcp: false, interactiveQuestions: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
-      { id: 'ask', label: 'Ask', description: 'use Claude default permissions; unavailable approvals stop the run' },
-      { id: 'accept-edits', label: 'Edit automatically', description: 'approve edits and common filesystem operations' },
+      { id: 'ask', label: 'Ask', description: 'prompt before tools that need approval' },
+      { id: 'auto', label: 'Auto', description: 'let Claude decide which tool calls can run automatically' },
+      { id: 'accept-edits', label: 'Edit automatically', description: 'approve file edits; prompt for other protected tools' },
       { id: 'plan', label: 'Plan', description: 'read-only planning mode' }
     ]
   }
@@ -251,7 +252,7 @@ export class BackendManager {
       interrupted: 'The run was interrupted.'
     } satisfies Record<AttentionKind, string>)[kind]
     if (Notification.isSupported()) {
-      new Notification({ title: binding.title ?? 'R.A.L.F. task', body }).show()
+      new Notification({ title: binding.title ?? 'BOSS task', body }).show()
     }
   }
 
@@ -359,7 +360,7 @@ export class BackendManager {
           const scope = projectScope(legacy.projectPath)
           const binding: ThreadBinding = {
             ...legacy,
-            nativeSessionOwnership: legacy.backendId === 'opencode' ? 'imported' : 'ralf',
+            nativeSessionOwnership: legacy.backendId === 'opencode' ? 'imported' : 'boss',
             projectId: scope.projectId,
             projectPath: scope.projectPath,
             executionPath: scope.executionPath
@@ -369,8 +370,8 @@ export class BackendManager {
         this.save()
       }
     } catch {
-      /* Preserve pre-R.A.L.F. OpenCode sessions once on first launch or migration. */
-      /* First R.A.L.F. launch starts with no thread bindings. */
+      /* Preserve pre-BOSS OpenCode sessions once on first launch or migration. */
+      /* First BOSS launch starts with no thread bindings. */
     }
     this.migrateLegacyCodexParts()
   }
@@ -440,7 +441,7 @@ export class BackendManager {
 
   private binding(threadId: string): ThreadBinding {
     const binding = this.bindings.get(threadId)
-    if (!binding) throw new Error(`R.A.L.F. thread not found: ${threadId}`)
+    if (!binding) throw new Error(`BOSS thread not found: ${threadId}`)
     this.backends[binding.backendId].setSessionDirectory?.(binding.nativeSessionId, binding.executionPath)
     if (binding.worktree?.status === 'active') void this.worktrees?.touch(binding.worktree.id)
     return binding
@@ -677,7 +678,7 @@ export class BackendManager {
   ): Promise<SessionInfo> {
     const backend = await this.ensureStarted(backendId)
     const native = await backend.sessionCreate(title, scope.executionPath || undefined)
-    const binding = this.registerNative(backendId, native, 'ralf', lineage)
+    const binding = this.registerNative(backendId, native, 'boss', lineage)
     binding.title = title ?? native.title
     binding.projectId = scope.projectId
     binding.projectPath = scope.projectPath
@@ -719,10 +720,10 @@ export class BackendManager {
     const previousOwnership = binding.nativeSessionOwnership
     binding.backendId = backendId
     binding.nativeSessionId = nextNative.id
-    binding.nativeSessionOwnership = 'ralf'
-    if (previousOwnership === 'ralf') {
+    binding.nativeSessionOwnership = 'boss'
+    if (previousOwnership === 'boss') {
       // The binding already points at the replacement so an old backend's
-      // session.deleted event cannot remove the preserved R.A.L.F. thread.
+      // session.deleted event cannot remove the preserved BOSS thread.
       await previousBackend.sessionDelete(previousNativeSessionId).catch(() => {})
     }
 
@@ -737,7 +738,7 @@ export class BackendManager {
 
   async sessionDelete(threadId: string): Promise<void> {
     const binding = this.binding(threadId)
-    if (binding.nativeSessionOwnership === 'ralf') {
+    if (binding.nativeSessionOwnership === 'boss') {
       const backend = await this.ensureStarted(binding.backendId)
       await backend.sessionDelete(binding.nativeSessionId)
     }
@@ -1017,7 +1018,7 @@ export class BackendManager {
     const backend = await this.ensureStarted(source.backendId)
     const native = await backend.fork(source.nativeSessionId, messageId)
     if (native.id === source.nativeSessionId) return this.clone(threadId, source.backendId)
-    const binding = this.registerNative(source.backendId, native, 'ralf', {
+    const binding = this.registerNative(source.backendId, native, 'boss', {
       kind: 'fork',
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
@@ -1037,7 +1038,7 @@ export class BackendManager {
     const diffs = await sourceBackend.diffGet(source.nativeSessionId).catch(() => [])
     const diffSummary = diffs.slice(0, 30).map((diff) => `- ${diff.path}: ${diff.status ?? 'changed'}`).join('\n')
     return [
-      '[R.A.L.F. CONTEXT HANDOFF]',
+      '[BOSS CONTEXT HANDOFF]',
       `Source thread: ${source.title ?? sourceThreadId}`,
       `Source backend: ${source.backendId}`,
       `Project: ${source.projectId === 'global' ? 'Global chat' : source.projectPath}`,
@@ -1293,7 +1294,9 @@ export class BackendManager {
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
       case 'thread.list': return this.sessionsList()
-      case 'thread.create': return this.sessionCreate(request.backendId, request.title, undefined, request.scope)
+      case 'thread.create': return request.executionPath
+        ? this.createScopedThread(request.backendId, this.scopeFor(request.executionPath), request.title ?? 'Untitled thread')
+        : this.sessionCreate(request.backendId, request.title, undefined, request.scope)
       case 'thread.backend.set': return this.setEmptyThreadBackend(request.threadId, request.backendId)
       case 'thread.get': return this.sessionGet(request.threadId)
       case 'thread.delete': return this.sessionDelete(request.threadId)

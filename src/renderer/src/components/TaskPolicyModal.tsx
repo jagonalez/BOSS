@@ -78,7 +78,7 @@ export function TaskPolicyModal(): React.JSX.Element | null {
                 <label><span>Reported tokens</span><input type="number" min="1" value={policy.budget.maxTokens ?? ''} onChange={(event) => setBudget('maxTokens', event.target.value)} placeholder="Unlimited" /></label>
                 <label><span>Agent minutes</span><input type="number" min="0.1" step="0.1" value={policy.budget.maxDurationMinutes ?? ''} onChange={(event) => setBudget('maxDurationMinutes', event.target.value)} placeholder="Unlimited" /></label>
               </div>
-              <small className="policy-note">When any limit is reached, R.A.L.F. blocks the next run until you raise or remove it.</small>
+              <small className="policy-note">When any limit is reached, BOSS blocks the next run until you raise or remove it.</small>
             </fieldset>
             <fieldset className="delegate-fieldset">
               <div className="policy-section-title"><legend>Reviewer chain</legend><button className="btn-ghost" onClick={addReviewer}>Add reviewer</button></div>

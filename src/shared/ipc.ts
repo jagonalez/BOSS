@@ -20,6 +20,15 @@ export interface ServerInfo {
   healthy: boolean
 }
 
+export interface UpdateStatus {
+  currentVersion: string
+  checking: boolean
+  available: boolean
+  latestVersion?: string
+  url: string
+  error?: string
+}
+
 export interface BrowseBounds {
   x: number
   y: number
@@ -67,6 +76,12 @@ export type PrivacyPane = 'accessibility' | 'screenRecording'
 
 export interface ProjectInfo {
   path: string
+  checkoutPath: string
+  checkouts: Array<{
+    path: string
+    branch?: string
+    main: boolean
+  }>
   healthy: boolean
 }
 
@@ -159,6 +174,13 @@ export const IpcChannels = {
   TerminalData: 'terminal:data',
   TerminalExit: 'terminal:exit',
   GitRun: 'git:run',
+  ReviewSnapshot: 'review:snapshot',
+  ReviewChangeRequestDiff: 'review:change-request-diff',
+  ReviewLocalAdd: 'review:local-add',
+  ReviewLocalDelete: 'review:local-delete',
+  ReviewPublishComment: 'review:publish-comment',
+  ReviewReply: 'review:reply',
+  ReviewSubmit: 'review:submit',
   TtsStatus: 'tts:status',
   TtsSpeak: 'tts:speak',
   SpeechStatusChanged: 'speech:status-changed',
@@ -175,7 +197,10 @@ export const IpcChannels = {
   SitesChanged: 'sites:changed',
   SitesCfGet: 'sites:cf:get',
   SitesCfSet: 'sites:cf:set',
-  SitesCfClear: 'sites:cf:clear'
+  SitesCfClear: 'sites:cf:clear',
+  UpdateStatusGet: 'update:status',
+  UpdateCheck: 'update:check',
+  UpdateChanged: 'update:changed'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

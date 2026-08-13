@@ -54,7 +54,7 @@ export function DelegateModal(): React.JSX.Element | null {
             autoFocus
             rows={5}
           />
-          <small>R.A.L.F. includes a bounded transcript and changed-file summary automatically.</small>
+          <small>BOSS includes a bounded transcript and changed-file summary automatically.</small>
         </label>
         <fieldset className="delegate-fieldset">
           <legend>Backend</legend>
