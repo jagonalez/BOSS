@@ -16,12 +16,14 @@ import type {
   CloudflareSettings,
   TerminalDataEvent,
   TerminalExitEvent,
-  TtsSpeakRequest
+  TtsSpeakRequest,
+  UpdateStatus
 } from './ipc'
 import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
 import type { BackendRequest } from './backend'
+import type { AddReviewCommentInput, ChangeRequestFileDiff, ReviewComment, ReviewSnapshot, SubmitReviewEvent } from './review'
 
-export interface RalfApi {
+export interface BossApi {
   platform(): string
   toggleMaximize(): Promise<boolean>
   serverInfo(): Promise<ServerInfo>
@@ -69,6 +71,13 @@ export interface RalfApi {
   onTerminalExit(cb: (evt: TerminalExitEvent) => void): () => void
 
   gitRun(path: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }>
+  reviewSnapshot(path: string): Promise<ReviewSnapshot>
+  reviewChangeRequestDiff(path: string): Promise<ChangeRequestFileDiff[]>
+  reviewLocalAdd(path: string, input: AddReviewCommentInput): Promise<ReviewComment>
+  reviewLocalDelete(path: string, commentId: string): Promise<boolean>
+  reviewPublishComment(path: string, input: AddReviewCommentInput): Promise<ReviewSnapshot>
+  reviewReply(path: string, commentId: string, body: string): Promise<ReviewSnapshot>
+  reviewSubmit(path: string, event: SubmitReviewEvent, body: string): Promise<ReviewSnapshot>
 
   ttsStatus(): Promise<TtsStatus>
   ttsSpeak(req: TtsSpeakRequest): Promise<TtsSpeakResult>
@@ -88,4 +97,8 @@ export interface RalfApi {
   sitesCfGet(): Promise<CloudflareSettings>
   sitesCfSet(token: string, accountId: string): Promise<CloudflareSettings>
   sitesCfClear(): Promise<CloudflareSettings>
+
+  updateStatus(): Promise<UpdateStatus>
+  updateCheck(): Promise<UpdateStatus>
+  onUpdateChanged(cb: (status: UpdateStatus) => void): () => void
 }

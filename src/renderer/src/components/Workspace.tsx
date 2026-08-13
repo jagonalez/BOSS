@@ -32,7 +32,7 @@ import { activeWorkspaceView, walkTabs, workspaceMenuRight } from '../lib/worksp
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
-const TAB_DRAG_TYPE = 'application/x-ralf-workspace-tab'
+const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
 
 const TAB_TYPES: Array<{
   kind: WorkspaceTabKind
@@ -217,14 +217,19 @@ function CheckoutPicker({
   close: () => void
 }): React.JSX.Element {
   const projectPath = useStore(appStore, (state) => state.projectPath)
+  const selectedCheckoutPath = useStore(appStore, (state) => state.selectedCheckoutPath)
+  const projectCheckouts = useStore(appStore, (state) => state.projectCheckouts)
   const sessions = useStore(appStore, (state) => state.sessions)
   const activeSessionId = useStore(appStore, (state) => state.activeSessionId)
   const terminalStartLocation = useStore(appStore, (state) => state.terminalStartLocation)
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const contexts = useMemo(() => {
-    const items: WorkspaceCheckoutBinding[] = projectPath
-      ? [{ contextPath: projectPath, contextLabel: 'Main' }]
-      : []
+    const items: WorkspaceCheckoutBinding[] = projectCheckouts.length > 0
+      ? projectCheckouts.map((checkout) => ({
+          contextPath: checkout.path,
+          contextLabel: checkout.main ? 'Main' : checkout.branch ?? shortProject(checkout.path)
+        }))
+      : projectPath ? [{ contextPath: projectPath, contextLabel: 'Main' }] : []
     const seen = new Set(items.map((item) => item.contextPath))
     for (const session of sessions) {
       if (!session.worktree || session.worktree.status !== 'active') continue
@@ -238,11 +243,13 @@ function CheckoutPicker({
       })
     }
     const active = sessions.find((session) => session.id === activeSessionId)
-    const preferredPath = kind === 'terminal' && terminalStartLocation === 'focused-checkout'
-      ? checkoutPath(active ?? {}) ?? projectPath
-      : projectPath
+    const preferredPath = kind === 'terminal'
+      ? terminalStartLocation === 'focused-checkout'
+        ? checkoutPath(active ?? {}) ?? selectedCheckoutPath ?? projectPath
+        : projectPath
+      : selectedCheckoutPath || projectPath
     return [...items].sort((a, b) => Number(b.contextPath === preferredPath) - Number(a.contextPath === preferredPath))
-  }, [activeSessionId, kind, projectPath, sessions, terminalStartLocation])
+  }, [activeSessionId, kind, projectCheckouts, projectPath, selectedCheckoutPath, sessions, terminalStartLocation])
   const openKeys = useMemo(() => new Set(
     workspace ? walkTabs(activeWorkspaceView(workspace).root).map((item) => `${item.kind}\0${item.contextPath ?? ''}`) : []
   ), [workspace])
@@ -351,11 +358,6 @@ function TabContent({
   overlayOpen: boolean
 }): React.JSX.Element {
   const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
-  const reviewSessionId = useStore(appStore, (state) => {
-    const activeSession = state.sessions.find((session) => session.id === state.activeSessionId)
-    if (activeSession && checkoutPath(activeSession) === item.contextPath) return activeSession.id
-    return state.sessions.find((session) => checkoutPath(session) === item.contextPath)?.id
-  })
   useEffect(() => {
     if (item.kind !== 'thread' || !item.sessionId) return
     void loadMessages(item.sessionId)
@@ -380,7 +382,7 @@ function TabContent({
       )
       break
     case 'review':
-      content = <ReviewTab contextPath={item.contextPath} sessionId={reviewSessionId} />
+      content = <ReviewTab contextPath={item.contextPath} sessionId={item.sessionId} groupId={groupId} tabId={item.id} />
       break
     case 'files':
       content = <FilesTab contextPath={item.contextPath} />

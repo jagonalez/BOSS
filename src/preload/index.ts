@@ -4,7 +4,7 @@ import {
   type ApiRequest,
   type BrowseBounds
 } from '../shared/ipc'
-import type { RalfApi } from '../shared/api'
+import type { BossApi } from '../shared/api'
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
   const listener = (_event: IpcRendererEvent, payload: T): void => callback(payload)
@@ -14,7 +14,7 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
   }
 }
 
-const ralf: RalfApi = {
+const boss: BossApi = {
   platform: () => process.platform,
   toggleMaximize: () => ipcRenderer.invoke(IpcChannels.WindowToggleMaximize),
   serverInfo: () => ipcRenderer.invoke(IpcChannels.ServerGetInfo),
@@ -64,6 +64,13 @@ const ralf: RalfApi = {
   onTerminalData: (cb) => subscribe(IpcChannels.TerminalData, cb),
   onTerminalExit: (cb) => subscribe(IpcChannels.TerminalExit, cb),
   gitRun: (path: string, args: string[]) => ipcRenderer.invoke(IpcChannels.GitRun, { path, args }),
+  reviewSnapshot: (path: string) => ipcRenderer.invoke(IpcChannels.ReviewSnapshot, path),
+  reviewChangeRequestDiff: (path: string) => ipcRenderer.invoke(IpcChannels.ReviewChangeRequestDiff, path),
+  reviewLocalAdd: (path, input) => ipcRenderer.invoke(IpcChannels.ReviewLocalAdd, { path, input }),
+  reviewLocalDelete: (path, commentId) => ipcRenderer.invoke(IpcChannels.ReviewLocalDelete, { path, commentId }),
+  reviewPublishComment: (path, input) => ipcRenderer.invoke(IpcChannels.ReviewPublishComment, { path, input }),
+  reviewReply: (path, commentId, body) => ipcRenderer.invoke(IpcChannels.ReviewReply, { path, commentId, body }),
+  reviewSubmit: (path, event, body) => ipcRenderer.invoke(IpcChannels.ReviewSubmit, { path, event, body }),
 
   ttsStatus: () => ipcRenderer.invoke(IpcChannels.TtsStatus),
   ttsSpeak: (req) => ipcRenderer.invoke(IpcChannels.TtsSpeak, req),
@@ -82,7 +89,11 @@ const ralf: RalfApi = {
   onSitesChanged: (cb) => subscribe(IpcChannels.SitesChanged, cb),
   sitesCfGet: () => ipcRenderer.invoke(IpcChannels.SitesCfGet),
   sitesCfSet: (token: string, accountId: string) => ipcRenderer.invoke(IpcChannels.SitesCfSet, { token, accountId }),
-  sitesCfClear: () => ipcRenderer.invoke(IpcChannels.SitesCfClear)
+  sitesCfClear: () => ipcRenderer.invoke(IpcChannels.SitesCfClear),
+
+  updateStatus: () => ipcRenderer.invoke(IpcChannels.UpdateStatusGet),
+  updateCheck: () => ipcRenderer.invoke(IpcChannels.UpdateCheck),
+  onUpdateChanged: (cb) => subscribe(IpcChannels.UpdateChanged, cb)
 }
 
-contextBridge.exposeInMainWorld('ralf', ralf)
+contextBridge.exposeInMainWorld('boss', boss)

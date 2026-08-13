@@ -1,7 +1,7 @@
 import { parseGitLog, parseGitBranches } from './diff'
 
 async function runGit(path: string, args: string[]): Promise<string> {
-  const res = await window.ralf.gitRun(path, args)
+  const res = await window.boss.gitRun(path, args)
   if (res.code !== 0) throw new Error(res.stderr.trim() || res.stdout.trim() || `git ${args[0]} failed`)
   return res.stdout
 }

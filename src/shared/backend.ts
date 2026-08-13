@@ -19,6 +19,8 @@ export interface BackendCapabilities {
   images: boolean
   mcp: boolean
   interactiveQuestions: boolean
+  /** The backend enforces its own Auto policy; escalations must still be shown to the user. */
+  nativeAutoMode: boolean
 }
 
 export interface QueuedFollowUpAttachment {
@@ -74,7 +76,7 @@ export interface BackendMessageOptions {
   model?: { providerID: string; modelID: string; variant?: string }
   agent?: string
   mode?: BackendModeId
-  /** Headless runs: restrict the agent to R.A.L.F.-provided tools, ignoring user-level MCP configs. */
+  /** Headless runs: restrict the agent to BOSS-provided tools, ignoring user-level MCP configs. */
   strictTools?: boolean
 }
 
@@ -83,7 +85,7 @@ export type BackendRequest =
   | { type: 'backend.auth.status' }
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
   | { type: 'thread.list' }
-  | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope }
+  | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope; executionPath?: string }
   | { type: 'thread.backend.set'; threadId: string; backendId: BackendId }
   | { type: 'thread.get'; threadId: string }
   | { type: 'thread.delete'; threadId: string }

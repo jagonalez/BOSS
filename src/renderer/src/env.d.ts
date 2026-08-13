@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 
-import type { RalfApi } from '../../shared/api'
+import type { BossApi } from '../../shared/api'
 
 declare global {
   interface Window {
-    ralf: RalfApi
+    boss: BossApi
   }
 }
 

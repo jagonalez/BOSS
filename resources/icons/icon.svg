@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">R.A.L.F. app icon</title>
+  <title id="title">BOSS app icon</title>
   <desc id="desc">A folder-shaped agent workstation displaying a terminal prompt.</desc>
 
   <!-- macOS icon field -->
@@ -11,7 +11,7 @@
     fill="#23466D"
   />
 
-  <!-- Folder + workstation + R.A.L.F. silhouette -->
+  <!-- Folder + workstation + BOSS silhouette -->
   <path
     d="M196 336c0-31 25-56 56-56h176l68 78h181v-99c0-20 16-36 36-36h10c20 0 36 16 36 36v99h45c31 0 56 25 56 56v378c0 31-25 56-56 56H252c-31 0-56-25-56-56V336Z"
     fill="#0B274A"

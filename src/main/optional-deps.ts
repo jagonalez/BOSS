@@ -42,7 +42,7 @@ function bundledOpenCodePath(): string {
 }
 
 export class OptionalDeps {
-  constructor(private readonly baseUrl = process.env.RALF_OPTIONAL_CDN ?? '') {}
+  constructor(private readonly baseUrl = process.env.BOSS_OPTIONAL_CDN ?? '') {}
 
   list(): OptionalComponentInfo[] {
     return COMPONENTS.map((def) => {
@@ -71,11 +71,11 @@ export class OptionalDeps {
     const def = COMPONENTS.find((c) => c.id === id)
     if (!def) throw new Error(`unknown component: ${id}`)
     if (this.list().find((c) => c.id === id)?.installed) return
-    if (!this.baseUrl) throw new Error('optional downloads not configured (set RALF_OPTIONAL_CDN)')
+    if (!this.baseUrl) throw new Error('optional downloads not configured (set BOSS_OPTIONAL_CDN)')
 
     const url = `${this.baseUrl}/${id}/artifact.tar.gz`
     const destDir = componentDir(id)
-    const tmpFile = join(tmpdir(), `ralf-${id}-${Date.now()}.tar.gz`)
+    const tmpFile = join(tmpdir(), `boss-${id}-${Date.now()}.tar.gz`)
     mkdirSync(destDir, { recursive: true })
 
     const res = await fetch(url)

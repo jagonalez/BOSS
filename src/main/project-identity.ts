@@ -9,6 +9,12 @@ export interface ProjectScope {
   executionPath: string
 }
 
+export interface ProjectCheckout {
+  path: string
+  branch?: string
+  main: boolean
+}
+
 function canonicalPath(path: string): string {
   if (!path) return ''
   const absolute = resolve(path)
@@ -36,6 +42,24 @@ function mainWorktree(cwd: string): string {
   const output = gitOutput(cwd, ['worktree', 'list', '--porcelain', '-z'])
   const entry = output.split('\0').find((line) => line.startsWith('worktree '))
   return entry ? canonicalPath(entry.slice('worktree '.length)) : ''
+}
+
+export function projectCheckouts(path: string): ProjectCheckout[] {
+  const executionPath = canonicalPath(path)
+  if (!executionPath) return []
+  const records = gitOutput(executionPath, ['worktree', 'list', '--porcelain', '-z'])
+    .split('\0\0')
+    .map((record) => record.split('\0').filter(Boolean))
+    .filter((record) => record.some((line) => line.startsWith('worktree ')))
+  return records.map((record, index) => {
+    const worktree = record.find((line) => line.startsWith('worktree '))
+    const branch = record.find((line) => line.startsWith('branch '))
+    return {
+      path: canonicalPath(worktree!.slice('worktree '.length)),
+      branch: branch?.slice('branch refs/heads/'.length),
+      main: index === 0
+    }
+  })
 }
 
 export function projectScope(path: string): ProjectScope {

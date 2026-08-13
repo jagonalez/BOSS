@@ -35,7 +35,7 @@ export class BrowseManager {
   }
 
   private browseSession(): Session {
-    return session.fromPartition('persist:ralf-browse')
+    return session.fromPartition('persist:boss-browse')
   }
 
   attach(id: string, bounds: BrowseBounds): void {
@@ -106,7 +106,7 @@ export class BrowseManager {
     const entry = this.requireView(id)
     const parsed = new URL(url)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error('R.A.L.F. browser tools only allow HTTP and HTTPS URLs.')
+      throw new Error('BOSS browser tools only allow HTTP and HTTPS URLs.')
     }
     entry.loadedOnce = true
     await entry.view.webContents.loadURL(parsed.toString())
@@ -129,7 +129,7 @@ export class BrowseManager {
       const selector = 'a,button,input,textarea,select,summary,[role="button"],[role="link"],[role="checkbox"],[role="tab"],[contenteditable="true"],[tabindex]:not([tabindex="-1"])'
       const elements = [...document.querySelectorAll(selector)].filter(visible).slice(0, 250).map((element, index) => {
         const ref = 'e' + (index + 1)
-        element.setAttribute('data-ralf-agent-ref', ref)
+        element.setAttribute('data-boss-agent-ref', ref)
         const rect = element.getBoundingClientRect()
         return {
           ref,
@@ -155,7 +155,7 @@ export class BrowseManager {
     const entry = this.requireView(id)
     const result = await entry.view.webContents.executeJavaScript(`(() => {
       const ref = ${JSON.stringify(ref)}
-      const element = [...document.querySelectorAll('[data-ralf-agent-ref]')].find((item) => item.getAttribute('data-ralf-agent-ref') === ref)
+      const element = [...document.querySelectorAll('[data-boss-agent-ref]')].find((item) => item.getAttribute('data-boss-agent-ref') === ref)
       if (!element) return { ok: false, error: 'Element ref not found. Take a fresh snapshot.' }
       if (element.disabled || element.getAttribute('aria-disabled') === 'true') return { ok: false, error: 'Element is disabled.' }
       element.scrollIntoView({ block: 'center', inline: 'center' })
@@ -174,7 +174,7 @@ export class BrowseManager {
       const ref = ${JSON.stringify(ref)}
       const text = ${JSON.stringify(text)}
       const submit = ${JSON.stringify(submit)}
-      const element = [...document.querySelectorAll('[data-ralf-agent-ref]')].find((item) => item.getAttribute('data-ralf-agent-ref') === ref)
+      const element = [...document.querySelectorAll('[data-boss-agent-ref]')].find((item) => item.getAttribute('data-boss-agent-ref') === ref)
       if (!element) return { ok: false, error: 'Element ref not found. Take a fresh snapshot.' }
       element.scrollIntoView({ block: 'center', inline: 'center' })
       element.focus()
@@ -206,7 +206,7 @@ export class BrowseManager {
     const image = await entry.view.webContents.capturePage(undefined, { stayHidden: true, stayAwake: false })
     const size = image.getSize()
     return {
-      __ralfToolResult: true,
+      __bossToolResult: true,
       text: `Screenshot of browser tab ${id} (${size.width}×${size.height}).`,
       image: { mimeType: 'image/png', data: image.toPNG().toString('base64') }
     }
@@ -226,18 +226,18 @@ export class BrowseManager {
 
   private requireView(id: string): BrowseView {
     const entry = this.views.get(id)
-    if (!entry) throw new Error(`Browser tab ${id || '(missing)'} was not found. Use ralf_browser_tabs first.`)
+    if (!entry) throw new Error(`Browser tab ${id || '(missing)'} was not found. Use boss_browser_tabs first.`)
     return entry
   }
 
   private textResult(text: string): AgentToolResult {
-    return { __ralfToolResult: true, text }
+    return { __bossToolResult: true, text }
   }
 
   private createView(id: string): BrowseView {
     const view = new WebContentsView({
       webPreferences: {
-        partition: 'persist:ralf-browse',
+        partition: 'persist:boss-browse',
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,

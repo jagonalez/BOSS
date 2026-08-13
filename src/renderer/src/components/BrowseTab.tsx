@@ -20,20 +20,20 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
 
   useEffect(() => {
     return () => {
-      void window.ralf.browseDetach(id)
-      void window.ralf.browseDestroy(id)
+      void window.boss.browseDetach(id)
+      void window.boss.browseDestroy(id)
     }
   }, [id])
 
   useEffect(() => {
     const el = viewRef.current
     if (!el || !actuallyVisible) {
-      void window.ralf.browseDetach(id)
+      void window.boss.browseDetach(id)
       return
     }
-    void window.ralf.browseAttach(id, rectOf(el))
+    void window.boss.browseAttach(id, rectOf(el))
     const report = (): void => {
-      void window.ralf.browseBounds(id, rectOf(el))
+      void window.boss.browseBounds(id, rectOf(el))
     }
     const ro = new ResizeObserver(report)
     ro.observe(el)
@@ -41,12 +41,12 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
     return () => {
       ro.disconnect()
       window.removeEventListener('resize', report)
-      void window.ralf.browseDetach(id)
+      void window.boss.browseDetach(id)
     }
   }, [id, actuallyVisible])
 
   useEffect(() => {
-    const off = window.ralf.onBrowseNavigation((evt) => {
+    const off = window.boss.onBrowseNavigation((evt) => {
       if (evt.id === id) {
         appStore.setState((s) => ({ browse: { ...s.browse, [evt.id]: evt.state } }))
       }
@@ -62,7 +62,7 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
     let target = urlInput.trim()
     if (!target) return
     if (!/^https?:\/\//i.test(target)) target = `https://${target}`
-    void window.ralf.browseNavigate(id, target)
+    void window.boss.browseNavigate(id, target)
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -72,19 +72,19 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
   return (
     <div className="browse">
       <div className="browse-bar">
-        <button className="btn-ghost" disabled={!nav.canGoBack} onClick={() => void window.ralf.browseBack(id)} title="Back">
+        <button className="btn-ghost" disabled={!nav.canGoBack} onClick={() => void window.boss.browseBack(id)} title="Back">
           <BackIcon size={14} />
         </button>
-        <button className="btn-ghost" disabled={!nav.canGoForward} onClick={() => void window.ralf.browseForward(id)} title="Forward">
+        <button className="btn-ghost" disabled={!nav.canGoForward} onClick={() => void window.boss.browseForward(id)} title="Forward">
           <ForwardIcon size={14} />
         </button>
-        <button className="btn-ghost" onClick={() => void window.ralf.browseReload(id)} title="Reload">
+        <button className="btn-ghost" onClick={() => void window.boss.browseReload(id)} title="Reload">
           <ReloadIcon size={14} />
         </button>
         {nav.url ? (
           <button
             className="btn-ghost"
-            onClick={() => void window.ralf.openExternal(nav.url)}
+            onClick={() => void window.boss.openExternal(nav.url)}
             title="Open in default browser"
           >
             <ExternalIcon size={14} />

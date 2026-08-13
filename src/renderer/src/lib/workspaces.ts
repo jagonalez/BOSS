@@ -11,9 +11,9 @@ import type {
   WorkspaceView
 } from '@shared/workspace'
 
-const WORKSPACES_KEY = 'ralf.projectWorkspaces.v3'
-const LEGACY_WORKSPACES_KEY = 'ralf.projectWorkspaces.v2'
-const TEMPLATES_KEY = 'ralf.layoutTemplates.v2'
+const WORKSPACES_KEY = 'boss.projectWorkspaces.v3'
+const LEGACY_WORKSPACES_KEY = 'boss.projectWorkspaces.v2'
+const TEMPLATES_KEY = 'boss.layoutTemplates.v2'
 let sequence = 0
 
 export function workspaceId(prefix: string): string {
