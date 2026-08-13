@@ -12,6 +12,7 @@
     "start": "electron-vite preview",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "test:transcripts": "node --experimental-strip-types --test src/main/transcript-store.test.ts",
     "test:workspaces": "node --experimental-strip-types --test src/renderer/src/lib/workspaces.test.ts",
     "test:version": "node --experimental-strip-types --test src/shared/version.test.ts",
