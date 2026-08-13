@@ -21,6 +21,7 @@ import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '
 import type { MobileAccessStatus } from '@shared/mobile'
 import type { SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
 import type { TaskPolicy } from '@shared/task-policy'
+import type { TeamAccessInfo, TeamSnapshot, TeamStartPlanningInput, TeamStartTaskInput, TeamTaskInput, TeamTaskPatch } from '@shared/team'
 
 export class ApiError extends Error {
   constructor(
@@ -195,6 +196,29 @@ export const OpenCode = {
   mobileStatus: () => backendRequest<MobileAccessStatus>({ type: 'mobile.status' }),
   mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean }) =>
     backendRequest<MobileAccessStatus>({ type: 'mobile.set', patch }),
+  teamSnapshot: () => backendRequest<TeamSnapshot>({ type: 'team.snapshot' }),
+  teamAccess: () => backendRequest<TeamAccessInfo>({ type: 'team.access' }),
+  createTeam: (name: string, brief: string, memberName: string) =>
+    backendRequest<TeamSnapshot>({ type: 'team.create', name, brief, memberName }),
+  closeTeam: () => backendRequest<TeamSnapshot>({ type: 'team.close' }),
+  setTeamIdentity: (name: string) => backendRequest<TeamSnapshot>({ type: 'team.identity.set', name }),
+  updateTeamBoard: (boardId: string, patch: { name?: string; brief?: string }) =>
+    backendRequest<TeamSnapshot>({ type: 'team.board.update', boardId, ...patch }),
+  createTeamTask: (boardId: string, input: TeamTaskInput) =>
+    backendRequest<TeamSnapshot>({ type: 'team.task.create', boardId, input }),
+  updateTeamTask: (boardId: string, taskId: string, patch: TeamTaskPatch, expectedRevision?: number) =>
+    backendRequest<TeamSnapshot>({ type: 'team.task.update', boardId, taskId, patch, expectedRevision }),
+  deleteTeamTask: (boardId: string, taskId: string) =>
+    backendRequest<TeamSnapshot>({ type: 'team.task.delete', boardId, taskId }),
+  claimTeamTask: (boardId: string, taskId: string, release = false) =>
+    backendRequest<TeamSnapshot>({ type: 'team.task.claim', boardId, taskId, release }),
+  startTeamTask: (input: TeamStartTaskInput) =>
+    backendRequest<{ snapshot: TeamSnapshot; threadId: string }>({ type: 'team.task.start', input }),
+  startTeamPlanning: (input: TeamStartPlanningInput) =>
+    backendRequest<{ snapshot: TeamSnapshot; threadId: string }>({ type: 'team.plan.start', input }),
+  connectTeam: (url: string, token: string, memberName: string) =>
+    backendRequest<TeamSnapshot>({ type: 'team.connect', url, token, memberName }),
+  disconnectTeam: () => backendRequest<TeamSnapshot>({ type: 'team.disconnect' }),
   automationsList: () => backendRequest<AutomationsSnapshot>({ type: 'automation.list' }),
   createAutomation: (input: AutomationInput) => backendRequest<Automation>({ type: 'automation.create', input }),
   updateAutomation: (automationId: string, patch: Partial<AutomationInput> & { enabled?: boolean }) =>

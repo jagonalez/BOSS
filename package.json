@@ -22,6 +22,7 @@
     "test:projects": "node --experimental-strip-types --test src/main/project-identity.test.ts",
     "test:review": "node --experimental-strip-types --test src/main/review-manager.test.ts src/main/github-review-provider.test.ts src/renderer/src/lib/themes.test.ts",
     "test:claude": "node --experimental-strip-types --test src/main/backend/claude-backend.test.ts",
+    "test:team": "node --experimental-strip-types --test src/main/team-board-manager.test.ts",
     "fetch:opencode": "node scripts/fetch-opencode.mjs",
     "fetch:cua-driver": "bash scripts/fetch-cua-driver.sh",
     "pack": "electron-vite build && electron-builder --dir",
