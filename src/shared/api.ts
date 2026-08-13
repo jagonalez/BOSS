@@ -45,6 +45,8 @@ export interface BossApi {
   browseDestroy(id: string): Promise<boolean>
   onBrowseNavigation(cb: (evt: BrowseNavEvent) => void): () => void
   onBrowseExternal(cb: (url: string) => void): () => void
+  /** An agent navigated, clicked, or typed in a browser tab. */
+  onBrowseAgentActivity(cb: (id: string) => void): () => void
   openExternal(url: string): Promise<boolean>
   openPath(path: string): Promise<boolean>
   openInEditor(path: string, line?: number): Promise<boolean>

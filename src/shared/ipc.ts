@@ -153,6 +153,7 @@ export const IpcChannels = {
   BrowseDestroy: 'browse:destroy',
   BrowseNavigation: 'browse:navigation',
   BrowseExternal: 'browse:external',
+  BrowseAgentActivity: 'browse:agent-activity',
   OpenExternal: 'open-external',
   OpenPath: 'open-path',
   OpenInEditor: 'open-in-editor',

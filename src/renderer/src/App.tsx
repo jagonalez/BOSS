@@ -248,6 +248,12 @@ export function App(): React.JSX.Element {
 
     const offSpeech = window.boss.onSpeechStatusChanged(applySpeechStatus)
 
+    // Highlight a browser tab an agent drove, so work in a tab you are not
+    // looking at is still visible. Cleared when you open the tab.
+    const offBrowseAgent = window.boss.onBrowseAgentActivity((id) => {
+      appStore.setState((s) => ({ browseAgentActivity: { ...s.browseAgentActivity, [id]: true } }))
+    })
+
     const offSites = window.boss.onSitesChanged((sites) => appStore.setState({ sites }))
     void window.boss
       .sitesCfGet()
@@ -294,6 +300,7 @@ export function App(): React.JSX.Element {
       offProgress()
       offSpeech()
       offSites()
+      offBrowseAgent()
       window.clearTimeout(refreshTimer)
       void window.boss.unsubscribeEvents()
     }

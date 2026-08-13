@@ -124,10 +124,13 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
   const busActivity = useStore(appStore, (state) => Boolean(item.sessionId && state.threadBus?.messages.some((message) =>
     (message.fromThreadId === item.sessionId || message.toThreadId === item.sessionId) && message.status !== 'delivered'
   )))
+  const agentDriven = useStore(appStore, (state) =>
+    item.kind === 'browser' && Boolean(state.browseAgentActivity[`workspace-${item.id}`])
+  )
 
   return (
     <>
-      <span className={`workspace-tab-icon ${busy ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
+      <span className={`workspace-tab-icon ${busy || agentDriven ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
         <Icon size={12} />
       </span>
       <span className="workspace-tab-label" title={label}>{label}</span>
@@ -207,110 +210,39 @@ function checkoutPath(session: { executionPath?: string; worktree?: { path: stri
   return session.executionPath ?? session.worktree?.path
 }
 
-function CheckoutPicker({
-  groupId,
-  kind,
-  close
-}: {
-  groupId: string
-  kind: 'terminal' | 'review' | 'files'
-  close: () => void
-}): React.JSX.Element {
-  const projectPath = useStore(appStore, (state) => state.projectPath)
-  const selectedCheckoutPath = useStore(appStore, (state) => state.selectedCheckoutPath)
-  const projectCheckouts = useStore(appStore, (state) => state.projectCheckouts)
-  const sessions = useStore(appStore, (state) => state.sessions)
-  const activeSessionId = useStore(appStore, (state) => state.activeSessionId)
-  const terminalStartLocation = useStore(appStore, (state) => state.terminalStartLocation)
-  const workspace = useStore(appStore, (state) => state.projectWorkspace)
-  const contexts = useMemo(() => {
-    const items: WorkspaceCheckoutBinding[] = projectCheckouts.length > 0
-      ? projectCheckouts.map((checkout) => ({
-          contextPath: checkout.path,
-          contextLabel: checkout.main ? 'Main' : checkout.branch ?? shortProject(checkout.path)
-        }))
-      : projectPath ? [{ contextPath: projectPath, contextLabel: 'Main' }] : []
-    const seen = new Set(items.map((item) => item.contextPath))
-    for (const session of sessions) {
-      if (!session.worktree || session.worktree.status !== 'active') continue
-      const contextPath = checkoutPath(session)
-      if (!contextPath || seen.has(contextPath)) continue
-      seen.add(contextPath)
-      items.push({
-        contextPath,
-        worktreeId: session.worktree.id,
-        contextLabel: session.worktree.branch
-      })
-    }
-    const active = sessions.find((session) => session.id === activeSessionId)
-    const preferredPath = kind === 'terminal'
-      ? terminalStartLocation === 'focused-checkout'
-        ? checkoutPath(active ?? {}) ?? selectedCheckoutPath ?? projectPath
-        : projectPath
-      : selectedCheckoutPath || projectPath
-    return [...items].sort((a, b) => Number(b.contextPath === preferredPath) - Number(a.contextPath === preferredPath))
-  }, [activeSessionId, kind, projectCheckouts, projectPath, selectedCheckoutPath, sessions, terminalStartLocation])
-  const openKeys = useMemo(() => new Set(
-    workspace ? walkTabs(activeWorkspaceView(workspace).root).map((item) => `${item.kind}\0${item.contextPath ?? ''}`) : []
-  ), [workspace])
-  const label = TAB_TYPES.find((item) => item.kind === kind)?.label ?? kind
-
-  return (
-    <div className="workspace-add-menu thread-picker">
-      <div className="workspace-menu-title">{label} checkout</div>
-      <div className="workspace-thread-options">
-        {contexts.map((context, index) => {
-          const alreadyOpen = (kind === 'review' || kind === 'files') && openKeys.has(`${kind}\0${context.contextPath}`)
-          return (
-            <button
-              key={context.contextPath}
-              className="workspace-add-menu-item"
-              onClick={() => {
-                addWorkspaceTab(groupId, kind, undefined, context)
-                close()
-              }}
-              title={context.contextPath}
-            >
-              {kind === 'terminal' ? <TerminalIcon size={13} /> : kind === 'review' ? <ReviewIcon size={13} /> : <FilesIcon size={13} />}
-              <span>{context.contextLabel ?? shortProject(context.contextPath)}</span>
-              {index === 0 && kind === 'terminal' ? <small>default</small> : alreadyOpen ? <small>open</small> : null}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 function AddMenu({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
   const [threadPicker, setThreadPicker] = useState(false)
-  const [checkoutKind, setCheckoutKind] = useState<'terminal' | 'review' | 'files' | null>(null)
   const projectPath = useStore(appStore, (state) => state.projectPath)
   const sessions = useStore(appStore, (state) => state.sessions)
   const activeSessionId = useStore(appStore, (state) => state.activeSessionId)
   const terminalStartLocation = useStore(appStore, (state) => state.terminalStartLocation)
   const activeSession = sessions.find((session) => session.id === activeSessionId)
-  const activeWorktrees = sessions.filter((session) => session.worktree?.status === 'active')
-  const terminalPath = terminalStartLocation === 'focused-checkout'
-    ? checkoutPath(activeSession ?? {}) ?? projectPath
-    : projectPath
-  const terminalCheckout: WorkspaceCheckoutBinding | undefined = terminalPath
-    ? {
-        contextPath: terminalPath,
-        worktreeId: terminalStartLocation === 'focused-checkout' ? activeSession?.worktree?.id : undefined,
-        contextLabel: terminalStartLocation === 'focused-checkout' && activeSession?.worktree?.branch
-          ? activeSession.worktree.branch
-          : 'Main'
-      }
-    : undefined
+
+  // A resource belongs to the thread it was opened from, so it inherits that
+  // thread's checkout instead of asking. Worktrees are an agent-isolation
+  // mechanism; picking one from a list of every worktree on disk asked the user
+  // to answer a question the thread had already answered. With no thread open —
+  // or when the user has set new resources to start at the project root —
+  // resources fall back to the project itself.
+  const inherited: WorkspaceCheckoutBinding | undefined = (() => {
+    const fromThread = terminalStartLocation === 'focused-checkout'
+    const path = (fromThread ? checkoutPath(activeSession ?? {}) : undefined) ?? projectPath
+    if (!path) return undefined
+    const worktree = fromThread ? activeSession?.worktree : undefined
+    return {
+      contextPath: path,
+      worktreeId: worktree?.id,
+      contextLabel: worktree?.branch ?? (fromThread && activeSession?.title ? activeSession.title : 'Project')
+    }
+  })()
 
   if (threadPicker) return <ThreadPicker groupId={groupId} close={close} />
-  if (checkoutKind) return <CheckoutPicker groupId={groupId} kind={checkoutKind} close={close} />
 
   return (
     <div className="workspace-add-menu">
       <div className="workspace-menu-title">Add to group</div>
       {TAB_TYPES.map(({ kind, label, icon: Icon }) => {
+        const scoped = kind === 'terminal' || kind === 'review' || kind === 'files'
         return (
           <button
             key={kind}
@@ -318,30 +250,18 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
             onClick={() => {
               if (kind === 'thread') {
                 setThreadPicker(true)
-              } else if (kind === 'terminal') {
-                addWorkspaceTab(groupId, kind, undefined, terminalCheckout)
-                close()
-              } else if (kind === 'review' || kind === 'files') {
-                setCheckoutKind(kind)
-              } else {
-                addWorkspaceTab(groupId, kind)
-                close()
+                return
               }
+              addWorkspaceTab(groupId, kind, undefined, scoped ? inherited : undefined)
+              close()
             }}
           >
             <Icon size={14} />
             <span>{label}</span>
-            {kind === 'terminal' ? <small>{terminalCheckout?.contextLabel ?? 'project'}</small> : null}
-            {kind === 'review' || kind === 'files' ? <small>choose checkout</small> : null}
+            {scoped ? <small>{inherited?.contextLabel ?? 'project'}</small> : null}
           </button>
         )
       })}
-      {activeWorktrees.length > 0 ? (
-        <button className="workspace-add-menu-item" onClick={() => setCheckoutKind('terminal')}>
-          <TerminalIcon size={14} />
-          <span>Terminal in another checkout…</span>
-        </button>
-      ) : null}
     </div>
   )
 }
