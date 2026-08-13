@@ -12,18 +12,18 @@ if [ ! -d "$APP" ]; then
   exit 1
 fi
 
-# Preserve code signature (cp breaks the cdhash / embedded Info.plist).
-ditto "$APP" resources/cua-driver/CuaDriver.app
-
-# Verify the whole bundle with --strict, not just the inner binary. Notarization
-# once failed with "The signature of the binary is invalid" because Info.plist,
-# CodeResources, and Resources/ had been stripped from the copy — the binary
-# alone still passed a non-strict check, so this script reported success.
-codesign --verify --strict resources/cua-driver/CuaDriver.app 2>/dev/null \
-  || { echo "bundled CuaDriver.app failed signature verification" >&2; exit 1; }
-for required in Info.plist CodeResources; do
-  [ -f "resources/cua-driver/CuaDriver.app/Contents/$required" ] \
-    || { echo "bundled CuaDriver.app is missing Contents/$required" >&2; exit 1; }
+# Copy the binaries out of the bundle rather than the bundle itself. A nested
+# .app signed by another team (Cua AI) sent notarization into manual review, and
+# the bundle carried a second fragility: its signature covers Contents/Info.plist,
+# so a stray cp -R that dropped that file made Apple reject the whole build.
+# ditto preserves each binary's own signature; cp would break it.
+for bin in cua-driver cua-cursor-theme; do
+  src="$APP/Contents/MacOS/$bin"
+  [ -f "$src" ] || { echo "missing $src in the installed driver" >&2; exit 1; }
+  ditto "$src" "resources/cua-driver/$bin"
+  codesign --verify --strict "resources/cua-driver/$bin" 2>/dev/null \
+    || { echo "$bin failed signature verification after copy" >&2; exit 1; }
 done
-echo "bundled CuaDriver.app -> resources/cua-driver/CuaDriver.app"
-resources/cua-driver/CuaDriver.app/Contents/MacOS/cua-driver --version
+
+echo "bundled cua-driver binaries -> resources/cua-driver/"
+resources/cua-driver/cua-driver --version

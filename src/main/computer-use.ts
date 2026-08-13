@@ -28,6 +28,13 @@ function resolveCuaBin(): string {
   if (process.env.CUA_DRIVER_BIN) return process.env.CUA_DRIVER_BIN
   if (!app.isPackaged) return exe
   const candidates = [
+    // Shipped flat. A nested .app signed by another team (Cua AI) sent
+    // notarization into manual review, and the bundle's Info.plist made the
+    // signature fragile: a stray cp -R once stripped it and Apple rejected the
+    // build. The binary carries its own signature, which flattening preserves.
+    join(process.resourcesPath ?? '', 'cua-driver', exe),
+    join(app.getAppPath(), 'resources', 'cua-driver', exe),
+    // Older layouts and a locally installed driver.
     join(process.resourcesPath ?? '', 'cua-driver', 'CuaDriver.app', 'Contents', 'MacOS', exe),
     join(app.getAppPath(), 'resources', 'cua-driver', 'CuaDriver.app', 'Contents', 'MacOS', exe),
     '/Applications/CuaDriver.app/Contents/MacOS/cua-driver'
