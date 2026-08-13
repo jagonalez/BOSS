@@ -11,9 +11,13 @@ export function ConfirmModal(): React.JSX.Element | null {
         <h3>{confirm.title}</h3>
         <div className="body">{confirm.message}</div>
         <div className="actions">
-          <button className="btn-deny" onClick={() => appStore.setState({ confirm: null })}>
-            Cancel
-          </button>
+          {/* A notice has nothing to decline, so Cancel would just duplicate the
+              acknowledge button. */}
+          {confirm.notice ? null : (
+            <button className="btn-deny" onClick={() => appStore.setState({ confirm: null })}>
+              Cancel
+            </button>
+          )}
           <button
             className={`btn-allow ${confirm.destructive ? 'danger' : ''}`}
             onClick={() => {

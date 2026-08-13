@@ -3279,6 +3279,22 @@ textarea {
   padding-left: 47px;
 }
 
+.sidebar-load-more {
+  padding: 7px 8px;
+  color: var(--text-faint);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sidebar-load-more.nested {
+  padding-left: 47px;
+}
+
+.sidebar-load-more:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
 .project-card {
   display: flex;
   align-items: center;

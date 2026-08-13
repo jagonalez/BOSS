@@ -18,9 +18,12 @@ import {
   showPage,
   toggleArchive
 } from '../lib/actions'
-import { ChatIcon, ChevronIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
+import { ChatIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
+
+/** Threads shown per project before "Show N more". */
+const THREADS_PER_PROJECT = 20
 
 interface CtxMenu {
   x: number
@@ -148,12 +151,6 @@ export function Sidebar(): React.JSX.Element {
   const activePath = projectPath
 
   useEffect(() => {
-    if (activePath && !expanded.has(activePath)) {
-      setExpanded((prev) => new Set(prev).add(activePath))
-    }
-  }, [activePath])
-
-  useEffect(() => {
     if (!ctx) return
     const close = (): void => setCtx(null)
     const onKey = (e: KeyboardEvent): void => {
@@ -171,10 +168,6 @@ export function Sidebar(): React.JSX.Element {
   }, [ctx])
 
   const open = (path: string): void => {
-    const next = new Set(expanded)
-    if (next.has(path)) next.delete(path)
-    else next.add(path)
-    setExpanded(next)
     if (path !== activePath) void openProject(path)
     else showPage('project')
   }
@@ -297,8 +290,12 @@ export function Sidebar(): React.JSX.Element {
         >
         {projectPaths.map((path) => {
           const isActive = path === activePath
-          const isExpanded = expanded.has(path)
           const pathSessions = sessionsByPath.get(path) ?? []
+          // Threads are always listed; "expanded" now only lifts the per-project
+          // cap, so a project with hundreds of threads cannot flood the sidebar.
+          const isExpanded = expanded.has(path)
+          const shown = isExpanded ? pathSessions : pathSessions.slice(0, THREADS_PER_PROJECT)
+          const hidden = pathSessions.length - shown.length
           return (
             <div key={path}>
               <div
@@ -307,28 +304,32 @@ export function Sidebar(): React.JSX.Element {
                 onContextMenu={(e) => onProjectCtx(e, path)}
                 title={path}
               >
-                <span className="icon" style={{ transform: isExpanded ? 'rotate(90deg)' : undefined, transition: 'transform 0.12s ease' }}>
-                  <ChevronIcon size={14} />
-                </span>
                 <span className="icon">
                   <FolderIcon size={15} />
                 </span>
                 <span className="project-row-copy">
                   <span className="name">{projectName(path)}</span>
-                  {isExpanded ? <span className="project-row-path">{path}</span> : null}
+                  {isActive ? <span className="project-row-path">{path}</span> : null}
                 </span>
                 <span className="meta">{pathSessions.length || ''}</span>
               </div>
-              {isExpanded &&
-                (pathSessions.length > 0 ? (
-                  pathSessions.map((session) => (
-                    <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
-                  ))
-                ) : (
-                  <div className="sidebar-empty nested">
-                    {isActive ? 'No chats yet' : 'Open project to load chats'}
-                  </div>
-                ))}
+              {shown.map((session) => (
+                <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
+              ))}
+              {hidden > 0 ? (
+                <div
+                  className="sidebar-load-more nested"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setExpanded((prev) => new Set(prev).add(path))
+                  }}
+                >
+                  Show {hidden} more
+                </div>
+              ) : null}
+              {pathSessions.length === 0 ? (
+                <div className="sidebar-empty nested">No chats yet</div>
+              ) : null}
             </div>
           )
         })}

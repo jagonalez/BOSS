@@ -1851,9 +1851,27 @@ export async function openProjectFolder(): Promise<void> {
     await refreshProjects()
     const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
     loadProjectWorkspace(info.path, preferred)
+    // A linked worktree opens its repository, not a second project. Without
+    // saying so, picking a worktree looks like BOSS ignored the folder chosen.
+    if (info.checkoutPath && info.checkoutPath !== info.path) {
+      const branch = info.checkouts.find((checkout) => checkout.path === info.checkoutPath)?.branch
+      appStore.setState({
+        confirm: {
+          title: 'Opened as a checkout',
+          message: `${folderName(info.checkoutPath)} is a git worktree of ${folderName(info.path)}, so BOSS opened that project with ${branch ? `the ${branch} branch` : 'this worktree'} as the active checkout. Switch checkouts from the project header.`,
+          confirmLabel: 'Got it',
+          notice: true,
+          action: () => {}
+        }
+      })
+    }
   } catch (err) {
     console.error('open project folder:', err)
   }
+}
+
+function folderName(path: string): string {
+  return path.split('/').filter(Boolean).pop() ?? path
 }
 
 export function loadSpeechPrefs(): void {
