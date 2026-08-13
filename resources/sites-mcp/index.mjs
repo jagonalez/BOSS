@@ -1,15 +1,15 @@
 // R.A.L.F. sites MCP server (stdio).
 // Exposes a single tool `publish_site(folder, name?)` that forwards to the
-// Ralf main-process control endpoint (loopback + random secret).
+// BOSS main-process control endpoint (loopback + random secret).
 // Run via `ELECTRON_RUN_AS_NODE=1 electron <this-file>`.
 
-const CONTROL_URL = process.env.RALF_SITES_CONTROL_URL
-const SECRET = process.env.RALF_SITES_SECRET
+const CONTROL_URL = process.env.BOSS_SITES_CONTROL_URL
+const SECRET = process.env.BOSS_SITES_SECRET
 
 const TOOL = {
   name: 'publish_site',
   description:
-    'Publish a folder of static files (a site/artifact) so it is served locally in Ralf and can be previewed in a browser. Use this after generating a site (HTML/CSS/JS) into a folder to make it viewable and optionally deployed to Cloudflare. Provide the absolute folder path or a path relative to the project.',
+    'Publish a folder of static files (a site/artifact) so it is served locally in BOSS and can be previewed in a browser. Use this after generating a site (HTML/CSS/JS) into a folder to make it viewable and optionally deployed to Cloudflare. Provide the absolute folder path or a path relative to the project.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -38,7 +38,7 @@ async function handle(msg) {
       result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'ralf-sites', version: '0.1.0' }
+        serverInfo: { name: 'boss-sites', version: '0.1.0' }
       }
     })
     return
@@ -62,7 +62,7 @@ async function handle(msg) {
         if (args.name !== undefined && typeof args.name !== 'string') {
           throw new Error('name must be a string')
         }
-        if (!CONTROL_URL || !SECRET) throw new Error('Ralf Sites control endpoint is unavailable')
+        if (!CONTROL_URL || !SECRET) throw new Error('BOSS Sites control endpoint is unavailable')
         const res = await fetch(`${CONTROL_URL}/publish`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SECRET}` },
