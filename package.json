@@ -97,7 +97,9 @@
       "signIgnore": [
         "cua-driver/CuaDriver.app"
       ],
-      "notarize": true
+      "notarize": {
+        "teamId": "78UU74XQFK"
+      }
     },
     "win": {
       "target": [

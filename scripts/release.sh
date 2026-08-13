@@ -20,7 +20,8 @@ fi
 # Notarization runs inside `npm run dist`. Check the credentials up front rather
 # than after a multi-minute build, and fail rather than silently shipping an
 # unsigned build that auto-update cannot install.
-# electron-builder reads the team id from APPLE_TEAM_ID, not from the config.
+# package.json carries notarize.teamId as a fallback; the env var wins and
+# avoids electron-builder's deprecation warning.
 export APPLE_TEAM_ID="${APPLE_TEAM_ID:-78UU74XQFK}"
 
 if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]; then
