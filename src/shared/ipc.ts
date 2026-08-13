@@ -167,6 +167,8 @@ export const IpcChannels = {
   ProjectCurrent: 'project:current',
   ProjectSet: 'project:set',
   ProjectChoose: 'project:choose',
+  ProjectList: 'project:list',
+  ProjectForget: 'project:forget',
   TerminalCreate: 'terminal:create',
   TerminalWrite: 'terminal:write',
   TerminalResize: 'terminal:resize',

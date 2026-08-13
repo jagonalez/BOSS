@@ -218,7 +218,6 @@ export const OpenCode = {
   setQaDefault: (policy: QaPolicy) => backendRequest<QaPolicy>({ type: 'qa.default.policy', policy }),
   fileTree: (path = '', directory?: string) => request<FileNode[]>('GET', '/file', { query: { path }, directory }),
   fileContent: (path: string, directory?: string) => request<FileContent>('GET', '/file/content', { query: { path }, directory }),
-  projectList: () => request<Project[]>('GET', '/project'),
   projectCurrent: () => request<Project>('GET', '/project/current'),
   agents: () => request<Agent[]>('GET', '/agent'),
   providers: () =>
