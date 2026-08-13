@@ -13,7 +13,7 @@ export function Toolbar(): React.JSX.Element {
     <div className="toolbar">
       <div className="spacer" />
       {attention ? (
-        <div className={`attention-pill ${attention.kind}`} title="R.A.L.F. needs your attention" onClick={() => appStore.setState({ attention: null })}>
+        <div className={`attention-pill ${attention.kind}`} title="BOSS needs your attention" onClick={() => appStore.setState({ attention: null })}>
           <span className={`attention-dot ${attention.kind}`} />
           <span>{attention.kind === 'permission' ? 'Permission needed' : attention.kind === 'error' ? 'Error' : 'Done'}</span>
         </div>

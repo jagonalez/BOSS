@@ -52,7 +52,7 @@ const PERMISSION_GRACE_MS = 2_500
 
 function runHeader(automation: Automation): string {
   return [
-    '[R.A.L.F. AUTOMATION RUN]',
+    '[BOSS AUTOMATION RUN]',
     `Automation: ${automation.name}`,
     'This run is unattended. Complete the task below without asking the user questions.',
     'End your final message with exactly one line in this form:',
@@ -581,7 +581,7 @@ export class AutomationManager {
   private notify(automation: Automation, body: string): void {
     if (automation.notify === 'off') return
     try {
-      new Notification({ title: 'R.A.L.F. automation', body }).show()
+      new Notification({ title: 'BOSS automation', body }).show()
     } catch {
       /* Notifications are best-effort. */
     }
@@ -590,7 +590,7 @@ export class AutomationManager {
       // accepts a text POST works.
       void fetch(this.notifyWebhookUrl, {
         method: 'POST',
-        headers: { title: `R.A.L.F. · ${automation.name}`, 'content-type': 'text/plain' },
+        headers: { title: `BOSS · ${automation.name}`, 'content-type': 'text/plain' },
         body
       }).catch(() => {
         /* Push is best-effort; the run record is the source of truth. */

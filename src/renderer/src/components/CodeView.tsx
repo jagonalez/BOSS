@@ -34,7 +34,7 @@ export function CodeView({ text, path }: { text: string; path?: string }): React
             {path}
           </span>
           <div className="code-view-actions">
-            <button className="btn-ghost" onClick={() => void window.ralf.openInEditor(path)} title="Open in editor">
+            <button className="btn-ghost" onClick={() => void window.boss.openInEditor(path)} title="Open in editor">
               <CodeIcon size={14} /> Open
             </button>
             <button className="btn-ghost" onClick={() => void copy()} title="Copy file contents">

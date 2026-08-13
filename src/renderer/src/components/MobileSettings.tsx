@@ -66,7 +66,7 @@ export function MobileSettings(): React.JSX.Element {
                     ? `tailscale serve failed: ${status.tailscaleError}`
                     : status.tailscale
                       ? 'Publishing to your tailnet…'
-                      : `Off. R.A.L.F. can run tailscale serve for you, or run it yourself: tailscale serve --bg ${status.port}`
+                      : `Off. BOSS can run tailscale serve for you, or run it yourself: tailscale serve --bg ${status.port}`
               }
             >
               <Button size="small" disabled={busy} onClick={() => void apply({ tailscale: !status.tailscale })}>

@@ -194,17 +194,17 @@ export class ThreadBus {
 
   async agentCall(backendId: BackendId, nativeThreadId: string, tool: ThreadBusAgentTool, args: unknown): Promise<unknown> {
     const caller = this.host.threadForNative(backendId, nativeThreadId)
-    if (!caller) throw new Error('R.A.L.F. could not identify the calling thread.')
-    if (tool.startsWith('ralf_browser_') || tool === 'ralf_computer') {
-      if (!this.qaTools) throw new Error('R.A.L.F. QA tools are not ready.')
+    if (!caller) throw new Error('BOSS could not identify the calling thread.')
+    if (tool.startsWith('boss_browser_') || tool === 'boss_computer') {
+      if (!this.qaTools) throw new Error('BOSS QA tools are not ready.')
       return this.qaTools.call(caller.id, tool as QaAgentTool, args)
     }
-    if (tool.startsWith(MCP_TOOL_PREFIX) || tool === 'ralf_mcp_list' || tool === 'ralf_mcp_call') {
-      if (!this.mcpHub) throw new Error('R.A.L.F. MCP connections are not ready.')
-      if (tool === 'ralf_mcp_list') return this.mcpHub.agentListing(stringArg(args, 'tool') || undefined)
-      if (tool === 'ralf_mcp_call') {
+    if (tool.startsWith(MCP_TOOL_PREFIX) || tool === 'boss_mcp_list' || tool === 'boss_mcp_call') {
+      if (!this.mcpHub) throw new Error('BOSS MCP connections are not ready.')
+      if (tool === 'boss_mcp_list') return this.mcpHub.agentListing(stringArg(args, 'tool') || undefined)
+      if (tool === 'boss_mcp_call') {
         const name = stringArg(args, 'tool')
-        if (!name) throw new Error('Pass the tool name from ralf_mcp_list.')
+        if (!name) throw new Error('Pass the tool name from boss_mcp_list.')
         const argumentsJson = stringArg(args, 'argumentsJson')
         const inline = (args as Record<string, unknown> | undefined)?.arguments
         let toolArgs: unknown = inline && typeof inline === 'object' ? inline : {}
@@ -221,16 +221,16 @@ export class ThreadBus {
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
-    if (!['ralf_threads_list', 'ralf_threads_read', 'ralf_threads_send', 'ralf_threads_reply', 'ralf_threads_spawn_worktree'].includes(tool)) {
-      throw new Error('Unknown R.A.L.F. thread tool.')
+    if (!['boss_threads_list', 'boss_threads_read', 'boss_threads_send', 'boss_threads_reply', 'boss_threads_spawn_worktree'].includes(tool)) {
+      throw new Error('Unknown BOSS thread tool.')
     }
 
     switch (tool) {
-      case 'ralf_threads_list':
+      case 'boss_threads_list':
         return this.host.threadList(caller.projectId)
           .filter((thread) => thread.backendId === caller.backendId)
           .map((thread) => ({ id: thread.id, title: thread.title, busy: thread.busy, current: thread.id === caller.id }))
-      case 'ralf_threads_read': {
+      case 'boss_threads_read': {
         const targetId = stringArg(args, 'threadId')
         const target = this.requirePeer(caller, targetId)
         const limit = Math.max(1, Math.min(20, numberArg(args, 'limit', 8)))
@@ -240,13 +240,13 @@ export class ThreadBus {
           transcript: messageText(messages) || '(No messages yet.)'
         }
       }
-      case 'ralf_threads_send':
+      case 'boss_threads_send':
         if (policy !== 'collaborate') throw new Error('This project allows reading threads, but not sending messages.')
         return this.send(caller, stringArg(args, 'threadId'), stringArg(args, 'message'), {
           expectsReply: booleanArg(args, 'expectsReply', true),
           maxTurns: numberArg(args, 'maxTurns', 4)
         })
-      case 'ralf_threads_reply': {
+      case 'boss_threads_reply': {
         if (policy !== 'collaborate') throw new Error('This project allows reading threads, but not sending replies.')
         const replyTo = this.messages.find((message) => message.id === stringArg(args, 'messageId'))
         if (!replyTo || replyTo.toThreadId !== caller.id) throw new Error('That message is not addressed to this thread.')
@@ -262,7 +262,7 @@ export class ThreadBus {
           hopCount: replyTo.hopCount + 1
         })
       }
-      case 'ralf_threads_spawn_worktree': {
+      case 'boss_threads_spawn_worktree': {
         if (policy !== 'collaborate') throw new Error('This project does not allow agents to create worktree threads.')
         const instruction = stringArg(args, 'instruction')
         if (!instruction) throw new Error('An implementation instruction is required.')
@@ -321,13 +321,13 @@ export class ThreadBus {
   private prompt(message: ThreadBusMessage): string {
     const source = this.host.threadInfo(message.fromThreadId)
     return [
-      '[R.A.L.F. THREAD MESSAGE]',
+      '[BOSS THREAD MESSAGE]',
       `From: ${source?.title ?? message.fromThreadId} (${message.fromThreadId})`,
       `Message id: ${message.id}`,
       `Conversation turn: ${message.hopCount + 1} of ${message.maxTurns}`,
       message.body,
       message.expectsReply
-        ? 'A reply was requested. Use ralf_threads_reply with this message id; do not simulate a reply in another thread.'
+        ? 'A reply was requested. Use boss_threads_reply with this message id; do not simulate a reply in another thread.'
         : 'No reply is required. Reply only if it materially helps the sending thread.'
     ].join('\n\n')
   }
@@ -426,17 +426,17 @@ export class ThreadBus {
   }
 
   private mcpTools(): Array<Record<string, unknown>> {
-    const threadId = { type: 'string', description: 'R.A.L.F. thread id returned by ralf_threads_list.' }
+    const threadId = { type: 'string', description: 'BOSS thread id returned by boss_threads_list.' }
     const message = { type: 'string', description: 'Message to send to the other agent.' }
     return [
       {
-        name: 'ralf_threads_list',
+        name: 'boss_threads_list',
         description: 'List other threads in this project that use the same backend.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true }
       },
       {
-        name: 'ralf_threads_read',
+        name: 'boss_threads_read',
         description: 'Read recent messages from another same-project, same-backend thread.',
         inputSchema: {
           type: 'object',
@@ -447,7 +447,7 @@ export class ThreadBus {
         annotations: { readOnlyHint: true }
       },
       {
-        name: 'ralf_threads_send',
+        name: 'boss_threads_send',
         description: 'Send a bounded message to another same-project, same-backend thread.',
         inputSchema: {
           type: 'object',
@@ -462,12 +462,12 @@ export class ThreadBus {
         }
       },
       {
-        name: 'ralf_threads_reply',
-        description: 'Reply once to a R.A.L.F. thread message addressed to this thread.',
+        name: 'boss_threads_reply',
+        description: 'Reply once to a BOSS thread message addressed to this thread.',
         inputSchema: {
           type: 'object',
           properties: {
-            messageId: { type: 'string', description: 'Message id from the incoming R.A.L.F. thread message.' },
+            messageId: { type: 'string', description: 'Message id from the incoming BOSS thread message.' },
             message,
             expectsReply: { type: 'boolean', default: false }
           },
@@ -476,8 +476,8 @@ export class ThreadBus {
         }
       },
       {
-        name: 'ralf_threads_spawn_worktree',
-        description: 'Fork this conversation into a new R.A.L.F. thread running in an isolated Git worktree.',
+        name: 'boss_threads_spawn_worktree',
+        description: 'Fork this conversation into a new BOSS thread running in an isolated Git worktree.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -498,8 +498,8 @@ export class ThreadBus {
   }
 
   private async handleMcp(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const nativeThreadId = request.headers['x-ralf-thread']
-    const backendId = request.headers['x-ralf-backend']
+    const nativeThreadId = request.headers['x-boss-thread']
+    const backendId = request.headers['x-boss-backend']
     if (backendId !== 'claude' || typeof nativeThreadId !== 'string' || !this.authorized(request, 'claude', nativeThreadId)) {
       this.json(response, 404)
       return
@@ -539,7 +539,7 @@ export class ThreadBus {
       reply({
         protocolVersion: requested === '2025-03-26' ? requested : '2025-06-18',
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'ralf-agent-tools', version: '1.0.0' },
+        serverInfo: { name: 'boss-agent-tools', version: '1.0.0' },
         instructions: hubInstructions ? `${QA_GUIDANCE}\n\n${hubInstructions}` : QA_GUIDANCE
       })
       return
@@ -551,7 +551,7 @@ export class ThreadBus {
     if (input.method === 'tools/call') {
       const name = input.params?.name
       if (typeof name !== 'string') {
-        reply({ content: [{ type: 'text', text: 'R.A.L.F. could not identify the calling Claude thread.' }], isError: true })
+        reply({ content: [{ type: 'text', text: 'BOSS could not identify the calling Claude thread.' }], isError: true })
         return
       }
       try {

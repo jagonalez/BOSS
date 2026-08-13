@@ -1,13 +1,13 @@
 export type QaPolicy = 'off' | 'suggest' | 'automatic'
 
 export type QaAgentTool =
-  | 'ralf_browser_tabs'
-  | 'ralf_browser_navigate'
-  | 'ralf_browser_snapshot'
-  | 'ralf_browser_screenshot'
-  | 'ralf_browser_click'
-  | 'ralf_browser_type'
-  | 'ralf_computer'
+  | 'boss_browser_tabs'
+  | 'boss_browser_navigate'
+  | 'boss_browser_snapshot'
+  | 'boss_browser_screenshot'
+  | 'boss_browser_click'
+  | 'boss_browser_type'
+  | 'boss_computer'
 
 export interface QaPolicyState {
   threadId: string
@@ -25,19 +25,19 @@ export interface AgentToolImage {
 }
 
 export interface AgentToolResult {
-  __ralfToolResult: true
+  __bossToolResult: true
   text: string
   image?: AgentToolImage
 }
 
 export function isAgentToolResult(value: unknown): value is AgentToolResult {
-  return Boolean(value && typeof value === 'object' && (value as AgentToolResult).__ralfToolResult === true)
+  return Boolean(value && typeof value === 'object' && (value as AgentToolResult).__bossToolResult === true)
 }
 
 export const QA_GUIDANCE = [
-  'R.A.L.F. provides browser and computer QA tools.',
+  'BOSS provides browser and computer QA tools.',
   'For UI bugs or visual reviews, inspect the running result before drawing conclusions.',
-  'Prefer ralf_browser_* for web content and ralf_computer for native applications.',
+  'Prefer boss_browser_* for web content and boss_computer for native applications.',
   'After changes, repeat the affected flow and report the evidence you observed.',
   'In Suggest mode, inspection is allowed but navigation, clicking, and typing require the user to enable Automatic QA.'
 ].join(' ')
@@ -49,14 +49,14 @@ export const QA_TOOL_DEFINITIONS: Array<{
   readOnly: boolean
 }> = [
   {
-    name: 'ralf_browser_tabs',
-    description: 'List the browser tiles currently open in the R.A.L.F. workspace. Use this before other browser tools.',
+    name: 'boss_browser_tabs',
+    description: 'List the browser tiles currently open in the BOSS workspace. Use this before other browser tools.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     readOnly: true
   },
   {
-    name: 'ralf_browser_navigate',
-    description: 'Navigate an existing R.A.L.F. browser tile to an HTTP or HTTPS URL. Requires Automatic QA.',
+    name: 'boss_browser_navigate',
+    description: 'Navigate an existing BOSS browser tile to an HTTP or HTTPS URL. Requires Automatic QA.',
     inputSchema: {
       type: 'object',
       properties: { tabId: { type: 'string' }, url: { type: 'string' } },
@@ -66,8 +66,8 @@ export const QA_TOOL_DEFINITIONS: Array<{
     readOnly: false
   },
   {
-    name: 'ralf_browser_snapshot',
-    description: 'Read visible page text and indexed interactive elements from a R.A.L.F. browser tile. Element refs remain valid until the page changes.',
+    name: 'boss_browser_snapshot',
+    description: 'Read visible page text and indexed interactive elements from a BOSS browser tile. Element refs remain valid until the page changes.',
     inputSchema: {
       type: 'object',
       properties: { tabId: { type: 'string' } },
@@ -77,8 +77,8 @@ export const QA_TOOL_DEFINITIONS: Array<{
     readOnly: true
   },
   {
-    name: 'ralf_browser_screenshot',
-    description: 'Capture the rendered page in a R.A.L.F. browser tile for visual QA.',
+    name: 'boss_browser_screenshot',
+    description: 'Capture the rendered page in a BOSS browser tile for visual QA.',
     inputSchema: {
       type: 'object',
       properties: { tabId: { type: 'string' } },
@@ -88,8 +88,8 @@ export const QA_TOOL_DEFINITIONS: Array<{
     readOnly: true
   },
   {
-    name: 'ralf_browser_click',
-    description: 'Click an element ref returned by ralf_browser_snapshot. Requires Automatic QA; snapshot again afterward to verify.',
+    name: 'boss_browser_click',
+    description: 'Click an element ref returned by boss_browser_snapshot. Requires Automatic QA; snapshot again afterward to verify.',
     inputSchema: {
       type: 'object',
       properties: { tabId: { type: 'string' }, ref: { type: 'string' } },
@@ -99,8 +99,8 @@ export const QA_TOOL_DEFINITIONS: Array<{
     readOnly: false
   },
   {
-    name: 'ralf_browser_type',
-    description: 'Replace the value of an editable element returned by ralf_browser_snapshot. Requires Automatic QA.',
+    name: 'boss_browser_type',
+    description: 'Replace the value of an editable element returned by boss_browser_snapshot. Requires Automatic QA.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -115,8 +115,8 @@ export const QA_TOOL_DEFINITIONS: Array<{
     readOnly: false
   },
   {
-    name: 'ralf_computer',
-    description: 'Inspect or operate a native app through R.A.L.F. Computer Use. Supported operations: list_apps, list_windows, get_window_state, get_desktop_state, screenshot, zoom, click, type_text, press_key, hotkey, scroll, wait. Inspect before acting and verify after every action. Input actions require Automatic QA.',
+    name: 'boss_computer',
+    description: 'Inspect or operate a native app through BOSS Computer Use. Supported operations: list_apps, list_windows, get_window_state, get_desktop_state, screenshot, zoom, click, type_text, press_key, hotkey, scroll, wait. Inspect before acting and verify after every action. Input actions require Automatic QA.',
     inputSchema: {
       type: 'object',
       properties: {

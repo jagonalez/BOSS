@@ -20,6 +20,15 @@ export interface ServerInfo {
   healthy: boolean
 }
 
+export interface UpdateStatus {
+  currentVersion: string
+  checking: boolean
+  available: boolean
+  latestVersion?: string
+  url: string
+  error?: string
+}
+
 export interface BrowseBounds {
   x: number
   y: number
@@ -175,7 +184,10 @@ export const IpcChannels = {
   SitesChanged: 'sites:changed',
   SitesCfGet: 'sites:cf:get',
   SitesCfSet: 'sites:cf:set',
-  SitesCfClear: 'sites:cf:clear'
+  SitesCfClear: 'sites:cf:clear',
+  UpdateStatusGet: 'update:status',
+  UpdateCheck: 'update:check',
+  UpdateChanged: 'update:changed'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

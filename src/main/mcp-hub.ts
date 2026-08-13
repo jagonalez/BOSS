@@ -386,11 +386,11 @@ export class McpHub {
       if (result.isError) throw new Error(text || 'The MCP tool reported an error.')
       return text || '(empty result)'
     }
-    throw new Error(`Unknown MCP tool: ${namespacedName}. Use ralf_mcp_list to see available tools.`)
+    throw new Error(`Unknown MCP tool: ${namespacedName}. Use boss_mcp_list to see available tools.`)
   }
 
   /**
-   * Listing for the generic ralf_mcp_list agent tool. Without an argument it
+   * Listing for the generic boss_mcp_list agent tool. Without an argument it
    * stays compact — names and trimmed descriptions — because full schemas for
    * a large server run to tens of thousands of tokens. Passing a tool name
    * returns that tool's complete definition.
@@ -410,7 +410,7 @@ export class McpHub {
           inputSchema: tool.inputSchema ?? { type: 'object', additionalProperties: true }
         }
       }
-      return { error: `Unknown tool "${toolName}". Call ralf_mcp_list without arguments for the catalog.` }
+      return { error: `Unknown tool "${toolName}". Call boss_mcp_list without arguments for the catalog.` }
     }
     const listing: Array<Record<string, unknown>> = []
     for (const connection of this.connections) {
@@ -419,7 +419,7 @@ export class McpHub {
       listing.push({
         connection: connection.name,
         instructions: live.instructions,
-        note: 'Call ralf_mcp_list with {"tool": "<name>"} to get a tool\'s full input schema before calling it.',
+        note: 'Call boss_mcp_list with {"tool": "<name>"} to get a tool\'s full input schema before calling it.',
         tools: live.tools.map((tool) => ({
           tool: `${MCP_TOOL_PREFIX}${connection.slug}_${tool.name}`,
           description: (tool.description ?? '').slice(0, 200)

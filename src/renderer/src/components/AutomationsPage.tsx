@@ -537,9 +537,9 @@ export function AutomationsPage(): React.JSX.Element {
     <div className="command-center automations-page">
       <header className="command-header">
         <div>
-          <span className="command-eyebrow">Ralf</span>
+          <span className="command-eyebrow">BOSS</span>
           <h1>Automations</h1>
-          <p>Prompts that run on a schedule — or on demand — against a backend you pick. Every run is a thread you can review and continue. Runs fire while R.A.L.F. is open.</p>
+          <p>Prompts that run on a schedule — or on demand — against a backend you pick. Every run is a thread you can review and continue. Runs fire while BOSS is open.</p>
         </div>
         <button className="site-publish-btn" onClick={() => setEditor(emptyEditor(projectPath, engine))}>
           <PlusIcon size={14} /> New automation
