@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 
 async function git(path: string, args: string[]): Promise<string> {
-  const res = await window.ralf.gitRun(path, args)
+  const res = await window.boss.gitRun(path, args)
   if (res.code !== 0) throw new Error(res.stderr.trim() || res.stdout.trim() || `git ${args[0]} failed`)
   return res.stdout
 }

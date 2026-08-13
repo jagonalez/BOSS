@@ -66,7 +66,7 @@ export function CommandCenter(): React.JSX.Element {
         <div>
           <span className="command-eyebrow">Command Center</span>
           <h1>Here’s what’s happening.</h1>
-          <p>Status is based on live R.A.L.F. events. An optional AI briefing can be layered on later.</p>
+          <p>Status is based on live BOSS events. An optional AI briefing can be layered on later.</p>
         </div>
         {degradations.length ? (
           <div className="command-connection degraded" title={degradations.join('\n')}>

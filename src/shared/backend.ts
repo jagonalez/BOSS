@@ -75,7 +75,7 @@ export interface BackendMessageOptions {
   model?: { providerID: string; modelID: string; variant?: string }
   agent?: string
   mode?: BackendModeId
-  /** Headless runs: restrict the agent to R.A.L.F.-provided tools, ignoring user-level MCP configs. */
+  /** Headless runs: restrict the agent to BOSS-provided tools, ignoring user-level MCP configs. */
   strictTools?: boolean
 }
 

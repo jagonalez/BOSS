@@ -44,7 +44,7 @@ export interface McpConnectionView {
 export interface McpImportCandidate {
   source: string
   input: McpConnectionInput
-  /** Set when the same command/url is already configured in R.A.L.F. */
+  /** Set when the same command/url is already configured in BOSS */
   alreadyConfigured: boolean
 }
 

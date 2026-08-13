@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import type { ComputerUsePermissions, ComputerUseStatus, PrivacyPane } from '@shared/ipc'
 import type { AgentToolResult } from '@shared/qa'
 
-const HOST_BUNDLE_ID = 'dev.ralf.app'
+const HOST_BUNDLE_ID = 'dev.boss.app'
 const ALLOWED_TOOLS = new Set([
   'list_apps',
   'list_windows',
@@ -56,7 +56,7 @@ function isSocketReady(p: string): boolean {
 }
 
 function socketPath(): string {
-  return join(tmpdir(), `ralf-cua-${process.pid}.sock`)
+  return join(tmpdir(), `boss-cua-${process.pid}.sock`)
 }
 
 export class ComputerUse {
@@ -80,7 +80,7 @@ export class ComputerUse {
     if (process.platform !== 'darwin') {
       return { available: false, accessibility: false, screenRecording: false }
     }
-    // In embedded mode the daemon runs as Ralf's child, so Ralf's own TCC
+    // In embedded mode the daemon runs as BOSS's child, so BOSS's own TCC
     // grants ARE the driver's grants — systemPreferences is authoritative.
     let accessibility = false
     let screenRecording = false
@@ -136,12 +136,12 @@ export class ComputerUse {
   }
 
   async call(tool: string, args: Record<string, unknown>): Promise<AgentToolResult> {
-    if (!ALLOWED_TOOLS.has(tool)) throw new Error(`Computer tool “${tool}” is not available in R.A.L.F.'s scoped QA surface.`)
+    if (!ALLOWED_TOOLS.has(tool)) throw new Error(`Computer tool “${tool}” is not available in BOSS's scoped QA surface.`)
     if (!this.enabled || !this.daemon || !isSocketReady(this.socket)) {
       throw new Error('Computer Use is disabled. Enable Automatic QA or turn on Computer Use before trying again.')
     }
     const bin = resolveCuaBin()
-    const screenshotDir = join(tmpdir(), 'ralf-qa')
+    const screenshotDir = join(tmpdir(), 'boss-qa')
     mkdirSync(screenshotDir, { recursive: true })
     const screenshotPath = join(screenshotDir, `${randomUUID()}.png`)
     const output = await new Promise<string>((resolve, reject) => {
@@ -181,10 +181,10 @@ export class ComputerUse {
     } finally {
       try { unlinkSync(screenshotPath) } catch { /* ignore */ }
     }
-    return { __ralfToolResult: true, text: output.slice(0, 80_000), image }
+    return { __bossToolResult: true, text: output.slice(0, 80_000), image }
   }
 
-  /** Spawn the embedded daemon as Ralf's child so TCC attributes to Ralf. */
+  /** Spawn the embedded daemon as BOSS's child so TCC attributes to BOSS. */
   private startDaemon(bin: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const child = spawn(bin, ['serve', '--embedded', '--socket', this.socket], {
@@ -197,7 +197,7 @@ export class ComputerUse {
       })
       this.daemon = child
       child.stderr?.on('data', (d) => {
-        if (process.env.RALF_DEBUG) process.stderr.write(`[cua-driver] ${d}`)
+        if (process.env.BOSS_DEBUG) process.stderr.write(`[cua-driver] ${d}`)
       })
       child.on('exit', () => {
         this.daemon = null

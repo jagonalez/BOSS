@@ -8,13 +8,13 @@ import test from 'node:test'
 import { TranscriptStore } from './transcript-store.ts'
 
 const source = {
-  threadId: 'ralf-thread',
+  threadId: 'boss-thread',
   backendId: 'codex' as const,
   nativeSessionId: 'native-thread'
 }
 
 test('keeps live tool details across lossy history refreshes and restarts', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ralf-transcripts-'))
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const path = join(directory, 'transcripts.sqlite')
   try {
     let store = new TranscriptStore(path)
@@ -71,7 +71,7 @@ test('keeps live tool details across lossy history refreshes and restarts', () =
 })
 
 test('can prune messages only after native history is authoritative', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ralf-transcripts-'))
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
   try {
     store.recordMessage(source, {
@@ -91,7 +91,7 @@ test('can prune messages only after native history is authoritative', () => {
 })
 
 test('reconciles duplicate live and native narrative parts without dropping tool details', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ralf-transcripts-'))
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
   try {
     store.recordMessage(source, {
@@ -130,7 +130,7 @@ test('reconciles duplicate live and native narrative parts without dropping tool
 })
 
 test('does not render duplicate narrative rows already persisted under different ids', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ralf-transcripts-'))
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
   try {
     for (const id of ['stream-text', 'history-text']) {
@@ -149,7 +149,7 @@ test('does not render duplicate narrative rows already persisted under different
 })
 
 test('recovers an active run and marks unfinished tools as interrupted', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ralf-transcripts-'))
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const path = join(directory, 'transcripts.sqlite')
   try {
     let store = new TranscriptStore(path)

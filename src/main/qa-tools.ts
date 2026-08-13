@@ -93,22 +93,22 @@ export class QaTools {
     if (policy === 'off') throw new Error('QA tools are disabled for this thread. Ask the user to change QA to Suggest or Automatic.')
     const browser = this.getBrowser()
     switch (tool) {
-      case 'ralf_browser_tabs':
+      case 'boss_browser_tabs':
         return this.text(JSON.stringify(browser?.agentTabs() ?? [], null, 2))
-      case 'ralf_browser_snapshot':
+      case 'boss_browser_snapshot':
         return this.requireBrowser(browser).agentSnapshot(stringArg(args, 'tabId'))
-      case 'ralf_browser_screenshot':
+      case 'boss_browser_screenshot':
         return this.requireBrowser(browser).agentScreenshot(stringArg(args, 'tabId'))
-      case 'ralf_browser_navigate':
+      case 'boss_browser_navigate':
         this.requireAutomatic(policy, 'navigate the browser')
         return this.requireBrowser(browser).agentNavigate(stringArg(args, 'tabId'), stringArg(args, 'url'))
-      case 'ralf_browser_click':
+      case 'boss_browser_click':
         this.requireAutomatic(policy, 'click in the browser')
         return this.requireBrowser(browser).agentClick(stringArg(args, 'tabId'), stringArg(args, 'ref'))
-      case 'ralf_browser_type':
+      case 'boss_browser_type':
         this.requireAutomatic(policy, 'type in the browser')
         return this.requireBrowser(browser).agentType(stringArg(args, 'tabId'), stringArg(args, 'ref'), stringArg(args, 'text'), booleanArg(args, 'submit'))
-      case 'ralf_computer': {
+      case 'boss_computer': {
         const operation = stringArg(args, 'operation')
         if (COMPUTER_INPUT_TOOLS.has(operation)) this.requireAutomatic(policy, `run computer action ${operation}`)
         const input = objectArg(objectArg(args).arguments)
@@ -118,7 +118,7 @@ export class QaTools {
   }
 
   private requireBrowser(browser: BrowseManager | null): BrowseManager {
-    if (!browser) throw new Error('The R.A.L.F. browser is not ready.')
+    if (!browser) throw new Error('The BOSS browser is not ready.')
     return browser
   }
 
@@ -127,7 +127,7 @@ export class QaTools {
   }
 
   private text(text: string): AgentToolResult {
-    return { __ralfToolResult: true, text }
+    return { __bossToolResult: true, text }
   }
 
   private save(): void {

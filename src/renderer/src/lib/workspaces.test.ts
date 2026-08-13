@@ -5,9 +5,9 @@ import { bindTemplate, group, tab, templateFromWorkspace, walkTabs, workspaceVie
 test('saved formats strip thread and checkout bindings', () => {
   const view = workspaceView('Main', group([
     tab('thread', 'thread-1'),
-    tab('terminal', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'ralf/test' }),
-    tab('review', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'ralf/test' }),
-    tab('files', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'ralf/test' })
+    tab('terminal', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' }),
+    tab('review', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' }),
+    tab('files', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' })
   ]))
 
   const template = templateFromWorkspace(view, 'Bound layout')
@@ -26,7 +26,7 @@ test('applying a format binds checkout tools and removes duplicate singleton sur
     favorite: true,
     root: group([tab('thread'), tab('review'), tab('review'), tab('files'), tab('files'), tab('terminal')])
   }
-  const checkout = { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'ralf/test' }
+  const checkout = { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' }
   const view = bindTemplate(template, 'Main', ['thread-1'], checkout)
   const items = walkTabs(view.root)
 

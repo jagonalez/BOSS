@@ -16,13 +16,14 @@ import type {
   CloudflareSettings,
   TerminalDataEvent,
   TerminalExitEvent,
-  TtsSpeakRequest
+  TtsSpeakRequest,
+  UpdateStatus
 } from './ipc'
 import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
 import type { BackendRequest } from './backend'
 import type { AddReviewCommentInput, ChangeRequestFileDiff, ReviewComment, ReviewSnapshot, SubmitReviewEvent } from './review'
 
-export interface RalfApi {
+export interface BossApi {
   platform(): string
   toggleMaximize(): Promise<boolean>
   serverInfo(): Promise<ServerInfo>
@@ -96,4 +97,8 @@ export interface RalfApi {
   sitesCfGet(): Promise<CloudflareSettings>
   sitesCfSet(token: string, accountId: string): Promise<CloudflareSettings>
   sitesCfClear(): Promise<CloudflareSettings>
+
+  updateStatus(): Promise<UpdateStatus>
+  updateCheck(): Promise<UpdateStatus>
+  onUpdateChanged(cb: (status: UpdateStatus) => void): () => void
 }
