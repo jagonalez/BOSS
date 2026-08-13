@@ -36,6 +36,7 @@ const boss: BossApi = {
   browseDestroy: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseDestroy, id),
   onBrowseNavigation: (cb) => subscribe(IpcChannels.BrowseNavigation, cb),
   onBrowseExternal: (cb) => subscribe(IpcChannels.BrowseExternal, cb),
+  onBrowseAgentActivity: (cb) => subscribe(IpcChannels.BrowseAgentActivity, cb),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OpenExternal, url),
   openPath: (path: string) => ipcRenderer.invoke(IpcChannels.OpenPath, path),
   openInEditor: (path: string, line?: number) => ipcRenderer.invoke(IpcChannels.OpenInEditor, { path, line }),

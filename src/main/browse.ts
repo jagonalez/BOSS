@@ -19,6 +19,9 @@ export class BrowseManager {
 
   onNavigation?: (id: string, state: BrowseNavigationState) => void
   onExternal?: (url: string) => void
+  /** An agent drove this browser tab. Lets the UI highlight a tab that is not
+   *  on screen, so work happening out of sight is still visible. */
+  onAgentActivity?: (id: string) => void
 
   constructor(private readonly win: BrowserWindow) {
     this.hardenSession()
@@ -104,6 +107,7 @@ export class BrowseManager {
 
   async agentNavigate(id: string, url: string): Promise<AgentToolResult> {
     const entry = this.requireView(id)
+    this.onAgentActivity?.(id)
     const parsed = new URL(url)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       throw new Error('BOSS browser tools only allow HTTP and HTTPS URLs.')
@@ -153,6 +157,7 @@ export class BrowseManager {
 
   async agentClick(id: string, ref: string): Promise<AgentToolResult> {
     const entry = this.requireView(id)
+    this.onAgentActivity?.(id)
     const result = await entry.view.webContents.executeJavaScript(`(() => {
       const ref = ${JSON.stringify(ref)}
       const element = [...document.querySelectorAll('[data-boss-agent-ref]')].find((item) => item.getAttribute('data-boss-agent-ref') === ref)
@@ -169,6 +174,7 @@ export class BrowseManager {
 
   async agentType(id: string, ref: string, text: string, submit = false): Promise<AgentToolResult> {
     const entry = this.requireView(id)
+    this.onAgentActivity?.(id)
     if (text.length > 8_000) throw new Error('Browser typing is limited to 8,000 characters per call.')
     const result = await entry.view.webContents.executeJavaScript(`(() => {
       const ref = ${JSON.stringify(ref)}

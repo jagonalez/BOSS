@@ -45,6 +45,17 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
     }
   }, [id, actuallyVisible])
 
+  // Looking at the tab is the acknowledgement, so drop its agent highlight.
+  useEffect(() => {
+    if (!actuallyVisible) return
+    appStore.setState((s) => {
+      if (!s.browseAgentActivity[id]) return s
+      const next = { ...s.browseAgentActivity }
+      delete next[id]
+      return { browseAgentActivity: next }
+    })
+  }, [id, actuallyVisible])
+
   useEffect(() => {
     const off = window.boss.onBrowseNavigation((evt) => {
       if (evt.id === id) {

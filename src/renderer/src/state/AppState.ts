@@ -75,6 +75,8 @@ export interface AppState {
   confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; notice?: boolean; action: () => void } | null
   reviewFile: string | null
   browse: Record<string, BrowseNavigationState>
+  /** Browse tab ids an agent has driven since you last looked at them. */
+  browseAgentActivity: Record<string, boolean>
   optional: OptionalComponentInfo[]
   optionalProgress: Partial<Record<OptionalComponentId, OptionalDownloadEvent>>
   computerUse: ComputerUseStatus
@@ -172,6 +174,7 @@ export const initialState: AppState = {
   confirm: null,
   reviewFile: null,
   browse: {},
+  browseAgentActivity: {},
   optional: [],
   optionalProgress: {},
   computerUse: { supported: false, enabled: false, running: false },
