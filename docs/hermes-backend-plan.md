@@ -33,21 +33,66 @@ implementation is reusable for any other ACP agent later.
 | `sessionGet()` | `session/load` | Only if `agentCapabilities.loadSession` is true |
 | `sendMessage()` | `session/prompt` | Content blocks: text, image, resource |
 | `abort()` | `session/cancel` | Notification, not a request |
-| `thinkingSet()` | `session/set_mode` | Maps to Hermes modes, not a thinking level |
+| `thinkingSet()` | `session/set_mode` | Hermes modes are permission levels, not thinking depth — see below |
 | `permissionRespond()` | answer `session/request_permission` | Agent calls *us*; we respond |
-| `modelsList()` | TBD | `provider:model` format, e.g. `openrouter:z-ai/glm-5.1` |
+| `modelsList()` | read `session/new` result | Models arrive with the session, not from a separate call |
+
+Verified against `hermes acp` v0.20.0 (2026.8.3). The handshake returns:
+
+    agentCapabilities: {
+      loadSession: true,
+      promptCapabilities: { image: true },
+      sessionCapabilities: { fork: {}, list: {}, resume: {} }
+    }
+
+So `loadSession`, `fork`, `list`, and `resume` are all supported — better than
+this plan first assumed.
+
+### Models come from session/new
+
+`session/new` returns `{ _meta, models, modes, sessionId }`. There is no
+separate models call: `models.availableModels` carries 25 entries shaped
+`{ modelId, name, description }` with ids like `opencode-go:deepseek-v4-flash`,
+and `models.currentModelId` names the active one. So `modelsList()` caches what
+the session handshake already returned.
+
+### Modes are permissions, not thinking
+
+`modes.availableModes` is:
+
+| id | Behaviour |
+|---|---|
+| `default` | Ask before edits |
+| `accept_edits` | Auto-allow workspace and /tmp edits; still asks for sensitive paths |
+| `dont_ask` | Auto-allow edits except sensitive paths |
+
+That maps to BOSS's per-thread ask/auto mode, **not** to `thinkingSet()`.
+Wiring modes to a thinking control would silently change permission behaviour.
 
 ## Streaming
 
 The agent pushes `session/update` notifications. Translate each to a BOSS
 `EventMessage`:
 
-| ACP update | BOSS event |
-|---|---|
-| `agent_message_chunk` | `message.part.updated` |
-| `tool_call` | `message.part.created` |
-| `tool_call_update` | `message.part.updated`; `content[].type === 'diff'` carries file changes |
-| `plan` | `session.todos` — closest fit to BOSS todos |
+The discriminator is `update.sessionUpdate`, **not** `update.type` as the
+published schema shows. Observed values:
+
+| `sessionUpdate` | Payload | BOSS event |
+|---|---|---|
+| `agent_message_chunk` | `content: {type,text}` | `message.part.updated` |
+| `agent_thought_chunk` | `content: {type,text}` | Reasoning stream — keep separate from the answer |
+| `tool_call` | tool descriptor | `message.part.created` |
+| `tool_call_update` | status + content | `message.part.updated`; diff blocks carry file changes |
+| `usage_update` | `{size, used}` | Context-window meter |
+| `available_commands_update` | command list | Hermes slash commands, for `runCommand()` |
+
+`agent_thought_chunk` is Hermes-specific and arrives before the answer. In the
+PONG probe it streamed 24 thought tokens before 2 answer tokens, so treating
+the two as one stream would print the model's reasoning into the reply.
+
+`session/prompt` resolves with `{ stopReason, usage }`. Observed `stopReason`
+was `end_turn` — not one of the `Completed`/`Cancelled` values in the published
+schema, so match loosely rather than on an exact enum.
 
 ## Permissions — the one inversion
 
@@ -69,29 +114,39 @@ unsupported methods. Expect the same here:
 
 - `fileTree()` / `fileContent()` — no ACP equivalent; return empty
 - `revert()` / `unrevert()` — no ACP equivalent; no-op
-- `fork()` — Hermes docs mention session fork, but it is not in the core ACP
-  schema; check `_meta` for an extension
+- `fork()` — supported. `sessionCapabilities.fork` is advertised, and the
+  `_meta.hermes.sessionProvenance` block tracks `rootHermesSessionId`,
+  `parentHermesSessionId`, and `sessionKind`, so forks stay traceable
 - `registerMcpServer()` — `session/new` accepts `mcpServers` at creation, so
   registration is per-session rather than dynamic. Likely `supportsMcp()` false
   at first.
 - `diffGet()` — no direct call. Accumulate diffs from `tool_call_update`
   content blocks instead.
 
-## Open questions — need the CLI installed
+## Verified against the running CLI
 
-The published ACP schema does not answer these, and the Hermes docs explicitly
-omit payload shapes:
+A probe against `hermes acp` v0.20.0 completed a full round trip from BOSS's
+project directory: `initialize` → `session/new` → `session/prompt` → answer.
+That settles the questions this plan opened with.
 
-1. What does `hermes acp` advertise in `agentCapabilities`?
-2. How are models listed and selected over ACP? The docs mention a model menu
-   in Buzz Desktop, but not the method behind it.
-3. Which `session/request_permission` option ids does Hermes emit?
-4. Does it support `session/load`, and does it survive a BOSS restart?
-5. Does the sandboxing (Docker/SSH/Modal) surface through ACP, or is it config
-   only?
+1. **Capabilities** — `loadSession`, `fork`, `list`, `resume`, and image
+   prompts. Richer than assumed.
+2. **Models** — 25 available, returned by `session/new` rather than a separate
+   call. Ids look like `opencode-go:deepseek-v4-flash`.
+3. **Auth** — two `authMethods`: `opencode-go` runtime credentials, and a
+   `hermes-setup` terminal method for unconfigured machines. BOSS should
+   surface the second when auth fails.
+4. **Sessions** — `loadSession: true`, so threads survive a BOSS restart.
+5. **Sandboxing** — does *not* surface through ACP. It stays Hermes-side
+   config, so BOSS cannot drive Docker/SSH/Modal isolation per thread.
 
-Answer these by running `hermes acp` and capturing the handshake before
-writing the backend.
+Still unverified, because the probe did not trigger a tool call:
+
+- The `session/request_permission` option ids Hermes emits. The mode
+  descriptions imply a sensitive-path distinction, but the actual option
+  payload needs a run that touches a real file.
+- Whether `tool_call_update` carries diff content in a form `diffGet()` can
+  use.
 
 ## Wiring checklist
 
