@@ -272,6 +272,11 @@ export function App(): React.JSX.Element {
       })
       .catch(() => {})
 
+    // BOSS owns the project list, so load it without waiting for a backend.
+    // refreshAll only runs once opencode connects, which left added projects
+    // saved to disk but never shown.
+    void refreshProjects()
+
     void refreshOptional()
     void refreshProject()
     void window.boss

@@ -4,6 +4,10 @@ import { join } from 'node:path'
 
 interface BossState {
   projectPath?: string
+  /** Projects the user has opened. BOSS owns this list; opencode only knows a
+   *  directory once it has served a session there, so sourcing it from opencode
+   *  hid freshly added projects and emptied the list when opencode was absent. */
+  projects?: string[]
 }
 
 function stateFile(): string {

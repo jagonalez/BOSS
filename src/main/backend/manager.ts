@@ -322,7 +322,12 @@ export class BackendManager {
   async start(projectPath?: string): Promise<void> {
     this.load()
     if (projectPath) this.projectPath = projectPath
-    await this.ensureStarted('opencode')
+    // Best-effort: a missing or unhealthy opencode must not abort startup. This
+    // call is awaited inside an unawaited block in index.ts, so throwing here
+    // silently skipped mcpHub, automations, and webAccess.
+    await this.ensureStarted('opencode').catch((error) => {
+      process.stderr.write(`[backend] opencode unavailable: ${error instanceof Error ? error.message : String(error)}\n`)
+    })
     await this.threadBus?.resume()
     for (const binding of this.bindings.values()) {
       if (binding.followUps?.length) void this.deliverNextFollowUp(binding.id)
@@ -641,15 +646,15 @@ export class BackendManager {
 
   async sessionsList(): Promise<SessionInfo[]> {
     this.load()
-    const openCode = await this.ensureStarted('opencode')
-    const nativeSessions = await openCode.sessionsList().catch(() => [])
-    const currentProjectId = this.currentScope.projectId
-
-    const current = [...this.bindings.values()].filter((binding) => {
-      if (!this.projectPath) return true
-      return binding.projectId === currentProjectId || binding.projectId === 'global'
-    })
-    return current
+    // Only opencode-owned threads need enriching, so do not spin opencode up
+    // just to list sessions belonging to other backends.
+    const needsOpenCode = [...this.bindings.values()].some((binding) => binding.backendId === 'opencode')
+    const nativeSessions = needsOpenCode
+      ? await this.ensureStarted('opencode').then((backend) => backend.sessionsList()).catch(() => [])
+      : []
+    // Every thread, not just the open project's: the sidebar lists threads
+    // under each project, so filtering here left the others permanently empty.
+    return [...this.bindings.values()]
       .map((binding) => {
         const native = binding.backendId === 'opencode'
           ? nativeSessions.find((session) => session.id === binding.nativeSessionId)

@@ -2,7 +2,7 @@ import { appStore, type Attachment } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { startMicCapture } from './mic'
-import type { ReviewRun, SessionMeta } from '@shared/opencode'
+import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
@@ -683,7 +683,12 @@ export async function clearThreadBusFailures(): Promise<void> {
 
 export async function refreshProjects(): Promise<void> {
   try {
-    const listed = await OpenCode.projectList()
+    // BOSS owns the project list. opencode only knows a directory once it has
+    // served a session there, so sourcing the list from it hid freshly opened
+    // projects and emptied the sidebar whenever opencode was not running.
+    // A backend's own projects are offered for import, never merged silently.
+    const owned = await window.boss.projectList().catch((): string[] => [])
+    const listed: Project[] = owned.map((path) => ({ id: path, path }))
     const state = appStore.getState()
     const checkoutPaths = new Set(state.projectCheckouts.map((checkout) => checkout.path))
     const projects = listed.map((project) => {
@@ -1358,7 +1363,8 @@ export async function openProject(path: string): Promise<void> {
     projectCheckouts: info.checkouts,
     activePage: 'project',
     activeSessionId: null,
-    sessions: [],
+    // Sessions span every project now, so blanking them here only made the
+    // whole sidebar flash empty until refreshSessions repopulated it.
     messages: {},
     diffs: null,
     fileContent: null,
@@ -1846,9 +1852,27 @@ export async function openProjectFolder(): Promise<void> {
     await refreshProjects()
     const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
     loadProjectWorkspace(info.path, preferred)
+    // A linked worktree opens its repository, not a second project. Without
+    // saying so, picking a worktree looks like BOSS ignored the folder chosen.
+    if (info.checkoutPath && info.checkoutPath !== info.path) {
+      const branch = info.checkouts.find((checkout) => checkout.path === info.checkoutPath)?.branch
+      appStore.setState({
+        confirm: {
+          title: 'Opened as a checkout',
+          message: `${folderName(info.checkoutPath)} is a git worktree of ${folderName(info.path)}, so BOSS opened that project with ${branch ? `the ${branch} branch` : 'this worktree'} as the active checkout. Switch checkouts from the project header.`,
+          confirmLabel: 'Got it',
+          notice: true,
+          action: () => {}
+        }
+      })
+    }
   } catch (err) {
     console.error('open project folder:', err)
   }
+}
+
+function folderName(path: string): string {
+  return path.split('/').filter(Boolean).pop() ?? path
 }
 
 export function loadSpeechPrefs(): void {

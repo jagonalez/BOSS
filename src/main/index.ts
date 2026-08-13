@@ -30,14 +30,25 @@ import { GitHubReviewProvider } from './github-review-provider'
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
 // Dev runs get their own userData so a broken dev build cannot corrupt the
-// installed app's workspaces, transcripts, and backend config. This must run
-// before anything below reads app.getPath('userData').
+// installed app's workspaces, transcripts, and backend config. Every checkout
+// shares that one dev profile, so threads and settings follow you between
+// clones. The single-instance lock is keyed on userData, so running two clones
+// at once needs BOSS_PROFILE to separate them. This must run before anything
+// below reads app.getPath('userData').
 if (process.env.ELECTRON_RENDERER_URL) {
-  app.setPath('userData', `${app.getPath('userData')}-dev`)
+  const profile = process.env.BOSS_PROFILE?.trim()
+  const suffix = profile ? `-dev-${profile.replace(/[^A-Za-z0-9_-]/g, '-')}` : '-dev'
+  app.setPath('userData', `${app.getPath('userData')}${suffix}`)
 }
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
+  // Exiting silently here looks identical to a crash. Name the profile that is
+  // taken, since another checkout on disk shares it.
+  process.stderr.write(
+    `[boss] another instance already owns ${app.getPath('userData')} — focusing it and exiting.\n` +
+      '[boss] to run a second checkout at the same time, set BOSS_PROFILE=<name>.\n'
+  )
   app.quit()
 }
 

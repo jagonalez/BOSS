@@ -71,7 +71,8 @@ export interface AppState {
   renameTarget: string | null
   delegateTarget: string | null
   policyTarget: string | null
-  confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; action: () => void } | null
+  /** `notice` drops the Cancel button: there is nothing to decline. */
+  confirm: { title: string; message: string; confirmLabel: string; destructive?: boolean; notice?: boolean; action: () => void } | null
   reviewFile: string | null
   browse: Record<string, BrowseNavigationState>
   optional: OptionalComponentInfo[]

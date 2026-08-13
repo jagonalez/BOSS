@@ -59,6 +59,9 @@ export interface BossApi {
   requestComputerUsePermission(pane: 'accessibility' | 'screenRecording'): Promise<boolean>
   openPrivacyPane(pane: 'accessibility' | 'screenRecording'): Promise<boolean>
 
+  /** Projects BOSS itself has opened. Independent of any backend. */
+  projectList(): Promise<string[]>
+  projectForget(path: string): Promise<string[]>
   projectCurrent(): Promise<ProjectInfo>
   projectSet(path: string): Promise<ProjectInfo>
   projectChoose(): Promise<string | null>

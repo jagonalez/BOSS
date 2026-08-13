@@ -51,6 +51,8 @@ const boss: BossApi = {
     ipcRenderer.invoke(IpcChannels.ComputerUseRequestPermission, pane),
   openPrivacyPane: (pane: 'accessibility' | 'screenRecording') => ipcRenderer.invoke(IpcChannels.OpenPrivacyPane, pane),
 
+  projectList: () => ipcRenderer.invoke(IpcChannels.ProjectList),
+  projectForget: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectForget, path),
   projectCurrent: () => ipcRenderer.invoke(IpcChannels.ProjectCurrent),
   projectSet: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectSet, path),
   projectChoose: () => ipcRenderer.invoke(IpcChannels.ProjectChoose),
