@@ -382,8 +382,8 @@ export function SettingsModal(): React.JSX.Element | null {
                 </section>
                 <section className="settings-card settings-card-list">
                   <SettingsRow
-                    title="New terminal location"
-                    description="Chooses a checkout when a terminal tab is created. Existing terminals stay pinned to their original folder."
+                    title="New resource location"
+                    description="Chooses the checkout for a new terminal, files, or review tab. Existing tabs stay pinned to the folder they were opened in."
                   >
                     <Select
                       value={terminalStartLocation}
