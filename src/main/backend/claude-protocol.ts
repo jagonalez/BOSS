@@ -53,4 +53,3 @@ export function claudePermissionResponse(
     response: { subtype: 'success', request_id: requestId, response: decision }
   }
 }
-

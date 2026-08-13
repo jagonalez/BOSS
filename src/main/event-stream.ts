@@ -1,6 +1,25 @@
 import type { OpenCodeServer } from './opencode-server'
 
+/**
+ * OpenCode's global stream wraps project-scoped events so one connection can
+ * observe every directory handled by the server. Keep the EventStream public
+ * contract identical to the legacy `/event` stream by passing only the native
+ * event payload to the backend adapter.
+ */
+export function unwrapOpenCodeEvent(data: string): string {
+  try {
+    const event = JSON.parse(data) as { payload?: unknown }
+    if (event && typeof event === 'object' && event.payload && typeof event.payload === 'object') {
+      return JSON.stringify(event.payload)
+    }
+  } catch {
+    /* Let the backend adapter report malformed events as unknown. */
+  }
+  return data
+}
+
 export class EventStream {
+  private readonly server: OpenCodeServer
   private active = false
   private controller: AbortController | null = null
   private retryTimer: NodeJS.Timeout | null = null
@@ -9,7 +28,9 @@ export class EventStream {
   onConnected?: () => void
   onDisconnected?: () => void
 
-  constructor(private readonly server: OpenCodeServer) {}
+  constructor(server: OpenCodeServer) {
+    this.server = server
+  }
 
   start(): void {
     if (this.active) return
@@ -28,10 +49,19 @@ export class EventStream {
       const controller = new AbortController()
       this.controller = controller
       try {
-        const res = await fetch(`${this.server.baseUrl}/event`, {
+        let res = await fetch(`${this.server.baseUrl}/global/event`, {
           headers: { Authorization: this.server.authHeader },
           signal: controller.signal
         })
+        // Older OpenCode builds predate the global stream. They can still run
+        // against the original directory-scoped endpoint.
+        if (res.status === 404 || res.status === 405) {
+          await res.body?.cancel()
+          res = await fetch(`${this.server.baseUrl}/event`, {
+            headers: { Authorization: this.server.authHeader },
+            signal: controller.signal
+          })
+        }
         if (!res.ok) throw new Error(`event stream status ${res.status}`)
         if (!res.body) throw new Error('event stream has no body')
         this.onConnected?.()
@@ -49,7 +79,7 @@ export class EventStream {
             for (const line of block.split('\n')) {
               if (!line.startsWith('data:')) continue
               const payload = line.slice(5).trimStart()
-              if (payload) this.onEvent?.(payload)
+              if (payload) this.onEvent?.(unwrapOpenCodeEvent(payload))
             }
           }
         }

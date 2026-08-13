@@ -1,8 +1,9 @@
-import React from 'react'
-import type { SessionInfo } from '@shared/opencode'
+import React, { useEffect, useMemo, useState } from 'react'
+import type { SupervisedThread, SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
 import { useStore, appStore } from '../state/AppState'
 import { openProject, selectSession } from '../lib/actions'
-import { ChatIcon, ChevronIcon } from './icons'
+import { OpenCode } from '../lib/opencode'
+import { ChatIcon, ChevronIcon, SearchIcon } from './icons'
 import { serviceDegradations } from '../lib/status'
 
 function timeAgo(timestamp?: number): string {
@@ -14,59 +15,164 @@ function timeAgo(timestamp?: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
-function projectName(session: SessionInfo): string {
-  const path = session.projectPath ?? session.directory ?? session.path ?? ''
+function duration(value: number): string {
+  if (value < 60_000) return `${Math.max(1, Math.round(value / 1_000))}s`
+  if (value < 3_600_000) return `${Math.round(value / 60_000)}m`
+  return `${Math.round(value / 3_600_000)}h`
+}
+
+function compactNumber(value: number): string {
+  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+
+function projectName(path: string): string {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || 'Chat'
 }
 
-async function openSession(session: SessionInfo): Promise<void> {
-  const path = session.projectPath ?? session.directory ?? session.path ?? ''
-  if (path && path !== '/' && path !== appStore.getState().projectPath) await openProject(path)
-  selectSession(session.id)
+async function openThread(thread: Pick<SupervisedThread, 'threadId' | 'projectPath'>): Promise<void> {
+  if (thread.projectPath && thread.projectPath !== appStore.getState().projectPath) {
+    await openProject(thread.projectPath)
+  }
+  selectSession(thread.threadId)
+  void OpenCode.acknowledgeAttention(thread.threadId).catch(() => {})
 }
 
-function SessionCard({ session, state }: { session: SessionInfo; state: 'attention' | 'running' | 'recent' }): React.JSX.Element {
-  const permission = useStore(appStore, (value) => Boolean(value.permissions[session.id]))
-  const error = useStore(appStore, (value) => value.lastErrorBySession[session.id])
-  const busFailed = useStore(appStore, (value) => Boolean(value.threadBus?.messages.some((message) => message.fromThreadId === session.id && message.status === 'failed')))
-  const label = permission ? 'Permission needed' : error ? 'Run failed' : busFailed ? 'Thread message failed' : state === 'running' ? 'Working' : 'Updated'
+function ThreadCard({ thread, state, label }: {
+  thread: SupervisedThread
+  state: 'attention' | 'running' | 'recent'
+  label: string
+}): React.JSX.Element {
+  const metrics = [
+    thread.lastRun?.durationMs ? duration(thread.lastRun.durationMs) : '',
+    thread.lastRun?.tokens !== undefined ? `${compactNumber(thread.lastRun.tokens)} reported tokens` : '',
+    thread.lastRun?.toolCalls ? `${thread.lastRun.toolCalls} tools` : ''
+  ].filter(Boolean).join(' · ')
+  const budget = [
+    thread.policy?.budget.maxRuns ? `${thread.policy.budget.maxRuns} run cap` : '',
+    thread.policy?.budget.maxTokens ? `${compactNumber(thread.policy.budget.maxTokens)} token cap` : '',
+    thread.policy?.budget.maxDurationMinutes ? `${thread.policy.budget.maxDurationMinutes}m cap` : ''
+  ].filter(Boolean).join(' · ')
   return (
-    <button className="command-session-card" onClick={() => void openSession(session)}>
+    <button className="command-session-card" onClick={() => void openThread(thread)}>
       <span className={`command-state-icon ${state}`}><ChatIcon size={14} /></span>
       <span className="command-session-main">
-        <strong>{session.title || 'Untitled thread'}</strong>
-        <small>{projectName(session)} · {label}</small>
+        <strong>{thread.title}</strong>
+        <small>{projectName(thread.projectPath)} · {thread.backendId} · {label}</small>
+        {thread.policy?.goal ? <span className="command-session-goal">{thread.policy.goal}</span> : null}
+        {metrics ? <small className="command-session-metrics">{metrics}</small> : null}
+        {budget ? <small className="command-session-budget">Budget · {budget}</small> : null}
       </span>
-      <span className="command-session-time">{timeAgo(session.time?.updated)}</span>
+      <span className="command-session-time">{timeAgo(thread.updatedAt)}</span>
+      <ChevronIcon size={14} />
+    </button>
+  )
+}
+
+function SearchResult({ result }: { result: TranscriptSearchResult }): React.JSX.Element {
+  return (
+    <button className="command-search-result" onClick={() => void openThread({
+      threadId: result.threadId,
+      projectPath: result.projectPath
+    })}>
+      <span className="command-search-result-meta">
+        <strong>{result.title}</strong>
+        <small>{projectName(result.projectPath)} · {result.backendId} · {result.kind} · {timeAgo(result.timestamp)}</small>
+      </span>
+      <span className="command-search-snippet">{result.snippet}</span>
       <ChevronIcon size={14} />
     </button>
   )
 }
 
 export function CommandCenter(): React.JSX.Element {
-  const sessions = useStore(appStore, (state) => state.sessions.filter((session) => !session.parentID))
   const permissions = useStore(appStore, (state) => state.permissions)
   const questions = useStore(appStore, (state) => state.questions)
   const errors = useStore(appStore, (state) => state.lastErrorBySession)
-  const streaming = useStore(appStore, (state) => state.streaming)
   const serverHealthy = useStore(appStore, (state) => state.serverHealthy)
   const serverUrl = useStore(appStore, (state) => state.serverUrl)
   const backends = useStore(appStore, (state) => state.backends)
   const threadBus = useStore(appStore, (state) => state.threadBus)
+  const [snapshot, setSnapshot] = useState<SupervisionSnapshot | null>(null)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<TranscriptSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
   const degradations = serviceDegradations(serverUrl, serverHealthy, backends)
 
-  const ordered = [...sessions].sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
-  const needsAttention = ordered.filter((session) => permissions[session.id] || questions[session.id] || errors[session.id] || threadBus?.messages.some((message) => message.fromThreadId === session.id && message.status === 'failed'))
-  const running = ordered.filter((session) => streaming[session.id] && !needsAttention.includes(session))
-  const recent = ordered.filter((session) => !streaming[session.id] && !needsAttention.includes(session)).slice(0, 6)
+  useEffect(() => {
+    let disposed = false
+    const refresh = (): void => {
+      void OpenCode.supervision().then((value) => {
+        if (!disposed) setSnapshot(value)
+      }).catch(() => {})
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 5_000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [])
 
+  useEffect(() => {
+    const clean = query.trim()
+    if (clean.length < 2) {
+      setResults([])
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    let disposed = false
+    const timer = window.setTimeout(() => {
+      void OpenCode.searchTranscripts(clean).then((value) => {
+        if (!disposed) setResults(value)
+      }).catch(() => {
+        if (!disposed) setResults([])
+      }).finally(() => {
+        if (!disposed) setSearching(false)
+      })
+    }, 180)
+    return () => {
+      disposed = true
+      window.clearTimeout(timer)
+    }
+  }, [query])
+
+  const classified = useMemo(() => {
+    const threads = snapshot?.threads ?? []
+    const reason = (thread: SupervisedThread): string | undefined => {
+      if (permissions[thread.threadId]) return 'Permission needed'
+      if (questions[thread.threadId]) return 'Answer needed'
+      if (errors[thread.threadId]) return 'Run failed'
+      if (threadBus?.messages.some((message) => message.fromThreadId === thread.threadId && message.status === 'failed')) return 'Thread message failed'
+      if (thread.attention?.kind === 'permission') return 'Permission needed'
+      if (thread.attention?.kind === 'question') return 'Answer needed'
+      if (thread.attention?.kind === 'completed') return 'Finished while you were away'
+      if (thread.attention?.kind === 'error') return thread.attention.detail ?? 'Run failed'
+      if (thread.attention?.kind === 'interrupted') return 'Run was interrupted'
+      if (thread.lastRun?.status === 'error') return 'Last run failed'
+      if (thread.lastRun?.status === 'interrupted') return 'Run was interrupted'
+      return undefined
+    }
+    const attention = threads.flatMap((thread) => {
+      const label = reason(thread)
+      return label ? [{ thread, label }] : []
+    })
+    const attentionIds = new Set(attention.map((item) => item.thread.threadId))
+    return {
+      attention,
+      running: threads.filter((thread) => thread.running && !attentionIds.has(thread.threadId)),
+      recent: threads.filter((thread) => !thread.running && !attentionIds.has(thread.threadId)).slice(0, 8)
+    }
+  }, [snapshot, permissions, questions, errors, threadBus])
+
+  const totals = snapshot?.totals
   return (
     <div className="command-center">
       <header className="command-header">
         <div>
           <span className="command-eyebrow">Command Center</span>
           <h1>Here’s what’s happening.</h1>
-          <p>Status is based on live BOSS events. An optional AI briefing can be layered on later.</p>
+          <p>Supervise work across projects and backends, then jump straight to anything that needs you.</p>
         </div>
         {degradations.length ? (
           <div className="command-connection degraded" title={degradations.join('\n')}>
@@ -75,34 +181,66 @@ export function CommandCenter(): React.JSX.Element {
         ) : null}
       </header>
 
-      <div className="command-grid">
-        <section className="command-section command-attention">
-          <div className="command-section-head"><h2>Needs your attention</h2><span>{needsAttention.length}</span></div>
-          <div className="command-list">
-            {needsAttention.length > 0
-              ? needsAttention.map((session) => <SessionCard key={session.id} session={session} state="attention" />)
-              : <div className="command-empty">Nothing needs you right now.</div>}
-          </div>
-        </section>
-
-        <section className="command-section">
-          <div className="command-section-head"><h2>Running</h2><span>{running.length}</span></div>
-          <div className="command-list">
-            {running.length > 0
-              ? running.map((session) => <SessionCard key={session.id} session={session} state="running" />)
-              : <div className="command-empty">No agents are currently running.</div>}
-          </div>
-        </section>
-
-        <section className="command-section command-recent">
-          <div className="command-section-head"><h2>Recently active</h2><span>{recent.length}</span></div>
-          <div className="command-list">
-            {recent.length > 0
-              ? recent.map((session) => <SessionCard key={session.id} session={session} state="recent" />)
-              : <div className="command-empty">Your recent work will appear here.</div>}
-          </div>
-        </section>
+      <div className="command-overview">
+        <div><strong>{totals?.runs ?? 0}</strong><span>runs recorded</span></div>
+        <div><strong>{duration(totals?.durationMs ?? 0)}</strong><span>agent time</span></div>
+        <div title="Only tokens explicitly reported by a backend are counted.">
+          <strong>{totals?.tokens === undefined ? '—' : compactNumber(totals.tokens)}</strong>
+          <span>reported tokens</span>
+        </div>
+        <div><strong>{compactNumber(totals?.toolCalls ?? 0)}</strong><span>tool calls</span></div>
       </div>
+
+      <div className="command-search">
+        <SearchIcon size={15} />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search messages, reasoning, and tool activity across every project…"
+          aria-label="Search work history"
+        />
+        {searching ? <span>Searching…</span> : query.trim().length >= 2 ? <span>{results.length} results</span> : null}
+      </div>
+
+      {query.trim().length >= 2 ? (
+        <section className="command-section command-search-section">
+          <div className="command-section-head"><h2>Work history</h2><span>{results.length}</span></div>
+          <div className="command-list">
+            {results.length > 0
+              ? results.map((result) => <SearchResult key={`${result.threadId}:${result.messageId}:${result.kind}:${result.snippet}`} result={result} />)
+              : <div className="command-empty">{searching ? 'Searching your work…' : 'No matching work found.'}</div>}
+          </div>
+        </section>
+      ) : (
+        <div className="command-grid">
+          <section className="command-section command-attention">
+            <div className="command-section-head"><h2>Needs your attention</h2><span>{classified.attention.length}</span></div>
+            <div className="command-list">
+              {classified.attention.length > 0
+                ? classified.attention.map(({ thread, label }) => <ThreadCard key={thread.threadId} thread={thread} state="attention" label={label} />)
+                : <div className="command-empty">Nothing needs you right now.</div>}
+            </div>
+          </section>
+
+          <section className="command-section">
+            <div className="command-section-head"><h2>Running</h2><span>{classified.running.length}</span></div>
+            <div className="command-list">
+              {classified.running.length > 0
+                ? classified.running.map((thread) => <ThreadCard key={thread.threadId} thread={thread} state="running" label="Working" />)
+                : <div className="command-empty">No agents are currently running.</div>}
+            </div>
+          </section>
+
+          <section className="command-section command-recent">
+            <div className="command-section-head"><h2>Recently active</h2><span>{classified.recent.length}</span></div>
+            <div className="command-list">
+              {classified.recent.length > 0
+                ? classified.recent.map((thread) => <ThreadCard key={thread.threadId} thread={thread} state="recent" label="Updated" />)
+                : <div className="command-empty">Your recent work will appear here.</div>}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

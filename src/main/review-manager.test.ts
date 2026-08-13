@@ -60,7 +60,7 @@ test('persists checkout-specific local review comments', async () => {
   try {
     execFileSync('git', ['init', repository])
     execFileSync('git', ['-C', repository, 'config', 'user.email', 'boss@example.test'])
-    execFileSync('git', ['-C', repository, 'config', 'user.name', 'R.A.L.F. Test'])
+    execFileSync('git', ['-C', repository, 'config', 'user.name', 'BOSS Test'])
     execFileSync('git', ['-C', repository, 'config', 'commit.gpgsign', 'false'])
     writeFileSync(join(repository, 'file.ts'), 'export const value = 1\n')
     execFileSync('git', ['-C', repository, 'add', 'file.ts'])
@@ -89,7 +89,7 @@ test('review manager selects providers without knowing forge-specific semantics'
   try {
     execFileSync('git', ['init', repository])
     execFileSync('git', ['-C', repository, 'config', 'user.email', 'boss@example.test'])
-    execFileSync('git', ['-C', repository, 'config', 'user.name', 'R.A.L.F. Test'])
+    execFileSync('git', ['-C', repository, 'config', 'user.name', 'BOSS Test'])
     execFileSync('git', ['-C', repository, 'config', 'commit.gpgsign', 'false'])
     writeFileSync(join(repository, 'file.ts'), 'export const value = 1\n')
     execFileSync('git', ['-C', repository, 'add', 'file.ts'])

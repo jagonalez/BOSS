@@ -1,6 +1,7 @@
 export type BackendId = 'opencode' | 'pi' | 'codex' | 'claude'
 export type BackendModeId = 'ask' | 'auto' | 'plan' | 'accept-edits'
 export type ThreadCreationScope = 'current' | 'global'
+export type DelegatePlacement = 'same-checkout' | 'new-worktree'
 
 export interface BackendModeDescriptor {
   id: BackendModeId
@@ -107,7 +108,13 @@ export type BackendRequest =
   | { type: 'thread.command'; threadId: string; command: string; arguments: string; options?: BackendMessageOptions }
   | { type: 'thread.compact'; threadId: string; model?: { providerID: string; modelID: string } }
   | { type: 'thread.models'; threadId?: string; backendId?: BackendId }
+  | { type: 'supervision.snapshot' }
+  | { type: 'supervision.search'; query: string; limit?: number }
+  | { type: 'supervision.acknowledge'; threadId: string }
+  | { type: 'thread.policy.get'; threadId: string }
+  | { type: 'thread.policy.set'; threadId: string; policy: import('./task-policy').TaskPolicy }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }
+  | { type: 'thread.delegate'; threadId: string; backendId: BackendId; instruction: string; placement: DelegatePlacement; options?: BackendMessageOptions }
   | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string; options?: BackendMessageOptions }
   | { type: 'worktree.list'; threadId?: string }
   | { type: 'worktree.settings.get' }
@@ -128,7 +135,7 @@ export type BackendRequest =
   | { type: 'mcp.remove'; connectionId: string }
   | { type: 'mcp.import.scan' }
   | { type: 'mobile.status' }
-  | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean } }
+  | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean } }
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
   | { type: 'thread.bus.clear-failures'; threadId?: string }

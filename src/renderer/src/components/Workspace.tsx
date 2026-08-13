@@ -28,7 +28,7 @@ import {
   setWorkspaceSplitRatio,
   splitWorkspaceGroup
 } from '../lib/actions'
-import { activeWorkspaceView, walkTabs } from '../lib/workspaces'
+import { activeWorkspaceView, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -346,7 +346,17 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
   )
 }
 
-function TabContent({ groupId, item, active, overlayOpen }: { groupId: string; item: WorkspaceTab; active: boolean; overlayOpen: boolean }): React.JSX.Element {
+function TabContent({
+  groupId,
+  item,
+  active,
+  overlayOpen
+}: {
+  groupId: string
+  item: WorkspaceTab
+  active: boolean
+  overlayOpen: boolean
+}): React.JSX.Element {
   const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
   useEffect(() => {
     if (item.kind !== 'thread' || !item.sessionId) return
@@ -363,7 +373,13 @@ function TabContent({ groupId, item, active, overlayOpen }: { groupId: string; i
       content = <BrowseTab id={`workspace-${item.id}`} visible={active && !overlayOpen} />
       break
     case 'terminal':
-      content = <TerminalTab authBackendId={authBackendId} contextPath={item.contextPath} />
+      content = (
+        <TerminalTab
+          authBackendId={authBackendId}
+          contextPath={item.contextPath}
+          onExit={() => closeWorkspaceTab(groupId, item.id)}
+        />
+      )
       break
     case 'review':
       content = <ReviewTab contextPath={item.contextPath} sessionId={item.sessionId} groupId={groupId} tabId={item.id} />
@@ -393,14 +409,18 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
   const focused = view?.focusedGroupId === group.id
   const movable = Boolean(view && walkTabs(view.root).length > 1)
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
+  const [menuRight, setMenuRight] = useState<number | null>(null)
   const [dropTarget, setDropTarget] = useState<DropPosition | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const addButtonRef = useRef<HTMLButtonElement>(null)
   const activeId = group.tabs.some((item) => item.id === group.activeTabId) ? group.activeTabId : group.tabs[0]?.id ?? null
 
   useEffect(() => {
     if (!menuOpen) return
     const close = (event: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false)
+      const target = event.target as Node
+      if (addButtonRef.current?.contains(target)) return
+      if (menuRef.current && !menuRef.current.contains(target)) setMenuOpen(false)
     }
     const key = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setMenuOpen(false)
@@ -430,7 +450,8 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
 
   return (
     <section
-      className={`workspace-group ${focused ? 'focused' : ''}`}
+      className={`workspace-group ${focused ? 'focused' : ''} ${menuRight !== null ? 'menu-anchored' : ''}`}
+      style={{ '--workspace-add-menu-right': `${menuRight ?? 8}px` } as React.CSSProperties}
       data-workspace-group={group.id}
       onMouseDown={() => focusWorkspaceGroup(group.id)}
       onDragOver={(event) => {
@@ -492,10 +513,16 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
             </button>
           ))}
           <button
+            ref={addButtonRef}
             className="workspace-tab-add"
             title="Add tab"
             onClick={(event) => {
               event.stopPropagation()
+              const trigger = event.currentTarget.getBoundingClientRect()
+              const container = event.currentTarget.closest('.workspace-group')?.getBoundingClientRect()
+              setMenuRight(container
+                ? workspaceMenuRight(trigger.right, container.left, container.right)
+                : 8)
               setMenuOpen((open) => !open)
             }}
           >
@@ -514,13 +541,22 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
 
       <div className="workspace-group-content">
         {group.tabs.length === 0 ? (
-          <button className="workspace-empty-group" onClick={() => setMenuOpen(true)}>
+          <button className="workspace-empty-group" onClick={() => {
+            setMenuRight(null)
+            setMenuOpen(true)
+          }}>
             <PlusIcon size={18} />
             <span>Add a thread or tool</span>
           </button>
         ) : null}
         {group.tabs.map((item) => (
-          <TabContent key={item.id} groupId={group.id} item={item} active={item.id === activeId} overlayOpen={menuOpen || Boolean(dropTarget)} />
+          <TabContent
+            key={item.id}
+            groupId={group.id}
+            item={item}
+            active={item.id === activeId}
+            overlayOpen={menuOpen || Boolean(dropTarget)}
+          />
         ))}
       </div>
 

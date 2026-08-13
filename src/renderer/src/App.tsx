@@ -12,6 +12,8 @@ import { applyTheme, loadTheme } from './lib/themes'
 import { CommitDialog } from './components/CommitDialog'
 import { RenameModal } from './components/RenameModal'
 import { ConfirmModal } from './components/ConfirmModal'
+import { DelegateModal } from './components/DelegateModal'
+import { TaskPolicyModal } from './components/TaskPolicyModal'
 import { SettingsModal } from './components/SettingsModal'
 import { UpdateBanner } from './components/UpdateBanner'
 import {
@@ -70,7 +72,7 @@ export function App(): React.JSX.Element {
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const sessions = useStore(appStore, (s) => s.sessions)
   const workspaceProjectKey = useStore(appStore, (s) => s.projectWorkspace?.projectKey)
-  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget))
+  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget || s.policyTarget))
 
   useEffect(() => {
     loadArchived()
@@ -135,7 +137,14 @@ export function App(): React.JSX.Element {
           const props = (ev.properties ?? {}) as { sessionID?: string }
           const sid = props.sessionID ?? appStore.getState().activeSessionId ?? ''
           const wasStreaming = Boolean(appStore.getState().streaming[sid])
-          if (ev.type === 'session.idle' && sid) finalizeStalledParts(sid)
+          if (ev.type === 'session.idle' && sid) {
+            finalizeStalledParts(sid)
+            // Idle is the authoritative completion edge. Refreshing here also
+            // recovers the final response when intermediate backend events
+            // were missed during a reconnect or directory change.
+            void loadMessages(sid)
+            void loadTodos(sid)
+          }
           refreshStreaming(sid)
           if (wasStreaming && !appStore.getState().streaming[sid] && !document.hasFocus()) {
             setAttention('done')
@@ -336,6 +345,8 @@ export function App(): React.JSX.Element {
       <CommitDialog />
       <RenameModal />
       <ConfirmModal />
+      <DelegateModal />
+      <TaskPolicyModal />
       <SettingsModal />
     </div>
   )
