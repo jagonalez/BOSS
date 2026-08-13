@@ -256,6 +256,33 @@ export function findTab(node: WorkspaceNode, tabId: string): { group: WorkspaceG
   return undefined
 }
 
+/**
+ * The thread a pane belongs to, derived from its own thread tab rather than
+ * stored alongside it — a stored owner could disagree with what is on screen.
+ * A pane without a thread tab belongs to the project, not to any thread.
+ */
+export function groupThreadId(target: WorkspaceGroup): string | undefined {
+  return target.tabs.find((item) => item.kind === 'thread' && item.sessionId)?.sessionId
+}
+
+/**
+ * Resource tabs carry the checkout of the thread that opened them, so moving
+ * one into another thread's pane would leave it pointing at a directory that
+ * pane has nothing to do with. Moving within a pane, or into one holding no
+ * thread, stays allowed.
+ */
+export function canMoveTab(root: WorkspaceNode, tabId: string, targetGroupId: string): boolean {
+  const source = findTab(root, tabId)
+  if (!source) return false
+  if (source.group.id === targetGroupId) return true
+  if (source.tab.kind === 'thread' || source.tab.kind === 'browser') return true
+  const target = findGroup(root, targetGroupId)
+  if (!target) return false
+  const from = groupThreadId(source.group)
+  const to = groupThreadId(target)
+  return !from || !to || from === to
+}
+
 export function findSessionTab(node: WorkspaceNode, sessionId: string): { group: WorkspaceGroup; tab: WorkspaceTab } | undefined {
   for (const item of walkGroups(node)) {
     const found = item.tabs.find((candidate) => candidate.kind === 'thread' && candidate.sessionId === sessionId)

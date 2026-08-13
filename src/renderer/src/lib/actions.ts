@@ -17,6 +17,7 @@ import {
   closeGroup,
   closeTab,
   findGroup,
+  canMoveTab,
   findSessionTab,
   findTab,
   loadTemplates,
@@ -341,6 +342,8 @@ export function setWorkspaceSplitRatio(splitId: string, ratio: number): void {
 
 export function moveWorkspaceTab(tabId: string, targetGroupId: string, position: DropPosition): void {
   const next = updateWorkspaceView((item) => {
+    // Enforced here rather than at each drop site, so every caller is covered.
+    if (!canMoveTab(item.root, tabId, targetGroupId)) return item
     const moved = moveTab(item.root, tabId, targetGroupId, position)
     return { ...item, root: moved.root, focusedGroupId: moved.focusedGroupId }
   })

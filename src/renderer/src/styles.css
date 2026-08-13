@@ -7294,3 +7294,34 @@ select:hover {
 .update-banner-dismiss:hover {
   color: var(--text);
 }
+
+.workspace-pane-owner {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 10px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--type-meta);
+  min-width: 0;
+}
+
+.workspace-pane-owner-title {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pane-owner-branch {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pane-owner-shared {
+  color: var(--yellow);
+  flex: 0 0 auto;
+}

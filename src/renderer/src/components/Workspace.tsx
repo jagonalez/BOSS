@@ -28,7 +28,7 @@ import {
   setWorkspaceSplitRatio,
   splitWorkspaceGroup
 } from '../lib/actions'
-import { activeWorkspaceView, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { activeWorkspaceView, groupThreadId, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -323,6 +323,32 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
   return 'center'
 }
 
+/**
+ * Names the thread a pane belongs to and the branch its resources run in.
+ * Without this the ownership is invisible: a terminal reads "Terminal ·
+ * boss/fix-login" while nothing says why it cannot move to the next pane.
+ */
+function PaneOwner({ group }: { group: WorkspaceGroup }): React.JSX.Element | null {
+  const threadId = groupThreadId(group)
+  const session = useStore(appStore, (state) => state.sessions.find((item) => item.id === threadId))
+  const shared = useStore(appStore, (state) => {
+    const path = session?.worktree?.path
+    if (!path) return false
+    return state.sessions.filter((item) => item.worktree?.path === path).length > 1
+  })
+  if (!session) return null
+
+  return (
+    <div className="workspace-pane-owner" title={session.worktree?.path ?? session.projectPath}>
+      <span className="workspace-pane-owner-title">{session.title || 'Untitled thread'}</span>
+      {session.worktree?.branch ? (
+        <span className="workspace-pane-owner-branch">{session.worktree.branch}</span>
+      ) : null}
+      {shared ? <span className="workspace-pane-owner-shared" title="Another open thread uses this checkout">shared</span> : null}
+    </div>
+  )
+}
+
 function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const view = workspace ? activeWorkspaceView(workspace) : null
@@ -389,6 +415,7 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
       }}
       onDrop={onDrop}
     >
+      <PaneOwner group={group} />
       <header className="workspace-group-tabs">
         <div className="workspace-tabs" role="tablist">
           {group.tabs.map((item) => (
