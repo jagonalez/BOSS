@@ -5,7 +5,6 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { ServerInfo } from '@shared/ipc'
-import { saveState } from './state-store'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 
 interface Health {
@@ -283,29 +282,22 @@ export const computer = tool({
 `
   }
 
+  /**
+   * Switching project no longer restarts the server. Requests carry the target
+   * directory in `x-opencode-directory` (see ApiClient), and opencode-backend
+   * tracks a directory per session, so one server serves every project. The old
+   * SIGTERM-and-respawn cost up to 1.5s waiting for exit plus ~540ms to boot,
+   * and flagged the server unhealthy throughout — which surfaced as a red
+   * "Core project service unavailable" pill on every switch.
+   */
   async setProject(path: string): Promise<void> {
     if (!path || path === this.cwd) return
-    if (process.env.BOSS_SERVER_URL) {
-      throw new Error('cannot switch project while connected to an external server')
-    }
     if (!isDirectory(path)) {
       throw new Error(`project directory does not exist: ${path}`)
     }
     this.cwd = path
-    saveState({ projectPath: path })
-    const proc = this.proc
-    if (proc) {
-      this.suppressRestart = true
-      this.healthy = false
-      this.emitStatus()
-      await new Promise<void>((resolve) => {
-        proc.once('exit', () => resolve())
-        proc.kill('SIGTERM')
-        setTimeout(() => resolve(), 1500)
-      })
-      this.suppressRestart = false
-    }
-    await this.start()
+    // A server that has never started still needs its spawn cwd set.
+    if (!this.proc && !process.env.BOSS_SERVER_URL) await this.start()
   }
 
   get baseUrl(): string {

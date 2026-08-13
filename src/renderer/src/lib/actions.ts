@@ -1363,7 +1363,8 @@ export async function openProject(path: string): Promise<void> {
     projectCheckouts: info.checkouts,
     activePage: 'project',
     activeSessionId: null,
-    sessions: [],
+    // Sessions span every project now, so blanking them here only made the
+    // whole sidebar flash empty until refreshSessions repopulated it.
     messages: {},
     diffs: null,
     fileContent: null,
