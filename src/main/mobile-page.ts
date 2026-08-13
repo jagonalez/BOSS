@@ -114,10 +114,12 @@ input, textarea { font-size: 16px !important; }
 var token = localStorage.getItem('boss.token') || '';
 var view = { name: 'threads' };
 var threads = [];
+var supervision = { threads: [], totals: {} };
 var automations = { automations: [], runs: [] };
 var messages = {};
 var permissions = {};
 var busy = {};
+var accessRole = 'control';
 var app = document.getElementById('app');
 var refreshTimer = null;
 
@@ -141,6 +143,12 @@ function api(request) {
   });
 }
 
+function refreshAccess() {
+  return fetch('/api/access', { headers: { authorization: 'Bearer ' + token } })
+    .then(function (res) { return res.json(); })
+    .then(function (value) { accessRole = value.role || 'control'; });
+}
+
 function timeAgo(ts) {
   if (!ts) return '';
   var d = Date.now() - ts;
@@ -151,9 +159,10 @@ function timeAgo(ts) {
 }
 
 function refreshThreads() {
-  return api({ type: 'thread.list' }).then(function (list) {
-    threads = list || [];
-    threads.forEach(function (t) { busy[t.id] = Boolean(t.busy); });
+  return Promise.all([api({ type: 'thread.list' }), api({ type: 'supervision.snapshot' })]).then(function (values) {
+    threads = values[0] || [];
+    supervision = values[1] || { threads: [], totals: {} };
+    supervision.threads.forEach(function (t) { busy[t.threadId] = Boolean(t.running); });
     if (view.name === 'threads') render();
   });
 }
@@ -185,17 +194,24 @@ function stepsOf(message) {
 }
 
 function renderThreads() {
-  var sorted = threads.slice().sort(function (a, b) {
-    return ((b.time && b.time.updated) || 0) - ((a.time && a.time.updated) || 0);
+  var sorted = (supervision.threads || []).slice().sort(function (a, b) {
+    return (b.updatedAt || 0) - (a.updatedAt || 0);
   });
-  var html = '';
+  var totals = supervision.totals || {};
+  var html = '<div class="card"><div class="title">Task activity</div><div class="sub">' +
+    (totals.runs || 0) + ' runs · ' + (totals.toolCalls || 0) + ' tools' +
+    (typeof totals.tokens === 'number' ? ' · ' + totals.tokens.toLocaleString() + ' reported tokens' : '') + '</div></div>';
   if (!sorted.length) html = '<div class="empty">No threads yet.</div>';
   sorted.forEach(function (t) {
-    html += '<button class="card" onclick="openThread(\\'' + t.id + '\\')">' +
-      '<div class="row"><span class="dot ' + (busy[t.id] ? 'busy' : '') + '"></span>' +
+    var running = Boolean(t.running || busy[t.threadId]);
+    var last = t.lastRun || {};
+    var state = last.status === 'error' ? 'failed' : last.status === 'interrupted' ? 'interrupted' : running ? 'working' : 'idle';
+    html += '<button class="card" onclick="openThread(\\'' + t.threadId + '\\')">' +
+      '<div class="row"><span class="dot ' + (running ? 'busy' : '') + '"></span>' +
       '<div style="flex:1;min-width:0"><div class="title">' + esc(t.title || 'Untitled') + '</div>' +
-      '<div class="sub">' + esc(t.backendId || '') + (busy[t.id] ? ' · working' : '') + '</div></div>' +
-      '<span class="sub">' + timeAgo(t.time && t.time.updated) + '</span></div></button>';
+      '<div class="sub">' + esc(t.backendId || '') + (last.toolCalls ? ' · ' + last.toolCalls + ' tools' : '') + '</div></div>' +
+      '<span class="badge ' + esc(last.status || '') + '">' + esc(state) + '</span>' +
+      '<span class="sub">' + timeAgo(t.updatedAt) + '</span></div></button>';
   });
   return html;
 }
@@ -273,10 +289,10 @@ function render() {
     var t = null;
     threads.forEach(function (x) { if (x.id === view.id) t = x; });
     title = (t && t.title) || 'Thread';
-    headerExtra = busy[view.id] ? '<button onclick="stopThread()">Stop</button>' : '';
+    headerExtra = accessRole === 'control' && busy[view.id] ? '<button onclick="stopThread()">Stop</button>' : '';
     body = '<main>' + renderThread() + '</main>' +
-      '<div class="composer"><textarea id="reply" rows="1" placeholder="Reply…"></textarea>' +
-      '<button class="btn primary" onclick="sendReply()">Send</button></div>';
+      (accessRole === 'control' ? '<div class="composer"><textarea id="reply" rows="1" placeholder="Reply…"></textarea>' +
+      '<button class="btn primary" onclick="sendReply()">Send</button></div>' : '');
     app.innerHTML = '<header><button class="back" onclick="goBack()">‹ Back</button><h1>' + esc(title) + '</h1>' + headerExtra + '</header>' + body;
     var main = app.querySelector('main');
     if (main) window.scrollTo(0, document.body.scrollHeight);
@@ -356,8 +372,7 @@ function listen() {
 
 function boot() {
   render();
-  refreshThreads();
-  refreshAutomations();
+  refreshAccess().then(function () { refreshThreads(); refreshAutomations(); render(); });
   listen();
 }
 

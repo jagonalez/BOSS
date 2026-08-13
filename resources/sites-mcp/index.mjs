@@ -1,4 +1,4 @@
-// R.A.L.F. sites MCP server (stdio).
+// BOSS sites MCP server (stdio).
 // Exposes a single tool `publish_site(folder, name?)` that forwards to the
 // BOSS main-process control endpoint (loopback + random secret).
 // Run via `ELECTRON_RUN_AS_NODE=1 electron <this-file>`.

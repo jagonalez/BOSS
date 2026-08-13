@@ -12,13 +12,15 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendModelPreference, BackendRequest, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
+import type { SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
+import type { TaskPolicy } from '@shared/task-policy'
 
 export class ApiError extends Error {
   constructor(
@@ -159,8 +161,19 @@ export const OpenCode = {
     backendRequest<void>({ type: 'thread.compact', threadId: id, model }),
   backendModels: (threadId?: string, backendId?: BackendId) =>
     backendRequest<BackendModelDescriptor[]>({ type: 'thread.models', threadId, backendId }),
+  supervision: () => backendRequest<SupervisionSnapshot>({ type: 'supervision.snapshot' }),
+  searchTranscripts: (query: string, limit = 40) =>
+    backendRequest<TranscriptSearchResult[]>({ type: 'supervision.search', query, limit }),
+  acknowledgeAttention: (threadId: string) =>
+    backendRequest<SupervisionSnapshot>({ type: 'supervision.acknowledge', threadId }),
+  taskPolicy: (threadId: string) =>
+    backendRequest<TaskPolicy | undefined>({ type: 'thread.policy.get', threadId }),
+  setTaskPolicy: (threadId: string, policy: TaskPolicy) =>
+    backendRequest<TaskPolicy>({ type: 'thread.policy.set', threadId, policy }),
   cloneToBackend: (threadId: string, backendId: BackendId, instruction?: string, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction, options }),
+  delegate: (threadId: string, backendId: BackendId, instruction: string, placement: DelegatePlacement, options?: BackendMessageOptions) =>
+    backendRequest<SessionInfo>({ type: 'thread.delegate', threadId, backendId, instruction, placement, options }),
   forkIntoWorktree: (threadId: string, instruction?: string, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.worktree.create', threadId, instruction, options }),
   listWorktrees: (threadId?: string) =>
@@ -180,7 +193,7 @@ export const OpenCode = {
   notifyWebhook: () => backendRequest<string>({ type: 'automation.webhook.get' }),
   setNotifyWebhook: (url: string) => backendRequest<string>({ type: 'automation.webhook.set', url }),
   mobileStatus: () => backendRequest<MobileAccessStatus>({ type: 'mobile.status' }),
-  mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean }) =>
+  mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean }) =>
     backendRequest<MobileAccessStatus>({ type: 'mobile.set', patch }),
   automationsList: () => backendRequest<AutomationsSnapshot>({ type: 'automation.list' }),
   createAutomation: (input: AutomationInput) => backendRequest<Automation>({ type: 'automation.create', input }),

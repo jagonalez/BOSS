@@ -14,7 +14,7 @@ test('linked worktrees share one project while retaining their checkout paths', 
   const linked = join(root, 'linked')
   try {
     execFileSync('git', ['init', '-b', 'main', repository])
-    execFileSync('git', ['-C', repository, 'config', 'user.name', 'R.A.L.F. Test'])
+    execFileSync('git', ['-C', repository, 'config', 'user.name', 'BOSS Test'])
     execFileSync('git', ['-C', repository, 'config', 'user.email', 'boss@example.test'])
     execFileSync('git', ['-C', repository, 'config', 'commit.gpgsign', 'false'])
     execFileSync('git', ['-C', repository, 'commit', '--allow-empty', '-m', 'initial'])

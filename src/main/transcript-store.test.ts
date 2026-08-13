@@ -177,3 +177,63 @@ test('recovers an active run and marks unfinished tools as interrupted', () => {
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('keeps run history with backend-reported tokens and tool counts', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
+  try {
+    store.beginRun(source)
+    store.recordMessage(source, {
+      id: 'assistant-one', sessionID: source.nativeSessionId, role: 'assistant', tokens: 321
+    })
+    store.recordPart(source, {
+      id: 'tool-one', type: 'tool', sessionID: source.nativeSessionId,
+      messageID: 'assistant-one', state: { status: 'completed', tool: 'shell', output: 'ok' }
+    })
+    store.finishRun(source, 'completed')
+    store.beginRun(source)
+    store.recordMessage(source, {
+      id: 'assistant-two', sessionID: source.nativeSessionId, role: 'assistant'
+    })
+    store.finishRun(source, 'error')
+
+    const usage = store.usage(source.threadId)
+    assert.equal(usage.totals.runs, 2)
+    assert.equal(usage.totals.tokens, 321)
+    assert.equal(usage.totals.tokenRuns, 1)
+    assert.equal(usage.totals.toolCalls, 1)
+    assert.equal(usage.lastRun?.status, 'error')
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('searches normalized transcript text and tool activity', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
+  try {
+    store.recordMessage(source, {
+      id: 'assistant-search', sessionID: source.nativeSessionId, role: 'assistant',
+      time: { created: 123 }
+    })
+    store.recordPart(source, {
+      id: 'text-search', type: 'text', sessionID: source.nativeSessionId,
+      messageID: 'assistant-search', text: 'The authentication regression is fixed.'
+    })
+    store.recordPart(source, {
+      id: 'tool-search', type: 'tool', sessionID: source.nativeSessionId,
+      messageID: 'assistant-search', state: { status: 'completed', tool: 'shell', input: 'npm test' }
+    })
+
+    const textResults = store.search('authentication')
+    assert.equal(textResults.length, 1)
+    assert.match(textResults[0].snippet, /authentication regression/i)
+    assert.equal(textResults[0].backendId, 'codex')
+    const toolResults = store.search('npm test')
+    assert.equal(toolResults[0]?.kind, 'tool')
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
