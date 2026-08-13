@@ -7,3 +7,11 @@ resources/opencode/*
 !resources/opencode/.gitkeep
 resources/cua-driver/*
 !resources/cua-driver/.gitkeep
+
+# Never commit key material. A Tailscale TLS keypair reached the repo once.
+*.key
+*.pem
+*.p12
+*.crt
+*.cer
+*.mobileprovision
