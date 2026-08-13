@@ -64,6 +64,13 @@ const boss: BossApi = {
   onTerminalData: (cb) => subscribe(IpcChannels.TerminalData, cb),
   onTerminalExit: (cb) => subscribe(IpcChannels.TerminalExit, cb),
   gitRun: (path: string, args: string[]) => ipcRenderer.invoke(IpcChannels.GitRun, { path, args }),
+  reviewSnapshot: (path: string) => ipcRenderer.invoke(IpcChannels.ReviewSnapshot, path),
+  reviewChangeRequestDiff: (path: string) => ipcRenderer.invoke(IpcChannels.ReviewChangeRequestDiff, path),
+  reviewLocalAdd: (path, input) => ipcRenderer.invoke(IpcChannels.ReviewLocalAdd, { path, input }),
+  reviewLocalDelete: (path, commentId) => ipcRenderer.invoke(IpcChannels.ReviewLocalDelete, { path, commentId }),
+  reviewPublishComment: (path, input) => ipcRenderer.invoke(IpcChannels.ReviewPublishComment, { path, input }),
+  reviewReply: (path, commentId, body) => ipcRenderer.invoke(IpcChannels.ReviewReply, { path, commentId, body }),
+  reviewSubmit: (path, event, body) => ipcRenderer.invoke(IpcChannels.ReviewSubmit, { path, event, body }),
 
   ttsStatus: () => ipcRenderer.invoke(IpcChannels.TtsStatus),
   ttsSpeak: (req) => ipcRenderer.invoke(IpcChannels.TtsSpeak, req),
