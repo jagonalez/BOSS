@@ -21,7 +21,6 @@ import {
 import { ChatIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
-import { useCheckoutColor } from '../lib/checkout-color'
 
 /** Threads shown per project before "Show N more". */
 const THREADS_PER_PROJECT = 20
@@ -65,7 +64,6 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
   const preferredModel = useStore(appStore, (s) => s.modelsBySession[session.id])
   const model = preferredModel ?? session.model?.id
   const backend = BACKEND_SHORT_LABELS[session.backendId ?? 'opencode']
-  const rowColor = useCheckoutColor(session.executionPath ?? session.worktree?.path ?? session.projectPath)
   const details = [
     backend,
     model?.split('/').pop(),
@@ -86,11 +84,7 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
         <span />
       </span>
       <span className="session-copy">
-        {/* Same hue as the thread's pane header. A workspace mixes projects on
-            purpose, so this is what says which threads belong together. */}
-        <span className="name" style={{ color: rowColor }}>
-          {session.title || 'Untitled'}
-        </span>
+        <span className="name">{session.title || 'Untitled'}</span>
         <span className="session-details">{details.join(' · ')}</span>
       </span>
       <span className="meta">{timeAgo(session.time?.updated)}</span>

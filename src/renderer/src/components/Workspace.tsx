@@ -103,6 +103,11 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
   const sameKindIndex = group.tabs.filter((candidate) => candidate.kind === item.kind).findIndex((candidate) => candidate.id === item.id)
   const suffix = sameKindIndex > 0 ? ` ${sameKindIndex + 1}` : ''
+  // What the pane header states, so a tab can stay silent when it agrees.
+  const paneCheckout = useStore(appStore, (state) => {
+    const owner = state.sessions.find((session) => session.id === groupThreadId(group))
+    return owner?.executionPath ?? owner?.worktree?.path ?? owner?.projectPath
+  })
   if (item.kind === 'thread') return sessionTitle || 'Untitled thread'
   if (item.kind === 'browser') return browserTitle || `Browser${suffix}`
   if (item.kind === 'terminal' && authBackendId) {
@@ -110,7 +115,12 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
     return `Connect ${label}`
   }
   const label = `${TAB_TYPES.find((candidate) => candidate.kind === item.kind)?.label ?? item.kind}${suffix}`
-  return item.contextLabel && (item.kind === 'terminal' || item.kind === 'review' || item.kind === 'files')
+  // The pane header states the checkout, so repeating it on every tab is the
+  // duplication breadcrumbs exist to avoid — and it made tabs long enough to
+  // truncate. Say it only when this tab disagrees with its pane, which is the
+  // case worth noticing.
+  const scoped = item.kind === 'terminal' || item.kind === 'review' || item.kind === 'files'
+  return scoped && item.contextLabel && item.contextPath !== paneCheckout
     ? `${label} · ${item.contextLabel}`
     : label
 }
@@ -128,24 +138,16 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
   const agentDriven = useStore(appStore, (state) =>
     item.kind === 'browser' && Boolean(state.browseAgentActivity[`workspace-${item.id}`])
   )
-  const threadProject = useStore(appStore, (state) => {
-    const session = state.sessions.find((candidate) => candidate.id === item.sessionId)
-    return session?.executionPath ?? session?.worktree?.path ?? session?.projectPath
-  })
-  const threadColor = useCheckoutColor(threadProject)
 
   return (
     <>
       <span className={`workspace-tab-icon ${busy || agentDriven ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
         <Icon size={12} />
       </span>
-      <span
-        className="workspace-tab-label"
-        title={label}
-        style={item.kind === 'thread' ? { color: threadColor } : undefined}
-      >
-        {label}
-      </span>
+      {/* No checkout colour here: the pane header states the checkout, and a
+          second encoding of the same fact competes with the red, yellow, and
+          green this app already spends on status. */}
+      <span className="workspace-tab-label" title={label}>{label}</span>
       {item.kind === 'thread' ? <BackendBadge backendId={backendId} /> : null}
       {busActivity ? <span className="workspace-tab-bus" title="Thread message queued or failed" /> : null}
     </>
