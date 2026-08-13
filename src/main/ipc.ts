@@ -20,6 +20,8 @@ import type { UpdateChecker } from './updates'
 import type { BackendManager } from './backend/manager'
 import type { BackendRequest } from '@shared/backend'
 import type { AsrTranscribeRequest, TtsSpeakRequest } from '@shared/ipc'
+import type { ReviewManager } from './review-manager'
+import { projectCheckouts } from './project-identity'
 
 export interface IpcDeps {
   server: OpenCodeServer
@@ -33,6 +35,7 @@ export interface IpcDeps {
   speech: SpeechManager
   sites: SitesManager
   updates: UpdateChecker
+  reviews: ReviewManager
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -168,14 +171,29 @@ export function registerIpc(deps: IpcDeps): void {
     return true
   })
 
-  ipcMain.handle(IpcChannels.ProjectCurrent, () => ({
-    path: deps.backends.currentProject || deps.server.projectPath,
-    healthy: deps.server.info.healthy
-  }))
+  ipcMain.handle(IpcChannels.ProjectCurrent, () => {
+    const current = deps.backends.currentProject || deps.server.projectPath
+    const scope = deps.backends.scopeFor(current)
+    return {
+      path: scope.projectPath,
+      checkoutPath: scope.executionPath,
+      checkouts: projectCheckouts(scope.projectPath),
+      healthy: deps.server.info.healthy
+    }
+  })
 
   ipcMain.handle(IpcChannels.ProjectSet, async (_e, path: string) => {
-    await deps.backends.setProject(path)
-    return { path: deps.server.projectPath, healthy: deps.server.info.healthy }
+    // A linked worktree is a checkout within its repository project, not a
+    // second project. Keep project navigation canonical while review/files/
+    // terminal surfaces retain their own checkout-specific context paths.
+    const scope = deps.backends.scopeFor(path)
+    await deps.backends.setProject(scope.projectPath)
+    return {
+      path: scope.projectPath,
+      checkoutPath: scope.executionPath,
+      checkouts: projectCheckouts(scope.projectPath),
+      healthy: deps.server.info.healthy
+    }
   })
 
   ipcMain.handle(IpcChannels.ProjectChoose, async () => {
@@ -217,6 +235,24 @@ export function registerIpc(deps: IpcDeps): void {
       })
     })
   })
+
+  ipcMain.handle(IpcChannels.ReviewSnapshot, (_event, path: string) => deps.reviews.snapshot(path))
+  ipcMain.handle(IpcChannels.ReviewChangeRequestDiff, (_event, path: string) => deps.reviews.changeRequestDiff(path))
+  ipcMain.handle(IpcChannels.ReviewLocalAdd, (_event, body: { path: string; input: import('@shared/review').AddReviewCommentInput }) =>
+    deps.reviews.addLocal(body.path, body.input)
+  )
+  ipcMain.handle(IpcChannels.ReviewLocalDelete, (_event, body: { path: string; commentId: string }) =>
+    deps.reviews.deleteLocal(body.path, body.commentId)
+  )
+  ipcMain.handle(IpcChannels.ReviewPublishComment, (_event, body: { path: string; input: import('@shared/review').AddReviewCommentInput }) =>
+    deps.reviews.publishComment(body.path, body.input)
+  )
+  ipcMain.handle(IpcChannels.ReviewReply, (_event, body: { path: string; commentId: string; body: string }) =>
+    deps.reviews.reply(body.path, body.commentId, body.body)
+  )
+  ipcMain.handle(IpcChannels.ReviewSubmit, (_event, body: { path: string; event: import('@shared/review').SubmitReviewEvent; body: string }) =>
+    deps.reviews.submit(body.path, body.event, body.body)
+  )
 
   ipcMain.handle(IpcChannels.TtsStatus, () => deps.speech.ttsStatus())
 

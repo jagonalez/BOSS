@@ -24,6 +24,8 @@ import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
 import { TranscriptStore } from './transcript-store'
 import { UpdateChecker } from './updates'
+import { ReviewManager } from './review-manager'
+import { GitHubReviewProvider } from './github-review-provider'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 
@@ -83,11 +85,14 @@ const pty = new PTYManager(backendAuth)
 const speech = new SpeechManager()
 const sites = new SitesManager(() => backendMgr.currentProject || server.projectPath)
 const updates = new UpdateChecker()
+const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments.json'), [
+  new GitHubReviewProvider()
+])
 
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates, reviews }
 }
 
 function registerIpcOnce(): void {

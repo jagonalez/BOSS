@@ -9,6 +9,18 @@ import type { ThreadBusConnection } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { textFromParts } from './manager'
+import { claudePermissionMode, claudePermissionResponse, parseClaudePermission } from './claude-protocol'
+import type { ClaudePermissionRequest } from './claude-protocol'
+
+interface ClaudeProcess {
+  child: ChildProcess
+  permissions: Map<string, ClaudePermissionRequest>
+}
+
+function writeControl(child: ChildProcess, value: Record<string, unknown>): void {
+  if (!child.stdin?.writable) throw new Error('Claude Code permission channel is no longer available.')
+  child.stdin.write(`${JSON.stringify(value)}\n`)
+}
 
 interface ClaudeStore {
   version: 1
@@ -69,17 +81,19 @@ export class ClaudeBackend implements Backend {
   private projectPath = ''
   private version = ''
   private healthy = false
-  private processes = new Map<string, ChildProcess>()
+  private readonly command: string
+  private processes = new Map<string, ClaudeProcess>()
   private store: ClaudeStore = { version: 1, sessions: {} }
   private threadBus?: ThreadBusConnection
 
-  constructor(cwd?: string) {
+  constructor(cwd?: string, command = 'claude') {
     this.projectPath = cwd ?? ''
+    this.command = command
   }
 
   async start(): Promise<void> {
     try {
-      this.version = execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 2500 }).trim()
+      this.version = execFileSync(this.command, ['--version'], { encoding: 'utf8', timeout: 2500 }).trim()
     } catch {
       throw new Error('Claude Code is not installed or could not be started.')
     }
@@ -93,7 +107,7 @@ export class ClaudeBackend implements Backend {
   }
 
   async stop(): Promise<void> {
-    for (const process of this.processes.values()) process.kill()
+    for (const process of this.processes.values()) process.child.kill()
     this.processes.clear()
     this.healthy = false
   }
@@ -147,7 +161,7 @@ export class ClaudeBackend implements Backend {
   }
 
   async sessionDelete(id: string): Promise<void> {
-    this.processes.get(id)?.kill()
+    this.processes.get(id)?.child.kill()
     this.processes.delete(id)
     delete this.store.sessions[id]
     this.save()
@@ -224,13 +238,7 @@ export class ClaudeBackend implements Backend {
     })
 
     const hasHistory = record.messages.some((message) => message.info.role === 'assistant')
-    const mode = options?.mode === 'plan'
-      ? 'plan'
-      : options?.mode === 'auto'
-        ? 'auto'
-        : options?.mode === 'accept-edits'
-          ? 'acceptEdits'
-          : 'default'
+    const mode = claudePermissionMode(options?.mode)
     const threadBusConfig = this.threadBus ? JSON.stringify({
       mcpServers: {
         boss_thread_bus: {
@@ -258,32 +266,46 @@ export class ClaudeBackend implements Backend {
       '--output-format', 'stream-json',
       '--verbose',
       '--include-partial-messages',
+      '--input-format', 'stream-json',
+      '--permission-prompt-tool', 'stdio',
       '--permission-mode', mode,
       '--append-system-prompt', QA_GUIDANCE,
       ...(threadBusConfig ? ['--mcp-config', threadBusConfig, '--allowedTools', allowedThreadTools] : []),
       ...(options?.strictTools && threadBusConfig ? ['--strict-mcp-config'] : []),
-      ...(hasHistory ? ['--resume', sessionId] : ['--session-id', sessionId]),
+      ...(hasHistory ? [`--resume=${sessionId}`] : [`--session-id=${sessionId}`]),
       ...(options?.model?.modelID ? ['--model', options.model.modelID] : []),
-      ...(options?.model?.variant ? ['--effort', options.model.variant] : []),
-      prompt
+      ...(options?.model?.variant ? ['--effort', options.model.variant] : [])
     ]
-    const child = spawn('claude', args, {
+    const child = spawn(this.command, args, {
       cwd: record.projectPath || this.projectPath || globalThis.process.cwd(),
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       env: {
-        ...process.env,
+        ...globalThis.process.env,
         ...(this.threadBus ? {
           BOSS_THREAD_BUS_TOKEN: this.threadBus.tokenFor('claude', sessionId),
           BOSS_NATIVE_THREAD_ID: sessionId
         } : {})
       }
     })
-    this.processes.set(sessionId, child)
+    const process: ClaudeProcess = { child, permissions: new Map() }
+    this.processes.set(sessionId, process)
     this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'busy' } })
 
     let buffer = ''
     let assistantId: string = randomUUID()
     let liveText = ''
+    const initializeRequestId = `boss-init-${randomUUID()}`
+    let promptSent = false
+    const sendPrompt = (): void => {
+      if (promptSent) return
+      promptSent = true
+      writeControl(child, {
+        type: 'user',
+        session_id: sessionId,
+        message: { role: 'user', content: prompt },
+        parent_tool_use_id: null
+      })
+    }
     const decoder = new TextDecoder()
     child.stdout?.on('data', (chunk: Buffer) => {
       buffer += decoder.decode(chunk, { stream: true })
@@ -294,7 +316,27 @@ export class ClaudeBackend implements Backend {
         if (line.trim()) {
           try {
             const value = JSON.parse(line) as Record<string, unknown>
-            if (value.type === 'system' && value.subtype === 'init' && Array.isArray(value.mcp_server_errors) && value.mcp_server_errors.length > 0) {
+            if (value.type === 'control_response') {
+              const response = value.response as Record<string, unknown> | undefined
+              if (response?.request_id === initializeRequestId && response.subtype === 'success') sendPrompt()
+            } else if (value.type === 'control_request') {
+              const permission = parseClaudePermission(value)
+              if (permission) {
+                process.permissions.set(permission.requestId, permission)
+                this.emit({
+                  type: 'permission.asked',
+                  permission: {
+                    id: permission.requestId,
+                    sessionID: sessionId,
+                    permission: permission.toolName,
+                    patterns: [permission.title ?? permission.description ?? permission.displayName ?? ''].filter(Boolean),
+                    metadata: { ...permission.input, title: permission.title, description: permission.description },
+                    tool: { callID: permission.toolUseId },
+                    time: { created: Date.now() }
+                  }
+                })
+              }
+            } else if (value.type === 'system' && value.subtype === 'init' && Array.isArray(value.mcp_server_errors) && value.mcp_server_errors.length > 0) {
               this.emit({
                 type: 'session.error',
                 sessionID: sessionId,
@@ -324,8 +366,11 @@ export class ClaudeBackend implements Backend {
                   parts: [{ id: `${assistantId}-text`, type: 'text', sessionID: sessionId, messageID: assistantId, text: liveText }]
                 })
               }
-            } else if (value.type === 'result' && value.subtype !== 'success') {
-              this.emit({ type: 'session.error', sessionID: sessionId, error: String(value.error ?? value.result ?? 'Claude Code failed.') })
+            } else if (value.type === 'result') {
+              if (value.subtype !== 'success') {
+                this.emit({ type: 'session.error', sessionID: sessionId, error: String(value.error ?? value.result ?? 'Claude Code failed.') })
+              }
+              child.stdin?.end()
             }
           } catch {
             /* Ignore non-protocol diagnostic output. */
@@ -338,15 +383,23 @@ export class ClaudeBackend implements Backend {
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     child.on('error', (error) => this.emit({ type: 'session.error', sessionID: sessionId, error: error.message }))
     child.on('exit', (code) => {
+      for (const permissionId of process.permissions.keys()) {
+        this.emit({ type: 'permission.replied', sessionID: sessionId, permissionID: permissionId, response: 'reject' })
+      }
       this.processes.delete(sessionId)
       if (code && code !== 0) this.emit({ type: 'session.error', sessionID: sessionId, error: stderr.trim() || `Claude Code exited with ${code}.` })
       this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'idle' } })
       this.emit({ type: 'session.idle', sessionID: sessionId })
     })
+    writeControl(child, {
+      type: 'control_request',
+      request_id: initializeRequestId,
+      request: { subtype: 'initialize', hooks: null }
+    })
   }
 
   async abort(sessionId: string): Promise<void> {
-    this.processes.get(sessionId)?.kill('SIGINT')
+    this.processes.get(sessionId)?.child.kill('SIGINT')
   }
 
   async modelsList(): Promise<ModelInfo[]> {
@@ -362,7 +415,14 @@ export class ClaudeBackend implements Backend {
   async thinkingGet(): Promise<ThinkingLevel> { return { level: 'medium' } }
   async thinkingSet(_level: ThinkingLevel['level']): Promise<void> {}
   async todosGet(_sessionId: string): Promise<Todo[]> { return [] }
-  async permissionRespond(_sessionId: string, _permissionId: string, _response: 'once' | 'always' | 'reject'): Promise<void> {}
+  async permissionRespond(sessionId: string, permissionId: string, response: 'once' | 'always' | 'reject'): Promise<void> {
+    const process = this.processes.get(sessionId)
+    const pending = process?.permissions.get(permissionId)
+    if (!process || !pending) throw new Error('Claude Code is no longer waiting for this approval.')
+    writeControl(process.child, claudePermissionResponse(permissionId, pending, response))
+    process.permissions.delete(permissionId)
+    this.emit({ type: 'permission.replied', sessionID: sessionId, permissionID: permissionId, response })
+  }
   async diffGet(_sessionId: string, _messageId?: string): Promise<FileDiff[]> { return [] }
   async fileTree(_path?: string): Promise<FileNode[]> { return [] }
   async fileContent(path: string): Promise<FileContent> { return { path, content: '' } }
