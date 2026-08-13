@@ -1,5 +1,5 @@
 export type ClaudePermissionMode = 'manual' | 'auto' | 'acceptEdits' | 'plan'
-export type RalfClaudeMode = 'ask' | 'auto' | 'plan' | 'accept-edits' | undefined
+export type BossClaudeMode = 'ask' | 'auto' | 'plan' | 'accept-edits' | undefined
 
 export interface ClaudePermissionRequest {
   requestId: string
@@ -12,7 +12,7 @@ export interface ClaudePermissionRequest {
   toolUseId?: string
 }
 
-export function claudePermissionMode(mode?: RalfClaudeMode): ClaudePermissionMode {
+export function claudePermissionMode(mode?: BossClaudeMode): ClaudePermissionMode {
   if (mode === 'plan') return 'plan'
   if (mode === 'auto') return 'auto'
   if (mode === 'accept-edits') return 'acceptEdits'

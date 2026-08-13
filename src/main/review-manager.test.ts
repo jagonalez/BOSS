@@ -54,12 +54,12 @@ class FakeForgeProvider implements ReviewProvider {
 }
 
 test('persists checkout-specific local review comments', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ralf-review-'))
+  const directory = mkdtempSync(join(tmpdir(), 'boss-review-'))
   const stateFile = join(directory, 'comments.json')
   const repository = join(directory, 'repo')
   try {
     execFileSync('git', ['init', repository])
-    execFileSync('git', ['-C', repository, 'config', 'user.email', 'ralf@example.test'])
+    execFileSync('git', ['-C', repository, 'config', 'user.email', 'boss@example.test'])
     execFileSync('git', ['-C', repository, 'config', 'user.name', 'R.A.L.F. Test'])
     execFileSync('git', ['-C', repository, 'config', 'commit.gpgsign', 'false'])
     writeFileSync(join(repository, 'file.ts'), 'export const value = 1\n')
@@ -84,11 +84,11 @@ test('persists checkout-specific local review comments', async () => {
 })
 
 test('review manager selects providers without knowing forge-specific semantics', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'ralf-review-provider-'))
+  const directory = mkdtempSync(join(tmpdir(), 'boss-review-provider-'))
   const repository = join(directory, 'repo')
   try {
     execFileSync('git', ['init', repository])
-    execFileSync('git', ['-C', repository, 'config', 'user.email', 'ralf@example.test'])
+    execFileSync('git', ['-C', repository, 'config', 'user.email', 'boss@example.test'])
     execFileSync('git', ['-C', repository, 'config', 'user.name', 'R.A.L.F. Test'])
     execFileSync('git', ['-C', repository, 'config', 'commit.gpgsign', 'false'])
     writeFileSync(join(repository, 'file.ts'), 'export const value = 1\n')

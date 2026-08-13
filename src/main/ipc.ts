@@ -16,6 +16,7 @@ import type { ComputerUse } from './computer-use'
 import type { PTYManager } from './pty-manager'
 import type { SpeechManager } from './speech'
 import type { SitesManager } from './sites'
+import type { UpdateChecker } from './updates'
 import type { BackendManager } from './backend/manager'
 import type { BackendRequest } from '@shared/backend'
 import type { AsrTranscribeRequest, TtsSpeakRequest } from '@shared/ipc'
@@ -33,6 +34,7 @@ export interface IpcDeps {
   pty: PTYManager
   speech: SpeechManager
   sites: SitesManager
+  updates: UpdateChecker
   reviews: ReviewManager
 }
 
@@ -286,4 +288,11 @@ export function registerIpc(deps: IpcDeps): void {
   )
 
   ipcMain.handle(IpcChannels.SitesCfClear, () => deps.sites.cloudflareClear())
+
+  ipcMain.handle(IpcChannels.UpdateStatusGet, () => deps.updates.status())
+  ipcMain.handle(IpcChannels.UpdateCheck, async () => {
+    const status = await deps.updates.check()
+    broadcast(IpcChannels.UpdateChanged, status)
+    return status
+  })
 }

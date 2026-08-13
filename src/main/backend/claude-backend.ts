@@ -241,25 +241,25 @@ export class ClaudeBackend implements Backend {
     const mode = claudePermissionMode(options?.mode)
     const threadBusConfig = this.threadBus ? JSON.stringify({
       mcpServers: {
-        ralf_thread_bus: {
+        boss_thread_bus: {
           type: 'http',
           url: `${this.threadBus.url}/mcp`,
           headers: {
-            Authorization: 'Bearer ${RALF_THREAD_BUS_TOKEN}',
-            'X-Ralf-Backend': 'claude',
-            'X-Ralf-Thread': '${RALF_NATIVE_THREAD_ID}'
+            Authorization: 'Bearer ${BOSS_THREAD_BUS_TOKEN}',
+            'X-Boss-Backend': 'claude',
+            'X-Boss-Thread': '${BOSS_NATIVE_THREAD_ID}'
           }
         }
       }
     }) : ''
     const allowedThreadTools = [
-      'mcp__ralf_thread_bus__ralf_threads_list',
-      'mcp__ralf_thread_bus__ralf_threads_read',
-      'mcp__ralf_thread_bus__ralf_threads_send',
-      'mcp__ralf_thread_bus__ralf_threads_reply',
-      'mcp__ralf_thread_bus__ralf_threads_spawn_worktree',
-      ...QA_TOOL_DEFINITIONS.map((tool) => `mcp__ralf_thread_bus__${tool.name}`),
-      ...(this.threadBus?.agentToolNames() ?? []).map((name) => `mcp__ralf_thread_bus__${name}`)
+      'mcp__boss_thread_bus__boss_threads_list',
+      'mcp__boss_thread_bus__boss_threads_read',
+      'mcp__boss_thread_bus__boss_threads_send',
+      'mcp__boss_thread_bus__boss_threads_reply',
+      'mcp__boss_thread_bus__boss_threads_spawn_worktree',
+      ...QA_TOOL_DEFINITIONS.map((tool) => `mcp__boss_thread_bus__${tool.name}`),
+      ...(this.threadBus?.agentToolNames() ?? []).map((name) => `mcp__boss_thread_bus__${name}`)
     ].join(',')
     const args = [
       '-p',
@@ -282,8 +282,8 @@ export class ClaudeBackend implements Backend {
       env: {
         ...globalThis.process.env,
         ...(this.threadBus ? {
-          RALF_THREAD_BUS_TOKEN: this.threadBus.tokenFor('claude', sessionId),
-          RALF_NATIVE_THREAD_ID: sessionId
+          BOSS_THREAD_BUS_TOKEN: this.threadBus.tokenFor('claude', sessionId),
+          BOSS_NATIVE_THREAD_ID: sessionId
         } : {})
       }
     })
@@ -294,7 +294,7 @@ export class ClaudeBackend implements Backend {
     let buffer = ''
     let assistantId: string = randomUUID()
     let liveText = ''
-    const initializeRequestId = `ralf-init-${randomUUID()}`
+    const initializeRequestId = `boss-init-${randomUUID()}`
     let promptSent = false
     const sendPrompt = (): void => {
       if (promptSent) return
@@ -340,7 +340,7 @@ export class ClaudeBackend implements Backend {
               this.emit({
                 type: 'session.error',
                 sessionID: sessionId,
-                error: `Claude Code could not load R.A.L.F. agent tools: ${value.mcp_server_errors.map(String).join('; ')}`
+                error: `Claude Code could not load BOSS agent tools: ${value.mcp_server_errors.map(String).join('; ')}`
               })
             } else if (value.type === 'assistant') {
               const message = value.message as { id?: string; content?: unknown; model?: string } | undefined

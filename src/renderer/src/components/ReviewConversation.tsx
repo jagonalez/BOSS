@@ -36,7 +36,7 @@ function CommentCard({
       {comment.diffHunk ? <pre className="review-comment-hunk">{comment.diffHunk}</pre> : null}
       <p>{comment.body}</p>
       <footer>
-        {comment.url ? <button className="btn-ghost" onClick={() => void window.ralf.openExternal(comment.url!)}>Open on {providerLabel}</button> : null}
+        {comment.url ? <button className="btn-ghost" onClick={() => void window.boss.openExternal(comment.url!)}>Open on {providerLabel}</button> : null}
         {canReply && comment.source === 'remote' && comment.file ? <button className="btn-ghost" onClick={() => setReplying((value) => !value)}>Reply</button> : null}
         {comment.canDelete ? <button className="btn-ghost danger" onClick={() => void onDelete(comment.id)}>Delete local note</button> : null}
       </footer>
@@ -107,14 +107,14 @@ export function ReviewConversation({
   return <div className="review-conversation">
     <div className="review-conversation-head">
       <div><strong>{changeRequest ? `${changeRequest.displayId} ${changeRequest.title}` : 'Review notes'}</strong><small>{provider?.label ?? 'Local Git'} · {snapshot?.branch || 'detached HEAD'}</small></div>
-      {changeRequest ? <button className="btn-ghost" onClick={() => void window.ralf.openExternal(changeRequest.url)}>Open {provider?.changeRequestLabel ?? 'review'} ↗</button> : null}
+      {changeRequest ? <button className="btn-ghost" onClick={() => void window.boss.openExternal(changeRequest.url)}>Open {provider?.changeRequestLabel ?? 'review'} ↗</button> : null}
       <button className="btn-ghost" disabled={loading} onClick={onRefresh}>{loading ? 'Syncing…' : 'Refresh'}</button>
     </div>
     {error || snapshot?.syncError ? <div className="review-sync-error">{error || snapshot?.syncError}</div> : null}
     {changeRequest ? <section className="review-pr-summary">
       <div className="review-pr-badges"><span className={`review-status ${changeRequest.isDraft ? 'warning' : statusTone(changeRequest.state)}`}>{changeRequest.isDraft ? 'Draft' : changeRequest.state}</span>{changeRequest.reviewDecision ? <span className={`review-status ${statusTone(changeRequest.reviewDecision)}`}>{changeRequest.reviewDecision.replaceAll('_', ' ')}</span> : null}{changeRequest.mergeStateStatus ? <span className={`review-status ${statusTone(changeRequest.mergeStateStatus)}`}>{changeRequest.mergeStateStatus.replaceAll('_', ' ')}</span> : null}</div>
       <div className="review-pr-refs"><code>{changeRequest.headRefName}</code><span>→</span><code>{changeRequest.baseRefName}</code></div>
-      {changeRequest.checks.length ? <div className="review-checks">{changeRequest.checks.map((check) => <button key={`${check.name}-${check.state}`} className={`review-check ${statusTone(check.bucket ?? check.state)}`} onClick={() => check.url && void window.ralf.openExternal(check.url)} disabled={!check.url}><span />{check.name}<small>{check.state}</small></button>)}</div> : null}
+      {changeRequest.checks.length ? <div className="review-checks">{changeRequest.checks.map((check) => <button key={`${check.name}-${check.state}`} className={`review-check ${statusTone(check.bucket ?? check.state)}`} onClick={() => check.url && void window.boss.openExternal(check.url)} disabled={!check.url}><span />{check.name}<small>{check.state}</small></button>)}</div> : null}
       {changeRequest.reviews.length ? <div className="review-reviewers">{changeRequest.reviews.map((review) => <div key={review.id}><span className="review-avatar">{review.author.login.slice(0, 1).toUpperCase()}</span><span><strong>{review.author.login}</strong><small>{review.state.replaceAll('_', ' ')}</small></span>{review.body ? <p>{review.body}</p> : null}</div>)}</div> : null}
     </section> : <div className="review-local-explainer">{provider ? `No ${provider.changeRequestLabel.toLowerCase()} is attached to this branch.` : 'No remote review provider is configured for this checkout.'} Local annotations still work and remain on this machine.</div>}
     <section className="review-thread">

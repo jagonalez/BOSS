@@ -9,13 +9,13 @@ import test from 'node:test'
 import { projectCheckouts, projectScope } from './project-identity.ts'
 
 test('linked worktrees share one project while retaining their checkout paths', () => {
-  const root = mkdtempSync(join(tmpdir(), 'ralf-project-identity-'))
+  const root = mkdtempSync(join(tmpdir(), 'boss-project-identity-'))
   const repository = join(root, 'repository')
   const linked = join(root, 'linked')
   try {
     execFileSync('git', ['init', '-b', 'main', repository])
     execFileSync('git', ['-C', repository, 'config', 'user.name', 'R.A.L.F. Test'])
-    execFileSync('git', ['-C', repository, 'config', 'user.email', 'ralf@example.test'])
+    execFileSync('git', ['-C', repository, 'config', 'user.email', 'boss@example.test'])
     execFileSync('git', ['-C', repository, 'config', 'commit.gpgsign', 'false'])
     execFileSync('git', ['-C', repository, 'commit', '--allow-empty', '-m', 'initial'])
     execFileSync('git', ['-C', repository, 'worktree', 'add', '-b', 'feature/review', linked])

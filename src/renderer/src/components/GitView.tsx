@@ -57,7 +57,7 @@ export function GitView({
     setReviewLoading(true)
     setReviewError('')
     try {
-      const snapshot = await window.ralf.reviewSnapshot(projectPath)
+      const snapshot = await window.boss.reviewSnapshot(projectPath)
       if (request === reviewRequest.current) setReviewSnapshot(snapshot)
     } catch (err) {
       if (request === reviewRequest.current) setReviewError(String((err as Error).message ?? err))
@@ -97,7 +97,7 @@ export function GitView({
     setLoading(true)
     try {
       const changeRequestFiles = scope === 'change-request' && reviewSnapshot?.changeRequest
-        ? await window.ralf.reviewChangeRequestDiff(projectPath)
+        ? await window.boss.reviewChangeRequestDiff(projectPath)
         : undefined
       const paths = changeRequestFiles?.map((file) => file.path)
         ?? await gitDiffFiles(projectPath, scope as 'worktree' | 'staged' | 'compare', baseBranch)
@@ -171,9 +171,9 @@ export function GitView({
   async function addReviewComment(input: AddReviewCommentInput, publish: boolean): Promise<void> {
     setReviewError('')
     try {
-      if (publish) setReviewSnapshot(await window.ralf.reviewPublishComment(projectPath, input))
+      if (publish) setReviewSnapshot(await window.boss.reviewPublishComment(projectPath, input))
       else {
-        await window.ralf.reviewLocalAdd(projectPath, input)
+        await window.boss.reviewLocalAdd(projectPath, input)
         await loadReview()
       }
     } catch (err) {
@@ -185,7 +185,7 @@ export function GitView({
   async function replyToComment(commentId: string, body: string): Promise<void> {
     setReviewError('')
     try {
-      setReviewSnapshot(await window.ralf.reviewReply(projectPath, commentId, body))
+      setReviewSnapshot(await window.boss.reviewReply(projectPath, commentId, body))
     } catch (err) {
       setReviewError(String((err as Error).message ?? err))
       throw err
@@ -193,14 +193,14 @@ export function GitView({
   }
 
   async function deleteLocalComment(commentId: string): Promise<void> {
-    await window.ralf.reviewLocalDelete(projectPath, commentId)
+    await window.boss.reviewLocalDelete(projectPath, commentId)
     await loadReview()
   }
 
   async function submitReview(event: SubmitReviewEvent, body: string): Promise<void> {
     setReviewError('')
     try {
-      setReviewSnapshot(await window.ralf.reviewSubmit(projectPath, event, body))
+      setReviewSnapshot(await window.boss.reviewSubmit(projectPath, event, body))
     } catch (err) {
       setReviewError(String((err as Error).message ?? err))
       throw err

@@ -162,7 +162,7 @@ export class StdioMcpClient implements McpClient {
     const response = await this.request('initialize', {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: 'ralf-mcp-hub', version: '1.0.0' }
+      clientInfo: { name: 'boss-mcp-hub', version: '1.0.0' }
     })
     const error = rpcError(response)
     if (error) throw error
@@ -276,7 +276,7 @@ export class HttpMcpClient implements McpClient {
     const response = await this.request('initialize', {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: 'ralf-mcp-hub', version: '1.0.0' }
+      clientInfo: { name: 'boss-mcp-hub', version: '1.0.0' }
     })
     const error = rpcError(response)
     if (error) throw error
