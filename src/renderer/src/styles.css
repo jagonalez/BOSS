@@ -7325,3 +7325,11 @@ select:hover {
   color: var(--yellow);
   flex: 0 0 auto;
 }
+
+.workspace-pane-owner-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  align-self: center;
+}

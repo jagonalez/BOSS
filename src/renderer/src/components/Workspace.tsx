@@ -31,6 +31,7 @@ import {
 import { activeWorkspaceView, groupThreadId, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
+import { useProjectColor } from '../lib/project-color'
 
 const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
 
@@ -127,13 +128,23 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
   const agentDriven = useStore(appStore, (state) =>
     item.kind === 'browser' && Boolean(state.browseAgentActivity[`workspace-${item.id}`])
   )
+  const threadProject = useStore(appStore, (state) =>
+    state.sessions.find((session) => session.id === item.sessionId)?.projectPath
+  )
+  const threadColor = useProjectColor(threadProject)
 
   return (
     <>
       <span className={`workspace-tab-icon ${busy || agentDriven ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
         <Icon size={12} />
       </span>
-      <span className="workspace-tab-label" title={label}>{label}</span>
+      <span
+        className="workspace-tab-label"
+        title={label}
+        style={item.kind === 'thread' ? { color: threadColor } : undefined}
+      >
+        {label}
+      </span>
       {item.kind === 'thread' ? <BackendBadge backendId={backendId} /> : null}
       {busActivity ? <span className="workspace-tab-bus" title="Thread message queued or failed" /> : null}
     </>
@@ -336,10 +347,16 @@ function PaneOwner({ group }: { group: WorkspaceGroup }): React.JSX.Element | nu
     if (!path) return false
     return state.sessions.filter((item) => item.worktree?.path === path).length > 1
   })
+  // Same hue as the sidebar entry, so a thread is recognisable wherever it
+  // appears. Workspaces mix projects on purpose, so this is the only cue that
+  // says which threads belong together. Called before the early return: hooks
+  // cannot sit behind a condition.
+  const hue = useProjectColor(session?.projectPath)
   if (!session) return null
 
   return (
     <div className="workspace-pane-owner" title={session.worktree?.path ?? session.projectPath}>
+      {hue ? <span className="workspace-pane-owner-dot" style={{ background: hue }} /> : null}
       <span className="workspace-pane-owner-title">{session.title || 'Untitled thread'}</span>
       {session.worktree?.branch ? (
         <span className="workspace-pane-owner-branch">{session.worktree.branch}</span>
