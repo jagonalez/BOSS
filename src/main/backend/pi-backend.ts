@@ -457,6 +457,37 @@ export default function (pi: ExtensionAPI) {
     execute: (_id, args, signal) => call("boss_threads_spawn_worktree", args, signal)
   })
   pi.registerTool({
+    name: "boss_team_board_read",
+    label: "Read BOSS Team Board",
+    description: "Read the shared team brief, people, tasks, and public updates. Private transcripts are excluded.",
+    parameters: Type.Object({}),
+    execute: (_id, args, signal) => call("boss_team_board_read", args, signal)
+  })
+  pi.registerTool({
+    name: "boss_team_tasks_propose",
+    label: "Propose BOSS team tasks",
+    description: "Propose structured tasks on the connected BOSS team board.",
+    parameters: Type.Object({
+      tasks: Type.Array(Type.Object({
+        title: Type.String(),
+        summary: Type.Optional(Type.String()),
+        acceptanceCriteria: Type.Optional(Type.Array(Type.String())),
+        projectHint: Type.Optional(Type.String())
+      }), { minItems: 1, maxItems: 20 })
+    }),
+    execute: (_id, args, signal) => call("boss_team_tasks_propose", args, signal)
+  })
+  pi.registerTool({
+    name: "boss_team_task_publish",
+    label: "Publish BOSS team update",
+    description: "Publish a concise update or status for the team task that started this thread. Never publishes the private transcript.",
+    parameters: Type.Object({
+      update: Type.Optional(Type.String()),
+      status: Type.Optional(Type.Union([Type.Literal("working"), Type.Literal("blocked"), Type.Literal("review"), Type.Literal("done")]))
+    }),
+    execute: (_id, args, signal) => call("boss_team_task_publish", args, signal)
+  })
+  pi.registerTool({
     name: "boss_mcp_list",
     label: "List BOSS MCP tools",
     description: "List external MCP tools available through BOSS connections. Pass tool to get one tool's full input schema before calling it.",

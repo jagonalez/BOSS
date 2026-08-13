@@ -55,6 +55,14 @@ export const SearchIcon = (p: IconProps): React.JSX.Element => (
   </Svg>
 )
 
+export const TeamIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+  </Svg>
+)
+
 export const ReviewIcon = (p: IconProps): React.JSX.Element => (
   <Svg {...p}>
     <path d="M5 19 3 17l6-6 4 4 6-8 2 2-8 10-4-4-2 2Z" />
