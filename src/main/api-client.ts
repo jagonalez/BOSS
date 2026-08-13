@@ -18,7 +18,12 @@ export class ApiClient {
         headers: {
           Authorization: this.server.authHeader,
           'Content-Type': 'application/json',
-          ...(req.directory ? { 'x-opencode-directory': req.directory } : {})
+          // Fall back to the server's current project. Switching project no
+          // longer respawns the server, so without this a request with no
+          // explicit directory would keep hitting the project open at startup.
+          ...(req.directory || this.server.projectPath
+            ? { 'x-opencode-directory': req.directory || this.server.projectPath }
+            : {})
         },
         body: req.body !== undefined ? JSON.stringify(req.body) : undefined
       })
