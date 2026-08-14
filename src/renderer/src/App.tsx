@@ -255,6 +255,13 @@ export function App(): React.JSX.Element {
 
     const offSpeech = window.boss.onSpeechStatusChanged(applySpeechStatus)
 
+    // An agent can navigate, click and type in a browser tab you are not
+    // looking at. Mark the tab so the work is visible; opening it clears the
+    // mark.
+    const offBrowseAgent = window.boss.onBrowseAgentActivity((id) => {
+      appStore.setState((s) => ({ browseAgentActivity: { ...s.browseAgentActivity, [id]: true } }))
+    })
+
     const offSites = window.boss.onSitesChanged((sites) => appStore.setState({ sites }))
     void window.boss
       .sitesCfGet()
@@ -300,6 +307,7 @@ export function App(): React.JSX.Element {
       offStatus()
       offProgress()
       offSpeech()
+      offBrowseAgent()
       offSites()
       window.clearTimeout(refreshTimer)
       void window.boss.unsubscribeEvents()

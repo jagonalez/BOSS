@@ -33,6 +33,7 @@ const boss: BossApi = {
   browseReload: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseReload, id),
   browseDestroy: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseDestroy, id),
   onBrowseNavigation: (cb) => subscribe(IpcChannels.BrowseNavigation, cb),
+  onBrowseAgentActivity: (cb) => subscribe(IpcChannels.BrowseAgentActivity, cb),
   onBrowseExternal: (cb) => subscribe(IpcChannels.BrowseExternal, cb),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OpenExternal, url),
   openPath: (path: string) => ipcRenderer.invoke(IpcChannels.OpenPath, path),

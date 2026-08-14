@@ -146,6 +146,7 @@ export const IpcChannels = {
   BrowseAttach: 'browse:attach',
   BrowseRegister: 'browse:register',
   BrowseUnregister: 'browse:unregister',
+  BrowseAgentActivity: 'browse:agent-activity',
   BrowseNavigate: 'browse:navigate',
   BrowseGoBack: 'browse:go-back',
   BrowseGoForward: 'browse:go-forward',

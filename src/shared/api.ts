@@ -44,6 +44,8 @@ export interface BossApi {
   browseReload(id: string): Promise<boolean>
   browseDestroy(id: string): Promise<boolean>
   onBrowseNavigation(cb: (evt: BrowseNavEvent) => void): () => void
+  /** An agent drove a browser tab, which may not be the one on screen. */
+  onBrowseAgentActivity(cb: (id: string) => void): () => void
   onBrowseExternal(cb: (url: string) => void): () => void
   openExternal(url: string): Promise<boolean>
   openPath(path: string): Promise<boolean>

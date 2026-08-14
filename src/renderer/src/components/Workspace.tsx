@@ -188,10 +188,15 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
   const busActivity = useStore(appStore, (state) => Boolean(item.sessionId && state.threadBus?.messages.some((message) =>
     (message.fromThreadId === item.sessionId || message.toThreadId === item.sessionId) && message.status !== 'delivered'
   )))
+  // An agent drove this browser while you were elsewhere. Same treatment as a
+  // working thread, since it is the same thing: work happening out of sight.
+  const agentDrove = useStore(appStore, (state) =>
+    item.kind === 'browser' && Boolean(state.browseAgentActivity[`workspace-${item.id}`])
+  )
 
   return (
     <>
-      <span className={`workspace-tab-icon ${busy ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
+      <span className={`workspace-tab-icon ${busy || agentDrove ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
         <Icon size={12} />
       </span>
       <span className={`workspace-tab-label ${isChat ? 'chat' : ''}`} title={isChat ? `${label} — a chat, with no project or checkout` : label}>

@@ -49,6 +49,9 @@ export interface AppState {
   projectWorkspace: Workspace | null
   /** Tab to flash after it lands somewhere new. Clears itself. */
   highlightedTabId?: string
+  /** Browser tabs an agent has driven since you last looked at them. Keyed by
+   *  browse id, so `workspace-${tabId}`. */
+  browseAgentActivity: Record<string, boolean>
   /** Offer to undo the last close. Expires on its own. */
   workspaceUndo: { label: string } | null
   layoutTemplates: LayoutTemplate[]
@@ -149,6 +152,7 @@ export const initialBrowseState: BrowseNavigationState = {
 export const initialState: AppState = {
   activePage: 'command-center',
   projectWorkspace: null,
+  browseAgentActivity: {},
   workspaceUndo: null,
   layoutTemplates: [],
   nativeViewSuspensions: [],

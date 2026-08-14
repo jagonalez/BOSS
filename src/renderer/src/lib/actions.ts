@@ -173,6 +173,14 @@ export function activateWorkspaceTab(groupId: string, tabId: string): void {
   }))
   const active = next ? findTab(activeWorkspaceView(next).root, tabId)?.tab : undefined
   if (active?.kind === 'thread' && active.sessionId) selectSession(active.sessionId, false)
+  // Looking at the tab is what the mark was for.
+  if (active?.kind === 'browser') {
+    appStore.setState((state) => {
+      const browseAgentActivity = { ...state.browseAgentActivity }
+      delete browseAgentActivity[`workspace-${tabId}`]
+      return { browseAgentActivity }
+    })
+  }
 }
 
 export function addWorkspaceTab(

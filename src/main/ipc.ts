@@ -52,6 +52,7 @@ export function registerIpc(deps: IpcDeps): void {
   deps.backends.onEvent((event) => broadcast(IpcChannels.EventData, JSON.stringify(event)))
   deps.browse.onNavigation = (id, state) => broadcast(IpcChannels.BrowseNavigation, { id, state })
   deps.browse.onExternal = (url) => broadcast(IpcChannels.BrowseExternal, url)
+  deps.browse.onAgentActivity = (id) => broadcast(IpcChannels.BrowseAgentActivity, id)
   deps.computerUse.onStatusChange = (status) => broadcast(IpcChannels.ComputerUseStatus, status)
   deps.pty.onData = (id, data) => broadcast(IpcChannels.TerminalData, { id, data })
   deps.pty.onExit = (id, code) => broadcast(IpcChannels.TerminalExit, { id, code })
