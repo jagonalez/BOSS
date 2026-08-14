@@ -85,8 +85,13 @@ export class BrowseManager {
     if (!entry) return
     if (visible) {
       if (entry.parked) {
-        entry.view.setBounds(entry.parked)
+        const bounds = entry.parked
         entry.parked = undefined
+        entry.view.setBounds(bounds)
+        // Moving the view back does not itself schedule a frame, so the pane
+        // stayed empty until any mouse event made the compositor flush one.
+        // invalidate asks for that frame directly.
+        entry.view.webContents.invalidate()
       }
       return
     }
