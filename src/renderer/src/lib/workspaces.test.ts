@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bindTemplate, closeGroup, group, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, templateFromWorkspace, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { arrangeInto, closeGroup, group, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, layoutFromView, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('workspace add menus align to their trigger and stay inside the pane', () => {
   assert.equal(workspaceMenuRight(900, 100, 1_000), 100)
@@ -17,7 +17,7 @@ test('saved formats strip thread and checkout bindings', () => {
     tab('files', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' })
   ]))
 
-  const template = templateFromWorkspace(view, 'Bound layout')
+  const template = layoutFromView(view, 'Bound layout')
   for (const item of walkTabs(template.root)) {
     assert.equal(item.sessionId, undefined)
     assert.equal(item.contextPath, undefined)
@@ -26,25 +26,65 @@ test('saved formats strip thread and checkout bindings', () => {
   }
 })
 
-test('applying a format binds checkout tools and removes duplicate singleton surfaces', () => {
-  const template = {
-    id: 'format-1',
-    name: 'Review layout',
-    favorite: true,
-    root: group([tab('thread'), tab('review'), tab('review'), tab('files'), tab('files'), tab('terminal')])
-  }
-  const checkout = { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' }
-  const view = bindTemplate(template, 'Main', ['thread-1'], checkout)
-  const items = walkTabs(view.root)
+test('applying a layout moves the tabs you already have', () => {
+  const checkout = { contextPath: '/tmp/wt', worktreeId: 'wt-1', contextLabel: 'boss/test' }
+  const view = workspaceView('Main', group([
+    tab('thread', 'thread-1'),
+    tab('terminal', 'thread-1', checkout)
+  ]))
+  const before = walkTabs(view.root)
 
-  assert.equal(items.filter((item) => item.kind === 'review').length, 1)
-  assert.equal(items.filter((item) => item.kind === 'files').length, 1)
-  assert.equal(items.find((item) => item.kind === 'thread')?.sessionId, 'thread-1')
-  for (const item of items.filter((candidate) => candidate.kind === 'terminal' || candidate.kind === 'review' || candidate.kind === 'files')) {
-    assert.equal(item.contextPath, checkout.contextPath)
-    assert.equal(item.worktreeId, checkout.worktreeId)
-    assert.equal(item.contextLabel, checkout.contextLabel)
+  const layout = {
+    id: 'layout-1',
+    name: 'Side by side',
+    favorite: true,
+    root: split('horizontal', group([tab('thread')]), group([tab('terminal')]))
   }
+  const arranged = arrangeInto(layout, view)
+  const after = walkTabs(arranged.root)
+
+  // The same tabs, so a running shell and a loaded page carry over. Ids are
+  // what the terminal and browser caches key on.
+  assert.deepEqual(after.map((item) => item.id).sort(), before.map((item) => item.id).sort())
+  assert.equal(walkGroups(arranged.root).length, 2)
+  assert.equal(after.find((item) => item.kind === 'terminal')?.contextPath, checkout.contextPath)
+})
+
+test('a layout with no room for something keeps it anyway', () => {
+  const view = workspaceView('Main', group([
+    tab('thread', 'thread-1'),
+    tab('terminal', 'thread-1'),
+    tab('terminal', 'thread-1')
+  ]))
+  const before = walkTabs(view.root)
+
+  // One terminal slot, two terminals open.
+  const layout = {
+    id: 'layout-2',
+    name: 'Focus',
+    favorite: false,
+    root: group([tab('thread'), tab('terminal')])
+  }
+  const after = walkTabs(arrangeInto(layout, view).root)
+
+  // Applying a shape must not quietly kill a shell it had no slot for.
+  assert.deepEqual(after.map((item) => item.id).sort(), before.map((item) => item.id).sort())
+})
+
+test('a layout asking for what you do not have leaves the slot empty', () => {
+  const view = workspaceView('Main', group([tab('thread', 'thread-1')]))
+
+  const layout = {
+    id: 'layout-3',
+    name: 'Web development',
+    favorite: false,
+    root: split('horizontal', group([tab('thread')]), group([tab('browser'), tab('terminal')]))
+  }
+  const after = walkTabs(arrangeInto(layout, view).root)
+
+  // A shape describes where things go, not what to open. Creating a browser
+  // and a terminal here would start work the user did not ask for.
+  assert.deepEqual(after.map((item) => item.kind), ['thread'])
 })
 
 test('the placement index locates every tab across every view', () => {
@@ -144,7 +184,7 @@ test('a name given to a resource does not follow it into a saved format', () => 
 
   // A format is a shape. "Test runner" describes one particular terminal, so
   // it would be wrong on every layout built from this one.
-  for (const item of walkTabs(templateFromWorkspace(view, 'Saved').root)) {
+  for (const item of walkTabs(layoutFromView(view, 'Saved').root)) {
     assert.equal(item.title, undefined)
   }
 })

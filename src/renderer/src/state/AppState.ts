@@ -31,7 +31,7 @@ import type {
 } from '@shared/ipc'
 import type { ProjectInfo } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, LayoutTemplate, Workspace, TerminalStartLocation } from '@shared/workspace'
+import type { AppPage, Layout, Workspace, TerminalStartLocation } from '@shared/workspace'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
 
@@ -54,7 +54,7 @@ export interface AppState {
   browseAgentActivity: Record<string, boolean>
   /** Offer to undo the last close. Expires on its own. */
   workspaceUndo: { label: string } | null
-  layoutTemplates: LayoutTemplate[]
+  layouts: Layout[]
   nativeViewSuspensions: string[]
   serverUrl: string
   serverVersion: string
@@ -154,7 +154,7 @@ export const initialState: AppState = {
   projectWorkspace: null,
   browseAgentActivity: {},
   workspaceUndo: null,
-  layoutTemplates: [],
+  layouts: [],
   nativeViewSuspensions: [],
   serverUrl: '',
   serverVersion: '',

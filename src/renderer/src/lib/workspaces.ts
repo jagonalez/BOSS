@@ -1,6 +1,6 @@
 import type {
   DropPosition,
-  LayoutTemplate,
+  Layout,
   Workspace,
   SplitDirection,
   WorkspaceGroup,
@@ -14,7 +14,7 @@ import type {
 // Unversioned: nothing has shipped, so there is no other shape in the world to
 // migrate from. Version these at the first release, not before.
 const WORKSPACES_KEY = 'boss.workspace'
-const TEMPLATES_KEY = 'boss.layoutTemplates'
+const LAYOUTS_KEY = 'boss.layouts'
 /** Drag payload for a workspace tab. Shared so the sidebar can start a drag the
  *  panes already know how to accept. */
 export const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
@@ -93,7 +93,7 @@ export function cloneLayout(node: WorkspaceNode, stripBindings = false): Workspa
   return split(node.direction, cloneLayout(node.first, stripBindings), cloneLayout(node.second, stripBindings), node.ratio)
 }
 
-export const BUILTIN_TEMPLATES: LayoutTemplate[] = [
+export const BUILTIN_LAYOUTS: Layout[] = [
   { id: 'builtin-focus', name: 'Focus', favorite: true, builtIn: true, root: group([tab('thread')]) },
   {
     id: 'builtin-side-by-side',
@@ -164,15 +164,15 @@ function writeJson(key: string, value: unknown): void {
   }
 }
 
-export function loadTemplates(): LayoutTemplate[] {
-  const saved = readJson<LayoutTemplate[]>(TEMPLATES_KEY, [])
+export function loadLayouts(): Layout[] {
+  const saved = readJson<Layout[]>(LAYOUTS_KEY, [])
     .filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string' && isNode(item.root))
     .map((item) => ({ ...item, builtIn: false }))
-  return [...BUILTIN_TEMPLATES.map((item) => ({ ...item, root: cloneLayout(item.root, true) })), ...saved]
+  return [...BUILTIN_LAYOUTS.map((item) => ({ ...item, root: cloneLayout(item.root, true) })), ...saved]
 }
 
-export function saveCustomTemplates(templates: LayoutTemplate[]): void {
-  writeJson(TEMPLATES_KEY, templates.filter((item) => !item.builtIn))
+export function saveCustomLayouts(layouts: Layout[]): void {
+  writeJson(LAYOUTS_KEY, layouts.filter((item) => !item.builtIn))
 }
 
 export function saveWorkspace(workspace: Workspace): void {
@@ -466,46 +466,59 @@ export function reorderTab(root: WorkspaceNode, groupId: string, tabId: string, 
   })
 }
 
-export function bindTemplate(
-  template: LayoutTemplate,
-  name: string,
-  sessionIds: string[],
-  checkout?: WorkspaceCheckoutBinding
-): WorkspaceView {
-  const root = cloneLayout(template.root, true)
-  let sessionIndex = 0
-  let reviewBound = false
-  let filesBound = false
-  const bind = (node: WorkspaceNode): WorkspaceNode => {
-    if (node.type === 'split') return { ...node, first: bind(node.first), second: bind(node.second) }
-    const tabs = node.tabs.filter((item) => {
-      if (item.kind === 'review') {
-        if (reviewBound) return false
-        reviewBound = true
-      }
-      if (item.kind === 'files') {
-        if (filesBound) return false
-        filesBound = true
-      }
-      return true
-    }).map((item) => {
-      if (item.kind === 'thread') return { ...item, sessionId: sessionIds[sessionIndex++] }
-      if (checkout && (item.kind === 'terminal' || item.kind === 'review' || item.kind === 'files')) {
-        return { ...item, ...checkout }
-      }
-      return item
-    })
-    return { ...node, tabs, activeTabId: tabs[0]?.id ?? null }
+/** Arrange a view's tabs into the shape a layout describes.
+ *
+ *  Nothing is created and nothing is destroyed: the tabs that come out are the
+ *  tabs that went in, in different places. That is what makes applying a
+ *  layout safe while a terminal is running or a page is loaded — they are the
+ *  same tabs, so their shell and their page carry over untouched.
+ *
+ *  A slot the layout asks for and you cannot fill is dropped. Tabs left over
+ *  when the shape runs out go to the pane the layout would have put their kind
+ *  in, or the first pane, so nothing is lost by applying a smaller shape. */
+export function arrangeInto(layout: Layout, view: WorkspaceView): WorkspaceView {
+  const spare = new Map<WorkspaceTabKind, WorkspaceTab[]>()
+  for (const item of walkTabs(view.root)) {
+    const list = spare.get(item.kind) ?? []
+    list.push(item)
+    spare.set(item.kind, list)
   }
-  const bound = bind(root)
-  const first = walkGroups(bound)[0]
-  return { id: workspaceId('workspace'), name, root: bound, focusedGroupId: first.id }
+  const placed = new Set<string>()
+  const claim = (kind: WorkspaceTabKind): WorkspaceTab | undefined => {
+    const item = spare.get(kind)?.shift()
+    if (item) placed.add(item.id)
+    return item
+  }
+
+  const fill = (node: WorkspaceNode): WorkspaceNode => {
+    if (node.type === 'split') {
+      return { ...node, id: workspaceId('split'), first: fill(node.first), second: fill(node.second) }
+    }
+    const tabs = node.tabs.map((slot) => claim(slot.kind)).filter((item): item is WorkspaceTab => Boolean(item))
+    return { id: workspaceId('group'), type: 'group', tabs, activeTabId: tabs[0]?.id ?? null }
+  }
+
+  const root = fill(layout.root)
+  const groups = walkGroups(root)
+
+  // Whatever the shape had no room for. Keeping them beats a layout quietly
+  // closing a terminal because it only asked for one. Safe to mutate: fill
+  // built every one of these groups a moment ago.
+  for (const item of walkTabs(view.root)) {
+    if (placed.has(item.id)) continue
+    const home = groups.find((group) => group.tabs.some((tab) => tab.kind === item.kind)) ?? groups[0]
+    home.tabs.push(item)
+    home.activeTabId ??= item.id
+  }
+
+  const focused = groups.find((group) => group.id === view.focusedGroupId) ?? groups[0]
+  return { ...view, root, focusedGroupId: focused.id }
 }
 
-export function templateFromWorkspace(workspace: WorkspaceView, name: string): LayoutTemplate {
+export function layoutFromView(workspace: WorkspaceView, name: string): Layout {
   return {
-    id: workspaceId('format'),
-    name: name.trim() || 'Untitled format',
+    id: workspaceId('layout'),
+    name: name.trim() || 'Untitled layout',
     favorite: true,
     root: cloneLayout(workspace.root, true)
   }

@@ -11,7 +11,7 @@ import {
   activateWorkspaceView,
   activateWorkspaceTab,
   addWorkspaceTab,
-  applyLayoutTemplate,
+  applyLayout,
   closeWorkspaceView,
   closeWorkspaceGroup,
   closeWorkspaceTab,
@@ -21,15 +21,15 @@ import {
   focusWorkspaceGroup,
   loadMessages,
   loadTodos,
-  removeLayoutTemplate,
+  removeLayout,
   renameWorkspaceView,
   reorderWorkspaceTab,
-  saveCurrentLayoutTemplate,
+  saveCurrentLayout,
   sendWorkspaceTabToView,
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
   splitWorkspaceGroup,
-  undoWorkspaceClose
+  undoWorkspaceChange
 } from '../lib/actions'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
@@ -758,27 +758,27 @@ function WorkspaceNodeView({ node, viewId }: { node: WorkspaceNode; viewId: stri
 
 function WorkspaceBar(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
-  const templates = useStore(appStore, (state) => state.layoutTemplates)
+  const templates = useStore(appStore, (state) => state.layouts)
   const undo = useStore(appStore, (state) => state.workspaceUndo)
-  const [formatsOpen, setFormatsOpen] = useState(false)
+  const [layoutsOpen, setLayoutsOpen] = useState(false)
   const [editingViewId, setEditingViewId] = useState<string | null>(null)
   const [viewNameDraft, setViewNameDraft] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
   const viewNameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (!formatsOpen) return
+    if (!layoutsOpen) return
     const close = (event: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setFormatsOpen(false)
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setLayoutsOpen(false)
     }
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
-  }, [formatsOpen])
+  }, [layoutsOpen])
 
   useEffect(() => {
-    setNativeViewsSuspended('workspace-formats', formatsOpen)
-    return () => setNativeViewsSuspended('workspace-formats', false)
-  }, [formatsOpen])
+    setNativeViewsSuspended('workspace-layouts', layoutsOpen)
+    return () => setNativeViewsSuspended('workspace-layouts', false)
+  }, [layoutsOpen])
 
   useEffect(() => {
     if (!editingViewId) return
@@ -786,21 +786,17 @@ function WorkspaceBar(): React.JSX.Element {
     viewNameRef.current?.select()
   }, [editingViewId])
 
+  // No confirm: applying a layout only moves tabs, and the workspace bar
+  // offers Undo afterwards. It used to rebuild the view from scratch, which is
+  // what needed asking about.
   const apply = (id: string): void => {
-    setFormatsOpen(false)
-    appStore.setState({
-      confirm: {
-        title: 'Apply format?',
-        message: 'This replaces the current group arrangement. Threads and their history are not deleted.',
-        confirmLabel: 'Apply format',
-        action: () => applyLayoutTemplate(id)
-      }
-    })
+    setLayoutsOpen(false)
+    applyLayout(id)
   }
 
-  const saveFormat = (): void => {
-    const name = window.prompt('Name this format')?.trim()
-    if (name) saveCurrentLayoutTemplate(name)
+  const saveLayout = (): void => {
+    const name = window.prompt('Name this layout')?.trim()
+    if (name) saveCurrentLayout(name)
   }
 
   const beginRename = (viewId: string, current: string): void => {
@@ -874,29 +870,29 @@ function WorkspaceBar(): React.JSX.Element {
       </div>
       <div className="workspace-bar-spacer" />
       {undo ? (
-        <button className="workspace-undo" onClick={undoWorkspaceClose} title="Undo the last close">
+        <button className="workspace-undo" onClick={undoWorkspaceChange} title="Undo the last close">
           {undo.label} — Undo
         </button>
       ) : null}
-      <div className="workspace-format-control" ref={menuRef}>
-        <button className="workspace-bar-button" onClick={() => setFormatsOpen((open) => !open)}>Formats <span>⌄</span></button>
-        {formatsOpen ? (
-          <div className="workspace-format-menu">
-            <div className="workspace-menu-title">Favourite formats</div>
+      <div className="workspace-layout-control" ref={menuRef}>
+        <button className="workspace-bar-button" onClick={() => setLayoutsOpen((open) => !open)}>Layouts <span>⌄</span></button>
+        {layoutsOpen ? (
+          <div className="workspace-layout-menu">
+            <div className="workspace-menu-title">Favourite layouts</div>
             {templates.filter((item) => item.favorite).map((template) => (
-              <div className="workspace-format-row" key={template.id}>
+              <div className="workspace-layout-row" key={template.id}>
                 <button onClick={() => apply(template.id)}>
                   <span>{template.name}</span><small>{template.builtIn ? 'Built in' : 'Custom'}</small>
                 </button>
                 {!template.builtIn ? (
-                  <button className="workspace-format-delete" title="Delete format" onClick={() => removeLayoutTemplate(template.id)}>×</button>
+                  <button className="workspace-layout-delete" title="Delete layout" onClick={() => removeLayout(template.id)}>×</button>
                 ) : null}
               </div>
             ))}
           </div>
         ) : null}
       </div>
-      <button className="workspace-bar-button" onClick={saveFormat}>Save format</button>
+      <button className="workspace-bar-button" onClick={saveLayout}>Save layout</button>
     </div>
   )
 }

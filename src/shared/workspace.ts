@@ -58,8 +58,10 @@ export interface Workspace {
   updatedAt: number
 }
 
-/** Reusable formats preserve structure and tab kinds, never project/session bindings. */
-export interface LayoutTemplate {
+/** A shape to arrange a view into: splits, ratios, and how many of each kind
+ *  of tab sits where. Never a thread or a checkout — applying one rearranges
+ *  what is already open rather than building anything new. */
+export interface Layout {
   id: string
   name: string
   favorite: boolean
