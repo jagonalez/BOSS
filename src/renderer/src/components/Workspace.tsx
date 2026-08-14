@@ -498,6 +498,20 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
     return () => setNativeViewsSuspended(reason, false)
   }, [group.id, menuOpen, dropTarget, tabMenu])
 
+  // A drag can end anywhere, including over a native view or outside the
+  // window, so dragleave is not guaranteed. Clearing on the global dragend
+  // stops the drop indicator from sticking after the drag is over.
+  useEffect(() => {
+    if (!dropTarget) return
+    const clear = (): void => setDropTarget(null)
+    document.addEventListener('dragend', clear)
+    document.addEventListener('drop', clear)
+    return () => {
+      document.removeEventListener('dragend', clear)
+      document.removeEventListener('drop', clear)
+    }
+  }, [dropTarget])
+
   const onDrop = (event: React.DragEvent): void => {
     event.preventDefault()
     event.stopPropagation()
@@ -907,6 +921,24 @@ function focusNeighbor(direction: 'left' | 'right' | 'up' | 'down'): void {
 
 export function Workspace(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+
+  // Detach native views for the whole of a drag. A browser is composited over
+  // the page, so dragging across one never reaches the pane underneath: no
+  // dragover to move the drop indicator, no dragleave to clear it, and no drop
+  // at all. The indicator stuck wherever the cursor last crossed real DOM.
+  useEffect(() => {
+    const start = (): void => setNativeViewsSuspended('drag', true)
+    const stop = (): void => setNativeViewsSuspended('drag', false)
+    document.addEventListener('dragstart', start)
+    document.addEventListener('dragend', stop)
+    document.addEventListener('drop', stop)
+    return () => {
+      document.removeEventListener('dragstart', start)
+      document.removeEventListener('dragend', stop)
+      document.removeEventListener('drop', stop)
+      stop()
+    }
+  }, [])
 
   useEffect(() => {
     const key = (event: KeyboardEvent): void => {
