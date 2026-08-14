@@ -14,7 +14,6 @@ function rectOf(el: HTMLElement): { x: number; y: number; width: number; height:
 export function BrowseTab({ id, visible = true }: { id: string; visible?: boolean }): React.JSX.Element {
   const viewRef = useRef<HTMLDivElement>(null)
   const nativeViewsSuspended = useStore(appStore, (s) => s.nativeViewSuspensions.length > 0)
-  const actuallyVisible = visible && !nativeViewsSuspended
   const nav = useStore(appStore, (s) => s.browse[id] ?? { url: '', title: '', canGoBack: false, canGoForward: false, loading: false })
   const [urlInput, setUrlInput] = useState('')
 
@@ -24,18 +23,16 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
   // with the url bar still filled in. A browser is disposed when its tab
   // closes, which closeWorkspaceTab handles; unmounting only means React
   // moved it, which is now routine.
-  useEffect(() => {
-    return () => {
-      void window.boss.browseDetach(id)
-    }
-  }, [id])
 
   useEffect(() => {
     const el = viewRef.current
-    if (!el || !actuallyVisible) {
-      void window.boss.browseDetach(id)
+    // Hidden, not detached: a tab behind another in the same pane comes back
+    // often, and re-adding the view each time is what made it slow.
+    if (!el || !visible) {
+      void window.boss.browseVisible(id, false)
       return
     }
+    void window.boss.browseVisible(id, !nativeViewsSuspended)
     void window.boss.browseAttach(id, rectOf(el))
     const report = (): void => {
       void window.boss.browseBounds(id, rectOf(el))
@@ -70,14 +67,18 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
     })
     observer.observe(document.body, { childList: true, subtree: true })
 
+    // No detach here. This effect re-runs whenever the tab moves, and React
+    // runs cleanup before the next setup, so detaching first tore the view out
+    // of the window and put it straight back — a full re-add, which is what
+    // made the pane sit blank for a second or two after a drag. The view is
+    // detached when the tab genuinely goes away, not when it moves.
     return () => {
       ro.disconnect()
       observer.disconnect()
       cancelAnimationFrame(pending)
       window.removeEventListener('resize', report)
-      void window.boss.browseDetach(id)
     }
-  }, [id, actuallyVisible])
+  }, [id, visible, nativeViewsSuspended])
 
   useEffect(() => {
     const off = window.boss.onBrowseNavigation((evt) => {

@@ -145,6 +145,7 @@ export const IpcChannels = {
   EventData: 'events:data',
   BrowseAttach: 'browse:attach',
   BrowseDetach: 'browse:detach',
+  BrowseVisible: 'browse:visible',
   BrowseBounds: 'browse:bounds',
   BrowseNavigate: 'browse:navigate',
   BrowseGoBack: 'browse:go-back',

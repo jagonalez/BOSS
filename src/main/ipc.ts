@@ -93,6 +93,11 @@ export function registerIpc(deps: IpcDeps): void {
     return true
   })
 
+  ipcMain.handle(IpcChannels.BrowseVisible, (_e, body: { id: string; visible: boolean }) => {
+    deps.browse.setVisible(body.id, body.visible)
+    return true
+  })
+
   ipcMain.handle(IpcChannels.BrowseBounds, (_e, body: { id: string; bounds: BrowseBounds }) => {
     deps.browse.setBounds(body.id, body.bounds)
     return true

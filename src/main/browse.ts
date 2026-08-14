@@ -67,6 +67,14 @@ export class BrowseManager {
     }
   }
 
+  /** Hide a view without unhooking it. Detaching and re-attaching costs an IPC
+   *  round trip each way and makes the page visibly flash back in; a view that
+   *  is only temporarily in the way — behind a menu, under a drag — just needs
+   *  to stop being drawn. */
+  setVisible(id: string, visible: boolean): void {
+    this.views.get(id)?.view.setVisible(visible)
+  }
+
   setBounds(id: string, bounds: BrowseBounds): void {
     const entry = this.views.get(id)
     if (entry) entry.view.setBounds(bounds)

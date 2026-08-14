@@ -28,6 +28,7 @@ const boss: BossApi = {
 
   browseAttach: (id: string, bounds: BrowseBounds) => ipcRenderer.invoke(IpcChannels.BrowseAttach, { id, bounds }),
   browseDetach: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseDetach, id),
+  browseVisible: (id: string, visible: boolean) => ipcRenderer.invoke(IpcChannels.BrowseVisible, { id, visible }),
   browseBounds: (id: string, bounds: BrowseBounds) => ipcRenderer.invoke(IpcChannels.BrowseBounds, { id, bounds }),
   browseNavigate: (id: string, url: string) => ipcRenderer.invoke(IpcChannels.BrowseNavigate, { id, url }),
   browseBack: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseGoBack, id),
