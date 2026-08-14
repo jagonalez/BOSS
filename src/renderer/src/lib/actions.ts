@@ -458,6 +458,44 @@ export function dropSessionInGroup(
   showPage('project')
 }
 
+/** Give a thread a resource, from the sidebar rather than from its pane.
+ *
+ *  The resource takes the thread's checkout, so there is nothing to choose.
+ *  A thread that is not on screen opens first: adding a terminal to a thread
+ *  you cannot see should still show you the terminal. */
+export function addResourceToSession(sessionId: string, kind: WorkspaceTabKind): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+
+  let placement: { viewId: string; groupId: string } | undefined
+  for (const view of workspace.views) {
+    const found = findSessionTab(view.root, sessionId)
+    if (found) {
+      placement = { viewId: view.id, groupId: found.group.id }
+      break
+    }
+  }
+
+  if (!placement) {
+    const view = activeWorkspaceView(workspace)
+    const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
+    dropSessionInGroup(sessionId, view.id, groupId)
+    placement = { viewId: view.id, groupId }
+  } else if (workspace.activeViewId !== placement.viewId) {
+    activateWorkspaceView(placement.viewId)
+  }
+
+  const session = appStore.getState().sessions.find((item) => item.id === sessionId)
+  const path = session?.executionPath ?? session?.worktree?.path ?? session?.projectPath
+    ?? session?.directory ?? session?.path ?? appStore.getState().projectPath
+  const checkout: WorkspaceCheckoutBinding | undefined = path
+    ? { contextPath: path, worktreeId: session?.worktree?.id, contextLabel: session?.worktree?.branch ?? 'Main' }
+    : undefined
+
+  addWorkspaceTab(placement.groupId, kind, sessionId, checkout)
+  showPage('project')
+}
+
 /** Flash a tab that just arrived, so the eye finds it without hunting. */
 export function highlightWorkspaceTab(tabId: string): void {
   appStore.setState({ highlightedTabId: tabId })

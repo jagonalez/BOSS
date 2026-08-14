@@ -1579,6 +1579,21 @@ textarea {
   white-space: nowrap;
 }
 
+/* A chat has no project and no checkout, so it owns no resources. Saying so
+   on the tab explains the missing + before anyone hunts for it. */
+.workspace-tab-chat {
+  padding: 1px 5px;
+  border: 1px solid var(--line-default);
+  border-radius: 4px;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  white-space: nowrap;
+}
+
+.workspace-tab-label.chat {
+  font-style: italic;
+}
+
 /* Shown only when a resource sits away from its thread, where it is the one
    thing saying what the resource belongs to. Clicking goes there. */
 .workspace-tab-origin {
@@ -1596,6 +1611,35 @@ textarea {
 
 .workspace-tab-origin:hover {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--text);
+}
+
+/* Costs no width until you point at the tab, so a long thread title is not
+   squeezed by a button nobody is reaching for. Same trick the close button
+   already uses beside it. */
+.workspace-tab-add-inline {
+  width: 0;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 0;
+  overflow: hidden;
+  border-radius: 4px;
+  opacity: 0;
+  color: var(--text-faint);
+  transition: opacity 0.1s ease;
+}
+
+.workspace-tab:hover .workspace-tab-add-inline,
+.workspace-tab.active .workspace-tab-add-inline {
+  width: 16px;
+  flex: 0 0 16px;
+  margin-left: 2px;
+  opacity: 1;
+}
+
+.workspace-tab-add-inline:hover {
+  background: var(--bg-hover);
   color: var(--text);
 }
 
@@ -2997,6 +3041,51 @@ textarea {
 }
 
 .ctx-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* One Add rather than four entries. The thread menu already runs to ten
+   items, and the resources are a set, not four unrelated actions. */
+.ctx-submenu {
+  position: relative;
+}
+
+.ctx-parent .ctx-arrow {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
+.ctx-submenu-items {
+  position: absolute;
+  top: -4px;
+  left: 100%;
+  min-width: 160px;
+  margin-left: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Opens leftward when the menu sits near the right edge, so the submenu does
+   not run off the window. */
+.ctx-submenu.flip .ctx-submenu-items {
+  left: auto;
+  right: 100%;
+  margin-left: 0;
+  margin-right: 2px;
+}
+
+.ctx-submenu:hover .ctx-submenu-items {
+  display: flex;
+}
+
+.ctx-submenu:hover .ctx-parent {
   background: var(--bg-hover);
   color: var(--text);
 }

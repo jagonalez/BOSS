@@ -139,10 +139,11 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
     const label = { opencode: 'OpenCode', pi: 'Pi', codex: 'Codex', claude: 'Claude' }[authBackendId]
     return `Connect ${label}`
   }
-  const label = `${TAB_TYPES.find((candidate) => candidate.kind === item.kind)?.label ?? item.kind}${suffix}`
-  return item.contextLabel && (item.kind === 'terminal' || item.kind === 'review' || item.kind === 'files')
-    ? `${label} · ${item.contextLabel}`
-    : label
+  // No checkout on the label. A resource inherits its thread's, so naming it
+  // here repeated what the pane already said; when the resource sits away from
+  // its thread, the origin badge names the thread instead, which is the part
+  // that is actually in doubt.
+  return `${TAB_TYPES.find((candidate) => candidate.kind === item.kind)?.label ?? item.kind}${suffix}`
 }
 
 /** Where a resource's thread is, when the thread is not in this pane.
@@ -167,6 +168,13 @@ function useOrigin(item: WorkspaceTab, group: WorkspaceGroup): { title: string; 
 function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }): React.JSX.Element {
   const label = useTabLabel(item, group)
   const origin = useOrigin(item, group)
+  // A chat belongs to no project, so it owns no resources and shows no branch.
+  // Marking the tab says why its + is missing before anyone goes looking.
+  const isChat = useStore(appStore, (state) => {
+    if (item.kind !== 'thread' || !item.sessionId) return false
+    const session = state.sessions.find((candidate) => candidate.id === item.sessionId)
+    return Boolean(session) && !(session?.projectPath ?? session?.directory ?? session?.path)
+  })
   const backendId = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.backendId)
   const Icon = tabIcon(item.kind)
   const busy = useStore(appStore, (state) => Boolean(item.sessionId && state.streaming[item.sessionId]))
@@ -181,7 +189,10 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
       <span className={`workspace-tab-icon ${busy ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
         <Icon size={12} />
       </span>
-      <span className="workspace-tab-label" title={label}>{label}</span>
+      <span className={`workspace-tab-label ${isChat ? 'chat' : ''}`} title={isChat ? `${label} — a chat, with no project or checkout` : label}>
+        {label}
+      </span>
+      {isChat ? <span className="workspace-tab-chat">Chat</span> : null}
       {origin ? (
         <span
           className="workspace-tab-origin"
@@ -283,7 +294,6 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
           >
             <Icon size={14} />
             <span>{label}</span>
-            {scoped ? <small>{inherited?.contextLabel ?? 'project'}</small> : null}
           </button>
         )
       })}
@@ -369,6 +379,12 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
   const view = workspace?.views.find((item) => item.id === viewId) ?? null
   const focused = view?.focusedGroupId === group.id && workspace?.activeViewId === viewId
   const arrived = Boolean(highlightedTabId && group.tabs.some((item) => item.id === highlightedTabId))
+  const sessions = useStore(appStore, (state) => state.sessions)
+  // A chat has no project, so there is no checkout to hand a terminal.
+  const ownsCheckout = (sessionId: string): boolean => {
+    const session = sessions.find((candidate) => candidate.id === sessionId)
+    return Boolean(session && (session.projectPath ?? session.directory ?? session.path))
+  }
   const movable = Boolean(view && walkTabs(view.root).length > 1)
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
   const [menuRight, setMenuRight] = useState<number | null>(null)
@@ -473,6 +489,25 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
               onClick={() => activateWorkspaceTab(group.id, item.id)}
             >
               <TabLabel item={item} group={group} />
+              {/* On the thread's own tab, so "add to this thread" needs no
+                  explaining. A resource tab owns nothing, and a chat has no
+                  checkout to give, so neither gets one. */}
+              {item.kind === 'thread' && item.sessionId && ownsCheckout(item.sessionId) ? (
+                <span
+                  className="workspace-tab-add-inline"
+                  role="button"
+                  title="Add a terminal, files or review to this thread"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    const trigger = event.currentTarget.getBoundingClientRect()
+                    const container = event.currentTarget.closest('.workspace-group')?.getBoundingClientRect()
+                    setMenuRight(container ? workspaceMenuRight(trigger.right, container.left, container.right) : 8)
+                    setMenuOpen(true)
+                  }}
+                >
+                  <PlusIcon size={11} />
+                </span>
+              ) : null}
               <span
                 className={`workspace-tab-close ${isLiveSurface(item) ? 'destructive' : ''}`}
                 role="button"
@@ -484,22 +519,26 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
               >{isLiveSurface(item) ? '×' : '−'}</span>
             </button>
           ))}
-          <button
-            ref={addButtonRef}
-            className="workspace-tab-add"
-            title="Add tab"
-            onClick={(event) => {
-              event.stopPropagation()
-              const trigger = event.currentTarget.getBoundingClientRect()
-              const container = event.currentTarget.closest('.workspace-group')?.getBoundingClientRect()
-              setMenuRight(container
-                ? workspaceMenuRight(trigger.right, container.left, container.right)
-                : 8)
-              setMenuOpen((open) => !open)
-            }}
-          >
-            <PlusIcon size={13} />
-          </button>
+          {/* Only for a pane with nothing in it. Once a thread is here, its own
+              tab carries the +, so this one would just be a second way in. */}
+          {group.tabs.length === 0 ? (
+            <button
+              ref={addButtonRef}
+              className="workspace-tab-add"
+              title="Add a thread"
+              onClick={(event) => {
+                event.stopPropagation()
+                const trigger = event.currentTarget.getBoundingClientRect()
+                const container = event.currentTarget.closest('.workspace-group')?.getBoundingClientRect()
+                setMenuRight(container
+                  ? workspaceMenuRight(trigger.right, container.left, container.right)
+                  : 8)
+                setMenuOpen((open) => !open)
+              }}
+            >
+              <PlusIcon size={13} />
+            </button>
+          ) : null}
         </div>
         <div className="workspace-group-actions">
           <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>

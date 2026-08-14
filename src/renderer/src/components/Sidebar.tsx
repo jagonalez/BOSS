@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
+import type { WorkspaceTabKind } from '@shared/workspace'
 import type { OwnedResource } from '../lib/workspaces'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, resourcesByThread } from '../lib/workspaces'
 import {
@@ -14,6 +15,7 @@ import {
   openCommitDialog,
   openProject,
   openProjectFolder,
+  addResourceToSession,
   removeSessionWorktree,
   revealWorkspaceTab,
   selectSession,
@@ -33,7 +35,19 @@ interface CtxMenu {
   y: number
   project?: string
   session?: SessionInfo
+  /** Set by the + on a thread row: the same popup, listing resources to add
+   *  rather than the thread's own actions. */
+  addTo?: SessionInfo
 }
+
+/** What a thread can own. No thread here: a pane holds one, and it arrives by
+ *  being dragged or clicked, not from this menu. */
+const ADDABLE: Array<{ kind: WorkspaceTabKind; label: string }> = [
+  { kind: 'terminal', label: 'Terminal' },
+  { kind: 'files', label: 'Files' },
+  { kind: 'review', label: 'Review' },
+  { kind: 'browser', label: 'Browser' }
+]
 
 function timeAgo(ts?: number): string {
   if (!ts) return ''
@@ -515,6 +529,35 @@ export function Sidebar(): React.JSX.Element {
           ) : ctx.session ? (
             <>
               {menuItem('Open', () => selectSession(ctx.session!.id))}
+              {/* A chat has no checkout, so a terminal or diff has nowhere to
+                  point and Add is left out entirely. */}
+              {(ctx.session.projectPath ?? ctx.session.directory ?? ctx.session.path) ? (
+                <div className={`ctx-submenu ${ctx.x > window.innerWidth - 400 ? 'flip' : ''}`}>
+                  <button className="ctx-item ctx-parent">
+                    <span>Add</span>
+                    <span className="ctx-arrow">›</span>
+                  </button>
+                  <div className="ctx-submenu-items">
+                    {ADDABLE.map(({ kind, label }) => {
+                      const Icon = RESOURCE_ICONS[kind] ?? ChatIcon
+                      return (
+                        <button
+                          key={kind}
+                          className="ctx-item"
+                          onClick={() => {
+                            const target = ctx.session!
+                            setCtx(null)
+                            addResourceToSession(target.id, kind)
+                          }}
+                        >
+                          <Icon size={13} />
+                          <span>{label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
               {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Delegate…', () => appStore.setState({ delegateTarget: ctx.session!.id }))}
               {menuItem('Goal & budget…', () => appStore.setState({ policyTarget: ctx.session!.id }))}
