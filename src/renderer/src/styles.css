@@ -6348,6 +6348,20 @@ select:hover {
   flex: 1;
   position: relative;
   min-height: 0;
+  display: flex;
+}
+
+/* The guest page. A DOM element rather than a view composited over the window,
+   so it fills its pane by ordinary layout and menus draw over it by z-index. */
+.browse-guest {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+}
+
+.browse[hidden] {
+  display: none;
 }
 
 .panel {

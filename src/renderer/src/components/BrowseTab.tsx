@@ -1,98 +1,42 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { BackIcon, ExternalIcon, ForwardIcon, ReloadIcon } from './icons'
-function rectOf(el: HTMLElement): { x: number; y: number; width: number; height: number } {
-  const r = el.getBoundingClientRect()
-  return {
-    x: Math.round(r.x),
-    y: Math.round(r.y),
-    width: Math.round(r.width),
-    height: Math.round(r.height)
-  }
-}
+import { BROWSE_PARTITION, browseGuests, type BrowseGuest } from '../lib/browse-guests'
 
 export function BrowseTab({ id, visible = true }: { id: string; visible?: boolean }): React.JSX.Element {
-  const viewRef = useRef<HTMLDivElement>(null)
-  const nativeViewsSuspended = useStore(appStore, (s) => s.nativeViewSuspensions.length > 0)
+  const hostRef = useRef<HTMLDivElement>(null)
   const nav = useStore(appStore, (s) => s.browse[id] ?? { url: '', title: '', canGoBack: false, canGoForward: false, loading: false })
   const [urlInput, setUrlInput] = useState('')
 
-  // No destroy on unmount. StrictMode mounts, unmounts and remounts every
-  // component in development, so this tore down the page the moment it was
-  // created — the remount then built an empty view and the pane looked blank
-  // with the url bar still filled in. A browser is disposed when its tab
-  // closes, which closeWorkspaceTab handles; unmounting only means React
-  // moved it, which is now routine.
-
   useEffect(() => {
-    const el = viewRef.current
-    // Hidden, not detached: a tab behind another in the same pane comes back
-    // often, and re-adding the view each time is what made it slow.
-    if (!el || !visible) {
-      void window.boss.browseVisible(id, false)
-      return
-    }
-    // Suspended means something is drawing over this pane — a menu, usually.
-    // Parking is not enough there: a parked view is still a child of the
-    // window and still composited above the page, so the menu went behind it.
-    // Detaching is the only way out of the stack, and now that attach asks
-    // for a repaint, coming back costs nothing visible.
-    if (nativeViewsSuspended) {
-      void window.boss.browseDetach(id)
-      return
-    }
-    void window.boss.browseAttach(id, rectOf(el))
-    void window.boss.browseVisible(id, true)
-    const report = (): void => {
-      void window.boss.browseBounds(id, rectOf(el))
-    }
-    const ro = new ResizeObserver(report)
-    ro.observe(el)
-    window.addEventListener('resize', report)
+    const host = hostRef.current
+    if (!host) return
 
-    // A native view is drawn at an explicit rect, so it has to be told when it
-    // moves. ResizeObserver only reports size, and a tab dropped into a pane
-    // of the same size moves without resizing — the view stayed painted over
-    // the pane it came from, leaving the new one blank.
-    //
-    // Watching the document for structural changes catches the move itself:
-    // the portal re-parents this element, and childList mutations fire for
-    // that. Cheaper than polling the layout, and it needs no cooperation from
-    // whoever did the moving.
-    let last = rectOf(el)
-    let pending = 0
-    const sync = (): void => {
-      const next = rectOf(el)
-      if (next.x === last.x && next.y === last.y && next.width === last.width && next.height === last.height) return
-      last = next
-      void window.boss.browseBounds(id, next)
-    }
-    const observer = new MutationObserver(() => {
-      // Mutation callbacks are microtasks, so they run before the browser has
-      // laid the new position out — reading the rect here returns the old one.
-      // Waiting a frame reads the geometry that actually shipped.
-      cancelAnimationFrame(pending)
-      pending = requestAnimationFrame(sync)
-    })
-    // Watch the workspace canvas, not the whole document. Panes and views live
-    // under here, which is everything that can move this element — while the
-    // document as a whole churns constantly, and during a drag that meant a
-    // rect read scheduled on every mutation anywhere in the app.
-    const scope = el.closest('.workspace-shell') ?? document.body
-    observer.observe(scope, { childList: true, subtree: true })
+    let guest = browseGuests.get(id)
+    if (!guest) {
+      // createElement rather than JSX: React does not know the webview tag,
+      // and the element has to survive its component anyway.
+      guest = document.createElement('webview') as BrowseGuest
+      guest.setAttribute('partition', BROWSE_PARTITION)
+      guest.setAttribute('allowpopups', 'false')
+      guest.className = 'browse-guest'
+      browseGuests.set(id, guest)
 
-    // No detach here. This effect re-runs whenever the tab moves, and React
-    // runs cleanup before the next setup, so detaching first tore the view out
-    // of the window and put it straight back — a full re-add, which is what
-    // made the pane sit blank for a second or two after a drag. The view is
-    // detached when the tab genuinely goes away, not when it moves.
+      // The one thing the DOM cannot do: hand the page to the main process so
+      // agent tools reach it directly rather than through the renderer.
+      guest.addEventListener('dom-ready', () => {
+        void window.boss.browseRegister(id, guest!.getWebContentsId())
+      })
+    }
+
+    // A move is an appendChild, and the page carries on. This is the whole
+    // reason for the switch away from a native view.
+    if (guest.parentElement !== host) host.appendChild(guest)
+
     return () => {
-      ro.disconnect()
-      observer.disconnect()
-      cancelAnimationFrame(pending)
-      window.removeEventListener('resize', report)
+      // Left in the DOM deliberately: unmounting means the tab moved.
     }
-  }, [id, visible, nativeViewsSuspended])
+  }, [id])
 
   useEffect(() => {
     const off = window.boss.onBrowseNavigation((evt) => {
@@ -119,7 +63,7 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
   }
 
   return (
-    <div className="browse">
+    <div className="browse" hidden={!visible}>
       <div className="browse-bar">
         <button className="btn-ghost" disabled={!nav.canGoBack} onClick={() => void window.boss.browseBack(id)} title="Back">
           <BackIcon size={14} />
@@ -148,7 +92,7 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
         />
         {nav.loading ? <div className="spinner" /> : null}
       </div>
-      <div className="browse-view" ref={viewRef} />
+      <div className="browse-view" ref={hostRef} />
     </div>
   )
 }

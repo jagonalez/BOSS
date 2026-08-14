@@ -1,8 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import {
   IpcChannels,
-  type ApiRequest,
-  type BrowseBounds
+  type ApiRequest
 } from '../shared/ipc'
 import type { BossApi } from '../shared/api'
 
@@ -26,10 +25,8 @@ const boss: BossApi = {
   unsubscribeEvents: () => ipcRenderer.invoke(IpcChannels.EventUnsubscribe),
   onEvent: (cb) => subscribe(IpcChannels.EventData, cb),
 
-  browseAttach: (id: string, bounds: BrowseBounds) => ipcRenderer.invoke(IpcChannels.BrowseAttach, { id, bounds }),
-  browseDetach: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseDetach, id),
-  browseVisible: (id: string, visible: boolean) => ipcRenderer.invoke(IpcChannels.BrowseVisible, { id, visible }),
-  browseBounds: (id: string, bounds: BrowseBounds) => ipcRenderer.invoke(IpcChannels.BrowseBounds, { id, bounds }),
+  browseRegister: (id: string, webContentsId: number) => ipcRenderer.invoke(IpcChannels.BrowseRegister, { id, webContentsId }),
+  browseUnregister: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseUnregister, id),
   browseNavigate: (id: string, url: string) => ipcRenderer.invoke(IpcChannels.BrowseNavigate, { id, url }),
   browseBack: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseGoBack, id),
   browseForward: (id: string) => ipcRenderer.invoke(IpcChannels.BrowseGoForward, id),

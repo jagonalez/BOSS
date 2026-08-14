@@ -4,7 +4,6 @@ import { existsSync } from 'node:fs'
 import {
   IpcChannels,
   type ApiRequest,
-  type BrowseBounds,
   type PrivacyPane,
   type ServerInfo
 } from '@shared/ipc'
@@ -83,23 +82,16 @@ export function registerIpc(deps: IpcDeps): void {
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseAttach, (_e, body: { id: string; bounds: BrowseBounds }) => {
-    deps.browse.attach(body.id, body.bounds)
+  // Placement is the renderer's job now: a webview is a DOM element. All the
+  // main process needs is a handle on the guest page, so agent tools can reach
+  // it without a hop back through the renderer.
+  ipcMain.handle(IpcChannels.BrowseRegister, (_e, body: { id: string; webContentsId: number }) => {
+    deps.browse.register(body.id, body.webContentsId)
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseDetach, (_e, id: string) => {
-    deps.browse.detach(id)
-    return true
-  })
-
-  ipcMain.handle(IpcChannels.BrowseVisible, (_e, body: { id: string; visible: boolean }) => {
-    deps.browse.setVisible(body.id, body.visible)
-    return true
-  })
-
-  ipcMain.handle(IpcChannels.BrowseBounds, (_e, body: { id: string; bounds: BrowseBounds }) => {
-    deps.browse.setBounds(body.id, body.bounds)
+  ipcMain.handle(IpcChannels.BrowseUnregister, (_e, id: string) => {
+    deps.browse.unregister(id)
     return true
   })
 

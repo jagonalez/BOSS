@@ -3,7 +3,6 @@ import type {
   ApiResponse,
   AsrTranscribeRequest,
   AsrTranscribeResult,
-  BrowseBounds,
   BrowseNavEvent,
   ComputerUsePermissions,
   ComputerUseStatus,
@@ -35,11 +34,10 @@ export interface BossApi {
   unsubscribeEvents(): Promise<boolean>
   onEvent(cb: (data: string) => void): () => void
 
-  browseAttach(id: string, bounds: BrowseBounds): Promise<boolean>
-  browseDetach(id: string): Promise<boolean>
-  /** Hide without unhooking, for a view that is only temporarily in the way. */
-  browseVisible(id: string, visible: boolean): Promise<boolean>
-  browseBounds(id: string, bounds: BrowseBounds): Promise<boolean>
+  /** Hand a webview's guest page to the main process, so agent tools can drive
+   *  it directly. Placement is the renderer's own business. */
+  browseRegister(id: string, webContentsId: number): Promise<boolean>
+  browseUnregister(id: string): Promise<boolean>
   browseNavigate(id: string, url: string): Promise<boolean>
   browseBack(id: string): Promise<boolean>
   browseForward(id: string): Promise<boolean>

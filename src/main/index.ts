@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { OpenCodeServer, resolveOpenCodeBin } from './opencode-server'
 import { ApiClient } from './api-client'
 import { EventStream } from './event-stream'
-import { BrowseManager } from './browse'
+import { BROWSE_PARTITION, BrowseManager } from './browse'
 import { OptionalDeps } from './optional-deps'
 import { ComputerUse } from './computer-use'
 import { PTYManager } from './pty-manager'
@@ -129,10 +129,25 @@ function createWindow(): void {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      webviewTag: false
+      // Browser panes are <webview> elements: a DOM element the renderer can
+      // place, clip and move like any other pane content. See browse.ts for
+      // why they are not WebContentsViews. Every attachment is checked below.
+      webviewTag: true
     }
   })
   win.setMenuBarVisibility(false)
+
+  // A guest page may only be what BOSS asks for: its own hardened partition,
+  // no preload of its own, sandboxed, with node off. The renderer sets these
+  // as attributes, so they are re-checked here where they cannot be forged.
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    delete webPreferences.preload
+    webPreferences.sandbox = true
+    webPreferences.contextIsolation = true
+    webPreferences.nodeIntegration = false
+    webPreferences.webSecurity = true
+    if (params.partition !== BROWSE_PARTITION) event.preventDefault()
+  })
 
   win.webContents.on('console-message', (event) => {
     if (process.env.BOSS_DEBUG) {
@@ -158,7 +173,7 @@ function createWindow(): void {
   })
 
   mainWindow = win
-  browse = new BrowseManager(win)
+  browse = new BrowseManager()
 }
 
 function loadRenderer(): void {
