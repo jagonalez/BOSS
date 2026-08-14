@@ -53,6 +53,16 @@ export class BrowseManager {
     // renderer states which it wants right after, and unparking is a bounds
     // change rather than a flag.
     entry.view.setVisible(true)
+    // Re-adding a view does not schedule a frame, so the pane sat empty until
+    // any mouse event flushed one. Every path back on screen goes through
+    // here, whether it was hidden behind a menu or moved to another pane.
+    // Asked for twice: once now, once after the window has settled, since the
+    // first can land before the view has its new bounds.
+    const repaint = entry.view.webContents
+    repaint.invalidate()
+    setTimeout(() => {
+      if (!repaint.isDestroyed()) repaint.invalidate()
+    }, 16)
 
     // Load when there is nothing loaded, not merely the first time. A view is
     // detached and re-attached whenever its pane is hidden, a menu opens over
