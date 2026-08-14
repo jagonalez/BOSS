@@ -32,12 +32,17 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
       void window.boss.browseVisible(id, false)
       return
     }
-    // Attach when the tab becomes visible, then say plainly whether the view
-    // should be on screen. Leaving the unpark to the attach meant a drag that
-    // ended without moving anything never brought the view back — it stayed
-    // parked off-screen until something else forced an attach.
+    // Suspended means something is drawing over this pane — a menu, usually.
+    // Parking is not enough there: a parked view is still a child of the
+    // window and still composited above the page, so the menu went behind it.
+    // Detaching is the only way out of the stack, and now that attach asks
+    // for a repaint, coming back costs nothing visible.
+    if (nativeViewsSuspended) {
+      void window.boss.browseDetach(id)
+      return
+    }
     void window.boss.browseAttach(id, rectOf(el))
-    void window.boss.browseVisible(id, !nativeViewsSuspended)
+    void window.boss.browseVisible(id, true)
     const report = (): void => {
       void window.boss.browseBounds(id, rectOf(el))
     }
