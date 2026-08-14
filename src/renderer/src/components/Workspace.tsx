@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import type { DropPosition, WorkspaceCheckoutBinding, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
+import type { DropPosition, WorkspaceCheckoutBinding, WorkspaceGroup, WorkspaceNode, WorkspacePane, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import { useStore, appStore } from '../state/AppState'
 import { ChatView } from './ChatView'
 import { BrowseTab } from './BrowseTab'
@@ -168,6 +168,8 @@ function ThreadPicker({ groupId, close }: { groupId: string; close: () => void }
       if (node.type === 'split') {
         walk(node.first)
         walk(node.second)
+      } else if (node.type === 'pane') {
+        walk(node.root)
       } else {
         node.tabs.forEach((item) => {
           if (item.kind === 'thread' && item.sessionId) ids.add(item.sessionId)
@@ -342,9 +344,8 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
  * Without this the ownership is invisible: a terminal reads "Terminal ·
  * boss/fix-login" while nothing says why it cannot move to the next pane.
  */
-function PaneOwner({ group }: { group: WorkspaceGroup }): React.JSX.Element | null {
-  const threadId = groupThreadId(group)
-  const session = useStore(appStore, (state) => state.sessions.find((item) => item.id === threadId))
+function PaneOwner({ sessionId }: { sessionId?: string }): React.JSX.Element | null {
+  const session = useStore(appStore, (state) => state.sessions.find((item) => item.id === sessionId))
   const shared = useStore(appStore, (state) => {
     const path = session?.worktree?.path
     if (!path) return false
@@ -435,7 +436,6 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
       }}
       onDrop={onDrop}
     >
-      <PaneOwner group={group} />
       <header className="workspace-group-tabs">
         <div className="workspace-tabs" role="tablist">
           {group.tabs.map((item) => (
@@ -563,8 +563,26 @@ function SplitView({ node }: { node: WorkspaceSplit }): React.JSX.Element {
   )
 }
 
+/**
+ * A thread and everything belonging to it. The header names the thread once,
+ * so the resources tiled below can stay unlabelled, and the boundary is what
+ * makes their ownership unambiguous.
+ */
+function PaneView({ node }: { node: WorkspacePane }): React.JSX.Element {
+  return (
+    <div className="workspace-pane">
+      <PaneOwner sessionId={node.sessionId} />
+      <div className="workspace-pane-body">
+        <WorkspaceNodeView node={node.root} />
+      </div>
+    </div>
+  )
+}
+
 function WorkspaceNodeView({ node }: { node: WorkspaceNode }): React.JSX.Element {
-  return node.type === 'group' ? <GroupView group={node} /> : <SplitView node={node} />
+  if (node.type === 'group') return <GroupView group={node} />
+  if (node.type === 'pane') return <PaneView node={node} />
+  return <SplitView node={node} />
 }
 
 function WorkspaceBar(): React.JSX.Element {
@@ -777,5 +795,6 @@ export function Workspace(): React.JSX.Element {
 
 function findGroupForKeyboard(node: WorkspaceNode, id: string): WorkspaceGroup | undefined {
   if (node.type === 'group') return node.id === id ? node : undefined
+  if (node.type === 'pane') return findGroupForKeyboard(node.root, id)
   return findGroupForKeyboard(node.first, id) ?? findGroupForKeyboard(node.second, id)
 }

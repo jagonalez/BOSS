@@ -7333,3 +7333,18 @@ select:hover {
   border-radius: 50%;
   align-self: center;
 }
+
+.workspace-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.workspace-pane-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}

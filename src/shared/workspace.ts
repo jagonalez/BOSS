@@ -37,7 +37,23 @@ export interface WorkspaceSplit {
   second: WorkspaceNode
 }
 
-export type WorkspaceNode = WorkspaceGroup | WorkspaceSplit
+/**
+ * A thread and everything belonging to it — the folder holding one job's
+ * papers. Its `root` tiles that thread's own resources, so a chat can sit
+ * above its terminal, while the view tiles panes against each other.
+ *
+ * The boundary is what makes ownership unambiguous: every resource below a
+ * pane belongs to its thread, with no rule needed about which. A pane with no
+ * sessionId is a blank one, for a terminal or browser with no agent.
+ */
+export interface WorkspacePane {
+  id: string
+  type: 'pane'
+  sessionId?: string
+  root: WorkspaceNode
+}
+
+export type WorkspaceNode = WorkspaceGroup | WorkspaceSplit | WorkspacePane
 
 export interface WorkspaceView {
   id: string

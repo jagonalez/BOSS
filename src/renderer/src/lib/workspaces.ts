@@ -4,6 +4,8 @@ import type {
   ProjectWorkspace,
   SplitDirection,
   WorkspaceGroup,
+  WorkspacePane,
+  WorkspaceSplit,
   WorkspaceNode,
   WorkspaceTab,
   WorkspaceCheckoutBinding,
@@ -27,6 +29,11 @@ export function tab(kind: WorkspaceTabKind, sessionId?: string, checkout?: Works
 
 export function group(tabs: WorkspaceTab[] = []): WorkspaceGroup {
   return { id: workspaceId('group'), type: 'group', tabs, activeTabId: tabs[0]?.id ?? null }
+}
+
+/** A thread and the tree of resources belonging to it. */
+export function pane(sessionId?: string, root: WorkspaceNode = group()): WorkspacePane {
+  return { id: workspaceId('pane'), type: 'pane', sessionId, root }
 }
 
 export function workspaceView(name = 'Workspace', root: WorkspaceNode = group()): WorkspaceView {
@@ -80,6 +87,9 @@ export function cloneLayout(node: WorkspaceNode, stripBindings = false): Workspa
     const tabs = node.tabs.map((item) => cloneTab(item, stripBindings))
     return group(tabs)
   }
+  if (node.type === 'pane') {
+    return pane(stripBindings ? undefined : node.sessionId, cloneLayout(node.root, stripBindings))
+  }
   return split(node.direction, cloneLayout(node.first, stripBindings), cloneLayout(node.second, stripBindings), node.ratio)
 }
 
@@ -132,8 +142,10 @@ function isTab(value: unknown): value is WorkspaceTab {
 
 function isNode(value: unknown): value is WorkspaceNode {
   if (!value || typeof value !== 'object') return false
-  const node = value as Partial<WorkspaceNode>
+  const node = value as Partial<WorkspaceGroup> & Partial<WorkspaceSplit> & Partial<WorkspacePane>
   if (node.type === 'group') return typeof node.id === 'string' && Array.isArray(node.tabs) && node.tabs.every(isTab)
+  // A saved layout that fails this check is discarded, so panes must validate.
+  if (node.type === 'pane') return typeof node.id === 'string' && isNode(node.root)
   return node.type === 'split' && typeof node.id === 'string' && isNode(node.first) && isNode(node.second)
 }
 
@@ -142,6 +154,7 @@ function bindLegacyToolTabs(node: WorkspaceNode, projectKey: string): WorkspaceN
   if (node.type === 'split') {
     return { ...node, first: bindLegacyToolTabs(node.first, projectKey), second: bindLegacyToolTabs(node.second, projectKey) }
   }
+  if (node.type === 'pane') return { ...node, root: bindLegacyToolTabs(node.root, projectKey) }
   return {
     ...node,
     tabs: node.tabs.map((item) =>
@@ -150,6 +163,25 @@ function bindLegacyToolTabs(node: WorkspaceNode, projectKey: string): WorkspaceN
         : item
     )
   }
+}
+
+/**
+ * Wraps a saved layout's groups in panes. Workspaces persisted before panes
+ * existed are flat trees of groups; without this they would render with no
+ * header and no ownership, silently losing the model rather than failing.
+ *
+ * A group holding a thread becomes that thread's pane; anything else becomes a
+ * blank one, which is what a group of loose resources always was.
+ */
+export function wrapLegacyPanes(node: WorkspaceNode): WorkspaceNode {
+  // Already inside a pane: its contents are that thread's, so leave them be.
+  // Recursing here wrapped the pane's own group in a second pane, nesting one
+  // level deeper on every load.
+  if (node.type === 'pane') return node
+  if (node.type === 'split') {
+    return { ...node, first: wrapLegacyPanes(node.first), second: wrapLegacyPanes(node.second) }
+  }
+  return pane(node.tabs.find((item) => item.kind === 'thread')?.sessionId, node)
 }
 
 function readJson<T>(key: string, fallback: T): T {
@@ -196,7 +228,7 @@ export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWo
   ) {
     const views = saved.views.map((view, index) => ({
       ...view,
-      root: bindLegacyToolTabs(view.root, projectKey),
+      root: wrapLegacyPanes(bindLegacyToolTabs(view.root, projectKey)),
       name: /^Workspace(?: \d+)?$/.test(view.name) ? (index === 0 ? 'Main' : `View ${index + 1}`) : view.name
     }))
     return { ...saved, views }
@@ -210,12 +242,12 @@ export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWo
     updatedAt?: number
   }>>(LEGACY_WORKSPACES_KEY, {})[projectKey]
   if (legacy?.version === 2 && legacy.root && isNode(legacy.root)) {
-    const root = bindLegacyToolTabs(legacy.root, projectKey)
+    const root = wrapLegacyPanes(bindLegacyToolTabs(legacy.root, projectKey))
     const view = workspaceView('Main', root)
-    if (legacy.focusedGroupId && findGroup(legacy.root, legacy.focusedGroupId)) view.focusedGroupId = legacy.focusedGroupId
+    if (legacy.focusedGroupId && findGroup(root, legacy.focusedGroupId)) view.focusedGroupId = legacy.focusedGroupId
     return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: legacy.updatedAt ?? Date.now() }
   }
-  const root = group(sessionId ? [tab('thread', sessionId)] : [])
+  const root = pane(sessionId, group(sessionId ? [tab('thread', sessionId)] : []))
   const view = workspaceView('Main', root)
   return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: Date.now() }
 }
@@ -237,7 +269,21 @@ export function updateActiveWorkspaceView(
 }
 
 export function walkGroups(node: WorkspaceNode): WorkspaceGroup[] {
-  return node.type === 'group' ? [node] : [...walkGroups(node.first), ...walkGroups(node.second)]
+  if (node.type === 'group') return [node]
+  if (node.type === 'pane') return walkGroups(node.root)
+  return [...walkGroups(node.first), ...walkGroups(node.second)]
+}
+
+/** Every pane in the tree, outermost first. */
+export function walkPanes(node: WorkspaceNode): WorkspacePane[] {
+  if (node.type === 'pane') return [node, ...walkPanes(node.root)]
+  if (node.type === 'group') return []
+  return [...walkPanes(node.first), ...walkPanes(node.second)]
+}
+
+/** The pane a group sits inside, or undefined for a group outside any pane. */
+export function paneOf(root: WorkspaceNode, groupId: string): WorkspacePane | undefined {
+  return walkPanes(root).find((pane) => walkGroups(pane.root).some((item) => item.id === groupId))
 }
 
 export function walkTabs(node: WorkspaceNode): WorkspaceTab[] {
@@ -260,27 +306,28 @@ export function findTab(node: WorkspaceNode, tabId: string): { group: WorkspaceG
  * The thread a pane belongs to, derived from its own thread tab rather than
  * stored alongside it — a stored owner could disagree with what is on screen.
  * A pane without a thread tab belongs to the project, not to any thread.
+ *
+ * A pane holds at most one thread; see canMoveTab.
  */
 export function groupThreadId(target: WorkspaceGroup): string | undefined {
   return target.tabs.find((item) => item.kind === 'thread' && item.sessionId)?.sessionId
 }
 
 /**
- * Resource tabs carry the checkout of the thread that opened them, so moving
- * one into another thread's pane would leave it pointing at a directory that
- * pane has nothing to do with. Moving within a pane, or into one holding no
- * thread, stays allowed.
+ * A pane is one thread and the resources belonging to it — a folder holding
+ * the papers for one job. You would never move a paper between folders, so
+ * resources stay in their pane and only threads move between them. Reordering
+ * a resource inside its own pane is still fine.
+ *
+ * Earlier attempts allowed resources to move under conditions, which needed
+ * rules for every edge — two threads in a pane, panes with no thread, panes
+ * sharing a checkout. None of that arises once a pane is one thread.
  */
 export function canMoveTab(root: WorkspaceNode, tabId: string, targetGroupId: string): boolean {
   const source = findTab(root, tabId)
   if (!source) return false
   if (source.group.id === targetGroupId) return true
-  if (source.tab.kind === 'thread' || source.tab.kind === 'browser') return true
-  const target = findGroup(root, targetGroupId)
-  if (!target) return false
-  const from = groupThreadId(source.group)
-  const to = groupThreadId(target)
-  return !from || !to || from === to
+  return source.tab.kind === 'thread'
 }
 
 export function findSessionTab(node: WorkspaceNode, sessionId: string): { group: WorkspaceGroup; tab: WorkspaceTab } | undefined {
@@ -294,6 +341,7 @@ export function findSessionTab(node: WorkspaceNode, sessionId: string): { group:
 export function mapNode(node: WorkspaceNode, id: string, update: (node: WorkspaceNode) => WorkspaceNode): WorkspaceNode {
   if (node.id === id) return update(node)
   if (node.type === 'group') return node
+  if (node.type === 'pane') return { ...node, root: mapNode(node.root, id, update) }
   return { ...node, first: mapNode(node.first, id, update), second: mapNode(node.second, id, update) }
 }
 
@@ -322,12 +370,21 @@ function removeTabFromGroup(target: WorkspaceGroup, tabId: string): { group: Wor
   return { group: { ...target, tabs, activeTabId }, tab: removed }
 }
 
+function isEmptyNode(node: WorkspaceNode): boolean {
+  if (node.type === 'group') return node.tabs.length === 0
+  if (node.type === 'pane') return isEmptyNode(node.root)
+  return false
+}
+
 function collapseEmptyGroups(node: WorkspaceNode): WorkspaceNode {
   if (node.type === 'group') return node
+  // A pane whose last resource closed collapses with it: an empty folder is
+  // not something to keep on screen.
+  if (node.type === 'pane') return { ...node, root: collapseEmptyGroups(node.root) }
   const first = collapseEmptyGroups(node.first)
   const second = collapseEmptyGroups(node.second)
-  if (first.type === 'group' && first.tabs.length === 0) return second
-  if (second.type === 'group' && second.tabs.length === 0) return first
+  if (isEmptyNode(first)) return second
+  if (isEmptyNode(second)) return first
   return { ...node, first, second }
 }
 
@@ -355,6 +412,10 @@ export function splitGroup(
 
 export function closeGroup(root: WorkspaceNode, groupId: string): WorkspaceNode {
   if (root.type === 'group') return root.id === groupId ? group() : root
+  if (root.type === 'pane') {
+    // Closing a pane's last group closes the pane; the caller collapses it.
+    return { ...root, root: closeGroup(root.root, groupId) }
+  }
   if (root.first.id === groupId) return root.second
   if (root.second.id === groupId) return root.first
   return { ...root, first: closeGroup(root.first, groupId), second: closeGroup(root.second, groupId) }
@@ -419,6 +480,11 @@ export function bindTemplate(
   let filesBound = false
   const bind = (node: WorkspaceNode): WorkspaceNode => {
     if (node.type === 'split') return { ...node, first: bind(node.first), second: bind(node.second) }
+    if (node.type === 'pane') {
+      // The pane takes the same thread its own thread tab is bound to below.
+      const bound = bind(node.root)
+      return { ...node, root: bound, sessionId: walkGroups(bound).flatMap((item) => item.tabs).find((item) => item.kind === 'thread')?.sessionId }
+    }
     const tabs = node.tabs.filter((item) => {
       if (item.kind === 'review') {
         if (reviewBound) return false
