@@ -1739,6 +1739,14 @@ textarea {
   flex-direction: column;
 }
 
+/* During a drag the slot must not be the drop target: it sits over the pane's
+   whole content area and has no drop handling, so a drop landing on it never
+   reached the pane underneath. The content inside stays interactive, which is
+   why this is on the slot alone rather than its children. */
+body.workspace-dragging .workspace-tab-slot {
+  pointer-events: none;
+}
+
 /* Slots are siblings in one pane, so the inactive ones must take no space.
    The content sets this via the slot's own hidden attribute. */
 .workspace-tab-slot[hidden] {

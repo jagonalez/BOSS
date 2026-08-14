@@ -534,13 +534,12 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
       data-workspace-group={group.id}
       onMouseDown={() => focusWorkspaceGroup(group.id)}
       onDragOver={(event) => {
+        // Only types is readable here: the drag data store is protected until
+        // drop, so getData returns "" during dragover. The old guard against
+        // dropping a lone tab back into its own pane read getData, so it never
+        // fired; moveTab already treats that as a no-op.
         const types = event.dataTransfer.types
         if (!types.includes(TAB_DRAG_TYPE) && !types.includes(SESSION_DRAG_TYPE)) return
-        const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
-        if (tabId && group.tabs.length === 1 && group.tabs[0]?.id === tabId) {
-          setDropTarget(null)
-          return
-        }
         event.preventDefault()
         setDropTarget(dropPosition(event, event.currentTarget))
       }}
@@ -927,8 +926,15 @@ export function Workspace(): React.JSX.Element {
   // dragover to move the drop indicator, no dragleave to clear it, and no drop
   // at all. The indicator stuck wherever the cursor last crossed real DOM.
   useEffect(() => {
-    const start = (): void => setNativeViewsSuspended('drag', true)
-    const stop = (): void => setNativeViewsSuspended('drag', false)
+    const start = (): void => {
+      setNativeViewsSuspended('drag', true)
+      // Lets a drop fall through the portal slot to the pane that handles it.
+      document.body.classList.add('workspace-dragging')
+    }
+    const stop = (): void => {
+      setNativeViewsSuspended('drag', false)
+      document.body.classList.remove('workspace-dragging')
+    }
     document.addEventListener('dragstart', start)
     document.addEventListener('dragend', stop)
     document.addEventListener('drop', stop)
