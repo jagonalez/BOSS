@@ -38,9 +38,19 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
     const ro = new ResizeObserver(report)
     ro.observe(el)
     window.addEventListener('resize', report)
+
+    // A native view is positioned by explicit rect, so it has to be told when
+    // it moves. ResizeObserver only fires on size, and a tab dragged to a pane
+    // of the same size moves without resizing — the view stayed drawn over the
+    // old pane, leaving the new one blank. The workspace announces a move once
+    // it has re-parented the tab, which beats polling the layout every frame.
+    const onMoved = (): void => report()
+    window.addEventListener('boss:tab-moved', onMoved)
+
     return () => {
       ro.disconnect()
       window.removeEventListener('resize', report)
+      window.removeEventListener('boss:tab-moved', onMoved)
       void window.boss.browseDetach(id)
     }
   }, [id, actuallyVisible])

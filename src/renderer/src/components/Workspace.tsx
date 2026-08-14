@@ -369,6 +369,7 @@ function TabContent({
   useEffect(() => {
     if (host) host.hidden = !active
   }, [host, active])
+
   if (!host) return null
   return createPortal(<div className="workspace-tab-content">{content}</div>, host)
 }
@@ -920,6 +921,16 @@ function focusNeighbor(direction: 'left' | 'right' | 'up' | 'down'): void {
 
 export function Workspace(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+
+  // Native views are positioned by explicit rect, so they have to be told when
+  // a pane moves. ResizeObserver only reports size, and a tab dragged to a
+  // pane of the same size moves without resizing — the view stayed drawn over
+  // the old pane, leaving the new one blank. Announced after layout, or the
+  // rect the browser reads would still be the old one.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => window.dispatchEvent(new Event('boss:tab-moved')))
+    return () => cancelAnimationFrame(frame)
+  }, [workspace])
 
   // Detach native views for the whole of a drag. A browser is composited over
   // the page, so dragging across one never reaches the pane underneath: no
