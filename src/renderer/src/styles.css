@@ -3202,10 +3202,11 @@ textarea {
 
 /* One ladder, each rung a caret-plus-gap (13 + 9 = 22px) deeper than the last.
    A row's own caret sits at its indent, so its text lands one rung further in:
-   project caret 8px, thread caret 30px, resource icon 52px. .item.sub set 29px
-   back when threads had no caret, so it is overridden rather than left to
-   fight this rule. */
-.session-row {
+   project caret 8px, thread caret 30px, resource icon 52px.
+
+   Written as .item.sub.session-row because .item.sub alone is two classes and
+   outranks a bare .session-row, which silently kept the old 29px inset. */
+.item.sub.session-row {
   align-items: flex-start;
   gap: 9px;
   padding-left: 30px;
@@ -3251,7 +3252,7 @@ textarea {
   color: var(--text);
 }
 
-.resource-row {
+.item.resource-row {
   gap: 9px;
   padding: 4px 8px 4px 52px;
   font-size: 12px;
