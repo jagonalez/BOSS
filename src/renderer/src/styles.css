@@ -1573,6 +1573,26 @@ textarea {
   white-space: nowrap;
 }
 
+/* Shown only when a resource sits away from its thread, where it is the one
+   thing saying what the resource belongs to. Clicking goes there. */
+.workspace-tab-origin {
+  max-width: 96px;
+  overflow: hidden;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-tab-origin:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--text);
+}
+
 .workspace-tab-close {
   width: 16px;
   height: 16px;

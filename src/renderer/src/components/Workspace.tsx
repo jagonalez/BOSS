@@ -26,10 +26,11 @@ import {
   sendWorkspaceTabToView,
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
+  revealWorkspaceTab,
   splitWorkspaceGroup,
   undoWorkspaceClose
 } from '../lib/actions'
-import { TAB_DRAG_TYPE, activeWorkspaceView, findGroup, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -143,8 +144,28 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
     : label
 }
 
+/** Where a resource's thread is, when the thread is not in this pane.
+ *
+ *  A resource can be dragged anywhere and keeps running against its own
+ *  checkout, so once it sits away from its thread the tab is the only thing
+ *  that can say what it belongs to — and clicking through is the way back. */
+function useOrigin(item: WorkspaceTab, group: WorkspaceGroup): { title: string; viewId: string; groupId: string; tabId: string } | null {
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const title = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.title)
+  return useMemo(() => {
+    if (item.kind === 'thread' || !item.sessionId || !workspace) return null
+    if (group.tabs.some((candidate) => candidate.kind === 'thread' && candidate.sessionId === item.sessionId)) return null
+    for (const view of workspace.views) {
+      const found = findSessionTab(view.root, item.sessionId)
+      if (found) return { title: title || 'its thread', viewId: view.id, groupId: found.group.id, tabId: found.tab.id }
+    }
+    return null
+  }, [item.kind, item.sessionId, workspace, group.tabs, title])
+}
+
 function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }): React.JSX.Element {
   const label = useTabLabel(item, group)
+  const origin = useOrigin(item, group)
   const backendId = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.backendId)
   const Icon = tabIcon(item.kind)
   const busy = useStore(appStore, (state) => Boolean(item.sessionId && state.streaming[item.sessionId]))
@@ -160,6 +181,19 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
         <Icon size={12} />
       </span>
       <span className="workspace-tab-label" title={label}>{label}</span>
+      {origin ? (
+        <span
+          className="workspace-tab-origin"
+          role="button"
+          title={`From ${origin.title} — click to go there`}
+          onClick={(event) => {
+            event.stopPropagation()
+            revealWorkspaceTab(origin.viewId, origin.groupId, origin.tabId)
+          }}
+        >
+          {origin.title}
+        </span>
+      ) : null}
       {item.kind === 'thread' ? <BackendBadge backendId={backendId} /> : null}
       {busActivity ? <span className="workspace-tab-bus" title="Thread message queued or failed" /> : null}
     </>
