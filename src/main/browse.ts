@@ -46,6 +46,9 @@ export class BrowseManager {
     }
     entry.view.setBounds(bounds)
     this.win.contentView.addChildView(entry.view)
+    // addChildView resets this, so it has to be set after, in the same call.
+    // Doing it from the renderer raced the attach and left the view hidden.
+    entry.view.setVisible(true)
 
     // Load when there is nothing loaded, not merely the first time. A view is
     // detached and re-attached whenever its pane is hidden, a menu opens over

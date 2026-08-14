@@ -32,8 +32,10 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
       void window.boss.browseVisible(id, false)
       return
     }
-    void window.boss.browseVisible(id, !nativeViewsSuspended)
+    // attach shows the view itself: addChildView resets the visible flag, so
+    // setting it from here raced the attach and left the view hidden.
     void window.boss.browseAttach(id, rectOf(el))
+    if (nativeViewsSuspended) void window.boss.browseVisible(id, false)
     const report = (): void => {
       void window.boss.browseBounds(id, rectOf(el))
     }
