@@ -1353,6 +1353,12 @@ textarea {
   background: var(--surface-inset);
 }
 
+/* Inactive views stay mounted so their terminals keep running. Stated
+   explicitly because a later display rule would otherwise show them. */
+.workspace-canvas[hidden] {
+  display: none;
+}
+
 .workspace-split {
   width: 100%;
   height: 100%;

@@ -19,6 +19,11 @@ const TEMPLATES_KEY = 'boss.layoutTemplates'
  *  panes already know how to accept. */
 export const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
 
+/** Drag payload for a thread that is not open yet, carrying its session id.
+ *  Dropping one opens it where it lands, rather than moving a tab that does
+ *  not exist. A thread already on screen drags as a TAB_DRAG_TYPE instead. */
+export const SESSION_DRAG_TYPE = 'application/x-boss-session'
+
 let sequence = 0
 
 export function workspaceId(prefix: string): string {

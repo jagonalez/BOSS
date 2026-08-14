@@ -419,6 +419,45 @@ export function sendWorkspaceTabToView(
   showPage('project')
 }
 
+/** Put a thread in the pane it was dropped on.
+ *
+ *  A thread already on screen moves, so dropping it twice does not open two
+ *  copies. One that is not open yet gets a tab created where it landed, which
+ *  is what makes an empty pane fillable by dragging rather than by a picker. */
+export function dropSessionInGroup(
+  sessionId: string,
+  targetViewId: string,
+  targetGroupId: string,
+  position: DropPosition = 'center'
+): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+
+  for (const view of workspace.views) {
+    const existing = findSessionTab(view.root, sessionId)
+    if (existing) {
+      sendWorkspaceTabToView(existing.tab.id, targetViewId, targetGroupId, position)
+      return
+    }
+  }
+
+  const target = workspace.views.find((view) => view.id === targetViewId)
+  if (!target || !findGroup(target.root, targetGroupId)) return
+  const created = tab('thread', sessionId)
+  updateWorkspace((item) => ({
+    ...item,
+    activeViewId: targetViewId,
+    views: item.views.map((view) =>
+      view.id === targetViewId
+        ? { ...view, root: addTab(view.root, targetGroupId, created), focusedGroupId: targetGroupId }
+        : view
+    )
+  }))
+  activateWorkspaceTab(targetGroupId, created.id)
+  highlightWorkspaceTab(created.id)
+  showPage('project')
+}
+
 /** Flash a tab that just arrived, so the eye finds it without hunting. */
 export function highlightWorkspaceTab(tabId: string): void {
   appStore.setState({ highlightedTabId: tabId })

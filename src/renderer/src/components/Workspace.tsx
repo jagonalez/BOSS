@@ -15,6 +15,7 @@ import {
   closeWorkspaceGroup,
   closeWorkspaceTab,
   createWorkspaceView,
+  dropSessionInGroup,
   createThreadInGroup,
   focusWorkspaceGroup,
   loadMessages,
@@ -30,7 +31,7 @@ import {
   splitWorkspaceGroup,
   undoWorkspaceClose
 } from '../lib/actions'
-import { TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -302,12 +303,17 @@ function TabContent({
   groupId,
   item,
   active,
-  overlayOpen
+  overlayOpen,
+  viewShowing
 }: {
   groupId: string
   item: WorkspaceTab
   active: boolean
   overlayOpen: boolean
+  /** False while this tab's whole view is hidden. Browsers are a native view
+   *  each, so they detach rather than composite behind a hidden panel. The
+   *  page keeps running; only the expensive part stops. */
+  viewShowing: boolean
 }): React.JSX.Element {
   const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
   useEffect(() => {
@@ -322,7 +328,7 @@ function TabContent({
       content = item.sessionId ? <ChatView sessionId={item.sessionId} /> : <div className="workspace-unbound">Choose a thread for this tab.</div>
       break
     case 'browser':
-      content = <BrowseTab id={`workspace-${item.id}`} visible={active && !overlayOpen} />
+      content = <BrowseTab id={`workspace-${item.id}`} visible={active && viewShowing && !overlayOpen} />
       break
     case 'terminal':
       content = (
@@ -355,11 +361,13 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
   return 'center'
 }
 
-function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
+function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string }): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const highlightedTabId = useStore(appStore, (state) => state.highlightedTabId)
-  const view = workspace ? activeWorkspaceView(workspace) : null
-  const focused = view?.focusedGroupId === group.id
+  // The view this pane is in, not whichever is on screen: every view stays
+  // mounted, so a hidden one must not read the active view's focus.
+  const view = workspace?.views.find((item) => item.id === viewId) ?? null
+  const focused = view?.focusedGroupId === group.id && workspace?.activeViewId === viewId
   const arrived = Boolean(highlightedTabId && group.tabs.some((item) => item.id === highlightedTabId))
   const movable = Boolean(view && walkTabs(view.root).length > 1)
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
@@ -397,11 +405,15 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
   const onDrop = (event: React.DragEvent): void => {
     event.preventDefault()
     event.stopPropagation()
+    if (!view) return
+    const position = dropTarget ?? 'center'
+    // Two payloads land here. A tab drag moves something that already exists,
+    // possibly out of another view. A session drag carries a thread that may
+    // not be open at all, which is how an empty pane gets filled.
     const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
-    // Sidebar rows can carry a resource that lives in another view, so route
-    // every drop through the cross-view move. It falls back to the ordinary
-    // one when the source is already here.
-    if (tabId && view) sendWorkspaceTabToView(tabId, view.id, group.id, dropTarget ?? 'center')
+    const sessionId = event.dataTransfer.getData(SESSION_DRAG_TYPE)
+    if (tabId) sendWorkspaceTabToView(tabId, view.id, group.id, position)
+    else if (sessionId) dropSessionInGroup(sessionId, view.id, group.id, position)
     setDropTarget(null)
   }
 
@@ -412,7 +424,8 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
       data-workspace-group={group.id}
       onMouseDown={() => focusWorkspaceGroup(group.id)}
       onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
+        const types = event.dataTransfer.types
+        if (!types.includes(TAB_DRAG_TYPE) && !types.includes(SESSION_DRAG_TYPE)) return
         const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
         if (tabId && group.tabs.length === 1 && group.tabs[0]?.id === tabId) {
           setDropTarget(null)
@@ -515,6 +528,7 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
             item={item}
             active={item.id === activeId}
             overlayOpen={menuOpen || Boolean(dropTarget)}
+            viewShowing={workspace?.activeViewId === viewId}
           />
         ))}
       </div>
@@ -525,7 +539,7 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
   )
 }
 
-function SplitView({ node }: { node: WorkspaceSplit }): React.JSX.Element {
+function SplitView({ node, viewId }: { node: WorkspaceSplit; viewId: string }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const onMouseDown = (event: React.MouseEvent): void => {
     event.preventDefault()
@@ -548,15 +562,17 @@ function SplitView({ node }: { node: WorkspaceSplit }): React.JSX.Element {
   }
   return (
     <div ref={ref} className={`workspace-split ${node.direction}`}>
-      <div className="workspace-split-child" style={{ flexBasis: `${node.ratio * 100}%` }}><WorkspaceNodeView node={node.first} /></div>
+      <div className="workspace-split-child" style={{ flexBasis: `${node.ratio * 100}%` }}><WorkspaceNodeView node={node.first} viewId={viewId} /></div>
       <div className="workspace-splitter" onMouseDown={onMouseDown} />
-      <div className="workspace-split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}><WorkspaceNodeView node={node.second} /></div>
+      <div className="workspace-split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}><WorkspaceNodeView node={node.second} viewId={viewId} /></div>
     </div>
   )
 }
 
-function WorkspaceNodeView({ node }: { node: WorkspaceNode }): React.JSX.Element {
-  return node.type === 'group' ? <GroupView group={node} /> : <SplitView node={node} />
+function WorkspaceNodeView({ node, viewId }: { node: WorkspaceNode; viewId: string }): React.JSX.Element {
+  return node.type === 'group'
+    ? <GroupView group={node} viewId={viewId} />
+    : <SplitView node={node} viewId={viewId} />
 }
 
 function WorkspaceBar(): React.JSX.Element {
@@ -760,11 +776,22 @@ export function Workspace(): React.JSX.Element {
   }, [])
 
   if (!workspace) return <div className="workspace-loading">Open a project to load its views.</div>
-  const view = activeWorkspaceView(workspace)
   return (
     <div className="workspace-shell">
       <WorkspaceBar />
-      <div className="workspace-canvas"><WorkspaceNodeView node={view.root} /></div>
+      {/* Every view stays mounted, inactive ones hidden. Rendering only the
+          active tree unmounted the others, so switching views killed their
+          terminals and restarted them on the way back. A view is a place your
+          work sits, not a page that reloads. */}
+      {workspace.views.map((view) => (
+        <div
+          key={view.id}
+          className="workspace-canvas"
+          hidden={view.id !== workspace.activeViewId}
+        >
+          <WorkspaceNodeView node={view.root} viewId={view.id} />
+        </div>
+      ))}
     </div>
   )
 }

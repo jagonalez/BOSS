@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
 import type { OwnedResource } from '../lib/workspaces'
-import { TAB_DRAG_TYPE, resourcesByThread } from '../lib/workspaces'
+import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, resourcesByThread } from '../lib/workspaces'
 import {
   archiveAllInPath,
   cloneThreadToBackend,
@@ -82,6 +82,11 @@ function SessionRow({
   return (
     <div
       className={`item sub session-row ${active ? 'active' : ''}`}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData(SESSION_DRAG_TYPE, session.id)
+      }}
       onClick={() => selectSession(session.id)}
       onContextMenu={(e) => onCtx(e, session)}
       title={meta?.forkedFrom ? `Forked from ${meta.forkedFrom.sessionId.slice(0, 12)}` : meta?.kind === 'side' ? 'Side chat' : session.title}
