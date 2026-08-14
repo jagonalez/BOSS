@@ -6542,9 +6542,24 @@ select:hover {
   flex: 1;
   overflow-y: auto;
   padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+}
+
+/* Holds the full scroll height while only the cards near the viewport exist.
+   Each card is positioned by transform, so the gap that used to come from
+   flex is built into the measured height instead. */
+.diff-stack-runway {
+  position: relative;
+  width: 100%;
+}
+
+.diff-stack-runway > .diff-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  /* Padding, not margin: an absolutely positioned box does not collapse or
+     report its margin, so measureElement would leave the cards touching. */
+  padding-bottom: 10px;
 }
 
 .diff-card {

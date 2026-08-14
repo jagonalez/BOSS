@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import type { DiffLine } from '../lib/diff'
 import { DiffLines } from './DiffLines'
 import { ChevronIcon } from './icons'
@@ -34,7 +35,6 @@ export function DiffReview({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [listWidth, setListWidth] = useState(260)
-  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const onListResize = (e: React.MouseEvent): void => {
     e.preventDefault()
@@ -74,13 +74,38 @@ export function DiffReview({
     setCollapsed(nextAll ? new Set(files.map((f) => f.path)) : new Set())
   }
 
+  // Only the files near the viewport are mounted. Rendering every file's diff
+  // at once was tens of thousands of DOM nodes for a branch-sized review —
+  // enough to make scrolling and typing a comment feel broken.
+  //
+  // Virtualised by file rather than by line: files are the unit you read one
+  // at a time, and it avoids a virtualiser inside every file. Heights are
+  // measured rather than guessed, since a diff can be three lines or three
+  // thousand.
+  const stackRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => stackRef.current,
+    estimateSize: (index) => {
+      const file = filtered[index]
+      if (!file || collapsed.has(file.path)) return 44
+      // A line is about 20px, plus the header. Only a first guess: measureElement
+      // corrects it once the card is on screen.
+      return 44 + Math.min(file.lines.length, 400) * 20
+    },
+    getItemKey: (index) => filtered[index]?.path ?? index,
+    overscan: 2
+  })
+
   const jump = (path: string): void => {
     setCollapsed((prev) => {
       const next = new Set(prev)
       next.delete(path)
       return next
     })
-    setTimeout(() => cardRefs.current[path]?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 40)
+    const index = filtered.findIndex((file) => file.path === path)
+    // Through the virtualiser: the card may not be mounted to scroll to.
+    if (index >= 0) setTimeout(() => virtualizer.scrollToIndex(index, { align: 'start' }), 40)
   }
 
   return (
@@ -127,31 +152,35 @@ export function DiffReview({
             </button>
           )}
         </div>
-        <div className="diff-stack-body">
+        <div className="diff-stack-body" ref={stackRef}>
           {loading ? <div className="empty-inline">Loading…</div> : null}
-          {filtered.map((f) => {
-            const isCollapsed = collapsed.has(f.path)
-            return (
-              <div
-                key={f.path}
-                className="diff-card"
-                ref={(el) => {
-                  cardRefs.current[f.path] = el
-                }}
-              >
-                <button className="diff-card-head" onClick={() => toggle(f.path)}>
-                  <span className={`diff-chevron ${isCollapsed ? '' : 'open'}`}>
-                    <ChevronIcon size={13} />
-                  </span>
-                  <span className="diff-card-path">{f.path}</span>
-                  <span className="diff-card-stats">
-                    <span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span>
-                  </span>
-                </button>
-                {!isCollapsed ? <DiffLines lines={f.lines} path={f.path} comments={comments} provider={provider} canPublish={canPublish} onAddComment={onAddComment} /> : null}
-              </div>
-            )
-          })}
+          <div className="diff-stack-runway" style={{ height: virtualizer.getTotalSize() }}>
+            {virtualizer.getVirtualItems().map((item) => {
+              const f = filtered[item.index]
+              if (!f) return null
+              const isCollapsed = collapsed.has(f.path)
+              return (
+                <div
+                  key={f.path}
+                  className="diff-card"
+                  data-index={item.index}
+                  ref={virtualizer.measureElement}
+                  style={{ transform: `translateY(${item.start}px)` }}
+                >
+                  <button className="diff-card-head" onClick={() => toggle(f.path)}>
+                    <span className={`diff-chevron ${isCollapsed ? '' : 'open'}`}>
+                      <ChevronIcon size={13} />
+                    </span>
+                    <span className="diff-card-path">{f.path}</span>
+                    <span className="diff-card-stats">
+                      <span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span>
+                    </span>
+                  </button>
+                  {!isCollapsed ? <DiffLines lines={f.lines} path={f.path} comments={comments} provider={provider} canPublish={canPublish} onAddComment={onAddComment} /> : null}
+                </div>
+              )
+            })}
+          </div>
           {!loading && !error && filtered.length === 0 && files.length > 0 && (
             <div className="empty-inline">No files match “{query}”</div>
           )}
