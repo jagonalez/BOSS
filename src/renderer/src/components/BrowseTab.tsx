@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
+import type { BrowseNavigationState } from '@shared/ipc'
 import { BackIcon, ExternalIcon, ForwardIcon, ReloadIcon } from './icons'
 import { BROWSE_PARTITION, browseGuests, type BrowseGuest } from '../lib/browse-guests'
 
@@ -19,13 +20,43 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
       guest = document.createElement('webview') as BrowseGuest
       guest.setAttribute('partition', BROWSE_PARTITION)
       guest.setAttribute('allowpopups', 'false')
+      // A webview with no src never attaches a guest, so it would have no web
+      // contents to hand over and nothing to navigate.
+      guest.setAttribute('src', 'about:blank')
       guest.className = 'browse-guest'
       browseGuests.set(id, guest)
 
       // The one thing the DOM cannot do: hand the page to the main process so
-      // agent tools reach it directly rather than through the renderer.
-      guest.addEventListener('dom-ready', () => {
-        void window.boss.browseRegister(id, guest!.getWebContentsId())
+      // agent tools reach it directly rather than through the renderer. Fired
+      // again on every navigation; register is idempotent for the same page.
+      const created = guest
+      created.addEventListener('dom-ready', () => {
+        void window.boss.browseRegister(id, created.getWebContentsId())
+      })
+
+      // Navigation state from the element itself. The main process also
+      // reports it once registered, but the bar should work from the first
+      // load rather than waiting on that round trip.
+      const report = (partial: Partial<BrowseNavigationState>): void => {
+        appStore.setState((s) => ({
+          browse: {
+            ...s.browse,
+            [id]: {
+              ...(s.browse[id] ?? { url: '', title: '', canGoBack: false, canGoForward: false, loading: false }),
+              ...partial
+            }
+          }
+        }))
+      }
+      created.addEventListener('did-start-loading', () => report({ loading: true }))
+      created.addEventListener('did-stop-loading', () => report({ loading: false }))
+      created.addEventListener('page-title-updated', (event) => report({ title: (event as unknown as { title: string }).title }))
+      created.addEventListener('did-navigate', (event) => {
+        const url = (event as unknown as { url: string }).url
+        if (url !== 'about:blank') report({ url })
+      })
+      created.addEventListener('did-navigate-in-page', (event) => {
+        report({ url: (event as unknown as { url: string }).url })
       })
     }
 
@@ -55,7 +86,12 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
     let target = urlInput.trim()
     if (!target) return
     if (!/^https?:\/\//i.test(target)) target = `https://${target}`
-    void window.boss.browseNavigate(id, target)
+    // Straight to the element. Going through the main process would drop the
+    // request if the guest had not registered yet, and the element is right
+    // here — the registry exists for agents, which have no element to hold.
+    const guest = browseGuests.get(id)
+    if (guest) guest.loadURL(target)
+    else void window.boss.browseNavigate(id, target)
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
@@ -65,13 +101,13 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
   return (
     <div className="browse" hidden={!visible}>
       <div className="browse-bar">
-        <button className="btn-ghost" disabled={!nav.canGoBack} onClick={() => void window.boss.browseBack(id)} title="Back">
+        <button className="btn-ghost" disabled={!nav.canGoBack} onClick={() => browseGuests.get(id)?.goBack()} title="Back">
           <BackIcon size={14} />
         </button>
-        <button className="btn-ghost" disabled={!nav.canGoForward} onClick={() => void window.boss.browseForward(id)} title="Forward">
+        <button className="btn-ghost" disabled={!nav.canGoForward} onClick={() => browseGuests.get(id)?.goForward()} title="Forward">
           <ForwardIcon size={14} />
         </button>
-        <button className="btn-ghost" onClick={() => void window.boss.browseReload(id)} title="Reload">
+        <button className="btn-ghost" onClick={() => browseGuests.get(id)?.reload()} title="Reload">
           <ReloadIcon size={14} />
         </button>
         {nav.url ? (

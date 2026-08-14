@@ -6,6 +6,10 @@ export const BROWSE_PARTITION = 'persist:boss-browse'
  *  Electron's types into the renderer, which does not otherwise need them. */
 export interface BrowseGuest extends HTMLElement {
   getWebContentsId(): number
+  loadURL(url: string): Promise<void>
+  goBack(): void
+  goForward(): void
+  reload(): void
 }
 
 /** Live guest pages, keyed by tab.
