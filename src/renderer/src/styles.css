@@ -3200,13 +3200,16 @@ textarea {
   font-size: 12.5px;
 }
 
-/* Threads sat at 29px; the caret takes that gutter rather than pushing every
-   row further in. */
+/* One ladder, each rung a caret-plus-gap (13 + 9 = 22px) deeper than the last.
+   A row's own caret sits at its indent, so its text lands one rung further in:
+   project caret 8px, thread caret 30px, resource icon 52px. .item.sub set 29px
+   back when threads had no caret, so it is overridden rather than left to
+   fight this rule. */
 .session-row {
-  min-height: 50px;
   align-items: flex-start;
   gap: 9px;
-  padding-left: 12px;
+  padding-left: 30px;
+  min-height: 0;
 }
 
 .project-caret {
@@ -3249,13 +3252,18 @@ textarea {
 }
 
 .resource-row {
-  gap: 8px;
-  padding: 4px 8px 4px 54px;
+  gap: 9px;
+  padding: 4px 8px 4px 52px;
   font-size: 12px;
   color: var(--text-muted);
 }
 
+/* Same 13px box as the carets above it, so the label lines up with theirs. */
 .resource-row .icon {
+  display: grid;
+  width: 13px;
+  flex: 0 0 13px;
+  place-items: center;
   color: var(--text-faint);
 }
 
