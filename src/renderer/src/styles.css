@@ -331,17 +331,6 @@ textarea {
   padding: 14px 8px 6px;
 }
 
-.section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-right: 4px;
-}
-
-.section-head .section-label {
-  padding: 14px 8px 6px;
-}
-
 .section-add {
   background: var(--bg-hover);
   border: 1px solid var(--border);
@@ -1150,42 +1139,6 @@ textarea {
   -webkit-app-region: drag;
 }
 
-.workspace-identity {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-}
-
-.workspace-identity > div {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.workspace-identity strong {
-  font-size: 13.5px;
-  font-weight: 620;
-}
-
-.workspace-identity small {
-  max-width: 430px;
-  overflow: hidden;
-  color: var(--text-faint);
-  font-size: var(--type-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-project-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 7px color-mix(in srgb, var(--green) 45%, transparent);
-}
-
 .workspace-bar-spacer {
   flex: 1;
 }
@@ -1284,6 +1237,27 @@ textarea {
   place-items: center;
 }
 
+/* Closing disposes what it removes, so the way back has to be visible while it
+   is still available. Expires with the snapshot behind it. */
+.workspace-undo {
+  -webkit-app-region: no-drag;
+  height: 30px;
+  margin-right: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 520;
+  white-space: nowrap;
+}
+
+.workspace-undo:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
 .workspace-bar-button {
   -webkit-app-region: no-drag;
   height: 30px;
@@ -1379,6 +1353,12 @@ textarea {
   background: var(--surface-inset);
 }
 
+/* Inactive views stay mounted so their terminals keep running. Stated
+   explicitly because a later display rule would otherwise show them. */
+.workspace-canvas[hidden] {
+  display: none;
+}
+
 .workspace-split {
   width: 100%;
   height: 100%;
@@ -1467,6 +1447,30 @@ textarea {
 .workspace-group.focused {
   border-color: color-mix(in srgb, var(--focus-ring) 78%, var(--line-default));
   box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+
+/* A pane that just received a resource. The move often lands in a view the
+   user was not looking at, so the flash answers "where did it go". */
+@keyframes workspace-arrived {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  100% {
+    border-color: var(--line-default);
+    box-shadow: none;
+  }
+}
+
+.workspace-group.arrived {
+  animation: workspace-arrived 1.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-group.arrived {
+    animation: none;
+    border-color: var(--accent);
+  }
 }
 
 .workspace-group-tabs {
@@ -1575,6 +1579,91 @@ textarea {
   white-space: nowrap;
 }
 
+/* A chat has no project and no checkout, so it owns no resources. Saying so
+   on the tab explains the missing + before anyone hunts for it. */
+.workspace-tab-chat {
+  padding: 1px 5px;
+  border: 1px solid var(--line-default);
+  border-radius: 4px;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  white-space: nowrap;
+}
+
+.workspace-tab-label.chat {
+  font-style: italic;
+}
+
+/* Costs no width until you point at the tab, so a long thread title is not
+   squeezed by a button nobody is reaching for. Same trick the close button
+   already uses beside it. */
+.workspace-tab-add-inline {
+  width: 0;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 0;
+  overflow: hidden;
+  border-radius: 4px;
+  opacity: 0;
+  color: var(--text-faint);
+  transition: opacity 0.1s ease;
+}
+
+.workspace-tab:hover .workspace-tab-add-inline,
+.workspace-tab.active .workspace-tab-add-inline {
+  width: 16px;
+  flex: 0 0 16px;
+  margin-left: 2px;
+  opacity: 1;
+}
+
+.workspace-tab-add-inline:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* Holds what would be dangerous as a stray click on the tab: chiefly jumping
+   to another view. Hidden until hover, same as the + and the close. */
+.workspace-tab-more {
+  width: 0;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 0;
+  overflow: hidden;
+  border-radius: 4px;
+  opacity: 0;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1;
+  transition: opacity 0.1s ease;
+}
+
+.workspace-tab:hover .workspace-tab-more,
+.workspace-tab.active .workspace-tab-more {
+  width: 16px;
+  flex: 0 0 16px;
+  margin-left: 2px;
+  opacity: 1;
+}
+
+.workspace-tab-more:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.workspace-tab-menu {
+  position: fixed;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 200;
+}
+
 .workspace-tab-close {
   width: 16px;
   height: 16px;
@@ -1640,6 +1729,30 @@ textarea {
   border-radius: 0 0 var(--radius-sm) var(--radius-sm);
 }
 
+/* The pane renders these; the content is portalled in. It has to pass the
+   height straight through, the way .page-layer does for the workspace. */
+.workspace-tab-slot {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* During a drag the slot must not be the drop target: it sits over the pane's
+   whole content area and has no drop handling, so a drop landing on it never
+   reached the pane underneath. The content inside stays interactive, which is
+   why this is on the slot alone rather than its children. */
+body.workspace-dragging .workspace-tab-slot {
+  pointer-events: none;
+}
+
+/* Slots are siblings in one pane, so the inactive ones must take no space.
+   The content sets this via the slot's own hidden attribute. */
+.workspace-tab-slot[hidden] {
+  display: none;
+}
+
 .workspace-tab-content {
   flex: 1;
   min-width: 0;
@@ -1648,9 +1761,6 @@ textarea {
   flex-direction: column;
 }
 
-.workspace-tab-content[hidden] {
-  display: none !important;
-}
 
 .workspace-tab-content > .chat,
 .workspace-tab-content > .browse,
@@ -1664,13 +1774,26 @@ textarea {
 .workspace-empty-group {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 6px;
+  padding: 16px;
   border: 0;
   color: var(--text-faint);
   background: transparent;
   cursor: pointer;
+  text-align: center;
+}
+
+/* Says why a terminal is not on offer here, rather than leaving the pane to
+   look broken while it waits for a thread. */
+.workspace-empty-group small {
+  max-width: 34ch;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  line-height: 1.4;
+  opacity: 0.85;
 }
 
 .workspace-empty-group:hover {
@@ -1895,6 +2018,13 @@ textarea {
   height: 1px;
   margin: 4px;
   background: var(--line-subtle);
+}
+
+.workspace-menu-note {
+  padding: 4px 10px 6px;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  line-height: 1.35;
 }
 
 .workspace-add-menu-item {
@@ -2802,10 +2932,6 @@ textarea {
 }
 
 @media (max-width: 820px) {
-  .workspace-identity small {
-    max-width: 200px;
-  }
-
   .workspace-group-actions button:nth-child(-n + 2) {
     display: none;
   }
@@ -2974,6 +3100,51 @@ textarea {
   color: var(--text);
 }
 
+/* One Add rather than four entries. The thread menu already runs to ten
+   items, and the resources are a set, not four unrelated actions. */
+.ctx-submenu {
+  position: relative;
+}
+
+.ctx-parent .ctx-arrow {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
+.ctx-submenu-items {
+  position: absolute;
+  top: -4px;
+  left: 100%;
+  min-width: 160px;
+  margin-left: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Opens leftward when the menu sits near the right edge, so the submenu does
+   not run off the window. */
+.ctx-submenu.flip .ctx-submenu-items {
+  left: auto;
+  right: 100%;
+  margin-left: 0;
+  margin-right: 2px;
+}
+
+.ctx-submenu:hover .ctx-submenu-items {
+  display: flex;
+}
+
+.ctx-submenu:hover .ctx-parent {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
 .list {
   display: flex;
   flex-direction: column;
@@ -2983,7 +3154,50 @@ textarea {
   min-height: 0;
 }
 
-.sidebar-section.projects {
+/* Projects and Chats share the panel, one at a time. Nesting resources under
+   threads made the project tree too tall to stack a second list beneath it. */
+.sidebar-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px 6px 8px;
+}
+
+.sidebar-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--type-control);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-tab:hover {
+  color: var(--text);
+}
+
+.sidebar-tab.active {
+  background: var(--bg-active, var(--bg-hover));
+  color: var(--text);
+}
+
+.sidebar-tab small {
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+.sidebar-tabs .section-add {
+  margin: 0 0 0 auto;
+}
+
+.sidebar-section.projects,
+.sidebar-section.chats {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -2991,39 +3205,54 @@ textarea {
   overflow: hidden;
 }
 
-.sidebar-section.projects .list {
-  flex: 1 1 auto;
+/* hidden must beat the flex display above it. */
+.sidebar-section[hidden] {
+  display: none;
 }
 
-.sidebar-divider {
-  flex: 0 0 auto;
-  height: 6px;
-  margin: 2px 0;
-  cursor: ns-resize;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.sidebar-filter {
   position: relative;
+  flex: 0 0 auto;
+  margin: 0 8px 8px;
 }
 
-.sidebar-divider::after {
-  content: '';
-  width: 28px;
-  height: 3px;
-  border-radius: 3px;
-  background: var(--border-subtle);
-  transition: background 0.12s ease;
+.sidebar-filter input {
+  width: 100%;
+  padding: 5px 22px 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-inset, var(--bg-hover));
+  color: var(--text);
+  font: inherit;
+  font-size: var(--type-meta);
+  outline: none;
 }
 
-.sidebar-divider:hover::after,
-.sidebar-divider:active::after {
-  background: var(--accent);
+.sidebar-filter input:focus {
+  border-color: var(--accent);
 }
 
-.sidebar-section-chats {
+.sidebar-filter-clear {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sidebar-filter-clear:hover {
+  color: var(--text);
+}
+
+.sidebar-section.projects .list,
+.sidebar-section.chats .list {
   flex: 1 1 auto;
-  min-height: 0;
 }
 
 .badge.compacting {
@@ -3176,10 +3405,100 @@ textarea {
   font-size: 12.5px;
 }
 
-.session-row {
-  min-height: 50px;
+/* Carets at 8px and 20px, resource icons at 68px. The steps are deliberately
+   uneven: a caret only has to clear the one above it to read as a level, but
+   a resource has to clear its thread's *title*, which starts at 60px once the
+   caret and status dot are counted. At 56px the icon landed 4px behind that
+   title and read as level with it rather than under it.
+
+   Written as .item.sub.session-row because .item.sub alone is two classes and
+   outranks a bare .session-row, which silently kept the old 29px inset. */
+.item.sub.session-row {
   align-items: flex-start;
   gap: 9px;
+  padding-left: 20px;
+  min-height: 0;
+}
+
+.project-caret {
+  display: grid;
+  width: 13px;
+  height: 18px;
+  flex: 0 0 13px;
+  place-items: center;
+  color: var(--text-faint);
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.project-caret.open {
+  transform: rotate(90deg);
+}
+
+.session-caret {
+  display: grid;
+  width: 13px;
+  height: 18px;
+  flex: 0 0 13px;
+  place-items: center;
+  color: var(--text-faint);
+  cursor: pointer;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.session-caret.open {
+  transform: rotate(90deg);
+}
+
+/* Threads that own nothing keep the 13px box so every title starts at the same
+   x. Named "leaf" rather than "empty": .empty is the full-page empty state,
+   40px of padding and height 100%, and it was landing on every arrowless row. */
+.session-caret.leaf {
+  cursor: default;
+}
+
+.session-caret:not(.leaf):hover {
+  color: var(--text);
+}
+
+.item.resource-row {
+  gap: 9px;
+  padding: 4px 8px 4px 68px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Same 13px box as the carets above it, so the label lines up with theirs. */
+.resource-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-inset, var(--bg-hover));
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.resource-row .icon {
+  display: grid;
+  width: 13px;
+  flex: 0 0 13px;
+  place-items: center;
+  color: var(--text-faint);
+}
+
+.resource-row .resource-where {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  white-space: nowrap;
 }
 
 .session-row .meta {
@@ -3377,6 +3696,21 @@ textarea {
   display: flex;
   flex-direction: column;
   min-width: 420px;
+}
+
+/* Holds the workspace while another page covers it, so its terminals keep
+   running. It has to pass the height straight through: the workspace shell
+   sizes itself as a flex child, and a plain div here collapsed it. */
+.page-layer {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-layer[hidden] {
+  display: none;
 }
 
 .toolbar {
@@ -6014,6 +6348,34 @@ select:hover {
   flex: 1;
   position: relative;
   min-height: 0;
+  display: flex;
+}
+
+/* Covers the guest's blank starting page. Absolute so the webview keeps its
+   own size — a hidden one never attaches and would have nothing to navigate. */
+.browse-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-pane);
+  color: var(--text-faint);
+  font-size: var(--type-control);
+}
+
+/* The guest page. A DOM element rather than a view composited over the window,
+   so it fills its pane by ordinary layout and menus draw over it by z-index. */
+.browse-guest {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+}
+
+.browse[hidden] {
+  display: none;
 }
 
 .panel {

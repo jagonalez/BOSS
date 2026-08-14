@@ -218,23 +218,10 @@ export const THEMES: ThemeDef[] = [
   }
 ]
 
-const LEGACY_THEME_IDS: Record<string, string> = {
-  graphite: 'boss-dark',
-  carbon: 'boss-dark',
-  ink: 'tokyo-night-moon',
-  'midnight-purple': 'rose-pine-moon',
-  dracula: 'rose-pine-moon',
-  orchid: 'rose-pine-moon',
-  ember: 'boss-dark',
-  paper: 'boss-light',
-  signal: 'high-contrast',
-  'solarized-dark': 'boss-dark',
-  'solarized-light': 'boss-light'
-}
-
 function resolveTheme(id: string): ThemeDef {
-  const resolved = LEGACY_THEME_IDS[id] ?? id
-  return THEMES.find((theme) => theme.id === resolved) ?? THEMES[0]
+  // An unknown id falls back to the first theme, which is all a renamed one
+  // needed. Nothing has shipped, so those names only ever existed here.
+  return THEMES.find((theme) => theme.id === id) ?? THEMES[0]
 }
 
 function themeTokens(theme: ThemeDef): Record<`--${string}`, string> {

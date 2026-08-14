@@ -4,7 +4,6 @@ import { existsSync } from 'node:fs'
 import {
   IpcChannels,
   type ApiRequest,
-  type BrowseBounds,
   type PrivacyPane,
   type ServerInfo
 } from '@shared/ipc'
@@ -53,6 +52,7 @@ export function registerIpc(deps: IpcDeps): void {
   deps.backends.onEvent((event) => broadcast(IpcChannels.EventData, JSON.stringify(event)))
   deps.browse.onNavigation = (id, state) => broadcast(IpcChannels.BrowseNavigation, { id, state })
   deps.browse.onExternal = (url) => broadcast(IpcChannels.BrowseExternal, url)
+  deps.browse.onAgentActivity = (id) => broadcast(IpcChannels.BrowseAgentActivity, id)
   deps.computerUse.onStatusChange = (status) => broadcast(IpcChannels.ComputerUseStatus, status)
   deps.pty.onData = (id, data) => broadcast(IpcChannels.TerminalData, { id, data })
   deps.pty.onExit = (id, code) => broadcast(IpcChannels.TerminalExit, { id, code })
@@ -83,18 +83,16 @@ export function registerIpc(deps: IpcDeps): void {
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseAttach, (_e, body: { id: string; bounds: BrowseBounds }) => {
-    deps.browse.attach(body.id, body.bounds)
+  // Placement is the renderer's job now: a webview is a DOM element. All the
+  // main process needs is a handle on the guest page, so agent tools can reach
+  // it without a hop back through the renderer.
+  ipcMain.handle(IpcChannels.BrowseRegister, (_e, body: { id: string; webContentsId: number }) => {
+    deps.browse.register(body.id, body.webContentsId)
     return true
   })
 
-  ipcMain.handle(IpcChannels.BrowseDetach, (_e, id: string) => {
-    deps.browse.detach(id)
-    return true
-  })
-
-  ipcMain.handle(IpcChannels.BrowseBounds, (_e, body: { id: string; bounds: BrowseBounds }) => {
-    deps.browse.setBounds(body.id, body.bounds)
+  ipcMain.handle(IpcChannels.BrowseUnregister, (_e, id: string) => {
+    deps.browse.unregister(id)
     return true
   })
 

@@ -3,7 +3,6 @@ import type {
   ApiResponse,
   AsrTranscribeRequest,
   AsrTranscribeResult,
-  BrowseBounds,
   BrowseNavEvent,
   ComputerUsePermissions,
   ComputerUseStatus,
@@ -35,15 +34,18 @@ export interface BossApi {
   unsubscribeEvents(): Promise<boolean>
   onEvent(cb: (data: string) => void): () => void
 
-  browseAttach(id: string, bounds: BrowseBounds): Promise<boolean>
-  browseDetach(id: string): Promise<boolean>
-  browseBounds(id: string, bounds: BrowseBounds): Promise<boolean>
+  /** Hand a webview's guest page to the main process, so agent tools can drive
+   *  it directly. Placement is the renderer's own business. */
+  browseRegister(id: string, webContentsId: number): Promise<boolean>
+  browseUnregister(id: string): Promise<boolean>
   browseNavigate(id: string, url: string): Promise<boolean>
   browseBack(id: string): Promise<boolean>
   browseForward(id: string): Promise<boolean>
   browseReload(id: string): Promise<boolean>
   browseDestroy(id: string): Promise<boolean>
   onBrowseNavigation(cb: (evt: BrowseNavEvent) => void): () => void
+  /** An agent drove a browser tab, which may not be the one on screen. */
+  onBrowseAgentActivity(cb: (id: string) => void): () => void
   onBrowseExternal(cb: (url: string) => void): () => void
   openExternal(url: string): Promise<boolean>
   openPath(path: string): Promise<boolean>

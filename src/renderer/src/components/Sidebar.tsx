@@ -1,6 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
+import type { Workspace, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
+import type { OwnedResource } from '../lib/workspaces'
+import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, findGroup, resourcesByThread, walkGroups } from '../lib/workspaces'
 import {
   archiveAllInPath,
   cloneThreadToBackend,
@@ -12,13 +15,17 @@ import {
   openCommitDialog,
   openProject,
   openProjectFolder,
+  addResourceToSession,
   removeSessionWorktree,
+  renameWorkspaceTab,
+  revealWorkspaceTab,
+  setNativeViewsSuspended,
   selectSession,
   sessionMetaFor,
   showPage,
   toggleArchive
 } from '../lib/actions'
-import { ChatIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
+import { ChatIcon, ChevronIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -30,18 +37,19 @@ interface CtxMenu {
   y: number
   project?: string
   session?: SessionInfo
+  /** Set by the + on a thread row: the same popup, listing resources to add
+   *  rather than the thread's own actions. */
+  addTo?: SessionInfo
 }
 
-function SectionHeader({ label, onAdd, addTitle }: { label: string; onAdd: () => void; addTitle: string }): React.JSX.Element {
-  return (
-    <div className="section-head">
-      <span className="section-label">{label}</span>
-      <IconButton size="small" className="section-add" onClick={onAdd} label={addTitle}>
-        <PlusIcon size={12} />
-      </IconButton>
-    </div>
-  )
-}
+/** What a thread can own. No thread here: a pane holds one, and it arrives by
+ *  being dragged or clicked, not from this menu. */
+const ADDABLE: Array<{ kind: WorkspaceTabKind; label: string }> = [
+  { kind: 'terminal', label: 'Terminal' },
+  { kind: 'files', label: 'Files' },
+  { kind: 'review', label: 'Review' },
+  { kind: 'browser', label: 'Browser' }
+]
 
 function timeAgo(ts?: number): string {
   if (!ts) return ''
@@ -57,7 +65,37 @@ function projectName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: boolean; onCtx: (e: React.MouseEvent, s: SessionInfo) => void }): React.JSX.Element {
+/** The one tab the user is working in: active tab, focused pane, active view. */
+function focusedTab(workspace: Workspace | null): WorkspaceTab | undefined {
+  if (!workspace) return undefined
+  const view = workspace.views.find((item) => item.id === workspace.activeViewId)
+  if (!view) return undefined
+  const group = findGroup(view.root, view.focusedGroupId) ?? walkGroups(view.root)[0]
+  return group?.tabs.find((item) => item.id === group.activeTabId)
+}
+
+
+function SessionRow({
+  session,
+  onCtx,
+  resourceCount = 0,
+  expanded = false,
+  onToggle
+}: {
+  session: SessionInfo
+  onCtx: (e: React.MouseEvent, s: SessionInfo) => void
+  resourceCount?: number
+  expanded?: boolean
+  onToggle?: () => void
+}): React.JSX.Element {
+  // One highlight, on the tab of the focused pane. A split view shows several
+  // tabs at once, but marking them all needs a second visual state the sidebar
+  // cannot explain. Not activeSessionId either: that is the session being
+  // chatted with, and it stayed lit long after you looked elsewhere.
+  const showing = useStore(appStore, (state) => {
+    const tab = focusedTab(state.projectWorkspace)
+    return tab?.kind === 'thread' && tab.sessionId === session.id
+  })
   const meta = sessionMetaFor(session.id)
   const busy = useStore(appStore, (s) => Boolean(s.sessionBusy[session.id]))
   const compacting = useStore(appStore, (s) => Boolean(s.compacting[session.id]))
@@ -75,11 +113,27 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
   ].filter(Boolean)
   return (
     <div
-      className={`item sub session-row ${active ? 'active' : ''}`}
+      className={`item sub session-row ${showing ? 'active' : ''}`}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData(SESSION_DRAG_TYPE, session.id)
+      }}
       onClick={() => selectSession(session.id)}
       onContextMenu={(e) => onCtx(e, session)}
       title={meta?.forkedFrom ? `Forked from ${meta.forkedFrom.sessionId.slice(0, 12)}` : meta?.kind === 'side' ? 'Side chat' : session.title}
     >
+      <span
+        className={`session-caret ${expanded ? 'open' : ''} ${resourceCount ? '' : 'leaf'}`}
+        onClick={(event) => {
+          if (!resourceCount) return
+          event.stopPropagation()
+          onToggle?.()
+        }}
+        title={resourceCount ? `${resourceCount} resource${resourceCount === 1 ? '' : 's'}` : undefined}
+      >
+        {resourceCount ? <ChevronIcon size={10} /> : null}
+      </span>
       <span className={`session-state ${compacting ? 'compacting' : busy ? 'busy' : 'idle'}`} title={compacting ? 'Compacting' : busy ? 'Agent is working' : 'Idle'}>
         <span />
       </span>
@@ -92,15 +146,97 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
   )
 }
 
+const RESOURCE_LABELS: Record<string, string> = {
+  terminal: 'Terminal',
+  review: 'Review',
+  files: 'Files',
+  browser: 'Browser'
+}
+
+const RESOURCE_ICONS: Record<string, (props: { size?: number }) => React.JSX.Element> = {
+  terminal: TerminalIcon,
+  review: ReviewIcon,
+  files: FilesIcon,
+  browser: GlobeIcon
+}
+
+function ResourceRow({ resource }: { resource: OwnedResource }): React.JSX.Element {
+  const Icon = RESOURCE_ICONS[resource.kind] ?? ChatIcon
+  // Same single highlight as thread rows: the focused pane's active tab.
+  const active = useStore(appStore, (state) => focusedTab(state.projectWorkspace)?.id === resource.id)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const label = resource.title || RESOURCE_LABELS[resource.kind] || resource.kind
+  const commit = (): void => {
+    setEditing(false)
+    if (draft !== (resource.title ?? '')) renameWorkspaceTab(resource.id, draft)
+  }
+  return (
+    <div
+      className={`item resource-row ${active ? 'active' : ''}`}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData(TAB_DRAG_TYPE, resource.id)
+      }}
+      onClick={() => revealWorkspaceTab(resource.viewId, resource.groupId, resource.id)}
+      onDoubleClick={(event) => {
+        event.stopPropagation()
+        setDraft(resource.title ?? '')
+        setEditing(true)
+      }}
+      title={`${label} — double-click to rename, drag into a view to move`}
+    >
+      <span className="icon"><Icon size={13} /></span>
+      {editing ? (
+        <input
+          className="resource-rename"
+          autoFocus
+          value={draft}
+          aria-label="Resource name"
+          placeholder={RESOURCE_LABELS[resource.kind] ?? resource.kind}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') commit()
+            if (event.key === 'Escape') setEditing(false)
+          }}
+        />
+      ) : (
+        <span className="name">{label}</span>
+      )}
+      <span className="resource-where">{resource.viewName}</span>
+    </div>
+  )
+}
+
 export function Sidebar(): React.JSX.Element {
   const sessions = useStore(appStore, (s) => s.sessions)
   const projects = useStore(appStore, (s) => s.projects)
-  const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
-  const projectPath = useStore(appStore, (s) => s.projectPath)
   const activePage = useStore(appStore, (s) => s.activePage)
   const archived = useStore(appStore, (s) => s.archived)
   const backends = useStore(appStore, (s) => s.backends)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const workspace = useStore(appStore, (s) => s.projectWorkspace)
+  const [tab, setTab] = useState<'projects' | 'chats'>(() => {
+    try { return localStorage.getItem('boss.sidebarTab') === 'chats' ? 'chats' : 'projects' } catch { return 'projects' }
+  })
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [liftedCaps, setLiftedCaps] = useState<Set<string>>(new Set())
+  const [openThreads, setOpenThreads] = useState<Set<string>>(new Set())
+  const [filter, setFilter] = useState('')
+
+  // Which resources belong to which thread, wherever they were dragged. Derived
+  // from the view trees rather than stored on the tab: the tree already records
+  // placement, and a second copy would drift the moment a resource moves.
+  //
+  // Only the loaded project's workspace is in state, so threads in other
+  // projects list no resources. That matches what the user can reach: their
+  // views are not on screen, so a row pointing into them would go nowhere.
+  const resources = useMemo(
+    () => resourcesByThread(workspace?.views ?? []),
+    [workspace]
+  )
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const projectsRef = useRef<HTMLDivElement>(null)
@@ -115,18 +251,17 @@ export function Sidebar(): React.JSX.Element {
       return 268
     }
   })
-  const [projectsH, setProjectsH] = useState<number | null>(() => {
-    try {
-      const saved = Number(localStorage.getItem('boss.sidebarProjectsH'))
-      return Number.isFinite(saved) && saved > 0 ? saved : null
-    } catch {
-      return null
-    }
-  })
-
   const archivedSet = new Set(archived)
-  const visibleSessions = sessions.filter((s) => !archivedSet.has(s.id) && !s.parentID)
-  const archivedSessions = sessions.filter((s) => archivedSet.has(s.id))
+  const query = filter.trim().toLowerCase()
+  // Matching on the project too, so "cage" finds every thread in that project
+  // without expanding it — the point of filtering is not to drill.
+  const matches = (session: SessionInfo): boolean => {
+    if (!query) return true
+    const where = session.projectPath ?? session.directory ?? session.path ?? ''
+    return `${session.title ?? ''} ${where}`.toLowerCase().includes(query)
+  }
+  const visibleSessions = sessions.filter((s) => !archivedSet.has(s.id) && !s.parentID && matches(s))
+  const archivedSessions = sessions.filter((s) => archivedSet.has(s.id) && matches(s))
 
   const sessionsByPath = new Map<string, SessionInfo[]>()
   for (const session of visibleSessions) {
@@ -148,7 +283,13 @@ export function Sidebar(): React.JSX.Element {
       ].filter(Boolean)
     )
   )
-  const activePath = projectPath
+  // A browser is a native view composited over the page, so it ignores
+  // z-index: a menu opening near one drew underneath it. Detach while the
+  // menu is up, as the workspace menus already do.
+  useEffect(() => {
+    setNativeViewsSuspended('sidebar-menu', Boolean(ctx))
+    return () => setNativeViewsSuspended('sidebar-menu', false)
+  }, [ctx])
 
   useEffect(() => {
     if (!ctx) return
@@ -167,32 +308,9 @@ export function Sidebar(): React.JSX.Element {
     }
   }, [ctx])
 
-  const open = (path: string): void => {
-    if (path !== activePath) void openProject(path)
-    else showPage('project')
-  }
-
-  const onDividerDown = (e: React.MouseEvent): void => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startH = projectsH ?? projectsRef.current?.getBoundingClientRect().height ?? 200
-    const onMove = (ev: MouseEvent): void => {
-      const h = Math.min(Math.max(60, startH + (ev.clientY - startY)), 480)
-      setProjectsH(h)
-      try {
-        localStorage.setItem('boss.sidebarProjectsH', String(h))
-      } catch {
-        /* ignore */
-      }
-    }
-    const onUp = (): void => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      document.body.style.userSelect = ''
-    }
-    document.body.style.userSelect = 'none'
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+  const selectTab = (next: 'projects' | 'chats'): void => {
+    setTab(next)
+    try { localStorage.setItem('boss.sidebarTab', next) } catch { /* ignore */ }
   }
 
   const setHidden = (hidden: boolean): void => {
@@ -229,6 +347,32 @@ export function Sidebar(): React.JSX.Element {
     e.preventDefault()
     e.stopPropagation()
     setCtx({ x: e.clientX, y: e.clientY, session })
+  }
+
+  // A thread and the resources it owns. Filtering opens every thread, for the
+  // same reason it opens every project: search replaces drilling.
+  const threadRow = (session: SessionInfo): React.JSX.Element => {
+    const owned = resources.get(session.id) ?? []
+    const isOpen = openThreads.has(session.id) || Boolean(query)
+    return (
+      <React.Fragment key={session.id}>
+        <SessionRow
+          session={session}
+          onCtx={onSessionCtx}
+          resourceCount={owned.length}
+          expanded={isOpen}
+          onToggle={() =>
+            setOpenThreads((prev) => {
+              const next = new Set(prev)
+              if (next.has(session.id)) next.delete(session.id)
+              else next.add(session.id)
+              return next
+            })
+          }
+        />
+        {isOpen ? owned.map((resource) => <ResourceRow key={resource.id} resource={resource} />) : null}
+      </React.Fragment>
+    )
   }
 
   const menuItem = (label: string, fn: () => void): React.JSX.Element => (
@@ -275,8 +419,49 @@ export function Sidebar(): React.JSX.Element {
       </nav>
       <div className="sidebar-section-rule" />
 
-      <div className="sidebar-section projects" style={projectsH ? { height: projectsH } : undefined}>
-        <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="Add a project folder" />
+      <div className="sidebar-tabs" role="tablist" aria-label="Sidebar sections">
+        <button
+          role="tab"
+          aria-selected={tab === 'projects'}
+          className={`sidebar-tab ${tab === 'projects' ? 'active' : ''}`}
+          onClick={() => selectTab('projects')}
+        >
+          Projects
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'chats'}
+          className={`sidebar-tab ${tab === 'chats' ? 'active' : ''}`}
+          onClick={() => selectTab('chats')}
+        >
+          Chats{looseChats.length ? <small>{looseChats.length}</small> : null}
+        </button>
+        <IconButton
+          size="small"
+          className="section-add"
+          onClick={() => (tab === 'projects' ? void openProjectFolder() : void newGlobalChat())}
+          label={tab === 'projects' ? 'New project' : 'New chat'}
+        >
+          <PlusIcon size={12} />
+        </IconButton>
+      </div>
+
+      {/* Above the tabs: matches() filters loose chats as well as project
+          threads, so one box serves both panels. */}
+      <div className="sidebar-filter">
+        <input
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder={tab === 'projects' ? 'Filter threads' : 'Filter chats'}
+          aria-label={tab === 'projects' ? 'Filter threads' : 'Filter chats'}
+          spellCheck={false}
+        />
+        {filter ? (
+          <button className="sidebar-filter-clear" onClick={() => setFilter('')} aria-label="Clear filter">×</button>
+        ) : null}
+      </div>
+
+      <div className="sidebar-section projects" hidden={tab !== 'projects'}>
         <div
           className="list"
           ref={projectsRef}
@@ -289,45 +474,51 @@ export function Sidebar(): React.JSX.Element {
           }}
         >
         {projectPaths.map((path) => {
-          const isActive = path === activePath
           const pathSessions = sessionsByPath.get(path) ?? []
-          // Threads are always listed; "expanded" now only lifts the per-project
-          // cap, so a project with hundreds of threads cannot flood the sidebar.
-          const isExpanded = expanded.has(path)
-          const shown = isExpanded ? pathSessions : pathSessions.slice(0, THREADS_PER_PROJECT)
+          // A project is a folder in the tree, not a thing you select. Clicking
+          // it opens and shuts it. Filtering opens every project that matched,
+          // since hunting through shut folders is what search replaces.
+          const isOpen = !collapsed.has(path) || Boolean(query)
+          const uncapped = liftedCaps.has(path) || Boolean(query)
+          const shown = uncapped ? pathSessions : pathSessions.slice(0, THREADS_PER_PROJECT)
           const hidden = pathSessions.length - shown.length
           return (
             <div key={path}>
               <div
-                className={`item dir project-row ${isActive ? 'active' : ''}`}
-                onClick={() => open(path)}
+                className="item dir project-row"
+                onClick={() =>
+                  setCollapsed((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(path)) next.delete(path)
+                    else next.add(path)
+                    return next
+                  })
+                }
                 onContextMenu={(e) => onProjectCtx(e, path)}
                 title={path}
               >
+                <span className={`project-caret ${isOpen ? 'open' : ''}`}><ChevronIcon size={10} /></span>
                 <span className="icon">
                   <FolderIcon size={15} />
                 </span>
                 <span className="project-row-copy">
                   <span className="name">{projectName(path)}</span>
-                  {isActive ? <span className="project-row-path">{path}</span> : null}
                 </span>
                 <span className="meta">{pathSessions.length || ''}</span>
               </div>
-              {shown.map((session) => (
-                <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
-              ))}
-              {hidden > 0 ? (
+              {isOpen ? shown.map(threadRow) : null}
+              {isOpen && hidden > 0 ? (
                 <div
                   className="sidebar-load-more nested"
                   onClick={(e) => {
                     e.stopPropagation()
-                    setExpanded((prev) => new Set(prev).add(path))
+                    setLiftedCaps((prev) => new Set(prev).add(path))
                   }}
                 >
                   Show {hidden} more
                 </div>
               ) : null}
-              {pathSessions.length === 0 ? (
+              {isOpen && pathSessions.length === 0 ? (
                 <div className="sidebar-empty nested">No chats yet</div>
               ) : null}
             </div>
@@ -336,24 +527,16 @@ export function Sidebar(): React.JSX.Element {
         {projectPaths.length === 0 && (
           <div className="sidebar-empty">No projects yet</div>
         )}
-        <div className="item" onClick={() => void openProjectFolder()}>
-          <span className="icon">
-            <FolderIcon size={15} />
-          </span>
-          <span className="name">Open folder…</span>
-        </div>
       </div>
       </div>
-      <div className="sidebar-divider" onMouseDown={onDividerDown} title="Drag to resize" />
 
-      <SectionHeader label="Chats" onAdd={() => void newGlobalChat()} addTitle="New chat" />
-      <div className="list sidebar-section-chats">
-        {looseChats.map((session) => (
-          <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
-        ))}
-        {looseChats.length === 0 && (
-          <div className="sidebar-empty">No chats yet</div>
-        )}
+      <div className="sidebar-section chats" hidden={tab !== 'chats'}>
+        <div className="list">
+          {looseChats.map(threadRow)}
+          {looseChats.length === 0 && (
+            <div className="sidebar-empty">No chats yet</div>
+          )}
+        </div>
       </div>
 
       {archivedSessions.length > 0 && (
@@ -401,6 +584,35 @@ export function Sidebar(): React.JSX.Element {
           ) : ctx.session ? (
             <>
               {menuItem('Open', () => selectSession(ctx.session!.id))}
+              {/* A chat has no checkout, so a terminal or diff has nowhere to
+                  point and Add is left out entirely. */}
+              {(ctx.session.projectPath ?? ctx.session.directory ?? ctx.session.path) ? (
+                <div className={`ctx-submenu ${ctx.x > window.innerWidth - 400 ? 'flip' : ''}`}>
+                  <button className="ctx-item ctx-parent">
+                    <span>Add</span>
+                    <span className="ctx-arrow">›</span>
+                  </button>
+                  <div className="ctx-submenu-items">
+                    {ADDABLE.map(({ kind, label }) => {
+                      const Icon = RESOURCE_ICONS[kind] ?? ChatIcon
+                      return (
+                        <button
+                          key={kind}
+                          className="ctx-item"
+                          onClick={() => {
+                            const target = ctx.session!
+                            setCtx(null)
+                            addResourceToSession(target.id, kind)
+                          }}
+                        >
+                          <Icon size={13} />
+                          <span>{label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
               {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Delegate…', () => appStore.setState({ delegateTarget: ctx.session!.id }))}
               {menuItem('Goal & budget…', () => appStore.setState({ policyTarget: ctx.session!.id }))}

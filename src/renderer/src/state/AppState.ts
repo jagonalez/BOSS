@@ -31,7 +31,7 @@ import type {
 } from '@shared/ipc'
 import type { ProjectInfo } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, LayoutTemplate, ProjectWorkspace, TerminalStartLocation } from '@shared/workspace'
+import type { AppPage, LayoutTemplate, Workspace, TerminalStartLocation } from '@shared/workspace'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
 
@@ -46,7 +46,14 @@ export interface Attachment {
 
 export interface AppState {
   activePage: AppPage
-  projectWorkspace: ProjectWorkspace | null
+  projectWorkspace: Workspace | null
+  /** Tab to flash after it lands somewhere new. Clears itself. */
+  highlightedTabId?: string
+  /** Browser tabs an agent has driven since you last looked at them. Keyed by
+   *  browse id, so `workspace-${tabId}`. */
+  browseAgentActivity: Record<string, boolean>
+  /** Offer to undo the last close. Expires on its own. */
+  workspaceUndo: { label: string } | null
   layoutTemplates: LayoutTemplate[]
   nativeViewSuspensions: string[]
   serverUrl: string
@@ -145,6 +152,8 @@ export const initialBrowseState: BrowseNavigationState = {
 export const initialState: AppState = {
   activePage: 'command-center',
   projectWorkspace: null,
+  browseAgentActivity: {},
+  workspaceUndo: null,
   layoutTemplates: [],
   nativeViewSuspensions: [],
   serverUrl: '',

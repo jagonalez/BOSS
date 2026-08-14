@@ -1,6 +1,8 @@
 import { appStore, type Attachment } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
+import { disposeTerminalSession } from './terminal-sessions'
+import { disposeBrowseGuest } from './browse-guests'
 import { startMicCapture } from './mic'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
@@ -8,7 +10,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind } from '@shared/workspace'
+import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
 import {
   activeWorkspaceView,
   activateTab,
@@ -21,7 +23,8 @@ import {
   findTab,
   loadTemplates,
   loadWorkspace,
-  moveTab,
+  mapTabs,
+  moveTabAcrossViews,
   nextWorkspaceViewName,
   reorderTab,
   resizeSplit,
@@ -69,9 +72,11 @@ export function setNativeViewsSuspended(reason: string, suspended: boolean): voi
   })
 }
 
-export function loadProjectWorkspace(projectKey: string, preferredSessionId?: string): void {
-  const workspace = loadWorkspace(projectKey, preferredSessionId)
-  appStore.setState({ projectWorkspace: workspace })
+/** Load the app's views. Call once at startup: they are not per project, so
+ *  opening a project must not reload them. */
+export function loadProjectWorkspace(preferredSessionId?: string): void {
+  if (appStore.getState().projectWorkspace) return
+  appStore.setState({ projectWorkspace: loadWorkspace(preferredSessionId) })
 }
 
 export function createWorkspaceView(): void {
@@ -168,6 +173,14 @@ export function activateWorkspaceTab(groupId: string, tabId: string): void {
   }))
   const active = next ? findTab(activeWorkspaceView(next).root, tabId)?.tab : undefined
   if (active?.kind === 'thread' && active.sessionId) selectSession(active.sessionId, false)
+  // Looking at the tab is what the mark was for.
+  if (active?.kind === 'browser') {
+    appStore.setState((state) => {
+      const browseAgentActivity = { ...state.browseAgentActivity }
+      delete browseAgentActivity[`workspace-${tabId}`]
+      return { browseAgentActivity }
+    })
+  }
 }
 
 export function addWorkspaceTab(
@@ -187,6 +200,9 @@ export function addWorkspaceTab(
     }
   }
   if (kind === 'review' || kind === 'files') {
+    // Deduped by checkout, not by owning thread. Two threads on one checkout
+    // see the same files and the same diff, so a second tab would be a copy of
+    // the first. The owner is still recorded on the tab for the sidebar.
     const existing = walkTabs(view.root).find((item) =>
       item.kind === kind && item.contextPath === checkout?.contextPath
     )
@@ -208,7 +224,7 @@ export function addWorkspaceTab(
 export function openBackendLogin(backendId: BackendId): void {
   let workspace = currentWorkspace()
   if (!workspace) {
-    workspace = loadWorkspace('__connections__')
+    workspace = loadWorkspace()
     appStore.setState({ projectWorkspace: workspace })
   }
   const view = activeWorkspaceView(workspace)
@@ -313,7 +329,47 @@ export function splitWorkspaceGroup(groupId: string, direction: SplitDirection):
   })
 }
 
+/** Put back the views as they were before the last close.
+ *
+ *  Closing disposes what it removes, so a misdrag or a slipped click would
+ *  otherwise cost a running terminal. The snapshot holds the whole view list,
+ *  which is what makes restoring a closed pane the same operation as
+ *  restoring a closed tab. */
+let closeUndo: { views: WorkspaceView[]; activeViewId: string; label: string } | null = null
+let closeUndoTimer: number | undefined
+
+export function undoWorkspaceClose(): void {
+  const snapshot = closeUndo
+  if (!snapshot) return
+  closeUndo = null
+  window.clearTimeout(closeUndoTimer)
+  updateWorkspace((item) => ({ ...item, views: snapshot.views, activeViewId: snapshot.activeViewId }))
+  appStore.setState({ workspaceUndo: null })
+  syncFocusedThread()
+}
+
+function rememberClose(label: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  closeUndo = { views: workspace.views, activeViewId: workspace.activeViewId, label }
+  appStore.setState({ workspaceUndo: { label } })
+  window.clearTimeout(closeUndoTimer)
+  closeUndoTimer = window.setTimeout(() => {
+    closeUndo = null
+    appStore.setState({ workspaceUndo: null })
+  }, 8_000)
+}
+
 export function closeWorkspaceTab(groupId: string, tabId: string): void {
+  const view = currentView()
+  const closing = view ? findTab(view.root, tabId)?.tab : undefined
+  rememberClose(closing ? `Closed ${closing.kind}` : 'Closed tab')
+  // Live surfaces are disposed here rather than when their component unmounts.
+  // React unmounts one whenever its tab moves, and StrictMode unmounts
+  // everything once on purpose, so tying disposal to unmounting destroyed
+  // pages and shells that were only being re-parented.
+  if (closing?.kind === 'browser') disposeBrowseGuest(`workspace-${tabId}`)
+  if (closing?.kind === 'terminal') disposeTerminalSession(tabId)
   const next = updateWorkspaceView((item) => {
     const root = closeTab(item.root, groupId, tabId)
     const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
@@ -328,6 +384,13 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
 }
 
 export function closeWorkspaceGroup(groupId: string): void {
+  rememberClose('Closed pane')
+  const view = currentView()
+  const pane = view ? findGroup(view.root, groupId) : undefined
+  for (const item of pane?.tabs ?? []) {
+    if (item.kind === 'browser') disposeBrowseGuest(`workspace-${item.id}`)
+    if (item.kind === 'terminal') disposeTerminalSession(item.id)
+  }
   const next = updateWorkspaceView((item) => {
     const root = closeGroup(item.root, groupId)
     return { ...item, root, focusedGroupId: walkGroups(root)[0].id }
@@ -337,14 +400,6 @@ export function closeWorkspaceGroup(groupId: string): void {
 
 export function setWorkspaceSplitRatio(splitId: string, ratio: number): void {
   updateWorkspaceView((item) => ({ ...item, root: resizeSplit(item.root, splitId, ratio) }))
-}
-
-export function moveWorkspaceTab(tabId: string, targetGroupId: string, position: DropPosition): void {
-  const next = updateWorkspaceView((item) => {
-    const moved = moveTab(item.root, tabId, targetGroupId, position)
-    return { ...item, root: moved.root, focusedGroupId: moved.focusedGroupId }
-  })
-  if (next) syncFocusedThread()
 }
 
 export function reorderWorkspaceTab(groupId: string, tabId: string, beforeTabId?: string): void {
@@ -363,6 +418,139 @@ export function openSessionInWorkspace(sessionId: string): boolean {
   const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
   addWorkspaceTab(groupId, 'thread', sessionId)
   return true
+}
+
+/** Move a resource into a group in any view, then go and show it there.
+ *  Dropping something you dragged out of the sidebar is worth following: it may
+ *  land in a view you were not looking at, and a silent move looks like a
+ *  failed one. */
+export function sendWorkspaceTabToView(
+  tabId: string,
+  targetViewId: string,
+  targetGroupId: string,
+  position: DropPosition = 'center'
+): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  const views = moveTabAcrossViews(workspace.views, tabId, targetViewId, targetGroupId, position)
+  if (views === workspace.views) return
+  updateWorkspace((item) => ({ ...item, views, activeViewId: targetViewId }))
+  const landed = views.find((view) => view.id === targetViewId)
+  const group = landed ? walkGroups(landed.root).find((item) => item.tabs.some((entry) => entry.id === tabId)) : undefined
+  if (group) activateWorkspaceTab(group.id, tabId)
+  highlightWorkspaceTab(tabId)
+  showPage('project')
+}
+
+/** Put a thread in the pane it was dropped on.
+ *
+ *  A thread already on screen moves, so dropping it twice does not open two
+ *  copies. One that is not open yet gets a tab created where it landed, which
+ *  is what makes an empty pane fillable by dragging rather than by a picker. */
+export function dropSessionInGroup(
+  sessionId: string,
+  targetViewId: string,
+  targetGroupId: string,
+  position: DropPosition = 'center'
+): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+
+  for (const view of workspace.views) {
+    const existing = findSessionTab(view.root, sessionId)
+    if (existing) {
+      sendWorkspaceTabToView(existing.tab.id, targetViewId, targetGroupId, position)
+      return
+    }
+  }
+
+  const target = workspace.views.find((view) => view.id === targetViewId)
+  if (!target || !findGroup(target.root, targetGroupId)) return
+  const created = tab('thread', sessionId)
+  updateWorkspace((item) => ({
+    ...item,
+    activeViewId: targetViewId,
+    views: item.views.map((view) =>
+      view.id === targetViewId
+        ? { ...view, root: addTab(view.root, targetGroupId, created), focusedGroupId: targetGroupId }
+        : view
+    )
+  }))
+  activateWorkspaceTab(targetGroupId, created.id)
+  highlightWorkspaceTab(created.id)
+  showPage('project')
+}
+
+/** Give a thread a resource, from the sidebar rather than from its pane.
+ *
+ *  The resource takes the thread's checkout, so there is nothing to choose.
+ *  A thread that is not on screen opens first: adding a terminal to a thread
+ *  you cannot see should still show you the terminal. */
+export function addResourceToSession(sessionId: string, kind: WorkspaceTabKind): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+
+  let placement: { viewId: string; groupId: string } | undefined
+  for (const view of workspace.views) {
+    const found = findSessionTab(view.root, sessionId)
+    if (found) {
+      placement = { viewId: view.id, groupId: found.group.id }
+      break
+    }
+  }
+
+  if (!placement) {
+    const view = activeWorkspaceView(workspace)
+    const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
+    dropSessionInGroup(sessionId, view.id, groupId)
+    placement = { viewId: view.id, groupId }
+  } else if (workspace.activeViewId !== placement.viewId) {
+    activateWorkspaceView(placement.viewId)
+  }
+
+  const session = appStore.getState().sessions.find((item) => item.id === sessionId)
+  const path = session?.executionPath ?? session?.worktree?.path ?? session?.projectPath
+    ?? session?.directory ?? session?.path ?? appStore.getState().projectPath
+  const checkout: WorkspaceCheckoutBinding | undefined = path
+    ? { contextPath: path, worktreeId: session?.worktree?.id, contextLabel: session?.worktree?.branch ?? 'Main' }
+    : undefined
+
+  addWorkspaceTab(placement.groupId, kind, sessionId, checkout)
+  showPage('project')
+}
+
+/** Name a resource. Blank clears it, so the tab falls back to its kind.
+ *  Two terminals on one thread are otherwise both called "Terminal". */
+export function renameWorkspaceTab(tabId: string, title: string): void {
+  const clean = title.trim()
+  updateWorkspace((workspace) => ({
+    ...workspace,
+    views: workspace.views.map((view) => ({
+      ...view,
+      root: mapTabs(view.root, (item) =>
+        item.id === tabId ? { ...item, title: clean || undefined } : item
+      )
+    }))
+  }))
+}
+
+/** Flash a tab that just arrived, so the eye finds it without hunting. */
+export function highlightWorkspaceTab(tabId: string): void {
+  appStore.setState({ highlightedTabId: tabId })
+  window.setTimeout(() => {
+    if (appStore.getState().highlightedTabId === tabId) appStore.setState({ highlightedTabId: undefined })
+  }, 1_400)
+}
+
+/** Jump to wherever a tab currently is: switch views if needed, then focus it.
+ *  Selection runs both ways, so a row in the sidebar reaches its resource even
+ *  after the resource was dragged into a view of its own. */
+export function revealWorkspaceTab(viewId: string, groupId: string, tabId: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace?.views.some((view) => view.id === viewId)) return
+  if (workspace.activeViewId !== viewId) activateWorkspaceView(viewId)
+  activateWorkspaceTab(groupId, tabId)
+  showPage('project')
 }
 
 export function applyLayoutTemplate(templateId: string): void {
@@ -1260,13 +1448,15 @@ export async function refreshFiles(): Promise<void> {
 export function selectSession(id: string, bindWorkspace = true): void {
   const cur = appStore.getState()
   const session = cur.sessions.find((s) => s.id === id)
-  const sessionPath = session?.projectPath ?? session?.directory ?? session?.path ?? ''
-  const inProject = Boolean(sessionPath && sessionPath !== '/')
-  if (bindWorkspace && inProject && cur.projectWorkspace?.projectKey === sessionPath) {
+  // A view holds sessions from wherever they live — every tab carries its own
+  // contextPath, so tiling does not care which project a thread belongs to,
+  // or whether it belongs to one at all. A chat opening as its own page
+  // unmounted the workspace and restarted every terminal in it.
+  if (bindWorkspace) {
     openSessionInWorkspace(id)
   }
   if (cur.activeSessionId === id) {
-    appStore.setState({ activePage: inProject ? 'project' : 'chat' })
+    appStore.setState({ activePage: 'project' })
     void refreshProviders(id)
     void refreshQaPolicy(id)
     void refreshFollowUps(id)
@@ -1275,7 +1465,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
   if (session?.model?.id && !cur.modelsBySession[id]) setModel(session.model.id, id, session.model.provider)
   appStore.setState({
     activeSessionId: id,
-    activePage: inProject ? 'project' : 'chat',
+    activePage: 'project',
     diffs: null,
     fileContent: null
   })
@@ -1373,8 +1563,8 @@ export async function openProject(path: string): Promise<void> {
   await refreshSessions()
   await refreshProjects()
   await refreshFiles()
-  const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
-  loadProjectWorkspace(info.path, preferred)
+  // Views stay put. They are not owned by a project, so opening one must not
+  // replace the layout the user is working in.
 }
 
 export async function deleteSession(id: string): Promise<void> {
@@ -1850,8 +2040,6 @@ export async function openProjectFolder(): Promise<void> {
     })
     await refreshSessions()
     await refreshProjects()
-    const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
-    loadProjectWorkspace(info.path, preferred)
     // A linked worktree opens its repository, not a second project. Without
     // saying so, picking a worktree looks like BOSS ignored the folder chosen.
     if (info.checkoutPath && info.checkoutPath !== info.path) {
@@ -2127,11 +2315,7 @@ export async function openSiteInBrowser(url: string): Promise<void> {
   const state = appStore.getState()
   let workspace = state.projectWorkspace
   if (!workspace) {
-    if (!state.projectPath) {
-      void window.boss.openExternal(url)
-      return
-    }
-    loadProjectWorkspace(state.projectPath)
+    loadProjectWorkspace()
     workspace = appStore.getState().projectWorkspace
   }
   if (!workspace) {

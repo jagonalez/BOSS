@@ -1,26 +1,40 @@
-import { BrowserWindow, WebContentsView, session, shell, type Session } from 'electron'
-import type { BrowseBounds, BrowseNavigationState } from '@shared/ipc'
+import { session, shell, webContents, type Session, type WebContents } from 'electron'
+import type { BrowseNavigationState } from '@shared/ipc'
 import type { AgentToolResult } from '@shared/qa'
 
 const ALLOWED_PERMISSIONS = new Set(['fullscreen', 'clipboard-sanitized-write'])
+export const BROWSE_PARTITION = 'persist:boss-browse'
 
 function isHttpUrl(url: string): boolean {
   return /^https?:/i.test(url)
 }
 
 interface BrowseView {
-  view: WebContentsView
-  loadedOnce: boolean
+  wc: WebContents
   state: BrowseNavigationState
 }
 
+/** Tracks the browser panes, which the renderer owns.
+ *
+ *  They used to be WebContentsViews the main process created and positioned:
+ *  outside the DOM, composited above the page, with bounds to keep in sync on
+ *  every layout change. In a tiling workspace that fought everything — a menu
+ *  drew underneath, a drag across one swallowed the events, and moving a tab
+ *  between panes meant parking, repainting and re-measuring.
+ *
+ *  A <webview> is a DOM element, so the renderer places it with CSS like any
+ *  other pane content. This keeps a registry of their web contents so agent
+ *  tools still reach the page directly, without a hop through the renderer. */
 export class BrowseManager {
   private views = new Map<string, BrowseView>()
 
   onNavigation?: (id: string, state: BrowseNavigationState) => void
   onExternal?: (url: string) => void
+  /** An agent drove this browser tab. Lets the UI highlight a tab that is not
+   *  on screen, so work happening out of sight is still visible. */
+  onAgentActivity?: (id: string) => void
 
-  constructor(private readonly win: BrowserWindow) {
+  constructor() {
     this.hardenSession()
   }
 
@@ -35,41 +49,34 @@ export class BrowseManager {
   }
 
   private browseSession(): Session {
-    return session.fromPartition('persist:boss-browse')
+    return session.fromPartition(BROWSE_PARTITION)
   }
 
-  attach(id: string, bounds: BrowseBounds): void {
-    let entry = this.views.get(id)
-    if (!entry) {
-      entry = this.createView(id)
-      this.views.set(id, entry)
+  /** Take ownership of a webview the renderer has attached.
+   *
+   *  The renderer creates the element and hands over its web contents id once
+   *  the guest is ready, which is the one thing it cannot do from the DOM. */
+  register(id: string, webContentsId: number): void {
+    const wc = webContents.fromId(webContentsId)
+    if (!wc) return
+    const existing = this.views.get(id)
+    if (existing?.wc === wc) return
+
+    const entry: BrowseView = {
+      wc,
+      state: existing?.state ?? { url: '', title: '', canGoBack: false, canGoForward: false, loading: false }
     }
-    entry.view.setBounds(bounds)
-    this.win.contentView.addChildView(entry.view)
-    if (!entry.loadedOnce && entry.state.url && !entry.view.webContents.isLoading()) {
-      entry.loadedOnce = true
-      void entry.view.webContents.loadURL(entry.state.url)
-    }
+    this.views.set(id, entry)
+    this.wire(id, entry)
   }
 
-  detach(id: string): void {
-    const entry = this.views.get(id)
-    if (entry) {
-      this.win.contentView.removeChildView(entry.view)
-    }
-  }
-
-  setBounds(id: string, bounds: BrowseBounds): void {
-    const entry = this.views.get(id)
-    if (entry) entry.view.setBounds(bounds)
+  unregister(id: string): void {
+    this.views.delete(id)
   }
 
   navigate(id: string, url: string): void {
-    let entry = this.views.get(id)
-    if (!entry) {
-      entry = this.createView(id)
-      this.views.set(id, entry)
-    }
+    const entry = this.views.get(id)
+    if (!entry) return
     let parsed: URL
     try {
       parsed = new URL(url)
@@ -77,20 +84,19 @@ export class BrowseManager {
       return
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
-    entry.loadedOnce = true
-    void entry.view.webContents.loadURL(url)
+    void entry.wc.loadURL(url)
   }
 
   goBack(id: string): void {
-    this.views.get(id)?.view.webContents.navigationHistory.goBack()
+    this.views.get(id)?.wc.navigationHistory.goBack()
   }
 
   goForward(id: string): void {
-    this.views.get(id)?.view.webContents.navigationHistory.goForward()
+    this.views.get(id)?.wc.navigationHistory.goForward()
   }
 
   reload(id: string): void {
-    this.views.get(id)?.view.webContents.reload()
+    this.views.get(id)?.wc.reload()
   }
 
   agentTabs(): Array<{ id: string; url: string; title: string; loading: boolean }> {
@@ -104,18 +110,18 @@ export class BrowseManager {
 
   async agentNavigate(id: string, url: string): Promise<AgentToolResult> {
     const entry = this.requireView(id)
+    this.onAgentActivity?.(id)
     const parsed = new URL(url)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       throw new Error('BOSS browser tools only allow HTTP and HTTPS URLs.')
     }
-    entry.loadedOnce = true
-    await entry.view.webContents.loadURL(parsed.toString())
+    await entry.wc.loadURL(parsed.toString())
     return this.textResult(`Opened ${parsed.toString()} in browser tab ${id}.`)
   }
 
   async agentSnapshot(id: string): Promise<AgentToolResult> {
     const entry = this.requireView(id)
-    const snapshot = await entry.view.webContents.executeJavaScript(`(() => {
+    const snapshot = await entry.wc.executeJavaScript(`(() => {
       const visible = (element) => {
         const style = getComputedStyle(element)
         const rect = element.getBoundingClientRect()
@@ -153,7 +159,8 @@ export class BrowseManager {
 
   async agentClick(id: string, ref: string): Promise<AgentToolResult> {
     const entry = this.requireView(id)
-    const result = await entry.view.webContents.executeJavaScript(`(() => {
+    this.onAgentActivity?.(id)
+    const result = await entry.wc.executeJavaScript(`(() => {
       const ref = ${JSON.stringify(ref)}
       const element = [...document.querySelectorAll('[data-boss-agent-ref]')].find((item) => item.getAttribute('data-boss-agent-ref') === ref)
       if (!element) return { ok: false, error: 'Element ref not found. Take a fresh snapshot.' }
@@ -169,8 +176,9 @@ export class BrowseManager {
 
   async agentType(id: string, ref: string, text: string, submit = false): Promise<AgentToolResult> {
     const entry = this.requireView(id)
+    this.onAgentActivity?.(id)
     if (text.length > 8_000) throw new Error('Browser typing is limited to 8,000 characters per call.')
-    const result = await entry.view.webContents.executeJavaScript(`(() => {
+    const result = await entry.wc.executeJavaScript(`(() => {
       const ref = ${JSON.stringify(ref)}
       const text = ${JSON.stringify(text)}
       const submit = ${JSON.stringify(submit)}
@@ -203,7 +211,7 @@ export class BrowseManager {
 
   async agentScreenshot(id: string): Promise<AgentToolResult> {
     const entry = this.requireView(id)
-    const image = await entry.view.webContents.capturePage(undefined, { stayHidden: true, stayAwake: false })
+    const image = await entry.wc.capturePage(undefined, { stayHidden: true, stayAwake: false })
     const size = image.getSize()
     return {
       __bossToolResult: true,
@@ -215,9 +223,11 @@ export class BrowseManager {
   destroy(id: string): void {
     const entry = this.views.get(id)
     if (!entry) return
-    this.win.contentView.removeChildView(entry.view)
-    entry.view.webContents.close()
     this.views.delete(id)
+    // The renderer owns the element, so removing it from the DOM is what ends
+    // the guest. Closing here as well covers a tab closed while its pane is
+    // not mounted, and is harmless when the element has already gone.
+    if (!entry.wc.isDestroyed()) entry.wc.close()
   }
 
   destroyAll(): void {
@@ -234,24 +244,10 @@ export class BrowseManager {
     return { __bossToolResult: true, text }
   }
 
-  private createView(id: string): BrowseView {
-    const view = new WebContentsView({
-      webPreferences: {
-        partition: 'persist:boss-browse',
-        sandbox: true,
-        contextIsolation: true,
-        nodeIntegration: false,
-        webviewTag: false,
-        webSecurity: true,
-        spellcheck: true
-      }
-    })
-    const wc = view.webContents
-    const entry: BrowseView = {
-      view,
-      loadedOnce: false,
-      state: { url: '', title: '', canGoBack: false, canGoForward: false, loading: false }
-    }
+  /** Listen to a guest page the renderer has handed over. The webview element
+   *  carries the sandbox settings; this is only about watching it. */
+  private wire(id: string, entry: BrowseView): void {
+    const wc = entry.wc
 
     wc.setWindowOpenHandler(({ url }) => {
       if (isHttpUrl(url)) void shell.openExternal(url)
@@ -281,12 +277,23 @@ export class BrowseManager {
       this.onNavigation?.(id, entry.state)
     }
 
+    // about:blank is where a guest starts so it exists at all — it is not
+    // somewhere the user went, and showing it in the url bar reads like a page
+    // that failed to load.
+    const real = (url: string): string => (url === 'about:blank' ? '' : url)
+
     wc.on('did-start-loading', () => update({ loading: true }))
     wc.on('did-stop-loading', () => update({ loading: false }))
-    wc.on('did-navigate', (_e, url) => update({ url }))
-    wc.on('did-navigate-in-page', (_e, url) => update({ url }))
+    wc.on('did-navigate', (_e, url) => update({ url: real(url) }))
+    wc.on('did-navigate-in-page', (_e, url) => update({ url: real(url) }))
     wc.on('page-title-updated', (_e, title) => update({ title }))
+    // The element can go away without the tab closing — a pane unmounting, a
+    // reload during development — and a stale entry would have agent tools
+    // talking to a dead page.
+    wc.on('destroyed', () => {
+      if (this.views.get(id)?.wc === wc) this.views.delete(id)
+    })
 
-    return entry
+    if (real(wc.getURL())) update({ url: wc.getURL(), title: wc.getTitle() })
   }
 }
