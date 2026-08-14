@@ -929,12 +929,10 @@ export function Workspace(): React.JSX.Element {
   // at all. The indicator stuck wherever the cursor last crossed real DOM.
   useEffect(() => {
     const start = (): void => {
-      setNativeViewsSuspended('drag', true)
       // Lets a drop fall through the portal slot to the pane that handles it.
       document.body.classList.add('workspace-dragging')
     }
     const stop = (): void => {
-      setNativeViewsSuspended('drag', false)
       document.body.classList.remove('workspace-dragging')
     }
     document.addEventListener('dragstart', start)

@@ -19,6 +19,7 @@ import {
   removeSessionWorktree,
   renameWorkspaceTab,
   revealWorkspaceTab,
+  setNativeViewsSuspended,
   selectSession,
   sessionMetaFor,
   showPage,
@@ -282,6 +283,14 @@ export function Sidebar(): React.JSX.Element {
       ].filter(Boolean)
     )
   )
+  // A browser is a native view composited over the page, so it ignores
+  // z-index: a menu opening near one drew underneath it. Detach while the
+  // menu is up, as the workspace menus already do.
+  useEffect(() => {
+    setNativeViewsSuspended('sidebar-menu', Boolean(ctx))
+    return () => setNativeViewsSuspended('sidebar-menu', false)
+  }, [ctx])
+
   useEffect(() => {
     if (!ctx) return
     const close = (): void => setCtx(null)
