@@ -3244,11 +3244,14 @@ textarea {
   transform: rotate(90deg);
 }
 
-.session-caret.empty {
+/* Threads that own nothing keep the 13px box so every title starts at the same
+   x. Named "leaf" rather than "empty": .empty is the full-page empty state,
+   40px of padding and height 100%, and it was landing on every arrowless row. */
+.session-caret.leaf {
   cursor: default;
 }
 
-.session-caret:not(.empty):hover {
+.session-caret:not(.leaf):hover {
   color: var(--text);
 }
 

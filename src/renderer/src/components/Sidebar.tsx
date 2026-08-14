@@ -98,7 +98,7 @@ function SessionRow({
       title={meta?.forkedFrom ? `Forked from ${meta.forkedFrom.sessionId.slice(0, 12)}` : meta?.kind === 'side' ? 'Side chat' : session.title}
     >
       <span
-        className={`session-caret ${expanded ? 'open' : ''} ${resourceCount ? '' : 'empty'}`}
+        className={`session-caret ${expanded ? 'open' : ''} ${resourceCount ? '' : 'leaf'}`}
         onClick={(event) => {
           if (!resourceCount) return
           event.stopPropagation()
