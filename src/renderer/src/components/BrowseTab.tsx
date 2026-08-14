@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { BrowseNavigationState } from '@shared/ipc'
 import { BackIcon, ExternalIcon, ForwardIcon, ReloadIcon } from './icons'
-import { BROWSE_PARTITION, browseGuests, type BrowseGuest } from '../lib/browse-guests'
+import { BROWSE_PARTITION, asUrl, browseGuests, type BrowseGuest } from '../lib/browse-guests'
 
 export function BrowseTab({ id, visible = true }: { id: string; visible?: boolean }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -83,9 +83,9 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
   }, [nav.url])
 
   const navigate = (): void => {
-    let target = urlInput.trim()
-    if (!target) return
-    if (!/^https?:\/\//i.test(target)) target = `https://${target}`
+    const typed = urlInput.trim()
+    if (!typed) return
+    const target = asUrl(typed)
     // Straight to the element. Going through the main process would drop the
     // request if the guest had not registered yet, and the element is right
     // here — the registry exists for agents, which have no element to hold.

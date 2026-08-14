@@ -12,6 +12,21 @@ export interface BrowseGuest extends HTMLElement {
   reload(): void
 }
 
+/** What the url bar does with what you typed.
+ *
+ *  A bare word is a search, not a hostname: "electron" became
+ *  https://electron and failed. Something with a dot and no spaces is treated
+ *  as a host, which is the guess every browser makes — it is wrong for a
+ *  sentence containing a domain, and right almost everywhere else. */
+export function asUrl(typed: string): string {
+  const text = typed.trim()
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text
+  if (text.startsWith('localhost') || /^\d{1,3}(\.\d{1,3}){3}(:\d+)?/.test(text)) return `http://${text}`
+  const looksLikeHost = !/\s/.test(text) && /^[^\s/?#]+\.[^\s/?#]{2,}/.test(text)
+  if (looksLikeHost) return `https://${text}`
+  return `https://www.google.com/search?q=${encodeURIComponent(text)}`
+}
+
 /** Live guest pages, keyed by tab.
  *
  *  The element outlives its component for the same reason a terminal's does:
