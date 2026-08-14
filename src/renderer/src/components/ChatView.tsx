@@ -1132,6 +1132,10 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const historyCapabilities = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId)?.capabilities)
   const projects = useStore(appStore, (s) => s.projects)
   const scrollRef = useRef<HTMLDivElement>(null)
+  /** Whether to keep the view pinned to the newest output. A ref, not state:
+   *  the follow observer must not be torn down every time this flips, and it
+   *  is decided by the user scrolling rather than by a render. */
+  const followRef = useRef(true)
   const [msgCtx, setMsgCtx] = useState<{ x: number; y: number; message: MessageWithParts } | null>(null)
   const msgCtxRef = useRef<HTMLDivElement>(null)
   const launcherProject = useStore(appStore, (s) => s.launcherProject)
@@ -1207,7 +1211,12 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   const onScroll = (): void => {
     const el = scrollRef.current
-    if (!el || expandingRef.current) return
+    if (!el) return
+    // Scrolling up to read stops the follow; coming back resumes it. The
+    // threshold is generous because a streamed line can land between the
+    // scroll and this handler.
+    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    if (expandingRef.current) return
     if (visible.length <= windowed.length) return
     if (el.scrollTop < 120) {
       expandingRef.current = true
@@ -1222,6 +1231,9 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
 
   useEffect(() => {
     const el = scrollRef.current
+    // A new thread starts at the bottom, following. Carrying the last one's
+    // position over would leave you reading history you never scrolled to.
+    followRef.current = true
     if (el) el.scrollTop = el.scrollHeight
     const t1 = setTimeout(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -1235,13 +1247,35 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
     }
   }, [effectiveId])
 
+  // Follow the conversation while it is at the bottom.
+  //
+  // This used to fire on messages.length, which does not change while a reply
+  // streams — the text grows inside the last message. So the view sat still
+  // through the whole response, and Thinking looked cut off because its
+  // message was already counted. Watching the element covers every way the
+  // content can grow: streamed text, an expanding tool block, an image
+  // finishing its load.
+  //
   useEffect(() => {
     const el = scrollRef.current
-    if (el) {
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
-      if (nearBottom) el.scrollTop = el.scrollHeight
+    if (!el) return
+    const stick = (): void => {
+      // Not while older messages are being prepended: that path is holding the
+      // scroll position deliberately, and jumping to the bottom would undo it.
+      if (followRef.current && !expandingRef.current) el.scrollTop = el.scrollHeight
     }
-  }, [messages.length])
+    const observer = new ResizeObserver(stick)
+    for (const child of el.children) observer.observe(child)
+    const mutations = new MutationObserver(() => {
+      for (const child of el.children) observer.observe(child)
+      stick()
+    })
+    mutations.observe(el, { childList: true })
+    return () => {
+      observer.disconnect()
+      mutations.disconnect()
+    }
+  }, [effectiveId])
 
   useEffect(() => {
     if (!msgCtx) return
