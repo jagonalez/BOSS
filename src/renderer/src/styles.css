@@ -1885,6 +1885,13 @@ textarea {
   background: var(--line-subtle);
 }
 
+.workspace-menu-note {
+  padding: 4px 10px 6px;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  line-height: 1.35;
+}
+
 .workspace-add-menu-item {
   width: 100%;
   display: flex;

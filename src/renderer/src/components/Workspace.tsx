@@ -131,68 +131,27 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
   )
 }
 
-function ThreadPicker({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
-  const sessions = useStore(appStore, (state) =>
-    [...state.sessions]
-      .filter((session) => !session.parentID)
-      .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
-  )
-  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+/** Start a thread in an empty pane. The long list of existing threads is gone:
+ *  that is the sidebar's job, and dragging one in beats searching a menu. */
+function NewThreadButtons({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
   const backends = useStore(appStore, (state) => state.backends)
-  const openIds = useMemo(() => {
-    const ids = new Set<string>()
-    const walk = (node: WorkspaceNode): void => {
-      if (node.type === 'split') {
-        walk(node.first)
-        walk(node.second)
-      } else {
-        node.tabs.forEach((item) => {
-          if (item.kind === 'thread' && item.sessionId) ids.add(item.sessionId)
-        })
-      }
-    }
-    if (workspace) walk(activeWorkspaceView(workspace).root)
-    return ids
-  }, [workspace])
-
   return (
-    <div className="workspace-add-menu thread-picker">
-      <div className="workspace-menu-title">Add thread</div>
-      <div className="workspace-new-thread-backends">
-        {backends.map((backend) => (
-          <button
-            key={backend.id}
-            className="workspace-add-menu-item primary"
-            disabled={!backend.available}
-            title={backend.available ? `New ${backend.label} thread` : backend.unavailableReason}
-            onClick={() => {
-              close()
-              void createThreadInGroup(groupId, backend.id)
-            }}
-          >
-            <PlusIcon size={14} />
-            <BackendBadge backendId={backend.id} />
-          </button>
-        ))}
-      </div>
-      <div className="workspace-menu-rule" />
-      <div className="workspace-thread-options">
-        {sessions.map((session) => (
-          <button
-            key={session.id}
-            className="workspace-add-menu-item"
-            onClick={() => {
-              addWorkspaceTab(groupId, 'thread', session.id)
-              close()
-            }}
-          >
-            <ChatIcon size={13} />
-            <span>{session.title || 'Untitled'}</span>
-            <BackendBadge backendId={session.backendId} />
-            {openIds.has(session.id) ? <small>open</small> : null}
-          </button>
-        ))}
-      </div>
+    <div className="workspace-new-thread-backends">
+      {backends.map((backend) => (
+        <button
+          key={backend.id}
+          className="workspace-add-menu-item primary"
+          disabled={!backend.available}
+          title={backend.available ? `New ${backend.label} thread` : backend.unavailableReason}
+          onClick={() => {
+            close()
+            void createThreadInGroup(groupId, backend.id)
+          }}
+        >
+          <PlusIcon size={14} />
+          <BackendBadge backendId={backend.id} />
+        </button>
+      ))}
     </div>
   )
 }
@@ -202,7 +161,6 @@ function checkoutPath(session: { executionPath?: string; worktree?: { path: stri
 }
 
 function AddMenu({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
-  const [threadPicker, setThreadPicker] = useState(false)
   const projectPath = useStore(appStore, (state) => state.projectPath)
   const sessions = useStore(appStore, (state) => state.sessions)
   const activeSessionId = useStore(appStore, (state) => state.activeSessionId)
@@ -228,22 +186,24 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
     }
   })()
 
-  if (threadPicker) return <ThreadPicker groupId={groupId} close={close} />
+  // A pane holds one thread and the resources belonging to it, so this menu
+  // adds resources only. An existing thread is dragged in from the sidebar,
+  // and an empty pane can start a new one below.
+  const resources = TAB_TYPES.filter((item) => item.kind !== 'thread')
+  const hasThread = Boolean(owner)
 
   return (
     <div className="workspace-add-menu">
-      <div className="workspace-menu-title">Add to group</div>
-      {TAB_TYPES.map(({ kind, label, icon: Icon }) => {
+      <div className="workspace-menu-title">
+        {hasThread ? `Add to ${owner?.title || 'this thread'}` : 'Add to this pane'}
+      </div>
+      {resources.map(({ kind, label, icon: Icon }) => {
+        const scoped = kind === 'terminal' || kind === 'review' || kind === 'files'
         return (
           <button
             key={kind}
             className="workspace-add-menu-item"
             onClick={() => {
-              if (kind === 'thread') {
-                setThreadPicker(true)
-                return
-              }
-              const scoped = kind === 'terminal' || kind === 'review' || kind === 'files'
               // Record the owning thread, not just its checkout. A resource can
               // be dragged into any view, so the sidebar needs to know which
               // thread to list it under once it no longer sits beside one.
@@ -253,12 +213,18 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
           >
             <Icon size={14} />
             <span>{label}</span>
-            {kind === 'terminal' || kind === 'review' || kind === 'files'
-              ? <small>{inherited?.contextLabel ?? 'project'}</small>
-              : null}
+            {scoped ? <small>{inherited?.contextLabel ?? 'project'}</small> : null}
           </button>
         )
       })}
+      {!hasThread ? (
+        <>
+          <div className="workspace-menu-rule" />
+          <div className="workspace-menu-title">New thread</div>
+          <NewThreadButtons groupId={groupId} close={close} />
+          <div className="workspace-menu-note">Or drag one in from the sidebar.</div>
+        </>
+      ) : null}
     </div>
   )
 }
