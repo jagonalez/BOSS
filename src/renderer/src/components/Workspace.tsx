@@ -46,11 +46,6 @@ const TAB_TYPES: Array<{
   { kind: 'files', label: 'Files', icon: FilesIcon }
 ]
 
-function shortProject(path?: string): string {
-  if (!path) return 'Project'
-  return path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) ?? path
-}
-
 function tabIcon(kind: WorkspaceTabKind): (props: { size?: number }) => React.JSX.Element {
   return TAB_TYPES.find((item) => item.kind === kind)?.icon ?? ChatIcon
 }
@@ -250,7 +245,10 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
                 return
               }
               const scoped = kind === 'terminal' || kind === 'review' || kind === 'files'
-              addWorkspaceTab(groupId, kind, undefined, scoped ? inherited : undefined)
+              // Record the owning thread, not just its checkout. A resource can
+              // be dragged into any view, so the sidebar needs to know which
+              // thread to list it under once it no longer sits beside one.
+              addWorkspaceTab(groupId, kind, scoped ? ownerId ?? undefined : undefined, scoped ? inherited : undefined)
               close()
             }}
           >
@@ -580,10 +578,6 @@ function WorkspaceBar(): React.JSX.Element {
 
   return (
     <div className="workspace-bar">
-      <div className="workspace-identity">
-        <span className="workspace-project-dot" />
-        <div><strong>{shortProject(workspace?.projectKey)}</strong><small>{workspace?.projectKey}</small></div>
-      </div>
       <div className="workspace-view-tabs" role="tablist" aria-label="Project views">
         {workspace?.views.map((view) => (
           <div

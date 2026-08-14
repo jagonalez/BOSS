@@ -187,6 +187,9 @@ export function addWorkspaceTab(
     }
   }
   if (kind === 'review' || kind === 'files') {
+    // Deduped by checkout, not by owning thread. Two threads on one checkout
+    // see the same files and the same diff, so a second tab would be a copy of
+    // the first. The owner is still recorded on the tab for the sidebar.
     const existing = walkTabs(view.root).find((item) =>
       item.kind === kind && item.contextPath === checkout?.contextPath
     )

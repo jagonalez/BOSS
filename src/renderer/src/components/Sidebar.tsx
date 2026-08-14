@@ -101,6 +101,7 @@ export function Sidebar(): React.JSX.Element {
   const archived = useStore(appStore, (s) => s.archived)
   const backends = useStore(appStore, (s) => s.backends)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [filter, setFilter] = useState('')
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const projectsRef = useRef<HTMLDivElement>(null)
@@ -125,8 +126,16 @@ export function Sidebar(): React.JSX.Element {
   })
 
   const archivedSet = new Set(archived)
-  const visibleSessions = sessions.filter((s) => !archivedSet.has(s.id) && !s.parentID)
-  const archivedSessions = sessions.filter((s) => archivedSet.has(s.id))
+  const query = filter.trim().toLowerCase()
+  // Matching on the project too, so "cage" finds every thread in that project
+  // without expanding it — the point of filtering is not to drill.
+  const matches = (session: SessionInfo): boolean => {
+    if (!query) return true
+    const where = session.projectPath ?? session.directory ?? session.path ?? ''
+    return `${session.title ?? ''} ${where}`.toLowerCase().includes(query)
+  }
+  const visibleSessions = sessions.filter((s) => !archivedSet.has(s.id) && !s.parentID && matches(s))
+  const archivedSessions = sessions.filter((s) => archivedSet.has(s.id) && matches(s))
 
   const sessionsByPath = new Map<string, SessionInfo[]>()
   for (const session of visibleSessions) {
@@ -277,6 +286,18 @@ export function Sidebar(): React.JSX.Element {
 
       <div className="sidebar-section projects" style={projectsH ? { height: projectsH } : undefined}>
         <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="Add a project folder" />
+        <div className="sidebar-filter">
+          <input
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            placeholder="Filter threads"
+            aria-label="Filter threads"
+            spellCheck={false}
+          />
+          {filter ? (
+            <button className="sidebar-filter-clear" onClick={() => setFilter('')} aria-label="Clear filter">×</button>
+          ) : null}
+        </div>
         <div
           className="list"
           ref={projectsRef}
@@ -293,7 +314,9 @@ export function Sidebar(): React.JSX.Element {
           const pathSessions = sessionsByPath.get(path) ?? []
           // Threads are always listed; "expanded" now only lifts the per-project
           // cap, so a project with hundreds of threads cannot flood the sidebar.
-          const isExpanded = expanded.has(path)
+          // While filtering, a project with matches opens itself: hunting
+          // through collapsed folders is the thing search is meant to replace.
+          const isExpanded = expanded.has(path) || Boolean(query)
           const shown = isExpanded ? pathSessions : pathSessions.slice(0, THREADS_PER_PROJECT)
           const hidden = pathSessions.length - shown.length
           return (
