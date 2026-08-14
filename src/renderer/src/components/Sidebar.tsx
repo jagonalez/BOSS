@@ -35,17 +35,6 @@ interface CtxMenu {
   session?: SessionInfo
 }
 
-function SectionHeader({ label, onAdd, addTitle }: { label: string; onAdd: () => void; addTitle: string }): React.JSX.Element {
-  return (
-    <div className="section-head">
-      <span className="section-label">{label}</span>
-      <IconButton size="small" className="section-add" onClick={onAdd} label={addTitle}>
-        <PlusIcon size={12} />
-      </IconButton>
-    </div>
-  )
-}
-
 function timeAgo(ts?: number): string {
   if (!ts) return ''
   const diff = Date.now() - ts
@@ -162,6 +151,9 @@ export function Sidebar(): React.JSX.Element {
   const archived = useStore(appStore, (s) => s.archived)
   const backends = useStore(appStore, (s) => s.backends)
   const workspace = useStore(appStore, (s) => s.projectWorkspace)
+  const [tab, setTab] = useState<'projects' | 'chats'>(() => {
+    try { return localStorage.getItem('boss.sidebarTab') === 'chats' ? 'chats' : 'projects' } catch { return 'projects' }
+  })
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [liftedCaps, setLiftedCaps] = useState<Set<string>>(new Set())
   const [openThreads, setOpenThreads] = useState<Set<string>>(new Set())
@@ -192,15 +184,6 @@ export function Sidebar(): React.JSX.Element {
       return 268
     }
   })
-  const [projectsH, setProjectsH] = useState<number | null>(() => {
-    try {
-      const saved = Number(localStorage.getItem('boss.sidebarProjectsH'))
-      return Number.isFinite(saved) && saved > 0 ? saved : null
-    } catch {
-      return null
-    }
-  })
-
   const archivedSet = new Set(archived)
   const query = filter.trim().toLowerCase()
   // Matching on the project too, so "cage" finds every thread in that project
@@ -250,27 +233,9 @@ export function Sidebar(): React.JSX.Element {
     }
   }, [ctx])
 
-  const onDividerDown = (e: React.MouseEvent): void => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startH = projectsH ?? projectsRef.current?.getBoundingClientRect().height ?? 200
-    const onMove = (ev: MouseEvent): void => {
-      const h = Math.min(Math.max(60, startH + (ev.clientY - startY)), 480)
-      setProjectsH(h)
-      try {
-        localStorage.setItem('boss.sidebarProjectsH', String(h))
-      } catch {
-        /* ignore */
-      }
-    }
-    const onUp = (): void => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      document.body.style.userSelect = ''
-    }
-    document.body.style.userSelect = 'none'
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+  const selectTab = (next: 'projects' | 'chats'): void => {
+    setTab(next)
+    try { localStorage.setItem('boss.sidebarTab', next) } catch { /* ignore */ }
   }
 
   const setHidden = (hidden: boolean): void => {
@@ -380,20 +345,49 @@ export function Sidebar(): React.JSX.Element {
       </nav>
       <div className="sidebar-section-rule" />
 
-      <div className="sidebar-section projects" style={projectsH ? { height: projectsH } : undefined}>
-        <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="New project" />
-        <div className="sidebar-filter">
-          <input
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter threads"
-            aria-label="Filter threads"
-            spellCheck={false}
-          />
-          {filter ? (
-            <button className="sidebar-filter-clear" onClick={() => setFilter('')} aria-label="Clear filter">×</button>
-          ) : null}
-        </div>
+      <div className="sidebar-tabs" role="tablist" aria-label="Sidebar sections">
+        <button
+          role="tab"
+          aria-selected={tab === 'projects'}
+          className={`sidebar-tab ${tab === 'projects' ? 'active' : ''}`}
+          onClick={() => selectTab('projects')}
+        >
+          Projects
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'chats'}
+          className={`sidebar-tab ${tab === 'chats' ? 'active' : ''}`}
+          onClick={() => selectTab('chats')}
+        >
+          Chats{looseChats.length ? <small>{looseChats.length}</small> : null}
+        </button>
+        <IconButton
+          size="small"
+          className="section-add"
+          onClick={() => (tab === 'projects' ? void openProjectFolder() : void newGlobalChat())}
+          label={tab === 'projects' ? 'New project' : 'New chat'}
+        >
+          <PlusIcon size={12} />
+        </IconButton>
+      </div>
+
+      {/* Above the tabs: matches() filters loose chats as well as project
+          threads, so one box serves both panels. */}
+      <div className="sidebar-filter">
+        <input
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder={tab === 'projects' ? 'Filter threads' : 'Filter chats'}
+          aria-label={tab === 'projects' ? 'Filter threads' : 'Filter chats'}
+          spellCheck={false}
+        />
+        {filter ? (
+          <button className="sidebar-filter-clear" onClick={() => setFilter('')} aria-label="Clear filter">×</button>
+        ) : null}
+      </div>
+
+      <div className="sidebar-section projects" hidden={tab !== 'projects'}>
         <div
           className="list"
           ref={projectsRef}
@@ -461,14 +455,14 @@ export function Sidebar(): React.JSX.Element {
         )}
       </div>
       </div>
-      <div className="sidebar-divider" onMouseDown={onDividerDown} title="Drag to resize" />
 
-      <SectionHeader label="Chats" onAdd={() => void newGlobalChat()} addTitle="New chat" />
-      <div className="list sidebar-section-chats">
-        {looseChats.map(threadRow)}
-        {looseChats.length === 0 && (
-          <div className="sidebar-empty">No chats yet</div>
-        )}
+      <div className="sidebar-section chats" hidden={tab !== 'chats'}>
+        <div className="list">
+          {looseChats.map(threadRow)}
+          {looseChats.length === 0 && (
+            <div className="sidebar-empty">No chats yet</div>
+          )}
+        </div>
       </div>
 
       {archivedSessions.length > 0 && (

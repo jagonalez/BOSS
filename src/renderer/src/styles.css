@@ -331,17 +331,6 @@ textarea {
   padding: 14px 8px 6px;
 }
 
-.section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-right: 4px;
-}
-
-.section-head .section-label {
-  padding: 14px 8px 6px;
-}
-
 .section-add {
   background: var(--bg-hover);
   border: 1px solid var(--border);
@@ -2974,7 +2963,50 @@ textarea {
   min-height: 0;
 }
 
-.sidebar-section.projects {
+/* Projects and Chats share the panel, one at a time. Nesting resources under
+   threads made the project tree too tall to stack a second list beneath it. */
+.sidebar-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px 6px 8px;
+}
+
+.sidebar-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--type-control);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-tab:hover {
+  color: var(--text);
+}
+
+.sidebar-tab.active {
+  background: var(--bg-active, var(--bg-hover));
+  color: var(--text);
+}
+
+.sidebar-tab small {
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+.sidebar-tabs .section-add {
+  margin: 0 0 0 auto;
+}
+
+.sidebar-section.projects,
+.sidebar-section.chats {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -2982,10 +3014,15 @@ textarea {
   overflow: hidden;
 }
 
+/* hidden must beat the flex display above it. */
+.sidebar-section[hidden] {
+  display: none;
+}
+
 .sidebar-filter {
   position: relative;
   flex: 0 0 auto;
-  margin: 0 8px 6px;
+  margin: 0 8px 8px;
 }
 
 .sidebar-filter input {
@@ -3022,39 +3059,9 @@ textarea {
   color: var(--text);
 }
 
-.sidebar-section.projects .list {
+.sidebar-section.projects .list,
+.sidebar-section.chats .list {
   flex: 1 1 auto;
-}
-
-.sidebar-divider {
-  flex: 0 0 auto;
-  height: 6px;
-  margin: 2px 0;
-  cursor: ns-resize;
-  border-radius: 3px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
-
-.sidebar-divider::after {
-  content: '';
-  width: 28px;
-  height: 3px;
-  border-radius: 3px;
-  background: var(--border-subtle);
-  transition: background 0.12s ease;
-}
-
-.sidebar-divider:hover::after,
-.sidebar-divider:active::after {
-  background: var(--accent);
-}
-
-.sidebar-section-chats {
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 .badge.compacting {
