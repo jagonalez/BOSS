@@ -8,7 +8,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind } from '@shared/workspace'
+import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
 import {
   activeWorkspaceView,
   activateTab,
@@ -318,7 +318,41 @@ export function splitWorkspaceGroup(groupId: string, direction: SplitDirection):
   })
 }
 
+/** Put back the views as they were before the last close.
+ *
+ *  Closing disposes what it removes, so a misdrag or a slipped click would
+ *  otherwise cost a running terminal. The snapshot holds the whole view list,
+ *  which is what makes restoring a closed pane the same operation as
+ *  restoring a closed tab. */
+let closeUndo: { views: WorkspaceView[]; activeViewId: string; label: string } | null = null
+let closeUndoTimer: number | undefined
+
+export function undoWorkspaceClose(): void {
+  const snapshot = closeUndo
+  if (!snapshot) return
+  closeUndo = null
+  window.clearTimeout(closeUndoTimer)
+  updateWorkspace((item) => ({ ...item, views: snapshot.views, activeViewId: snapshot.activeViewId }))
+  appStore.setState({ workspaceUndo: null })
+  syncFocusedThread()
+}
+
+function rememberClose(label: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  closeUndo = { views: workspace.views, activeViewId: workspace.activeViewId, label }
+  appStore.setState({ workspaceUndo: { label } })
+  window.clearTimeout(closeUndoTimer)
+  closeUndoTimer = window.setTimeout(() => {
+    closeUndo = null
+    appStore.setState({ workspaceUndo: null })
+  }, 8_000)
+}
+
 export function closeWorkspaceTab(groupId: string, tabId: string): void {
+  const view = currentView()
+  const closing = view ? findTab(view.root, tabId)?.tab : undefined
+  rememberClose(closing ? `Closed ${closing.kind}` : 'Closed tab')
   const next = updateWorkspaceView((item) => {
     const root = closeTab(item.root, groupId, tabId)
     const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
@@ -333,6 +367,7 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
 }
 
 export function closeWorkspaceGroup(groupId: string): void {
+  rememberClose('Closed pane')
   const next = updateWorkspaceView((item) => {
     const root = closeGroup(item.root, groupId)
     return { ...item, root, focusedGroupId: walkGroups(root)[0].id }

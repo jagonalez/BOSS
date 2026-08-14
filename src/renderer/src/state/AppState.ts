@@ -49,6 +49,8 @@ export interface AppState {
   projectWorkspace: Workspace | null
   /** Tab to flash after it lands somewhere new. Clears itself. */
   highlightedTabId?: string
+  /** Offer to undo the last close. Expires on its own. */
+  workspaceUndo: { label: string } | null
   layoutTemplates: LayoutTemplate[]
   nativeViewSuspensions: string[]
   serverUrl: string
@@ -147,6 +149,7 @@ export const initialBrowseState: BrowseNavigationState = {
 export const initialState: AppState = {
   activePage: 'command-center',
   projectWorkspace: null,
+  workspaceUndo: null,
   layoutTemplates: [],
   nativeViewSuspensions: [],
   serverUrl: '',

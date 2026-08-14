@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bindTemplate, group, moveTabAcrossViews, placementIndex, resourcesByThread, tab, templateFromWorkspace, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { bindTemplate, closeGroup, group, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, templateFromWorkspace, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('workspace add menus align to their trigger and stay inside the pane', () => {
   assert.equal(workspaceMenuRight(900, 100, 1_000), 100)
@@ -113,6 +113,24 @@ test('moving a resource within one view leaves the other views alone', () => {
 
   assert.equal(walkTabs(moved[0].root).length, 2)
   assert.deepEqual(walkTabs(moved[1].root).map((item) => item.kind), ['files'])
+})
+
+test('a view list snapshot restores a closed pane whole', () => {
+  // What the undo relies on: views are values, so holding the old array is
+  // enough to bring back a pane and everything that was in it.
+  const main = workspaceView('Main', split('horizontal',
+    group([tab('thread', 'thread-1'), tab('terminal', 'thread-1')]),
+    group([tab('files', 'thread-2')])
+  ))
+  const before = [main]
+  const doomed = walkGroups(main.root)[0]
+
+  const after = before.map((view) => ({ ...view, root: closeGroup(view.root, doomed.id) }))
+  assert.equal(walkTabs(after[0].root).length, 1)
+
+  // The snapshot is untouched by the close, so restoring it is a plain swap.
+  assert.equal(walkTabs(before[0].root).length, 3)
+  assert.equal(walkGroups(before[0].root).length, 2)
 })
 
 test('threads are not listed as resources of themselves', () => {

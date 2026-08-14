@@ -1237,6 +1237,27 @@ textarea {
   place-items: center;
 }
 
+/* Closing disposes what it removes, so the way back has to be visible while it
+   is still available. Expires with the snapshot behind it. */
+.workspace-undo {
+  -webkit-app-region: no-drag;
+  height: 30px;
+  margin-right: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 520;
+  white-space: nowrap;
+}
+
+.workspace-undo:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
 .workspace-bar-button {
   -webkit-app-region: no-drag;
   height: 30px;

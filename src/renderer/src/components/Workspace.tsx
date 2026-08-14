@@ -26,7 +26,8 @@ import {
   sendWorkspaceTabToView,
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
-  splitWorkspaceGroup
+  splitWorkspaceGroup,
+  undoWorkspaceClose
 } from '../lib/actions'
 import { TAB_DRAG_TYPE, activeWorkspaceView, findGroup, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
@@ -54,6 +55,24 @@ function isLiveSurface(item: WorkspaceTab): boolean {
 }
 
 function requestCloseWorkspaceTab(groupId: string, item: WorkspaceTab): void {
+  const state = appStore.getState()
+  const busy = item.kind === 'thread' && item.sessionId
+    && (state.sessionBusy[item.sessionId] || state.streaming[item.sessionId])
+
+  if (busy) {
+    const title = state.sessions.find((session) => session.id === item.sessionId)?.title || 'This thread'
+    appStore.setState({
+      confirm: {
+        title: 'Close while it is working?',
+        message: `${title} is still working. Closing it here stops you seeing the rest of the run.`,
+        confirmLabel: 'Close anyway',
+        destructive: true,
+        action: () => closeWorkspaceTab(groupId, item.id)
+      }
+    })
+    return
+  }
+
   if (item.kind !== 'terminal') {
     closeWorkspaceTab(groupId, item.id)
     return
@@ -70,19 +89,35 @@ function requestCloseWorkspaceTab(groupId: string, item: WorkspaceTab): void {
   })
 }
 
+/** Threads in this pane whose agent is mid-run. Closing disposes what it
+ *  removes, so a working agent is worth stopping for even though a terminal
+ *  is not the only live thing in the pane. */
+function workingThreads(group: WorkspaceGroup): string[] {
+  const state = appStore.getState()
+  return group.tabs
+    .filter((item) => item.kind === 'thread' && item.sessionId)
+    .filter((item) => state.sessionBusy[item.sessionId!] || state.streaming[item.sessionId!])
+    .map((item) => state.sessions.find((session) => session.id === item.sessionId)?.title || 'Untitled')
+}
+
 function requestCloseWorkspaceGroup(group: WorkspaceGroup): void {
   const terminals = group.tabs.filter((item) => item.kind === 'terminal').length
-  if (terminals === 0) {
+  const working = workingThreads(group)
+  if (terminals === 0 && working.length === 0) {
     closeWorkspaceGroup(group.id)
     return
   }
 
+  const parts: string[] = []
+  if (working.length === 1) parts.push(`${working[0]} is still working.`)
+  else if (working.length > 1) parts.push(`${working.length} threads are still working.`)
+  if (terminals === 1) parts.push('This closes the terminal and ends its running shell and processes.')
+  else if (terminals > 1) parts.push(`This closes ${terminals} terminals and ends their running shells and processes.`)
+
   appStore.setState({
     confirm: {
-      title: 'Close pane?',
-      message: terminals === 1
-        ? 'This closes the terminal and ends its running shell and processes.'
-        : `This closes ${terminals} terminals and ends their running shells and processes.`,
+      title: working.length ? 'Close pane while it is working?' : 'Close pane?',
+      message: parts.join(' '),
       confirmLabel: 'Close pane',
       destructive: true,
       action: () => closeWorkspaceGroup(group.id)
@@ -493,6 +528,7 @@ function WorkspaceNodeView({ node }: { node: WorkspaceNode }): React.JSX.Element
 function WorkspaceBar(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const templates = useStore(appStore, (state) => state.layoutTemplates)
+  const undo = useStore(appStore, (state) => state.workspaceUndo)
   const [formatsOpen, setFormatsOpen] = useState(false)
   const [editingViewId, setEditingViewId] = useState<string | null>(null)
   const [viewNameDraft, setViewNameDraft] = useState('')
@@ -606,6 +642,11 @@ function WorkspaceBar(): React.JSX.Element {
         </button>
       </div>
       <div className="workspace-bar-spacer" />
+      {undo ? (
+        <button className="workspace-undo" onClick={undoWorkspaceClose} title="Undo the last close">
+          {undo.label} — Undo
+        </button>
+      ) : null}
       <div className="workspace-format-control" ref={menuRef}>
         <button className="workspace-bar-button" onClick={() => setFormatsOpen((open) => !open)}>Formats <span>⌄</span></button>
         {formatsOpen ? (
