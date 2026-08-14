@@ -158,12 +158,12 @@ export function Sidebar(): React.JSX.Element {
   const sessions = useStore(appStore, (s) => s.sessions)
   const projects = useStore(appStore, (s) => s.projects)
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
-  const projectPath = useStore(appStore, (s) => s.projectPath)
   const activePage = useStore(appStore, (s) => s.activePage)
   const archived = useStore(appStore, (s) => s.archived)
   const backends = useStore(appStore, (s) => s.backends)
   const workspace = useStore(appStore, (s) => s.projectWorkspace)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [liftedCaps, setLiftedCaps] = useState<Set<string>>(new Set())
   const [openThreads, setOpenThreads] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState('')
 
@@ -233,8 +233,6 @@ export function Sidebar(): React.JSX.Element {
       ].filter(Boolean)
     )
   )
-  const activePath = projectPath
-
   useEffect(() => {
     if (!ctx) return
     const close = (): void => setCtx(null)
@@ -251,11 +249,6 @@ export function Sidebar(): React.JSX.Element {
       document.removeEventListener('keydown', onKey)
     }
   }, [ctx])
-
-  const open = (path: string): void => {
-    if (path !== activePath) void openProject(path)
-    else showPage('project')
-  }
 
   const onDividerDown = (e: React.MouseEvent): void => {
     e.preventDefault()
@@ -388,7 +381,7 @@ export function Sidebar(): React.JSX.Element {
       <div className="sidebar-section-rule" />
 
       <div className="sidebar-section projects" style={projectsH ? { height: projectsH } : undefined}>
-        <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="Add a project folder" />
+        <SectionHeader label="Projects" onAdd={() => void openProjectFolder()} addTitle="New project" />
         <div className="sidebar-filter">
           <input
             value={filter}
@@ -413,45 +406,51 @@ export function Sidebar(): React.JSX.Element {
           }}
         >
         {projectPaths.map((path) => {
-          const isActive = path === activePath
           const pathSessions = sessionsByPath.get(path) ?? []
-          // Threads are always listed; "expanded" now only lifts the per-project
-          // cap, so a project with hundreds of threads cannot flood the sidebar.
-          // While filtering, a project with matches opens itself: hunting
-          // through collapsed folders is the thing search is meant to replace.
-          const isExpanded = expanded.has(path) || Boolean(query)
-          const shown = isExpanded ? pathSessions : pathSessions.slice(0, THREADS_PER_PROJECT)
+          // A project is a folder in the tree, not a thing you select. Clicking
+          // it opens and shuts it. Filtering opens every project that matched,
+          // since hunting through shut folders is what search replaces.
+          const isOpen = !collapsed.has(path) || Boolean(query)
+          const uncapped = liftedCaps.has(path) || Boolean(query)
+          const shown = uncapped ? pathSessions : pathSessions.slice(0, THREADS_PER_PROJECT)
           const hidden = pathSessions.length - shown.length
           return (
             <div key={path}>
               <div
-                className={`item dir project-row ${isActive ? 'active' : ''}`}
-                onClick={() => open(path)}
+                className="item dir project-row"
+                onClick={() =>
+                  setCollapsed((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(path)) next.delete(path)
+                    else next.add(path)
+                    return next
+                  })
+                }
                 onContextMenu={(e) => onProjectCtx(e, path)}
                 title={path}
               >
+                <span className={`project-caret ${isOpen ? 'open' : ''}`}><ChevronIcon size={10} /></span>
                 <span className="icon">
                   <FolderIcon size={15} />
                 </span>
                 <span className="project-row-copy">
                   <span className="name">{projectName(path)}</span>
-                  {isActive ? <span className="project-row-path">{path}</span> : null}
                 </span>
                 <span className="meta">{pathSessions.length || ''}</span>
               </div>
-              {shown.map(threadRow)}
-              {hidden > 0 ? (
+              {isOpen ? shown.map(threadRow) : null}
+              {isOpen && hidden > 0 ? (
                 <div
                   className="sidebar-load-more nested"
                   onClick={(e) => {
                     e.stopPropagation()
-                    setExpanded((prev) => new Set(prev).add(path))
+                    setLiftedCaps((prev) => new Set(prev).add(path))
                   }}
                 >
                   Show {hidden} more
                 </div>
               ) : null}
-              {pathSessions.length === 0 ? (
+              {isOpen && pathSessions.length === 0 ? (
                 <div className="sidebar-empty nested">No chats yet</div>
               ) : null}
             </div>
@@ -460,12 +459,6 @@ export function Sidebar(): React.JSX.Element {
         {projectPaths.length === 0 && (
           <div className="sidebar-empty">No projects yet</div>
         )}
-        <div className="item" onClick={() => void openProjectFolder()}>
-          <span className="icon">
-            <FolderIcon size={15} />
-          </span>
-          <span className="name">Open folder…</span>
-        </div>
       </div>
       </div>
       <div className="sidebar-divider" onMouseDown={onDividerDown} title="Drag to resize" />

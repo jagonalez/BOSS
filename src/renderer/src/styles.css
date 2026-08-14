@@ -3209,6 +3209,21 @@ textarea {
   padding-left: 12px;
 }
 
+.project-caret {
+  display: grid;
+  width: 13px;
+  height: 18px;
+  flex: 0 0 13px;
+  place-items: center;
+  color: var(--text-faint);
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.project-caret.open {
+  transform: rotate(90deg);
+}
+
 .session-caret {
   display: grid;
   width: 13px;

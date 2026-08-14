@@ -46,8 +46,9 @@ export interface WorkspaceView {
   focusedGroupId: string
 }
 
-export interface ProjectWorkspace {
-  projectKey: string
+/** Every view in the app. Not scoped to a project: a view holds threads from
+ *  wherever they live, and each thread carries its own checkout. */
+export interface Workspace {
   views: WorkspaceView[]
   activeViewId: string
   updatedAt: number

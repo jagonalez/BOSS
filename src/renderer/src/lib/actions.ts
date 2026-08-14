@@ -69,9 +69,11 @@ export function setNativeViewsSuspended(reason: string, suspended: boolean): voi
   })
 }
 
-export function loadProjectWorkspace(projectKey: string, preferredSessionId?: string): void {
-  const workspace = loadWorkspace(projectKey, preferredSessionId)
-  appStore.setState({ projectWorkspace: workspace })
+/** Load the app's views. Call once at startup: they are not per project, so
+ *  opening a project must not reload them. */
+export function loadProjectWorkspace(preferredSessionId?: string): void {
+  if (appStore.getState().projectWorkspace) return
+  appStore.setState({ projectWorkspace: loadWorkspace(preferredSessionId) })
 }
 
 export function createWorkspaceView(): void {
@@ -211,7 +213,7 @@ export function addWorkspaceTab(
 export function openBackendLogin(backendId: BackendId): void {
   let workspace = currentWorkspace()
   if (!workspace) {
-    workspace = loadWorkspace('__connections__')
+    workspace = loadWorkspace()
     appStore.setState({ projectWorkspace: workspace })
   }
   const view = activeWorkspaceView(workspace)
@@ -1414,8 +1416,8 @@ export async function openProject(path: string): Promise<void> {
   await refreshSessions()
   await refreshProjects()
   await refreshFiles()
-  const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
-  loadProjectWorkspace(info.path, preferred)
+  // Views stay put. They are not owned by a project, so opening one must not
+  // replace the layout the user is working in.
 }
 
 export async function deleteSession(id: string): Promise<void> {
@@ -1891,8 +1893,6 @@ export async function openProjectFolder(): Promise<void> {
     })
     await refreshSessions()
     await refreshProjects()
-    const preferred = appStore.getState().sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === info.path)?.id
-    loadProjectWorkspace(info.path, preferred)
     // A linked worktree opens its repository, not a second project. Without
     // saying so, picking a worktree looks like BOSS ignored the folder chosen.
     if (info.checkoutPath && info.checkoutPath !== info.path) {
@@ -2168,11 +2168,7 @@ export async function openSiteInBrowser(url: string): Promise<void> {
   const state = appStore.getState()
   let workspace = state.projectWorkspace
   if (!workspace) {
-    if (!state.projectPath) {
-      void window.boss.openExternal(url)
-      return
-    }
-    loadProjectWorkspace(state.projectPath)
+    loadProjectWorkspace()
     workspace = appStore.getState().projectWorkspace
   }
   if (!workspace) {

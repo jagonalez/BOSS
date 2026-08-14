@@ -1,7 +1,7 @@
 import type {
   DropPosition,
   LayoutTemplate,
-  ProjectWorkspace,
+  Workspace,
   SplitDirection,
   WorkspaceGroup,
   WorkspaceNode,
@@ -13,7 +13,7 @@ import type {
 
 // Unversioned: nothing has shipped, so there is no other shape in the world to
 // migrate from. Version these at the first release, not before.
-const WORKSPACES_KEY = 'boss.projectWorkspaces'
+const WORKSPACES_KEY = 'boss.workspace'
 const TEMPLATES_KEY = 'boss.layoutTemplates'
 /** Drag payload for a workspace tab. Shared so the sidebar can start a drag the
  *  panes already know how to accept. */
@@ -170,14 +170,19 @@ export function saveCustomTemplates(templates: LayoutTemplate[]): void {
   writeJson(TEMPLATES_KEY, templates.filter((item) => !item.builtIn))
 }
 
-export function saveWorkspace(workspace: ProjectWorkspace): void {
-  const all = readJson<Record<string, ProjectWorkspace>>(WORKSPACES_KEY, {})
-  all[workspace.projectKey] = { ...workspace, updatedAt: Date.now() }
-  writeJson(WORKSPACES_KEY, all)
+export function saveWorkspace(workspace: Workspace): void {
+  writeJson(WORKSPACES_KEY, { ...workspace, updatedAt: Date.now() })
 }
 
-export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWorkspace {
-  const saved = readJson<Record<string, ProjectWorkspace>>(WORKSPACES_KEY, {})[projectKey]
+/** One set of views for the whole app.
+ *
+ *  Views used to be stored per project, which fought the model: a view holds
+ *  threads from anywhere, so keying the store by project meant switching
+ *  projects swapped your layout out from under you, and going back showed a
+ *  different one. A thread carries its own project, so nothing above it needs
+ *  to. */
+export function loadWorkspace(sessionId?: string): Workspace {
+  const saved = readJson<Workspace | null>(WORKSPACES_KEY, null)
   if (
     Array.isArray(saved?.views) &&
     saved.views.length > 0 &&
@@ -189,17 +194,17 @@ export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWo
   // than carry a reader for it. A layout is an arrangement, not content.
   const root = group(sessionId ? [tab('thread', sessionId)] : [])
   const view = workspaceView('Main', root)
-  return { projectKey, views: [view], activeViewId: view.id, updatedAt: Date.now() }
+  return { views: [view], activeViewId: view.id, updatedAt: Date.now() }
 }
 
-export function activeWorkspaceView(workspace: ProjectWorkspace): WorkspaceView {
+export function activeWorkspaceView(workspace: Workspace): WorkspaceView {
   return workspace.views.find((view) => view.id === workspace.activeViewId) ?? workspace.views[0]
 }
 
 export function updateActiveWorkspaceView(
-  workspace: ProjectWorkspace,
+  workspace: Workspace,
   update: (view: WorkspaceView) => WorkspaceView
-): ProjectWorkspace {
+): Workspace {
   const active = activeWorkspaceView(workspace)
   return {
     ...workspace,

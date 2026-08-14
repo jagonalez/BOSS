@@ -71,7 +71,6 @@ export function App(): React.JSX.Element {
   const activePage = useStore(appStore, (s) => s.activePage)
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const sessions = useStore(appStore, (s) => s.sessions)
-  const workspaceProjectKey = useStore(appStore, (s) => s.projectWorkspace?.projectKey)
   const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget || s.policyTarget))
 
   useEffect(() => {
@@ -87,11 +86,11 @@ export function App(): React.JSX.Element {
     applyTheme(loadTheme())
   }, [])
 
+  // Views load once and stay. They belong to the app, not to a project, so
+  // opening a project no longer swaps the layout the user is working in.
   useEffect(() => {
-    if (!projectPath || workspaceProjectKey === projectPath) return
-    const preferred = sessions.find((session) => (session.projectPath ?? session.directory ?? session.path) === projectPath)?.id
-    loadProjectWorkspace(projectPath, preferred)
-  }, [projectPath, sessions, workspaceProjectKey])
+    loadProjectWorkspace(sessions[0]?.id)
+  }, [sessions])
 
   useEffect(() => {
     if (projectPath) void refreshThreadBus()
