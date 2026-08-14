@@ -49,8 +49,9 @@ export class BrowseManager {
     if (entry.parked) entry.parked = bounds
     else entry.view.setBounds(bounds)
     this.win.contentView.addChildView(entry.view)
-    // addChildView resets this, so it has to be set after, in the same call.
-    // Doing it from the renderer raced the attach and left the view hidden.
+    // addChildView resets this, and a parked view must stay parked — the
+    // renderer states which it wants right after, and unparking is a bounds
+    // change rather than a flag.
     entry.view.setVisible(true)
 
     // Load when there is nothing loaded, not merely the first time. A view is

@@ -32,10 +32,12 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
       void window.boss.browseVisible(id, false)
       return
     }
-    // attach shows the view itself: addChildView resets the visible flag, so
-    // setting it from here raced the attach and left the view hidden.
+    // Attach when the tab becomes visible, then say plainly whether the view
+    // should be on screen. Leaving the unpark to the attach meant a drag that
+    // ended without moving anything never brought the view back — it stayed
+    // parked off-screen until something else forced an attach.
     void window.boss.browseAttach(id, rectOf(el))
-    if (nativeViewsSuspended) void window.boss.browseVisible(id, false)
+    void window.boss.browseVisible(id, !nativeViewsSuspended)
     const report = (): void => {
       void window.boss.browseBounds(id, rectOf(el))
     }
