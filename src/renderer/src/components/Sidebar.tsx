@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
+import type { OwnedResource } from '../lib/workspaces'
+import { resourcesByThread } from '../lib/workspaces'
 import {
   archiveAllInPath,
   cloneThreadToBackend,
@@ -13,12 +15,13 @@ import {
   openProject,
   openProjectFolder,
   removeSessionWorktree,
+  revealWorkspaceTab,
   selectSession,
   sessionMetaFor,
   showPage,
   toggleArchive
 } from '../lib/actions'
-import { ChatIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon } from './icons'
+import { ChatIcon, ChevronIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -57,7 +60,21 @@ function projectName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
-function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: boolean; onCtx: (e: React.MouseEvent, s: SessionInfo) => void }): React.JSX.Element {
+function SessionRow({
+  session,
+  active,
+  onCtx,
+  resourceCount = 0,
+  expanded = false,
+  onToggle
+}: {
+  session: SessionInfo
+  active: boolean
+  onCtx: (e: React.MouseEvent, s: SessionInfo) => void
+  resourceCount?: number
+  expanded?: boolean
+  onToggle?: () => void
+}): React.JSX.Element {
   const meta = sessionMetaFor(session.id)
   const busy = useStore(appStore, (s) => Boolean(s.sessionBusy[session.id]))
   const compacting = useStore(appStore, (s) => Boolean(s.compacting[session.id]))
@@ -80,6 +97,17 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
       onContextMenu={(e) => onCtx(e, session)}
       title={meta?.forkedFrom ? `Forked from ${meta.forkedFrom.sessionId.slice(0, 12)}` : meta?.kind === 'side' ? 'Side chat' : session.title}
     >
+      <span
+        className={`session-caret ${expanded ? 'open' : ''} ${resourceCount ? '' : 'empty'}`}
+        onClick={(event) => {
+          if (!resourceCount) return
+          event.stopPropagation()
+          onToggle?.()
+        }}
+        title={resourceCount ? `${resourceCount} resource${resourceCount === 1 ? '' : 's'}` : undefined}
+      >
+        {resourceCount ? <ChevronIcon size={10} /> : null}
+      </span>
       <span className={`session-state ${compacting ? 'compacting' : busy ? 'busy' : 'idle'}`} title={compacting ? 'Compacting' : busy ? 'Agent is working' : 'Idle'}>
         <span />
       </span>
@@ -92,6 +120,35 @@ function SessionRow({ session, active, onCtx }: { session: SessionInfo; active: 
   )
 }
 
+const RESOURCE_LABELS: Record<string, string> = {
+  terminal: 'Terminal',
+  review: 'Review',
+  files: 'Files',
+  browser: 'Browser'
+}
+
+const RESOURCE_ICONS: Record<string, (props: { size?: number }) => React.JSX.Element> = {
+  terminal: TerminalIcon,
+  review: ReviewIcon,
+  files: FilesIcon,
+  browser: GlobeIcon
+}
+
+function ResourceRow({ resource }: { resource: OwnedResource }): React.JSX.Element {
+  const Icon = RESOURCE_ICONS[resource.kind] ?? ChatIcon
+  return (
+    <div
+      className="item resource-row"
+      onClick={() => revealWorkspaceTab(resource.viewId, resource.groupId, resource.id)}
+      title={`${RESOURCE_LABELS[resource.kind] ?? resource.kind} — ${resource.contextLabel ?? resource.contextPath ?? ''}`}
+    >
+      <span className="icon"><Icon size={13} /></span>
+      <span className="name">{RESOURCE_LABELS[resource.kind] ?? resource.kind}</span>
+      <span className="resource-where">{resource.viewName}</span>
+    </div>
+  )
+}
+
 export function Sidebar(): React.JSX.Element {
   const sessions = useStore(appStore, (s) => s.sessions)
   const projects = useStore(appStore, (s) => s.projects)
@@ -100,8 +157,22 @@ export function Sidebar(): React.JSX.Element {
   const activePage = useStore(appStore, (s) => s.activePage)
   const archived = useStore(appStore, (s) => s.archived)
   const backends = useStore(appStore, (s) => s.backends)
+  const workspace = useStore(appStore, (s) => s.projectWorkspace)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [openThreads, setOpenThreads] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState('')
+
+  // Which resources belong to which thread, wherever they were dragged. Derived
+  // from the view trees rather than stored on the tab: the tree already records
+  // placement, and a second copy would drift the moment a resource moves.
+  //
+  // Only the loaded project's workspace is in state, so threads in other
+  // projects list no resources. That matches what the user can reach: their
+  // views are not on screen, so a row pointing into them would go nowhere.
+  const resources = useMemo(
+    () => resourcesByThread(workspace?.views ?? []),
+    [workspace]
+  )
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const projectsRef = useRef<HTMLDivElement>(null)
@@ -240,6 +311,33 @@ export function Sidebar(): React.JSX.Element {
     setCtx({ x: e.clientX, y: e.clientY, session })
   }
 
+  // A thread and the resources it owns. Filtering opens every thread, for the
+  // same reason it opens every project: search replaces drilling.
+  const threadRow = (session: SessionInfo): React.JSX.Element => {
+    const owned = resources.get(session.id) ?? []
+    const isOpen = openThreads.has(session.id) || Boolean(query)
+    return (
+      <React.Fragment key={session.id}>
+        <SessionRow
+          session={session}
+          active={session.id === activeSessionId}
+          onCtx={onSessionCtx}
+          resourceCount={owned.length}
+          expanded={isOpen}
+          onToggle={() =>
+            setOpenThreads((prev) => {
+              const next = new Set(prev)
+              if (next.has(session.id)) next.delete(session.id)
+              else next.add(session.id)
+              return next
+            })
+          }
+        />
+        {isOpen ? owned.map((resource) => <ResourceRow key={resource.id} resource={resource} />) : null}
+      </React.Fragment>
+    )
+  }
+
   const menuItem = (label: string, fn: () => void): React.JSX.Element => (
     <button
       className="ctx-item"
@@ -336,9 +434,7 @@ export function Sidebar(): React.JSX.Element {
                 </span>
                 <span className="meta">{pathSessions.length || ''}</span>
               </div>
-              {shown.map((session) => (
-                <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
-              ))}
+              {shown.map(threadRow)}
               {hidden > 0 ? (
                 <div
                   className="sidebar-load-more nested"
@@ -371,9 +467,7 @@ export function Sidebar(): React.JSX.Element {
 
       <SectionHeader label="Chats" onAdd={() => void newGlobalChat()} addTitle="New chat" />
       <div className="list sidebar-section-chats">
-        {looseChats.map((session) => (
-          <SessionRow key={session.id} session={session} active={session.id === activeSessionId} onCtx={onSessionCtx} />
-        ))}
+        {looseChats.map(threadRow)}
         {looseChats.length === 0 && (
           <div className="sidebar-empty">No chats yet</div>
         )}

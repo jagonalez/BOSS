@@ -368,6 +368,17 @@ export function openSessionInWorkspace(sessionId: string): boolean {
   return true
 }
 
+/** Jump to wherever a tab currently is: switch views if needed, then focus it.
+ *  Selection runs both ways, so a row in the sidebar reaches its resource even
+ *  after the resource was dragged into a view of its own. */
+export function revealWorkspaceTab(viewId: string, groupId: string, tabId: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace?.views.some((view) => view.id === viewId)) return
+  if (workspace.activeViewId !== viewId) activateWorkspaceView(viewId)
+  activateWorkspaceTab(groupId, tabId)
+  showPage('project')
+}
+
 export function applyLayoutTemplate(templateId: string): void {
   const state = appStore.getState()
   const workspace = state.projectWorkspace

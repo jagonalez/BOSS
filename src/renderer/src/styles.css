@@ -3176,10 +3176,58 @@ textarea {
   font-size: 12.5px;
 }
 
+/* Threads sat at 29px; the caret takes that gutter rather than pushing every
+   row further in. */
 .session-row {
   min-height: 50px;
   align-items: flex-start;
   gap: 9px;
+  padding-left: 12px;
+}
+
+.session-caret {
+  display: grid;
+  width: 13px;
+  height: 18px;
+  flex: 0 0 13px;
+  place-items: center;
+  color: var(--text-faint);
+  cursor: pointer;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.session-caret.open {
+  transform: rotate(90deg);
+}
+
+.session-caret.empty {
+  cursor: default;
+}
+
+.session-caret:not(.empty):hover {
+  color: var(--text);
+}
+
+.resource-row {
+  gap: 8px;
+  padding: 4px 8px 4px 54px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.resource-row .icon {
+  color: var(--text-faint);
+}
+
+.resource-row .resource-where {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  white-space: nowrap;
 }
 
 .session-row .meta {
