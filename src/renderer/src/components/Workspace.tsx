@@ -922,16 +922,6 @@ function focusNeighbor(direction: 'left' | 'right' | 'up' | 'down'): void {
 export function Workspace(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
 
-  // Native views are positioned by explicit rect, so they have to be told when
-  // a pane moves. ResizeObserver only reports size, and a tab dragged to a
-  // pane of the same size moves without resizing — the view stayed drawn over
-  // the old pane, leaving the new one blank. Announced after layout, or the
-  // rect the browser reads would still be the old one.
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => window.dispatchEvent(new Event('boss:tab-moved')))
-    return () => cancelAnimationFrame(frame)
-  }, [workspace])
-
   // Detach native views for the whole of a drag. A browser is composited over
   // the page, so dragging across one never reaches the pane underneath: no
   // dragover to move the drop indicator, no dragleave to clear it, and no drop
@@ -949,10 +939,20 @@ export function Workspace(): React.JSX.Element {
     document.addEventListener('dragstart', start)
     document.addEventListener('dragend', stop)
     document.addEventListener('drop', stop)
+    // A drag cancelled with Escape, or released outside the window, fires
+    // neither dragend nor drop. Without these the class stuck, every slot kept
+    // pointer-events: none, and the whole workspace stopped taking input.
+    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') stop() }
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('blur', stop)
+    document.addEventListener('keydown', onKey)
     return () => {
       document.removeEventListener('dragstart', start)
       document.removeEventListener('dragend', stop)
       document.removeEventListener('drop', stop)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('blur', stop)
       stop()
     }
   }, [])

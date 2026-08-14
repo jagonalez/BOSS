@@ -18,10 +18,15 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
   const nav = useStore(appStore, (s) => s.browse[id] ?? { url: '', title: '', canGoBack: false, canGoForward: false, loading: false })
   const [urlInput, setUrlInput] = useState('')
 
+  // No destroy on unmount. StrictMode mounts, unmounts and remounts every
+  // component in development, so this tore down the page the moment it was
+  // created — the remount then built an empty view and the pane looked blank
+  // with the url bar still filled in. A browser is disposed when its tab
+  // closes, which closeWorkspaceTab handles; unmounting only means React
+  // moved it, which is now routine.
   useEffect(() => {
     return () => {
       void window.boss.browseDetach(id)
-      void window.boss.browseDestroy(id)
     }
   }, [id])
 
@@ -39,18 +44,37 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
     ro.observe(el)
     window.addEventListener('resize', report)
 
-    // A native view is positioned by explicit rect, so it has to be told when
-    // it moves. ResizeObserver only fires on size, and a tab dragged to a pane
-    // of the same size moves without resizing — the view stayed drawn over the
-    // old pane, leaving the new one blank. The workspace announces a move once
-    // it has re-parented the tab, which beats polling the layout every frame.
-    const onMoved = (): void => report()
-    window.addEventListener('boss:tab-moved', onMoved)
+    // A native view is drawn at an explicit rect, so it has to be told when it
+    // moves. ResizeObserver only reports size, and a tab dropped into a pane
+    // of the same size moves without resizing — the view stayed painted over
+    // the pane it came from, leaving the new one blank.
+    //
+    // Watching the document for structural changes catches the move itself:
+    // the portal re-parents this element, and childList mutations fire for
+    // that. Cheaper than polling the layout, and it needs no cooperation from
+    // whoever did the moving.
+    let last = rectOf(el)
+    let pending = 0
+    const sync = (): void => {
+      const next = rectOf(el)
+      if (next.x === last.x && next.y === last.y && next.width === last.width && next.height === last.height) return
+      last = next
+      void window.boss.browseBounds(id, next)
+    }
+    const observer = new MutationObserver(() => {
+      // Mutation callbacks are microtasks, so they run before the browser has
+      // laid the new position out — reading the rect here returns the old one.
+      // Waiting a frame reads the geometry that actually shipped.
+      cancelAnimationFrame(pending)
+      pending = requestAnimationFrame(sync)
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
 
     return () => {
       ro.disconnect()
+      observer.disconnect()
+      cancelAnimationFrame(pending)
       window.removeEventListener('resize', report)
-      window.removeEventListener('boss:tab-moved', onMoved)
       void window.boss.browseDetach(id)
     }
   }, [id, actuallyVisible])

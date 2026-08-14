@@ -354,6 +354,11 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
   const view = currentView()
   const closing = view ? findTab(view.root, tabId)?.tab : undefined
   rememberClose(closing ? `Closed ${closing.kind}` : 'Closed tab')
+  // A browser's native view is disposed here rather than when the component
+  // unmounts. React unmounts it whenever the tab moves, and StrictMode
+  // unmounts everything once on purpose, so tying disposal to unmounting
+  // destroyed pages that were only being re-parented.
+  if (closing?.kind === 'browser') void window.boss.browseDestroy(`workspace-${tabId}`)
   const next = updateWorkspaceView((item) => {
     const root = closeTab(item.root, groupId, tabId)
     const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
@@ -369,6 +374,11 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
 
 export function closeWorkspaceGroup(groupId: string): void {
   rememberClose('Closed pane')
+  const view = currentView()
+  const pane = view ? findGroup(view.root, groupId) : undefined
+  for (const item of pane?.tabs ?? []) {
+    if (item.kind === 'browser') void window.boss.browseDestroy(`workspace-${item.id}`)
+  }
   const next = updateWorkspaceView((item) => {
     const root = closeGroup(item.root, groupId)
     return { ...item, root, focusedGroupId: walkGroups(root)[0].id }

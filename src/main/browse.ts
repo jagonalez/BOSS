@@ -46,9 +46,17 @@ export class BrowseManager {
     }
     entry.view.setBounds(bounds)
     this.win.contentView.addChildView(entry.view)
-    if (!entry.loadedOnce && entry.state.url && !entry.view.webContents.isLoading()) {
+
+    // Load when there is nothing loaded, not merely the first time. A view is
+    // detached and re-attached whenever its pane is hidden, a menu opens over
+    // it, or a drag crosses it — and coming back with loadedOnce already true
+    // left the page blank at the right bounds, with the url bar still filled
+    // in. Asking the web contents what it is showing survives all of that.
+    const showing = entry.view.webContents.getURL()
+    const wanted = entry.state.url
+    if (wanted && !entry.view.webContents.isLoading() && (!showing || showing === 'about:blank')) {
       entry.loadedOnce = true
-      void entry.view.webContents.loadURL(entry.state.url)
+      void entry.view.webContents.loadURL(wanted)
     }
   }
 
