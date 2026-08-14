@@ -12,6 +12,8 @@ interface BrowseView {
   view: WebContentsView
   loadedOnce: boolean
   state: BrowseNavigationState
+  /** Where the view belongs while it is parked off-screen. */
+  parked?: { x: number; y: number; width: number; height: number }
 }
 
 export class BrowseManager {
@@ -44,7 +46,8 @@ export class BrowseManager {
       entry = this.createView(id)
       this.views.set(id, entry)
     }
-    entry.view.setBounds(bounds)
+    if (entry.parked) entry.parked = bounds
+    else entry.view.setBounds(bounds)
     this.win.contentView.addChildView(entry.view)
     // addChildView resets this, so it has to be set after, in the same call.
     // Doing it from the renderer raced the attach and left the view hidden.
@@ -70,17 +73,35 @@ export class BrowseManager {
     }
   }
 
-  /** Hide a view without unhooking it. Detaching and re-attaching costs an IPC
-   *  round trip each way and makes the page visibly flash back in; a view that
-   *  is only temporarily in the way — behind a menu, under a drag — just needs
-   *  to stop being drawn. */
+  /** Move a view out of sight rather than hiding it.
+   *
+   *  setVisible(false) releases the compositing surface, and rebuilding it on
+   *  the way back took a second or more — long enough that a drag looked
+   *  broken. Parking the view off-screen keeps it composited, so coming back
+   *  is a bounds change and paints immediately. */
   setVisible(id: string, visible: boolean): void {
-    this.views.get(id)?.view.setVisible(visible)
+    const entry = this.views.get(id)
+    if (!entry) return
+    if (visible) {
+      if (entry.parked) {
+        entry.view.setBounds(entry.parked)
+        entry.parked = undefined
+      }
+      return
+    }
+    if (entry.parked) return
+    const bounds = entry.view.getBounds()
+    entry.parked = bounds
+    entry.view.setBounds({ ...bounds, x: -Math.abs(bounds.width) - 4000, y: bounds.y })
   }
 
   setBounds(id: string, bounds: BrowseBounds): void {
     const entry = this.views.get(id)
-    if (entry) entry.view.setBounds(bounds)
+    if (!entry) return
+    // While parked, remember where it should land rather than dragging it back
+    // on screen: the renderer keeps reporting real bounds throughout.
+    if (entry.parked) entry.parked = bounds
+    else entry.view.setBounds(bounds)
   }
 
   navigate(id: string, url: string): void {

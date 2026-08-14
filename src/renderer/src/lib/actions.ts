@@ -1,6 +1,7 @@
 import { appStore, type Attachment } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
+import { disposeTerminalSession } from './terminal-sessions'
 import { startMicCapture } from './mic'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
@@ -354,11 +355,12 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
   const view = currentView()
   const closing = view ? findTab(view.root, tabId)?.tab : undefined
   rememberClose(closing ? `Closed ${closing.kind}` : 'Closed tab')
-  // A browser's native view is disposed here rather than when the component
-  // unmounts. React unmounts it whenever the tab moves, and StrictMode
-  // unmounts everything once on purpose, so tying disposal to unmounting
-  // destroyed pages that were only being re-parented.
+  // Live surfaces are disposed here rather than when their component unmounts.
+  // React unmounts one whenever its tab moves, and StrictMode unmounts
+  // everything once on purpose, so tying disposal to unmounting destroyed
+  // pages and shells that were only being re-parented.
   if (closing?.kind === 'browser') void window.boss.browseDestroy(`workspace-${tabId}`)
+  if (closing?.kind === 'terminal') disposeTerminalSession(tabId)
   const next = updateWorkspaceView((item) => {
     const root = closeTab(item.root, groupId, tabId)
     const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
@@ -378,6 +380,7 @@ export function closeWorkspaceGroup(groupId: string): void {
   const pane = view ? findGroup(view.root, groupId) : undefined
   for (const item of pane?.tabs ?? []) {
     if (item.kind === 'browser') void window.boss.browseDestroy(`workspace-${item.id}`)
+    if (item.kind === 'terminal') disposeTerminalSession(item.id)
   }
   const next = updateWorkspaceView((item) => {
     const root = closeGroup(item.root, groupId)

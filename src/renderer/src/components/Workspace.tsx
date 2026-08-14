@@ -344,6 +344,7 @@ function TabContent({
     case 'terminal':
       content = (
         <TerminalTab
+          tabId={item.id}
           authBackendId={authBackendId}
           contextPath={item.contextPath}
           onExit={() => closeWorkspaceTab(groupId, item.id)}

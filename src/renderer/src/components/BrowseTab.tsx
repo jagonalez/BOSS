@@ -67,7 +67,12 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
       cancelAnimationFrame(pending)
       pending = requestAnimationFrame(sync)
     })
-    observer.observe(document.body, { childList: true, subtree: true })
+    // Watch the workspace canvas, not the whole document. Panes and views live
+    // under here, which is everything that can move this element — while the
+    // document as a whole churns constantly, and during a drag that meant a
+    // rect read scheduled on every mutation anywhere in the app.
+    const scope = el.closest('.workspace-shell') ?? document.body
+    observer.observe(scope, { childList: true, subtree: true })
 
     // No detach here. This effect re-runs whenever the tab moves, and React
     // runs cleanup before the next setup, so detaching first tore the view out

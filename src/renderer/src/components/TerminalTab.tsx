@@ -5,99 +5,116 @@ import '@xterm/xterm/css/xterm.css'
 import { useStore, appStore } from '../state/AppState'
 import type { BackendId } from '@shared/backend'
 import { getXtermTheme } from '../lib/themes'
+import { terminalSessions } from '../lib/terminal-sessions'
 
 export function TerminalTab({
+  tabId,
   authBackendId,
   contextPath,
   onExit
 }: {
+  tabId: string
   authBackendId?: BackendId
   contextPath?: string
   onExit?: (code: number) => void
 }): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
-  const onExitRef = useRef(onExit)
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const cwd = contextPath || projectPath
 
-  onExitRef.current = onExit
+  // Kept on the session so the exit handler always calls the current one
+  // without the listener having to be rebound.
+  const session = terminalSessions.get(tabId)
+  if (session) session.onExit = onExit
 
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
 
-    const term = new Terminal({
-      fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
-      fontSize: 13,
-      lineHeight: 1.35,
-      cursorBlink: true,
-      theme: getXtermTheme(),
-      scrollback: 5000
-    })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(el)
+    let existing = terminalSessions.get(tabId)
+    if (!existing) {
+      const term = new Terminal({
+        fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+        fontSize: 13,
+        lineHeight: 1.35,
+        cursorBlink: true,
+        theme: getXtermTheme(),
+        scrollback: 5000
+      })
+      const fit = new FitAddon()
+      term.loadAddon(fit)
+      existing = { term, fit, ptyId: null, onExit }
+      terminalSessions.set(tabId, existing)
 
-    let termId: string | null = null
-    let cancelled = false
+      term.onData((data) => {
+        const current = terminalSessions.get(tabId)
+        if (current?.ptyId) window.boss.terminalWrite(current.ptyId, data)
+      })
+    }
+    const live = existing
+
+    // Moves the xterm element into this container. Re-opening an existing
+    // terminal keeps its buffer, which is the whole point of the cache.
+    live.term.open(el)
 
     const fitNow = (): void => {
       try {
-        fit.fit()
-        const dims = fit.proposeDimensions()
-        if (termId && dims) window.boss.terminalResize(termId, dims.cols, dims.rows)
+        live.fit.fit()
+        const dims = live.fit.proposeDimensions()
+        if (live.ptyId && dims) window.boss.terminalResize(live.ptyId, dims.cols, dims.rows)
       } catch {
         /* ignore */
       }
     }
 
     const offData = window.boss.onTerminalData((evt) => {
-      if (evt.id === termId) term.write(evt.data)
+      if (evt.id === live.ptyId) live.term.write(evt.data)
     })
     const offExit = window.boss.onTerminalExit((evt) => {
-      if (evt.id !== termId) return
-      term.write(`\r\n\x1b[90m[process exited: ${evt.code}]\x1b[0m\r\n`)
-      onExitRef.current?.(evt.code)
+      if (evt.id !== live.ptyId) return
+      live.term.write(`\r\n\x1b[90m[process exited: ${evt.code}]\x1b[0m\r\n`)
+      live.onExit?.(evt.code)
     })
 
-    term.onData((data) => {
-      if (termId) window.boss.terminalWrite(termId, data)
-    })
-
-    const initial = fit.proposeDimensions()
-    void window.boss
-      .terminalCreate(cwd || undefined, initial?.cols ?? 80, initial?.rows ?? 24, authBackendId)
-      .then((id) => {
-        if (cancelled) {
-          window.boss.terminalDispose(id)
-          return
-        }
-        termId = id
-        fitNow()
-      })
+    if (!live.ptyId) {
+      const initial = live.fit.proposeDimensions()
+      void window.boss
+        .terminalCreate(cwd || undefined, initial?.cols ?? 80, initial?.rows ?? 24, authBackendId)
+        .then((id) => {
+          // The tab may have closed while this was in flight, in which case
+          // the session is gone and this shell has nobody to belong to.
+          if (!terminalSessions.has(tabId)) {
+            window.boss.terminalDispose(id)
+            return
+          }
+          live.ptyId = id
+          fitNow()
+        })
+    } else {
+      fitNow()
+    }
 
     const ro = new ResizeObserver(fitNow)
     ro.observe(el)
     window.addEventListener('resize', fitNow)
 
-    const focusTimer = setTimeout(() => term.focus(), 50)
+    const focusTimer = setTimeout(() => live.term.focus(), 50)
     const onThemeChanged = (): void => {
-      term.options.theme = getXtermTheme()
+      live.term.options.theme = getXtermTheme()
     }
     window.addEventListener('boss:theme-changed', onThemeChanged)
 
+    // No dispose here. Unmounting means React moved this tab, which is
+    // routine; the shell is disposed when the tab closes.
     return () => {
-      cancelled = true
       clearTimeout(focusTimer)
       ro.disconnect()
       window.removeEventListener('resize', fitNow)
       window.removeEventListener('boss:theme-changed', onThemeChanged)
       offData()
       offExit()
-      if (termId) window.boss.terminalDispose(termId)
-      term.dispose()
     }
-  }, [cwd, authBackendId])
+  }, [tabId, cwd, authBackendId])
 
   return <div className="terminal-view" ref={containerRef} />
 }
