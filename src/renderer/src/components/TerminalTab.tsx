@@ -53,9 +53,14 @@ export function TerminalTab({
     }
     const live = existing
 
-    // Moves the xterm element into this container. Re-opening an existing
-    // terminal keeps its buffer, which is the whole point of the cache.
-    live.term.open(el)
+    // open() only works once — calling it again on a live terminal does not
+    // move it, and leaves it rendering nowhere. Adopting the element it
+    // already built moves the whole terminal, buffer and all.
+    if (live.term.element) {
+      if (live.term.element.parentElement !== el) el.appendChild(live.term.element)
+    } else {
+      live.term.open(el)
+    }
 
     const fitNow = (): void => {
       try {
@@ -91,7 +96,9 @@ export function TerminalTab({
           fitNow()
         })
     } else {
-      fitNow()
+      // After layout: the element has just been moved into this container, so
+      // measuring it now would read the size it had in the old pane.
+      requestAnimationFrame(fitNow)
     }
 
     const ro = new ResizeObserver(fitNow)
