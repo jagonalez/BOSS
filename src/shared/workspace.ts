@@ -15,6 +15,10 @@ export interface WorkspaceTab {
   id: string
   kind: WorkspaceTabKind
   sessionId?: string
+  /** A name the user gave this resource. Without one the tab is called after
+   *  its kind, which stops telling them apart once a thread owns two
+   *  terminals. Threads take their name from the session instead. */
+  title?: string
   /** Checkout used by terminal, review, and files. Once created, the tab stays pinned here. */
   contextPath?: string
   worktreeId?: string

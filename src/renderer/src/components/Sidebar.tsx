@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
-import type { WorkspaceTabKind } from '@shared/workspace'
+import type { Workspace, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import type { OwnedResource } from '../lib/workspaces'
-import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, resourcesByThread } from '../lib/workspaces'
+import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, findGroup, resourcesByThread, walkGroups } from '../lib/workspaces'
 import {
   archiveAllInPath,
   cloneThreadToBackend,
@@ -17,6 +17,7 @@ import {
   openProjectFolder,
   addResourceToSession,
   removeSessionWorktree,
+  renameWorkspaceTab,
   revealWorkspaceTab,
   selectSession,
   sessionMetaFor,
@@ -63,21 +64,37 @@ function projectName(path: string): string {
   return parts[parts.length - 1] || path
 }
 
+/** The one tab the user is working in: active tab, focused pane, active view. */
+function focusedTab(workspace: Workspace | null): WorkspaceTab | undefined {
+  if (!workspace) return undefined
+  const view = workspace.views.find((item) => item.id === workspace.activeViewId)
+  if (!view) return undefined
+  const group = findGroup(view.root, view.focusedGroupId) ?? walkGroups(view.root)[0]
+  return group?.tabs.find((item) => item.id === group.activeTabId)
+}
+
+
 function SessionRow({
   session,
-  active,
   onCtx,
   resourceCount = 0,
   expanded = false,
   onToggle
 }: {
   session: SessionInfo
-  active: boolean
   onCtx: (e: React.MouseEvent, s: SessionInfo) => void
   resourceCount?: number
   expanded?: boolean
   onToggle?: () => void
 }): React.JSX.Element {
+  // One highlight, on the tab of the focused pane. A split view shows several
+  // tabs at once, but marking them all needs a second visual state the sidebar
+  // cannot explain. Not activeSessionId either: that is the session being
+  // chatted with, and it stayed lit long after you looked elsewhere.
+  const showing = useStore(appStore, (state) => {
+    const tab = focusedTab(state.projectWorkspace)
+    return tab?.kind === 'thread' && tab.sessionId === session.id
+  })
   const meta = sessionMetaFor(session.id)
   const busy = useStore(appStore, (s) => Boolean(s.sessionBusy[session.id]))
   const compacting = useStore(appStore, (s) => Boolean(s.compacting[session.id]))
@@ -95,7 +112,7 @@ function SessionRow({
   ].filter(Boolean)
   return (
     <div
-      className={`item sub session-row ${active ? 'active' : ''}`}
+      className={`item sub session-row ${showing ? 'active' : ''}`}
       draggable
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = 'move'
@@ -144,19 +161,50 @@ const RESOURCE_ICONS: Record<string, (props: { size?: number }) => React.JSX.Ele
 
 function ResourceRow({ resource }: { resource: OwnedResource }): React.JSX.Element {
   const Icon = RESOURCE_ICONS[resource.kind] ?? ChatIcon
+  // Same single highlight as thread rows: the focused pane's active tab.
+  const active = useStore(appStore, (state) => focusedTab(state.projectWorkspace)?.id === resource.id)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const label = resource.title || RESOURCE_LABELS[resource.kind] || resource.kind
+  const commit = (): void => {
+    setEditing(false)
+    if (draft !== (resource.title ?? '')) renameWorkspaceTab(resource.id, draft)
+  }
   return (
     <div
-      className="item resource-row"
+      className={`item resource-row ${active ? 'active' : ''}`}
       draggable
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = 'move'
         event.dataTransfer.setData(TAB_DRAG_TYPE, resource.id)
       }}
       onClick={() => revealWorkspaceTab(resource.viewId, resource.groupId, resource.id)}
-      title={`${RESOURCE_LABELS[resource.kind] ?? resource.kind} — ${resource.contextLabel ?? resource.contextPath ?? ''} — drag into a view to move it`}
+      onDoubleClick={(event) => {
+        event.stopPropagation()
+        setDraft(resource.title ?? '')
+        setEditing(true)
+      }}
+      title={`${label} — double-click to rename, drag into a view to move`}
     >
       <span className="icon"><Icon size={13} /></span>
-      <span className="name">{RESOURCE_LABELS[resource.kind] ?? resource.kind}</span>
+      {editing ? (
+        <input
+          className="resource-rename"
+          autoFocus
+          value={draft}
+          aria-label="Resource name"
+          placeholder={RESOURCE_LABELS[resource.kind] ?? resource.kind}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') commit()
+            if (event.key === 'Escape') setEditing(false)
+          }}
+        />
+      ) : (
+        <span className="name">{label}</span>
+      )}
       <span className="resource-where">{resource.viewName}</span>
     </div>
   )
@@ -165,7 +213,6 @@ function ResourceRow({ resource }: { resource: OwnedResource }): React.JSX.Eleme
 export function Sidebar(): React.JSX.Element {
   const sessions = useStore(appStore, (s) => s.sessions)
   const projects = useStore(appStore, (s) => s.projects)
-  const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const activePage = useStore(appStore, (s) => s.activePage)
   const archived = useStore(appStore, (s) => s.archived)
   const backends = useStore(appStore, (s) => s.backends)
@@ -302,7 +349,6 @@ export function Sidebar(): React.JSX.Element {
       <React.Fragment key={session.id}>
         <SessionRow
           session={session}
-          active={session.id === activeSessionId}
           onCtx={onSessionCtx}
           resourceCount={owned.length}
           expanded={isOpen}

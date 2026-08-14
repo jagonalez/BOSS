@@ -133,6 +133,22 @@ test('a view list snapshot restores a closed pane whole', () => {
   assert.equal(walkGroups(before[0].root).length, 2)
 })
 
+test('a name given to a resource does not follow it into a saved format', () => {
+  const view = workspaceView('Main', group([
+    tab('thread', 'thread-1'),
+    { ...tab('terminal', 'thread-1', { contextPath: '/tmp/wt' }), title: 'Test runner' }
+  ]))
+
+  const named = walkTabs(view.root).find((item) => item.kind === 'terminal')
+  assert.equal(named?.title, 'Test runner')
+
+  // A format is a shape. "Test runner" describes one particular terminal, so
+  // it would be wrong on every layout built from this one.
+  for (const item of walkTabs(templateFromWorkspace(view, 'Saved').root)) {
+    assert.equal(item.title, undefined)
+  }
+})
+
 test('threads are not listed as resources of themselves', () => {
   const view = workspaceView('Main', group([tab('thread', 'thread-1'), tab('terminal', 'thread-1')]))
   const owned = resourcesByThread([view])

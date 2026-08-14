@@ -132,6 +132,9 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
   const sameKindIndex = group.tabs.filter((candidate) => candidate.kind === item.kind).findIndex((candidate) => candidate.id === item.id)
   const suffix = sameKindIndex > 0 ? ` ${sameKindIndex + 1}` : ''
+  // A name the user gave it wins over anything derived. Threads are named by
+  // their session, so they ignore this.
+  if (item.title && item.kind !== 'thread') return item.title
   if (item.kind === 'thread') return sessionTitle || 'Untitled thread'
   if (item.kind === 'browser') return browserTitle || `Browser${suffix}`
   if (item.kind === 'terminal' && authBackendId) {

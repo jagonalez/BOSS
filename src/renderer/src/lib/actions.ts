@@ -21,6 +21,7 @@ import {
   findTab,
   loadTemplates,
   loadWorkspace,
+  mapTabs,
   moveTabAcrossViews,
   nextWorkspaceViewName,
   reorderTab,
@@ -494,6 +495,21 @@ export function addResourceToSession(sessionId: string, kind: WorkspaceTabKind):
 
   addWorkspaceTab(placement.groupId, kind, sessionId, checkout)
   showPage('project')
+}
+
+/** Name a resource. Blank clears it, so the tab falls back to its kind.
+ *  Two terminals on one thread are otherwise both called "Terminal". */
+export function renameWorkspaceTab(tabId: string, title: string): void {
+  const clean = title.trim()
+  updateWorkspace((workspace) => ({
+    ...workspace,
+    views: workspace.views.map((view) => ({
+      ...view,
+      root: mapTabs(view.root, (item) =>
+        item.id === tabId ? { ...item, title: clean || undefined } : item
+      )
+    }))
+  }))
 }
 
 /** Flash a tab that just arrived, so the eye finds it without hunting. */

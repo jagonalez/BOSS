@@ -3449,6 +3449,19 @@ textarea {
 }
 
 /* Same 13px box as the carets above it, so the label lines up with theirs. */
+.resource-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-inset, var(--bg-hover));
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
 .resource-row .icon {
   display: grid;
   width: 13px;

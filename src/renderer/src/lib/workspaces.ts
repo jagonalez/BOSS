@@ -230,6 +230,12 @@ export function findGroup(node: WorkspaceNode, groupId: string): WorkspaceGroup 
   return walkGroups(node).find((item) => item.id === groupId)
 }
 
+/** Rebuild a tree with every tab passed through `update`. */
+export function mapTabs(node: WorkspaceNode, update: (item: WorkspaceTab) => WorkspaceTab): WorkspaceNode {
+  if (node.type === 'group') return { ...node, tabs: node.tabs.map(update) }
+  return { ...node, first: mapTabs(node.first, update), second: mapTabs(node.second, update) }
+}
+
 export interface TabPlacement {
   viewId: string
   viewName: string
