@@ -11,9 +11,10 @@ import type {
   WorkspaceView
 } from '@shared/workspace'
 
-const WORKSPACES_KEY = 'boss.projectWorkspaces.v3'
-const LEGACY_WORKSPACES_KEY = 'boss.projectWorkspaces.v2'
-const TEMPLATES_KEY = 'boss.layoutTemplates.v2'
+// Unversioned: nothing has shipped, so there is no other shape in the world to
+// migrate from. Version these at the first release, not before.
+const WORKSPACES_KEY = 'boss.projectWorkspaces'
+const TEMPLATES_KEY = 'boss.layoutTemplates'
 let sequence = 0
 
 export function workspaceId(prefix: string): string {
@@ -137,21 +138,6 @@ function isNode(value: unknown): value is WorkspaceNode {
   return node.type === 'split' && typeof node.id === 'string' && isNode(node.first) && isNode(node.second)
 }
 
-function bindLegacyToolTabs(node: WorkspaceNode, projectKey: string): WorkspaceNode {
-  if (!projectKey || projectKey.startsWith('__')) return node
-  if (node.type === 'split') {
-    return { ...node, first: bindLegacyToolTabs(node.first, projectKey), second: bindLegacyToolTabs(node.second, projectKey) }
-  }
-  return {
-    ...node,
-    tabs: node.tabs.map((item) =>
-      !item.contextPath && (item.kind === 'terminal' || item.kind === 'review' || item.kind === 'files')
-        ? { ...item, contextPath: projectKey, contextLabel: 'Main' }
-        : item
-    )
-  }
-}
-
 function readJson<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -189,35 +175,17 @@ export function saveWorkspace(workspace: ProjectWorkspace): void {
 export function loadWorkspace(projectKey: string, sessionId?: string): ProjectWorkspace {
   const saved = readJson<Record<string, ProjectWorkspace>>(WORKSPACES_KEY, {})[projectKey]
   if (
-    saved?.version === 3 &&
-    Array.isArray(saved.views) &&
+    Array.isArray(saved?.views) &&
     saved.views.length > 0 &&
     saved.views.every((view) => view && typeof view.id === 'string' && typeof view.name === 'string' && isNode(view.root))
   ) {
-    const views = saved.views.map((view, index) => ({
-      ...view,
-      root: bindLegacyToolTabs(view.root, projectKey),
-      name: /^Workspace(?: \d+)?$/.test(view.name) ? (index === 0 ? 'Main' : `View ${index + 1}`) : view.name
-    }))
-    return { ...saved, views }
+    return saved
   }
-
-  const legacy = readJson<Record<string, {
-    version?: number
-    projectKey?: string
-    root?: WorkspaceNode
-    focusedGroupId?: string
-    updatedAt?: number
-  }>>(LEGACY_WORKSPACES_KEY, {})[projectKey]
-  if (legacy?.version === 2 && legacy.root && isNode(legacy.root)) {
-    const root = bindLegacyToolTabs(legacy.root, projectKey)
-    const view = workspaceView('Main', root)
-    if (legacy.focusedGroupId && findGroup(legacy.root, legacy.focusedGroupId)) view.focusedGroupId = legacy.focusedGroupId
-    return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: legacy.updatedAt ?? Date.now() }
-  }
+  // Anything else is a shape this build does not read, so start fresh rather
+  // than carry a reader for it. A layout is an arrangement, not content.
   const root = group(sessionId ? [tab('thread', sessionId)] : [])
   const view = workspaceView('Main', root)
-  return { version: 3, projectKey, views: [view], activeViewId: view.id, updatedAt: Date.now() }
+  return { projectKey, views: [view], activeViewId: view.id, updatedAt: Date.now() }
 }
 
 export function activeWorkspaceView(workspace: ProjectWorkspace): WorkspaceView {

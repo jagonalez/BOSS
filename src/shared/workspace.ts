@@ -47,7 +47,6 @@ export interface WorkspaceView {
 }
 
 export interface ProjectWorkspace {
-  version: 3
   projectKey: string
   views: WorkspaceView[]
   activeViewId: string
