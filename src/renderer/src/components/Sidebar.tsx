@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
 import type { OwnedResource } from '../lib/workspaces'
-import { resourcesByThread } from '../lib/workspaces'
+import { TAB_DRAG_TYPE, resourcesByThread } from '../lib/workspaces'
 import {
   archiveAllInPath,
   cloneThreadToBackend,
@@ -139,8 +139,13 @@ function ResourceRow({ resource }: { resource: OwnedResource }): React.JSX.Eleme
   return (
     <div
       className="item resource-row"
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData(TAB_DRAG_TYPE, resource.id)
+      }}
       onClick={() => revealWorkspaceTab(resource.viewId, resource.groupId, resource.id)}
-      title={`${RESOURCE_LABELS[resource.kind] ?? resource.kind} — ${resource.contextLabel ?? resource.contextPath ?? ''}`}
+      title={`${RESOURCE_LABELS[resource.kind] ?? resource.kind} — ${resource.contextLabel ?? resource.contextPath ?? ''} — drag into a view to move it`}
     >
       <span className="icon"><Icon size={13} /></span>
       <span className="name">{RESOURCE_LABELS[resource.kind] ?? resource.kind}</span>

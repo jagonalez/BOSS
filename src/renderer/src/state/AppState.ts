@@ -47,6 +47,8 @@ export interface Attachment {
 export interface AppState {
   activePage: AppPage
   projectWorkspace: ProjectWorkspace | null
+  /** Tab to flash after it lands somewhere new. Clears itself. */
+  highlightedTabId?: string
   layoutTemplates: LayoutTemplate[]
   nativeViewSuspensions: string[]
   serverUrl: string

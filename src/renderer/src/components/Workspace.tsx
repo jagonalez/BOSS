@@ -19,20 +19,19 @@ import {
   focusWorkspaceGroup,
   loadMessages,
   loadTodos,
-  moveWorkspaceTab,
   removeLayoutTemplate,
   renameWorkspaceView,
   reorderWorkspaceTab,
   saveCurrentLayoutTemplate,
+  sendWorkspaceTabToView,
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
   splitWorkspaceGroup
 } from '../lib/actions'
-import { activeWorkspaceView, findGroup, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { TAB_DRAG_TYPE, activeWorkspaceView, findGroup, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
-const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
 
 const TAB_TYPES: Array<{
   kind: WorkspaceTabKind
@@ -323,8 +322,10 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
 
 function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const highlightedTabId = useStore(appStore, (state) => state.highlightedTabId)
   const view = workspace ? activeWorkspaceView(workspace) : null
   const focused = view?.focusedGroupId === group.id
+  const arrived = Boolean(highlightedTabId && group.tabs.some((item) => item.id === highlightedTabId))
   const movable = Boolean(view && walkTabs(view.root).length > 1)
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
   const [menuRight, setMenuRight] = useState<number | null>(null)
@@ -362,13 +363,16 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
     event.preventDefault()
     event.stopPropagation()
     const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
-    if (tabId) moveWorkspaceTab(tabId, group.id, dropTarget ?? 'center')
+    // Sidebar rows can carry a resource that lives in another view, so route
+    // every drop through the cross-view move. It falls back to the ordinary
+    // one when the source is already here.
+    if (tabId && view) sendWorkspaceTabToView(tabId, view.id, group.id, dropTarget ?? 'center')
     setDropTarget(null)
   }
 
   return (
     <section
-      className={`workspace-group ${focused ? 'focused' : ''} ${menuRight !== null ? 'menu-anchored' : ''}`}
+      className={`workspace-group ${focused ? 'focused' : ''} ${arrived ? 'arrived' : ''} ${menuRight !== null ? 'menu-anchored' : ''}`}
       style={{ '--workspace-add-menu-right': `${menuRight ?? 8}px` } as React.CSSProperties}
       data-workspace-group={group.id}
       onMouseDown={() => focusWorkspaceGroup(group.id)}
@@ -411,8 +415,10 @@ function GroupView({ group }: { group: WorkspaceGroup }): React.JSX.Element {
                 event.preventDefault()
                 event.stopPropagation()
                 const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
-                if (tabId && tabId !== item.id) {
-                  moveWorkspaceTab(tabId, group.id, 'center')
+                if (tabId && tabId !== item.id && view) {
+                  // Also the landing spot for a resource dragged out of the
+                  // sidebar, which may still live in another view.
+                  sendWorkspaceTabToView(tabId, view.id, group.id, 'center')
                   reorderWorkspaceTab(group.id, tabId, item.id)
                 }
               }}

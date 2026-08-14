@@ -15,6 +15,10 @@ import type {
 // migrate from. Version these at the first release, not before.
 const WORKSPACES_KEY = 'boss.projectWorkspaces'
 const TEMPLATES_KEY = 'boss.layoutTemplates'
+/** Drag payload for a workspace tab. Shared so the sidebar can start a drag the
+ *  panes already know how to accept. */
+export const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
+
 let sequence = 0
 
 export function workspaceId(prefix: string): string {
@@ -385,6 +389,53 @@ export function moveTab(
   const placeFirst = position === 'left' || position === 'top'
   const result = splitGroup(without, targetGroupId, direction, source.tab, placeFirst)
   return { root: result.root, focusedGroupId: result.groupId }
+}
+
+/** Move a tab to a group in any view, not only the active one.
+ *
+ *  A resource is dragged out of the sidebar, where it may be listed from a view
+ *  the user is not looking at, so the source view has to be found rather than
+ *  assumed. Within one view this is exactly moveTab, edge splits and all; only
+ *  the crossing needs handling here, by lifting the tab out of its old view
+ *  before moveTab places it in the new one. */
+export function moveTabAcrossViews(
+  views: WorkspaceView[],
+  tabId: string,
+  targetViewId: string,
+  targetGroupId: string,
+  position: DropPosition
+): WorkspaceView[] {
+  const source = views.find((view) => findTab(view.root, tabId))
+  const target = views.find((view) => view.id === targetViewId)
+  if (!source || !target) return views
+
+  if (source.id === target.id) {
+    const moved = moveTab(source.root, tabId, targetGroupId, position)
+    return views.map((view) =>
+      view.id === source.id ? { ...view, root: moved.root, focusedGroupId: moved.focusedGroupId } : view
+    )
+  }
+
+  const lifted = findTab(source.root, tabId)
+  if (!lifted) return views
+  const without = collapseEmptyGroups(
+    updateGroup(source.root, lifted.group.id, (item) => removeTabFromGroup(item, tabId).group)
+  )
+  // Re-add to the target, then let moveTab position it. Adding first keeps the
+  // edge-split cases in one place rather than repeating splitGroup here.
+  const seeded = addTab(target.root, targetGroupId, lifted.tab)
+  const placed = position === 'center'
+    ? { root: seeded, focusedGroupId: targetGroupId }
+    : moveTab(seeded, tabId, targetGroupId, position)
+
+  return views.map((view) => {
+    if (view.id === source.id) {
+      const focused = findGroup(without, view.focusedGroupId) ? view.focusedGroupId : walkGroups(without)[0].id
+      return { ...view, root: without, focusedGroupId: focused }
+    }
+    if (view.id === target.id) return { ...view, root: placed.root, focusedGroupId: placed.focusedGroupId }
+    return view
+  })
 }
 
 export function reorderTab(root: WorkspaceNode, groupId: string, tabId: string, beforeTabId?: string): WorkspaceNode {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bindTemplate, group, placementIndex, resourcesByThread, tab, templateFromWorkspace, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { bindTemplate, group, moveTabAcrossViews, placementIndex, resourcesByThread, tab, templateFromWorkspace, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('workspace add menus align to their trigger and stay inside the pane', () => {
   assert.equal(workspaceMenuRight(900, 100, 1_000), 100)
@@ -72,6 +72,47 @@ test('a resource is listed under its thread even from another view', () => {
   assert.equal(listed.length, 1)
   assert.equal(listed[0].kind, 'files')
   assert.equal(listed[0].viewName, 'Review')
+})
+
+test('a resource moves out of one view and into another', () => {
+  const main = workspaceView('Main', group([tab('thread', 'thread-1'), tab('terminal', 'thread-1')]))
+  const review = workspaceView('Review', group([tab('thread', 'thread-2')]))
+  const terminal = walkTabs(main.root).find((item) => item.kind === 'terminal')!
+  const target = walkGroups(review.root)[0]
+
+  const moved = moveTabAcrossViews([main, review], terminal.id, review.id, target.id, 'center')
+
+  assert.equal(walkTabs(moved[0].root).some((item) => item.id === terminal.id), false)
+  assert.equal(walkTabs(moved[1].root).some((item) => item.id === terminal.id), true)
+  // The thread stays put: moving a resource does not drag its thread along.
+  assert.equal(walkTabs(moved[0].root).some((item) => item.kind === 'thread'), true)
+})
+
+test('moving a resource keeps its owner and checkout', () => {
+  const checkout = { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' }
+  const main = workspaceView('Main', group([tab('files', 'thread-1', checkout)]))
+  const review = workspaceView('Review', group([tab('thread', 'thread-2')]))
+  const files = walkTabs(main.root)[0]
+  const target = walkGroups(review.root)[0]
+
+  const moved = moveTabAcrossViews([main, review], files.id, review.id, target.id, 'center')
+  const landed = walkTabs(moved[1].root).find((item) => item.id === files.id)!
+
+  assert.equal(landed.sessionId, 'thread-1')
+  assert.equal(landed.contextPath, checkout.contextPath)
+  assert.equal(landed.worktreeId, checkout.worktreeId)
+})
+
+test('moving a resource within one view leaves the other views alone', () => {
+  const main = workspaceView('Main', group([tab('thread', 'thread-1'), tab('terminal', 'thread-1')]))
+  const review = workspaceView('Review', group([tab('files', 'thread-1')]))
+  const terminal = walkTabs(main.root).find((item) => item.kind === 'terminal')!
+  const target = walkGroups(main.root)[0]
+
+  const moved = moveTabAcrossViews([main, review], terminal.id, main.id, target.id, 'right')
+
+  assert.equal(walkTabs(moved[0].root).length, 2)
+  assert.deepEqual(walkTabs(moved[1].root).map((item) => item.kind), ['files'])
 })
 
 test('threads are not listed as resources of themselves', () => {

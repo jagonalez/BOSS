@@ -21,7 +21,7 @@ import {
   findTab,
   loadTemplates,
   loadWorkspace,
-  moveTab,
+  moveTabAcrossViews,
   nextWorkspaceViewName,
   reorderTab,
   resizeSplit,
@@ -342,14 +342,6 @@ export function setWorkspaceSplitRatio(splitId: string, ratio: number): void {
   updateWorkspaceView((item) => ({ ...item, root: resizeSplit(item.root, splitId, ratio) }))
 }
 
-export function moveWorkspaceTab(tabId: string, targetGroupId: string, position: DropPosition): void {
-  const next = updateWorkspaceView((item) => {
-    const moved = moveTab(item.root, tabId, targetGroupId, position)
-    return { ...item, root: moved.root, focusedGroupId: moved.focusedGroupId }
-  })
-  if (next) syncFocusedThread()
-}
-
 export function reorderWorkspaceTab(groupId: string, tabId: string, beforeTabId?: string): void {
   updateWorkspaceView((item) => ({ ...item, root: reorderTab(item.root, groupId, tabId, beforeTabId) }))
 }
@@ -366,6 +358,36 @@ export function openSessionInWorkspace(sessionId: string): boolean {
   const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
   addWorkspaceTab(groupId, 'thread', sessionId)
   return true
+}
+
+/** Move a resource into a group in any view, then go and show it there.
+ *  Dropping something you dragged out of the sidebar is worth following: it may
+ *  land in a view you were not looking at, and a silent move looks like a
+ *  failed one. */
+export function sendWorkspaceTabToView(
+  tabId: string,
+  targetViewId: string,
+  targetGroupId: string,
+  position: DropPosition = 'center'
+): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  const views = moveTabAcrossViews(workspace.views, tabId, targetViewId, targetGroupId, position)
+  if (views === workspace.views) return
+  updateWorkspace((item) => ({ ...item, views, activeViewId: targetViewId }))
+  const landed = views.find((view) => view.id === targetViewId)
+  const group = landed ? walkGroups(landed.root).find((item) => item.tabs.some((entry) => entry.id === tabId)) : undefined
+  if (group) activateWorkspaceTab(group.id, tabId)
+  highlightWorkspaceTab(tabId)
+  showPage('project')
+}
+
+/** Flash a tab that just arrived, so the eye finds it without hunting. */
+export function highlightWorkspaceTab(tabId: string): void {
+  appStore.setState({ highlightedTabId: tabId })
+  window.setTimeout(() => {
+    if (appStore.getState().highlightedTabId === tabId) appStore.setState({ highlightedTabId: undefined })
+  }, 1_400)
 }
 
 /** Jump to wherever a tab currently is: switch views if needed, then focus it.

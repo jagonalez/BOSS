@@ -1433,6 +1433,30 @@ textarea {
   box-shadow: inset 0 0 0 1px var(--accent-soft);
 }
 
+/* A pane that just received a resource. The move often lands in a view the
+   user was not looking at, so the flash answers "where did it go". */
+@keyframes workspace-arrived {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  100% {
+    border-color: var(--line-default);
+    box-shadow: none;
+  }
+}
+
+.workspace-group.arrived {
+  animation: workspace-arrived 1.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-group.arrived {
+    animation: none;
+    border-color: var(--accent);
+  }
+}
+
 .workspace-group-tabs {
   display: flex;
   align-items: stretch;
