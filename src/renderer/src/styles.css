@@ -6351,6 +6351,20 @@ select:hover {
   display: flex;
 }
 
+/* Covers the guest's blank starting page. Absolute so the webview keeps its
+   own size — a hidden one never attaches and would have nothing to navigate. */
+.browse-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-pane);
+  color: var(--text-faint);
+  font-size: var(--type-control);
+}
+
 /* The guest page. A DOM element rather than a view composited over the window,
    so it fills its pane by ordinary layout and menus draw over it by z-index. */
 .browse-guest {

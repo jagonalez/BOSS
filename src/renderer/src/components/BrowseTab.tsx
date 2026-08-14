@@ -128,7 +128,11 @@ export function BrowseTab({ id, visible = true }: { id: string; visible?: boolea
         />
         {nav.loading ? <div className="spinner" /> : null}
       </div>
-      <div className="browse-view" ref={hostRef} />
+      <div className="browse-view" ref={hostRef}>
+        {/* Over the guest, not instead of it: a hidden webview never attaches,
+            so it has to stay laid out even while it is showing about:blank. */}
+        {nav.url ? null : <div className="browse-empty">Search the web or enter a URL above</div>}
+      </div>
     </div>
   )
 }

@@ -277,10 +277,15 @@ export class BrowseManager {
       this.onNavigation?.(id, entry.state)
     }
 
+    // about:blank is where a guest starts so it exists at all — it is not
+    // somewhere the user went, and showing it in the url bar reads like a page
+    // that failed to load.
+    const real = (url: string): string => (url === 'about:blank' ? '' : url)
+
     wc.on('did-start-loading', () => update({ loading: true }))
     wc.on('did-stop-loading', () => update({ loading: false }))
-    wc.on('did-navigate', (_e, url) => update({ url }))
-    wc.on('did-navigate-in-page', (_e, url) => update({ url }))
+    wc.on('did-navigate', (_e, url) => update({ url: real(url) }))
+    wc.on('did-navigate-in-page', (_e, url) => update({ url: real(url) }))
     wc.on('page-title-updated', (_e, title) => update({ title }))
     // The element can go away without the tab closing — a pane unmounting, a
     // reload during development — and a stale entry would have agent tools
@@ -289,6 +294,6 @@ export class BrowseManager {
       if (this.views.get(id)?.wc === wc) this.views.delete(id)
     })
 
-    if (wc.getURL()) update({ url: wc.getURL(), title: wc.getTitle() })
+    if (real(wc.getURL())) update({ url: wc.getURL(), title: wc.getTitle() })
   }
 }
