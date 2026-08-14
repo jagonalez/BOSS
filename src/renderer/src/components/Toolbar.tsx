@@ -2,12 +2,16 @@ import React from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { serviceDegradations } from '../lib/status'
 
-export function Toolbar(): React.JSX.Element {
+export function Toolbar(): React.JSX.Element | null {
   const serverUrl = useStore(appStore, (s) => s.serverUrl)
   const serverHealthy = useStore(appStore, (s) => s.serverHealthy)
   const backends = useStore(appStore, (s) => s.backends)
   const attention = useStore(appStore, (s) => s.attention)
   const degradations = serviceDegradations(serverUrl, serverHealthy, backends)
+
+  // Nothing to say, no bar. It sits above every page now, so an empty one
+  // would take height from the workspace on all of them.
+  if (!attention && !degradations.length) return null
 
   return (
     <div className="toolbar">

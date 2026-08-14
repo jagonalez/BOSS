@@ -3539,6 +3539,21 @@ textarea {
   min-width: 420px;
 }
 
+/* Holds the workspace while another page covers it, so its terminals keep
+   running. It has to pass the height straight through: the workspace shell
+   sizes itself as a flex child, and a plain div here collapsed it. */
+.page-layer {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-layer[hidden] {
+  display: none;
+}
+
 .toolbar {
   display: flex;
   align-items: center;

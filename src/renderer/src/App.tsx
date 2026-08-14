@@ -2,7 +2,6 @@ import React, { useEffect } from 'react'
 import { useStore, appStore, applyEvent } from './state/AppState'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
-import { ChatView } from './components/ChatView'
 import { Workspace } from './components/Workspace'
 import { CommandCenter } from './components/CommandCenter'
 import { SitesPage } from './components/SitesPage'
@@ -95,6 +94,15 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (projectPath) void refreshThreadBus()
   }, [projectPath])
+
+  // Native views are composited over the window, not inside it, so a hidden
+  // workspace would leave its browsers floating on top of whichever page is
+  // showing. Detach them while it is covered.
+  useEffect(() => {
+    const covered = activePage === 'command-center' || activePage === 'automations' || activePage === 'sites'
+    setNativeViewsSuspended('page-overlay', covered)
+    return () => setNativeViewsSuspended('page-overlay', false)
+  }, [activePage])
 
   useEffect(() => {
     setNativeViewsSuspended('app-modal', modalOpen)
@@ -325,17 +333,16 @@ export function App(): React.JSX.Element {
       : 'BOSS'
   }, [attention])
 
-  const page = (() => {
+  // No standalone chat page: a chat is a thread, so it opens in a view like
+  // any other. And the workspace stays mounted behind the other pages rather
+  // than being swapped out — rendering it conditionally tore down every
+  // terminal in it whenever you looked at Command Center, Automations or
+  // Sites, and started them again on the way back.
+  const overlay = (() => {
     if (activePage === 'command-center') return <CommandCenter />
     if (activePage === 'automations') return <AutomationsPage />
     if (activePage === 'sites') return <SitesPage />
-    if (activePage === 'project') return <Workspace />
-    return (
-      <>
-        <Toolbar />
-        <div className="content"><ChatView /></div>
-      </>
-    )
+    return null
   })()
 
   return (
@@ -343,7 +350,11 @@ export function App(): React.JSX.Element {
       <Sidebar />
       <div className="main">
         <UpdateBanner />
-        {page}
+        {/* Above the pages, not inside one: the attention pill and any
+            degraded-service warning apply wherever you are. */}
+        <Toolbar />
+        <div className="page-layer" hidden={Boolean(overlay)}><Workspace /></div>
+        {overlay}
       </div>
       <ModelSwitchModal />
       <CommitDialog />

@@ -1372,18 +1372,15 @@ export async function refreshFiles(): Promise<void> {
 export function selectSession(id: string, bindWorkspace = true): void {
   const cur = appStore.getState()
   const session = cur.sessions.find((s) => s.id === id)
-  const sessionPath = session?.projectPath ?? session?.directory ?? session?.path ?? ''
-  const inProject = Boolean(sessionPath && sessionPath !== '/')
   // A view holds sessions from wherever they live — every tab carries its own
-  // contextPath, so tiling does not care which project a thread belongs to.
-  // Requiring a match here meant clicking a thread from another project did
-  // nothing until you clicked that project first, which was the whole
-  // back-and-forth.
-  if (bindWorkspace && inProject) {
+  // contextPath, so tiling does not care which project a thread belongs to,
+  // or whether it belongs to one at all. A chat opening as its own page
+  // unmounted the workspace and restarted every terminal in it.
+  if (bindWorkspace) {
     openSessionInWorkspace(id)
   }
   if (cur.activeSessionId === id) {
-    appStore.setState({ activePage: inProject ? 'project' : 'chat' })
+    appStore.setState({ activePage: 'project' })
     void refreshProviders(id)
     void refreshQaPolicy(id)
     void refreshFollowUps(id)
@@ -1392,7 +1389,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
   if (session?.model?.id && !cur.modelsBySession[id]) setModel(session.model.id, id, session.model.provider)
   appStore.setState({
     activeSessionId: id,
-    activePage: inProject ? 'project' : 'chat',
+    activePage: 'project',
     diffs: null,
     fileContent: null
   })
