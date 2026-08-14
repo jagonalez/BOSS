@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { DropPosition, Workspace as WorkspaceState, WorkspaceCheckoutBinding, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import { useStore, appStore } from '../state/AppState'
 import { ChatView } from './ChatView'
@@ -30,7 +31,7 @@ import {
   splitWorkspaceGroup,
   undoWorkspaceClose
 } from '../lib/actions'
-import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -313,18 +314,18 @@ function TabContent({
   groupId,
   item,
   active,
-  overlayOpen,
   viewShowing
 }: {
   groupId: string
   item: WorkspaceTab
   active: boolean
-  overlayOpen: boolean
   /** False while this tab's whole view is hidden. Browsers are a native view
    *  each, so they detach rather than composite behind a hidden panel. The
-   *  page keeps running; only the expensive part stops. */
+   *  page keeps running; only the expensive part stops. Menus opening over a
+   *  pane are handled by setNativeViewsSuspended instead, which is global and
+   *  no longer reachable from here. */
   viewShowing: boolean
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
   useEffect(() => {
     if (item.kind !== 'thread' || !item.sessionId) return
@@ -338,7 +339,7 @@ function TabContent({
       content = item.sessionId ? <ChatView sessionId={item.sessionId} /> : <div className="workspace-unbound">Choose a thread for this tab.</div>
       break
     case 'browser':
-      content = <BrowseTab id={`workspace-${item.id}`} visible={active && viewShowing && !overlayOpen} />
+      content = <BrowseTab id={`workspace-${item.id}`} visible={active && viewShowing} />
       break
     case 'terminal':
       content = (
@@ -356,7 +357,68 @@ function TabContent({
       content = <FilesTab contextPath={item.contextPath} />
       break
   }
-  return <div className="workspace-tab-content" hidden={!active}>{content}</div>
+  // Portalled into its pane rather than rendered inside it. React reconciles
+  // by position, so a tab moving between panes used to unmount and remount —
+  // and unmounting a terminal disposes its shell, a browser its page. Kept in
+  // one list at the workspace root, the component never moves in the React
+  // tree however far the tab travels; only the DOM container changes.
+  const host = useTabHost(item.id)
+  // The slot carries the hidden attribute, not the content: slots are siblings
+  // in one pane, so an inactive one has to take no space rather than sit there
+  // holding a hidden child.
+  useEffect(() => {
+    if (host) host.hidden = !active
+  }, [host, active])
+  if (!host) return null
+  return createPortal(<div className="workspace-tab-content">{content}</div>, host)
+}
+
+/** Where each tab's content is painted, published by the pane that owns it.
+ *
+ *  The map lives in a ref, not in state. A ref callback fires on every render
+ *  — null, then the element — so writing state from one re-renders, which
+ *  fires the callback again, which writes state again: "Maximum update depth
+ *  exceeded". Instead the map mutates silently and a single version counter
+ *  tells the content it has somewhere new to go. */
+const TabSlots = React.createContext<{
+  slots: React.MutableRefObject<Map<string, HTMLElement>>
+  publish: (tabId: string, element: HTMLElement | null) => void
+  version: number
+}>({ slots: { current: new Map() }, publish: () => {}, version: 0 })
+
+function useTabHost(tabId: string): HTMLElement | null {
+  const { slots, version } = React.useContext(TabSlots)
+  // version is read so this recomputes when a slot arrives or leaves.
+  void version
+  return slots.current.get(tabId) ?? null
+}
+
+/** The empty div a tab's content is portalled into. One per tab, rendered by
+ *  the pane, so the pane still controls layout while the content itself stays
+ *  put in the React tree. */
+function TabSlot({ tabId }: { tabId: string }): React.JSX.Element {
+  const { publish } = React.useContext(TabSlots)
+  const attach = React.useCallback(
+    (element: HTMLElement | null) => publish(tabId, element),
+    [publish, tabId]
+  )
+  return <div className="workspace-tab-slot" data-tab-slot={tabId} ref={attach} />
+}
+
+function TabSlotProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
+  const slots = useRef(new Map<string, HTMLElement>())
+  const [version, setVersion] = useState(0)
+  const publish = React.useCallback((tabId: string, element: HTMLElement | null) => {
+    const current = slots.current.get(tabId)
+    if (element === (current ?? null)) return
+    if (element) slots.current.set(tabId, element)
+    else slots.current.delete(tabId)
+    // Only when the set of slots actually changed, so a re-render that hands
+    // back the same element does not start the loop again.
+    setVersion((count) => count + 1)
+  }, [])
+  const value = useMemo(() => ({ slots, publish, version }), [publish, version])
+  return <TabSlots.Provider value={value}>{children}</TabSlots.Provider>
 }
 
 function dropPosition(event: React.DragEvent, element: HTMLElement): DropPosition {
@@ -596,16 +658,10 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
             <small>Terminals, files and reviews belong to a thread, so they come later.</small>
           </button>
         ) : null}
-        {group.tabs.map((item) => (
-          <TabContent
-            key={item.id}
-            groupId={group.id}
-            item={item}
-            active={item.id === activeId}
-            overlayOpen={menuOpen || Boolean(dropTarget)}
-            viewShowing={workspace?.activeViewId === viewId}
-          />
-        ))}
+        {/* Slots only. The content itself lives at the workspace root and is
+            portalled in here, so moving a tab between panes moves the DOM
+            without unmounting the component behind it. */}
+        {group.tabs.map((item) => <TabSlot key={item.id} tabId={item.id} />)}
       </div>
 
       {menuOpen ? <div ref={menuRef}><AddMenu groupId={group.id} close={() => setMenuOpen(false)} /></div> : null}
@@ -882,22 +938,49 @@ export function Workspace(): React.JSX.Element {
 
   if (!workspace) return <div className="workspace-loading">Open a project to load its views.</div>
   return (
-    <div className="workspace-shell">
-      <WorkspaceBar />
-      {/* Every view stays mounted, inactive ones hidden. Rendering only the
-          active tree unmounted the others, so switching views killed their
-          terminals and restarted them on the way back. A view is a place your
-          work sits, not a page that reloads. */}
-      {workspace.views.map((view) => (
-        <div
-          key={view.id}
-          className="workspace-canvas"
-          hidden={view.id !== workspace.activeViewId}
-        >
-          <WorkspaceNodeView node={view.root} viewId={view.id} />
-        </div>
-      ))}
-    </div>
+    <TabSlotProvider>
+      <div className="workspace-shell">
+        <WorkspaceBar />
+        {/* Every view stays mounted, inactive ones hidden. Rendering only the
+            active tree unmounted the others, so switching views killed their
+            terminals and restarted them on the way back. A view is a place
+            your work sits, not a page that reloads. */}
+        {workspace.views.map((view) => (
+          <div
+            key={view.id}
+            className="workspace-canvas"
+            hidden={view.id !== workspace.activeViewId}
+          >
+            <WorkspaceNodeView node={view.root} viewId={view.id} />
+          </div>
+        ))}
+        <TabContents workspace={workspace} />
+      </div>
+    </TabSlotProvider>
+  )
+}
+
+/** Every tab's content, mounted once and portalled into whichever pane holds
+ *  it. Living here rather than inside a pane is what lets a terminal survive
+ *  being dragged elsewhere: its position in the React tree never changes,
+ *  however far the tab moves. */
+function TabContents({ workspace }: { workspace: WorkspaceState }): React.JSX.Element {
+  return (
+    <>
+      {workspace.views.flatMap((view) =>
+        walkGroups(view.root).flatMap((group) =>
+          group.tabs.map((item) => (
+            <TabContent
+              key={item.id}
+              groupId={group.id}
+              item={item}
+              active={item.id === group.activeTabId}
+              viewShowing={workspace.activeViewId === view.id}
+            />
+          ))
+        )
+      )}
+    </>
   )
 }
 
