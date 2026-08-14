@@ -1262,7 +1262,12 @@ export function selectSession(id: string, bindWorkspace = true): void {
   const session = cur.sessions.find((s) => s.id === id)
   const sessionPath = session?.projectPath ?? session?.directory ?? session?.path ?? ''
   const inProject = Boolean(sessionPath && sessionPath !== '/')
-  if (bindWorkspace && inProject && cur.projectWorkspace?.projectKey === sessionPath) {
+  // A view holds sessions from wherever they live — every tab carries its own
+  // contextPath, so tiling does not care which project a thread belongs to.
+  // Requiring a match here meant clicking a thread from another project did
+  // nothing until you clicked that project first, which was the whole
+  // back-and-forth.
+  if (bindWorkspace && inProject) {
     openSessionInWorkspace(id)
   }
   if (cur.activeSessionId === id) {
