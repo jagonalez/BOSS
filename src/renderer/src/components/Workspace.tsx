@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import type { DropPosition, WorkspaceCheckoutBinding, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
+import type { DropPosition, Workspace as WorkspaceState, WorkspaceCheckoutBinding, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import { useStore, appStore } from '../state/AppState'
 import { ChatView } from './ChatView'
 import { BrowseTab } from './BrowseTab'
@@ -27,12 +27,11 @@ import {
   sendWorkspaceTabToView,
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
-  revealWorkspaceTab,
   splitWorkspaceGroup,
   undoWorkspaceClose
 } from '../lib/actions'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkTabs, workspaceMenuRight } from '../lib/workspaces'
-import { ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
 
@@ -146,28 +145,30 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   return `${TAB_TYPES.find((candidate) => candidate.kind === item.kind)?.label ?? item.kind}${suffix}`
 }
 
+interface TabOrigin {
+  title: string
+  viewId: string
+  groupId: string
+  tabId: string
+}
+
 /** Where a resource's thread is, when the thread is not in this pane.
  *
  *  A resource can be dragged anywhere and keeps running against its own
- *  checkout, so once it sits away from its thread the tab is the only thing
- *  that can say what it belongs to — and clicking through is the way back. */
-function useOrigin(item: WorkspaceTab, group: WorkspaceGroup): { title: string; viewId: string; groupId: string; tabId: string } | null {
-  const workspace = useStore(appStore, (state) => state.projectWorkspace)
-  const title = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.title)
-  return useMemo(() => {
-    if (item.kind === 'thread' || !item.sessionId || !workspace) return null
-    if (group.tabs.some((candidate) => candidate.kind === 'thread' && candidate.sessionId === item.sessionId)) return null
-    for (const view of workspace.views) {
-      const found = findSessionTab(view.root, item.sessionId)
-      if (found) return { title: title || 'its thread', viewId: view.id, groupId: found.group.id, tabId: found.tab.id }
-    }
-    return null
-  }, [item.kind, item.sessionId, workspace, group.tabs, title])
+ *  checkout, so once it sits away from its thread this is the only thing that
+ *  can say what it belongs to. */
+function originOf(item: WorkspaceTab, group: WorkspaceGroup, workspace: WorkspaceState | null, title?: string): TabOrigin | null {
+  if (item.kind === 'thread' || !item.sessionId || !workspace) return null
+  if (group.tabs.some((candidate) => candidate.kind === 'thread' && candidate.sessionId === item.sessionId)) return null
+  for (const view of workspace.views) {
+    const found = findSessionTab(view.root, item.sessionId)
+    if (found) return { title: title || 'its thread', viewId: view.id, groupId: found.group.id, tabId: found.tab.id }
+  }
+  return null
 }
 
 function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }): React.JSX.Element {
   const label = useTabLabel(item, group)
-  const origin = useOrigin(item, group)
   // A chat belongs to no project, so it owns no resources and shows no branch.
   // Marking the tab says why its + is missing before anyone goes looking.
   const isChat = useStore(appStore, (state) => {
@@ -193,19 +194,6 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
         {label}
       </span>
       {isChat ? <span className="workspace-tab-chat">Chat</span> : null}
-      {origin ? (
-        <span
-          className="workspace-tab-origin"
-          role="button"
-          title={`From ${origin.title} — click to go there`}
-          onClick={(event) => {
-            event.stopPropagation()
-            revealWorkspaceTab(origin.viewId, origin.groupId, origin.tabId)
-          }}
-        >
-          {origin.title}
-        </span>
-      ) : null}
       {item.kind === 'thread' ? <BackendBadge backendId={backendId} /> : null}
       {busActivity ? <span className="workspace-tab-bus" title="Thread message queued or failed" /> : null}
     </>
@@ -242,23 +230,21 @@ function checkoutPath(session: { executionPath?: string; worktree?: { path: stri
 }
 
 function AddMenu({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
-  const projectPath = useStore(appStore, (state) => state.projectPath)
   const sessions = useStore(appStore, (state) => state.sessions)
-  const activeSessionId = useStore(appStore, (state) => state.activeSessionId)
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
 
   // A resource belongs to the thread it was opened from, so it takes that
-  // thread's checkout — including its worktree — rather than asking. Picking
-  // from a list of every worktree on disk made the user answer a question the
-  // thread had already answered.
+  // thread's checkout — including its worktree — rather than asking. No
+  // fallback to the active session: an empty pane would silently bind its
+  // files to whatever thread happened to be selected somewhere else.
   const ownerId = useMemo(() => {
-    if (!workspace) return activeSessionId
-    const owner = findGroup(activeWorkspaceView(workspace).root, groupId)
-    return owner?.tabs.find((item) => item.kind === 'thread')?.sessionId ?? activeSessionId
-  }, [workspace, groupId, activeSessionId])
+    if (!workspace) return undefined
+    const pane = findGroup(activeWorkspaceView(workspace).root, groupId)
+    return pane?.tabs.find((item) => item.kind === 'thread')?.sessionId
+  }, [workspace, groupId])
   const owner = sessions.find((session) => session.id === ownerId)
   const inherited: WorkspaceCheckoutBinding | undefined = (() => {
-    const path = checkoutPath(owner ?? {}) ?? projectPath
+    const path = checkoutPath(owner ?? {})
     if (!path) return undefined
     return {
       contextPath: path,
@@ -267,17 +253,28 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
     }
   })()
 
-  // A pane holds one thread and the resources belonging to it, so this menu
-  // adds resources only. An existing thread is dragged in from the sidebar,
-  // and an empty pane can start a new one below.
-  const resources = TAB_TYPES.filter((item) => item.kind !== 'thread')
   const hasThread = Boolean(owner)
+
+  // Nothing to attach a resource to yet. A terminal needs a checkout and a
+  // diff needs something to diff, so an empty pane offers threads only.
+  if (!hasThread) {
+    return (
+      <div className="workspace-add-menu">
+        <div className="workspace-menu-title">Start a thread</div>
+        <NewThreadButtons groupId={groupId} close={close} />
+        <div className="workspace-menu-note">
+          Or drag a thread here from the sidebar. Terminals, files and reviews
+          are added to a thread once it has one.
+        </div>
+      </div>
+    )
+  }
+
+  const resources = TAB_TYPES.filter((item) => item.kind !== 'thread')
 
   return (
     <div className="workspace-add-menu">
-      <div className="workspace-menu-title">
-        {hasThread ? `Add to ${owner?.title || 'this thread'}` : 'Add to this pane'}
-      </div>
+      <div className="workspace-menu-title">Add to {owner?.title || 'this thread'}</div>
       {resources.map(({ kind, label, icon: Icon }) => {
         const scoped = kind === 'terminal' || kind === 'review' || kind === 'files'
         return (
@@ -389,6 +386,7 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
   const [menuRight, setMenuRight] = useState<number | null>(null)
   const [dropTarget, setDropTarget] = useState<DropPosition | null>(null)
+  const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const activeId = group.tabs.some((item) => item.id === group.activeTabId) ? group.activeTabId : group.tabs[0]?.id ?? null
@@ -412,11 +410,28 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
   }, [menuOpen])
 
   useEffect(() => {
+    if (!tabMenu) return
+    const close = (): void => setTabMenu(null)
+    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') close() }
+    // Any click dismisses it: the only item navigates away, so there is
+    // nothing in it worth keeping open through a stray click.
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', key)
+    }
+  }, [tabMenu])
+
+  // Browsers are native views composited over the page, so any menu drawn
+  // while one is showing would sit underneath it and take no clicks. Detach
+  // them for as long as a menu is open.
+  useEffect(() => {
     const reason = `workspace-group-${group.id}`
-    const suspended = menuOpen || Boolean(dropTarget)
+    const suspended = menuOpen || Boolean(dropTarget) || Boolean(tabMenu)
     setNativeViewsSuspended(reason, suspended)
     return () => setNativeViewsSuspended(reason, false)
-  }, [group.id, menuOpen, dropTarget])
+  }, [group.id, menuOpen, dropTarget, tabMenu])
 
   const onDrop = (event: React.DragEvent): void => {
     event.preventDefault()
@@ -508,6 +523,23 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
                   <PlusIcon size={11} />
                 </span>
               ) : null}
+              {/* Holds what would be dangerous as a stray click on the tab
+                  itself. Threads have no elsewhere to be, so they skip it. */}
+              {item.kind !== 'thread' && item.sessionId ? (
+                <span
+                  className="workspace-tab-more"
+                  role="button"
+                  title="More"
+                  // On mousedown, and stopped, so the dismiss listener does not
+                  // close the menu in the same gesture that opens it.
+                  onMouseDown={(event) => {
+                    event.stopPropagation()
+                    const trigger = event.currentTarget.getBoundingClientRect()
+                    setTabMenu(tabMenu?.tabId === item.id ? null : { tabId: item.id, x: trigger.right, y: trigger.bottom })
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                >⋯</span>
+              ) : null}
               <span
                 className={`workspace-tab-close ${isLiveSurface(item) ? 'destructive' : ''}`}
                 role="button"
@@ -557,7 +589,8 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
             setMenuOpen(true)
           }}>
             <PlusIcon size={18} />
-            <span>Add a thread or tool</span>
+            <span>Drag a thread here, or start one</span>
+            <small>Terminals, files and reviews belong to a thread, so they come later.</small>
           </button>
         ) : null}
         {group.tabs.map((item) => (
@@ -573,6 +606,36 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
       </div>
 
       {menuOpen ? <div ref={menuRef}><AddMenu groupId={group.id} close={() => setMenuOpen(false)} /></div> : null}
+      {tabMenu ? (() => {
+        const item = group.tabs.find((candidate) => candidate.id === tabMenu.tabId)
+        if (!item) return null
+        const title = sessions.find((session) => session.id === item.sessionId)?.title
+        const origin = originOf(item, group, workspace ?? null, title)
+        return (
+          <div
+            className="workspace-tab-menu"
+            style={{ left: tabMenu.x, top: tabMenu.y }}
+            // The dismiss listener is on mousedown, which fires before click,
+            // so without this the menu closed before its own buttons ran.
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            {origin ? (
+              <button
+                className="workspace-add-menu-item"
+                onClick={() => {
+                  setTabMenu(null)
+                  sendWorkspaceTabToView(item.id, origin.viewId, origin.groupId)
+                }}
+              >
+                <BackIcon size={13} />
+                <span>Send back to {origin.title}</span>
+              </button>
+            ) : (
+              <div className="workspace-menu-note">Its thread is in this pane.</div>
+            )}
+          </div>
+        )
+      })() : null}
       {dropTarget ? <div className={`workspace-drop-target ${dropTarget}`}><span>{dropTarget === 'center' ? 'Move into pane' : `Split ${dropTarget}`}</span></div> : null}
     </section>
   )

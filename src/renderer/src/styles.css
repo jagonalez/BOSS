@@ -1594,26 +1594,6 @@ textarea {
   font-style: italic;
 }
 
-/* Shown only when a resource sits away from its thread, where it is the one
-   thing saying what the resource belongs to. Clicking goes there. */
-.workspace-tab-origin {
-  max-width: 96px;
-  overflow: hidden;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--bg-hover);
-  color: var(--text-faint);
-  font-size: var(--type-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.workspace-tab-origin:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-  color: var(--text);
-}
-
 /* Costs no width until you point at the tab, so a long thread title is not
    squeezed by a button nobody is reaching for. Same trick the close button
    already uses beside it. */
@@ -1641,6 +1621,47 @@ textarea {
 .workspace-tab-add-inline:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* Holds what would be dangerous as a stray click on the tab: chiefly jumping
+   to another view. Hidden until hover, same as the + and the close. */
+.workspace-tab-more {
+  width: 0;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 0;
+  overflow: hidden;
+  border-radius: 4px;
+  opacity: 0;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1;
+  transition: opacity 0.1s ease;
+}
+
+.workspace-tab:hover .workspace-tab-more,
+.workspace-tab.active .workspace-tab-more {
+  width: 16px;
+  flex: 0 0 16px;
+  margin-left: 2px;
+  opacity: 1;
+}
+
+.workspace-tab-more:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.workspace-tab-menu {
+  position: fixed;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 200;
 }
 
 .workspace-tab-close {
@@ -1732,13 +1753,26 @@ textarea {
 .workspace-empty-group {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 9px;
+  gap: 6px;
+  padding: 16px;
   border: 0;
   color: var(--text-faint);
   background: transparent;
   cursor: pointer;
+  text-align: center;
+}
+
+/* Says why a terminal is not on offer here, rather than leaving the pane to
+   look broken while it waits for a thread. */
+.workspace-empty-group small {
+  max-width: 34ch;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  line-height: 1.4;
+  opacity: 0.85;
 }
 
 .workspace-empty-group:hover {
