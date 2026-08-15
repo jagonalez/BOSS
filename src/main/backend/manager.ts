@@ -1018,7 +1018,7 @@ export class BackendManager {
     const binding = this.binding(threadId)
     const worktree = binding.worktree
     if (!worktree || worktree.status !== 'active') throw new Error('This thread is not on a worktree.')
-    await this.removeWorktree(worktree.id)
+    await this.removeWorktree(worktree.id, true)
     return { path: binding.projectPath, branch: worktree.branch }
   }
 
@@ -1295,10 +1295,16 @@ export class BackendManager {
     return patch ? this.worktrees.setSettings(patch) : this.worktrees.settings()
   }
 
-  async removeWorktree(id: string): Promise<WorktreeInfo> {
+  async removeWorktree(id: string, calledByOwner = false): Promise<WorktreeInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const owner = [...this.bindings.values()].find((binding) => binding.worktree?.id === id)
-    if (owner && this.busyThreads.has(owner.id)) throw new Error('Stop the running agent before removing its worktree.')
+    // Not when the thread is removing its own: an agent calling this is
+    // mid-turn by definition, so the check could never pass. It guards a
+    // removal from outside, where pulling the directory out from under a
+    // running agent is the surprise.
+    if (!calledByOwner && owner && this.busyThreads.has(owner.id)) {
+      throw new Error('Stop the running agent before removing its worktree.')
+    }
     const removed = await this.worktrees.remove(id)
     for (const binding of this.bindings.values()) {
       if (binding.worktree?.id !== id) continue
