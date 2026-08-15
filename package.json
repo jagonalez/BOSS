@@ -12,7 +12,7 @@
     "postinstall": "node scripts/fix-pty-permissions.mjs",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "test:transcripts": "node --experimental-strip-types --test src/main/transcript-store.test.ts",
     "test:workspaces": "node --experimental-strip-types --test src/renderer/src/lib/workspaces.test.ts",
@@ -23,6 +23,8 @@
     "test:projects": "node --experimental-strip-types --test src/main/project-identity.test.ts",
     "test:review": "node --experimental-strip-types --test src/main/review-manager.test.ts src/main/github-review-provider.test.ts src/renderer/src/lib/themes.test.ts",
     "test:claude": "node --experimental-strip-types --test src/main/backend/claude-backend.test.ts",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:headed": "npm run build && BOSS_E2E_SHOW=1 playwright test --headed",
     "fetch:opencode": "node scripts/fetch-opencode.mjs",
     "fetch:cua-driver": "bash scripts/fetch-cua-driver.sh",
     "pack": "electron-vite build && electron-builder --dir",
@@ -45,6 +47,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@types/node": "^22.10.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
