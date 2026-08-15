@@ -12,7 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
@@ -117,6 +117,9 @@ export const OpenCode = {
   backendAuthStatus: () => backendRequest<BackendAuthStatus[]>({ type: 'backend.auth.status' }),
   setBackendDefaults: (defaults: Partial<Record<BackendId, BackendModelPreference>>) =>
     backendRequest<void>({ type: 'backend.defaults.set', defaults }),
+  backendBinaries: () => backendRequest<Partial<Record<BackendId, string>>>({ type: 'backend.bin.get' }),
+  setBackendBinary: (backendId: BackendId, path: string) =>
+    backendRequest<Partial<Record<BackendId, string>>>({ type: 'backend.bin.set', backendId, path }),
   listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
   createSession: (title?: string, backendId: BackendId = 'opencode', scope: ThreadCreationScope = 'current') =>
     backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, scope }),
@@ -153,6 +156,8 @@ export const OpenCode = {
   diff: (id: string, messageID?: string) =>
     backendRequest<FileDiff[]>({ type: 'thread.diff', threadId: id, messageId: messageID }),
   todos: (id: string) => backendRequest<Todo[]>({ type: 'thread.todos', threadId: id }),
+  setThreadMode: (threadId: string, mode: BackendModeId) =>
+    backendRequest<SessionInfo & { pendingUntilNextMessage?: boolean }>({ type: 'thread.mode.set', threadId, mode }),
   respondPermission: (sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject') =>
     backendRequest<void>({ type: 'thread.permission', threadId: sessionID, permissionId: permissionID, response }),
   replyQuestion: (requestID: string, answers: string[][]) =>

@@ -11,22 +11,26 @@ import type {
   BackendRequest,
   BackendCapabilities,
   BackendMessageOptions,
+  BackendModeId,
   BackendModelPreference,
   DelegatePlacement,
   QueuedFollowUp,
   QueuedFollowUpAttachment,
   ThreadCreationScope
 } from '@shared/backend'
+import { withBackendDefaults } from '@shared/backend'
 import type { EventMessage, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 import { projectScope, type ProjectScope } from '../project-identity'
+import { envHint, resolveBackendBin, type BinaryOverrides } from '../backend-bin'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
 import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 import { budgetViolation, normalizeTaskPolicy, type TaskPolicy } from '@shared/task-policy'
+import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
 
 interface ThreadBinding {
   id: string
@@ -45,6 +49,13 @@ interface ThreadBinding {
   followUps?: QueuedFollowUp[]
   attention?: ThreadAttention
   policy?: TaskPolicy
+  /** The thread's permission mode, and the only copy that decides anything.
+   *
+   *  A backend that takes its mode as a launch argument reads it once, so a
+   *  mid-run change can never reach the running process. Keeping the mode here
+   *  lets the permission handler read what the mode is *now* rather than what
+   *  it was at spawn. */
+  mode?: BackendModeId
 }
 
 type LegacyThreadBinding = Omit<ThreadBinding, 'nativeSessionOwnership' | 'projectId' | 'executionPath'>
@@ -125,8 +136,9 @@ function now(): number {
 }
 
 function probeVersion(command: string): { available: boolean; version?: string; reason?: string } {
+  const bin = resolveBackendBin(command)
   try {
-    const output = execFileSync(command, ['--version'], {
+    const output = execFileSync(bin, ['--version'], {
       encoding: 'utf8',
       timeout: 2500,
       stdio: ['ignore', 'pipe', 'pipe']
@@ -136,7 +148,10 @@ function probeVersion(command: string): { available: boolean; version?: string; 
     const code = (error as NodeJS.ErrnoException).code
     return {
       available: false,
-      reason: code === 'ENOENT' ? `${command} is not installed or is not on PATH.` : `${command} could not be started.`
+      reason:
+        code === 'ENOENT'
+          ? `${command} is not installed or is not on PATH. Set its location in Settings > Models & connections, or ${envHint(command)}.`
+          : `${command} could not be started.`
     }
   }
 }
@@ -182,6 +197,7 @@ export class BackendManager {
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
   private remote?: { handle(request: BackendRequest): Promise<unknown> }
+  private binaryOverrides?: BinaryOverrides
   private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
   private loaded = false
   private worktreeCleanupTimer?: NodeJS.Timeout
@@ -264,6 +280,64 @@ export class BackendManager {
     this.save()
   }
 
+  /** The mode this thread is in right now.
+   *
+   *  Falls back to the backend's first mode so a thread created before the mode
+   *  was stored here still answers with something its backend offers. */
+  private modeFor(binding: ThreadBinding): BackendModeId {
+    return resolveThreadMode(binding.mode, DEFINITIONS[binding.backendId].modes.map((mode) => mode.id))
+  }
+
+  /** Record the thread's mode and tell the running agent about it.
+   *
+   *  This is the write half of the single source of truth. The renderer calls
+   *  it the moment the user picks a mode, so a change lands even mid-run.
+   *
+   *  A backend with its own Auto policy has to be told, because BOSS does not
+   *  answer its requests for it. claude accepts the change on its control
+   *  channel and applies it immediately; codex takes its policy per turn, so
+   *  the change waits for the next one. That difference is reported rather
+   *  than hidden: `pendingUntilNextMessage` says the switch has not taken
+   *  effect yet. */
+  async setThreadMode(threadId: string, mode: BackendModeId): Promise<SessionInfo & { pendingUntilNextMessage?: boolean }> {
+    const binding = this.binding(threadId)
+    const changed = binding.mode !== mode
+    if (changed) {
+      binding.mode = mode
+      binding.updatedAt = now()
+      this.save()
+    }
+    // Only while the thread is actually running. An idle thread picks the mode
+    // up from its next sendMessage, so there is nothing to tell and nothing
+    // pending.
+    let pendingUntilNextMessage = false
+    if (this.busyThreads.has(threadId)) {
+      const backend = this.backends[binding.backendId]
+      const applied = backend.permissionModeSet
+        ? await backend.permissionModeSet(binding.nativeSessionId, mode).catch(() => false)
+        : true
+      pendingUntilNextMessage = !applied
+    }
+    const session = this.session(binding)
+    this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
+    return pendingUntilNextMessage ? { ...session, pendingUntilNextMessage } : session
+  }
+
+  /** What BOSS itself should do with a permission request, given the mode now.
+   *
+   *  Read when the request arrives, never captured, so a mid-run change applies
+   *  to the very next request. Returning undefined means "ask the user".
+   *
+   *  Backends with their own Auto policy are told about the change instead
+   *  (see setThreadMode) and keep deciding for themselves, so what they send is
+   *  an escalation and reaches the user. */
+  private hostPermissionResponse(binding: ThreadBinding): 'once' | 'reject' | undefined {
+    return hostPermissionResponse(
+      this.modeFor(binding),
+      DEFINITIONS[binding.backendId].capabilities.nativeAutoMode
+    )
+  }
+
   scopeFor(projectPath: string): ProjectScope {
     return projectPath ? projectScope(projectPath) : this.globalScope
   }
@@ -323,6 +397,36 @@ export class BackendManager {
 
   attachRemote(remote: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.remote = remote
+  }
+
+  attachBinaryOverrides(overrides: BinaryOverrides): void {
+    this.binaryOverrides = overrides
+  }
+
+  /** Where each backend's CLI lives, keyed by backend id rather than command name so
+   *  the renderer never has to know a backend's command. Backends with no command of
+   *  their own (opencode runs as a server) are absent. */
+  private binaryPaths(): Partial<Record<BackendId, string>> {
+    const stored = this.binaryOverrides?.all() ?? {}
+    const paths: Partial<Record<BackendId, string>> = {}
+    for (const id of Object.keys(DEFINITIONS) as BackendId[]) {
+      const command = DEFINITIONS[id].command
+      if (command && stored[command]) paths[id] = stored[command]
+    }
+    return paths
+  }
+
+  /** Record where a backend's CLI lives. An empty path clears the override and returns
+   *  the backend to a plain PATH lookup. */
+  private setBinaryPath(backendId: BackendId, path: string | undefined): Partial<Record<BackendId, string>> {
+    if (!this.binaryOverrides) throw new Error('Backend locations are not available.')
+    const command = DEFINITIONS[backendId].command
+    if (!command) throw new Error(`${DEFINITIONS[backendId].label} does not run from a CLI on PATH.`)
+    this.binaryOverrides.set(command, path)
+    // probeVersion runs on every descriptors() call rather than being cached, so the
+    // next backend.list already reflects this. The renderer reloads that after saving,
+    // which is what clears a stale "Unavailable".
+    return this.binaryPaths()
   }
 
   async start(projectPath?: string): Promise<void> {
@@ -489,6 +593,7 @@ export class BackendManager {
       parentID: binding.parentID,
       lineage: binding.lineage,
       worktree: binding.worktree,
+      mode: this.modeFor(binding),
       time: native?.time ?? { created: binding.createdAt, updated: binding.updatedAt }
     }
   }
@@ -618,6 +723,21 @@ export class BackendManager {
         this.busyThreads.delete(binding.id)
         this.setThreadAttention(binding, 'error', this.errorDetail(properties.error))
       } else if (eventType === 'permission.asked' || eventType === 'permission.updated') {
+        // Read the mode now, not at spawn. This is the whole fix: whatever the
+        // backend was launched under, the answer follows the mode the thread is
+        // in at the moment the request arrives.
+        const hostResponse = this.hostPermissionResponse(binding)
+        const permissionId = properties.id as string | undefined
+        if (hostResponse && permissionId) {
+          void this.handle({
+            type: 'thread.permission',
+            threadId: binding.id,
+            permissionId,
+            response: hostResponse
+          }).catch(() => { /* the run may have ended before the answer landed */ })
+          // Swallow the event so no surface prompts for something already answered.
+          return
+        }
         this.setThreadAttention(binding, 'permission')
       } else if (eventType === 'permission.replied') {
         if (binding.attention?.kind === 'permission') this.clearThreadAttention(binding)
@@ -805,6 +925,10 @@ export class BackendManager {
     const violation = budgetViolation(binding.policy, usage)
     if (violation) throw new Error(`${violation} Increase or remove the task budget before continuing.`)
     const backend = await this.ensureStarted(binding.backendId)
+    // A caller that names a mode is setting the thread's mode, not passing a
+    // one-off. Recording it here keeps the stored mode and the mode the backend
+    // launches under from drifting apart.
+    if (options?.mode) binding.mode = options.mode
     binding.updatedAt = now()
     this.save()
     this.transcripts?.beginRun(this.transcriptSource(binding))
@@ -1031,8 +1155,8 @@ export class BackendManager {
     return { path: binding.projectPath, branch: worktree.branch }
   }
 
-  async spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread> {
-    const created = await this.forkIntoWorktree(threadId, instruction)
+  async spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId): Promise<ThreadBusThread> {
+    const created = await this.forkIntoWorktree(threadId, instruction, undefined, agent)
     const info = this.threadInfo(created.id)
     if (!info) throw new Error('The worktree thread was created but could not be registered.')
     return info
@@ -1109,7 +1233,11 @@ export class BackendManager {
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
     }, source.projectId === 'global' ? 'global' : 'current')
-    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { ...options, mode: options?.mode ?? 'ask' })
+    await this.sendMessage(
+      created.id,
+      [{ type: 'text', text: packet }],
+      withBackendDefaults(this.defaultModel(backendId), options, 'ask')
+    )
     return created
   }
 
@@ -1176,12 +1304,14 @@ export class BackendManager {
       )
     }
 
-    await this.sendMessage(created.id, [{ type: 'text', text: packet }], {
-      ...options,
-      mode: options?.mode ?? DEFINITIONS[backendId].modes.find((mode) => mode.id === 'auto')?.id
-        ?? DEFINITIONS[backendId].modes.find((mode) => mode.id === 'accept-edits')?.id
-        ?? DEFINITIONS[backendId].modes[0]?.id
-    })
+    const fallbackMode = DEFINITIONS[backendId].modes.find((mode) => mode.id === 'auto')?.id
+      ?? DEFINITIONS[backendId].modes.find((mode) => mode.id === 'accept-edits')?.id
+      ?? DEFINITIONS[backendId].modes[0]?.id
+    await this.sendMessage(
+      created.id,
+      [{ type: 'text', text: packet }],
+      withBackendDefaults(this.defaultModel(backendId), options, fallbackMode)
+    )
     return this.sessionGet(created.id)
   }
 
@@ -1225,9 +1355,15 @@ export class BackendManager {
     return session
   }
 
-  async forkIntoWorktree(threadId: string, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
+  async forkIntoWorktree(
+    threadId: string,
+    instruction?: string,
+    options?: BackendMessageOptions,
+    targetBackendId?: BackendId
+  ): Promise<SessionInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const source = this.binding(threadId)
+    const backendId = targetBackendId ?? source.backendId
     if (source.projectId === 'global' || !source.projectPath) throw new Error('Projectless chats cannot create Git worktrees.')
     const worktree = await this.worktrees.create({
       projectId: source.projectId,
@@ -1244,7 +1380,7 @@ export class BackendManager {
         instruction ?? `Continue this conversation in the new Git worktree on branch ${worktree.branch}.`
       )
       created = await this.sessionCreateInScope(
-        source.backendId,
+        backendId,
         { projectId: source.projectId, projectPath: source.projectPath, executionPath: worktree.path },
         `${source.title ?? 'Untitled'} · worktree`,
         { kind: 'fork', sourceThreadId: threadId, sourceBackendId: source.backendId },
@@ -1260,8 +1396,12 @@ export class BackendManager {
     this.save()
     // Before the first message, so it is read before the agent starts working
     // in a checkout that may not have its dependencies.
-    this.reportSetupFailure(created.id, worktree.setupError, source.backendId)
-    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { ...options, mode: options?.mode ?? 'ask' })
+    this.reportSetupFailure(created.id, worktree.setupError, backendId)
+    await this.sendMessage(
+      created.id,
+      [{ type: 'text', text: packet }],
+      withBackendDefaults(this.defaultModel(backendId), options, 'ask')
+    )
     return this.session(binding)
   }
 
@@ -1439,6 +1579,8 @@ export class BackendManager {
       case 'backend.list': return this.descriptors()
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
+      case 'backend.bin.get': return this.binaryPaths()
+      case 'backend.bin.set': return this.setBinaryPath(request.backendId, request.path)
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return request.executionPath
         ? this.createScopedThread(request.backendId, this.scopeFor(request.executionPath), request.title ?? 'Untitled thread')
@@ -1456,6 +1598,7 @@ export class BackendManager {
       case 'thread.followups.move': return this.moveFollowUp(request.threadId, request.followUpId, request.toIndex)
       case 'thread.followups.steer': return this.steerFollowUp(request.threadId, request.followUpId)
       case 'thread.abort': return this.abort(request.threadId)
+      case 'thread.mode.set': return this.setThreadMode(request.threadId, request.mode)
       case 'thread.todos': {
         const binding = this.binding(request.threadId)
         return (await this.ensureStarted(binding.backendId)).todosGet(binding.nativeSessionId)

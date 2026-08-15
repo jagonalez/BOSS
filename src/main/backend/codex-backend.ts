@@ -1,7 +1,8 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { resolveBackendBin } from '../backend-bin'
 import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
-import type { BackendMessageOptions } from '@shared/backend'
+import { BACKEND_IDS, type BackendMessageOptions, type BackendModeId } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
@@ -120,7 +121,12 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
     inputSchema: {
       type: 'object',
       properties: {
-        instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction }
+        instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction },
+        agent: {
+          type: 'string',
+          enum: [...BACKEND_IDS],
+          description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeAgent
+        }
       },
       required: ['instruction'],
       additionalProperties: false
@@ -338,12 +344,13 @@ export class CodexBackend implements Backend {
 
   async start(): Promise<void> {
     if (this.process) return
+    const bin = resolveBackendBin('codex')
     try {
-      this.version = execFileSync('codex', ['--version'], { encoding: 'utf8', timeout: 2500 }).trim()
+      this.version = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 2500 }).trim()
     } catch {
       throw new Error('Codex CLI is not installed or could not be started.')
     }
-    this.process = spawn('codex', ['app-server', '--stdio'], {
+    this.process = spawn(bin, ['app-server', '--stdio'], {
       cwd: this.projectPath || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe']
     })
@@ -703,6 +710,17 @@ export class CodexBackend implements Backend {
   async thinkingGet(): Promise<ThinkingLevel> { return { level: 'medium' } }
   async thinkingSet(_level: ThinkingLevel['level']): Promise<void> {}
   async todosGet(_sessionId: string): Promise<Todo[]> { return [] }
+
+  /** Codex takes its approval policy per turn, at turn/start, so a running turn
+   *  cannot be told about a mode change.
+   *
+   *  In Auto it runs with approvalPolicy 'never' and stops sending approval
+   *  requests altogether, so there is nothing to intercept either. The mode
+   *  applies from the next turn, and saying so is better than a switch that
+   *  silently does nothing. */
+  async permissionModeSet(sessionId: string, _mode: BackendModeId): Promise<boolean> {
+    return !this.activeTurns.has(sessionId)
+  }
 
   async permissionRespond(sessionId: string, permissionId: string, response: 'once' | 'always' | 'reject'): Promise<void> {
     const approval = this.approvals.get(permissionId)

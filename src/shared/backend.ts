@@ -1,4 +1,9 @@
-export type BackendId = 'opencode' | 'pi' | 'codex' | 'claude'
+export const BACKEND_IDS = ['opencode', 'pi', 'codex', 'claude'] as const
+export type BackendId = typeof BACKEND_IDS[number]
+
+export function isBackendId(value: string): value is BackendId {
+  return (BACKEND_IDS as readonly string[]).includes(value)
+}
 export type BackendModeId = 'ask' | 'auto' | 'plan' | 'accept-edits'
 export type ThreadCreationScope = 'current' | 'global'
 export type DelegatePlacement = 'same-checkout' | 'new-worktree'
@@ -94,10 +99,35 @@ export interface BackendMessageOptions {
   context?: string
 }
 
+/** Fill a newly-created thread's first turn from the owning backend's saved
+ * defaults. Explicit per-thread choices always win. Kept in the shared layer
+ * because renderer-created and agent-created threads must resolve the same
+ * settings even though the latter never pass through renderer state. */
+export function withBackendDefaults(
+  preference: BackendModelPreference | undefined,
+  options?: BackendMessageOptions,
+  fallbackMode?: BackendModeId
+): BackendMessageOptions {
+  const model = options?.model ?? (preference ? {
+    providerID: preference.providerID,
+    modelID: preference.modelID,
+    ...(preference.variant ? { variant: preference.variant } : {})
+  } : undefined)
+  const mode = options?.mode ?? preference?.mode ?? fallbackMode
+  return {
+    ...options,
+    ...(model ? { model } : {}),
+    ...(mode ? { mode } : {})
+  }
+}
+
 export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'backend.auth.status' }
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
+  | { type: 'backend.bin.get' }
+  /** An empty or omitted path clears the override, returning the backend to PATH. */
+  | { type: 'backend.bin.set'; backendId: BackendId; path?: string }
   | { type: 'thread.list' }
   | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope; executionPath?: string }
   | { type: 'thread.backend.set'; threadId: string; backendId: BackendId }
@@ -113,6 +143,7 @@ export type BackendRequest =
   | { type: 'thread.followups.move'; threadId: string; followUpId: string; toIndex: number }
   | { type: 'thread.followups.steer'; threadId: string; followUpId: string }
   | { type: 'thread.abort'; threadId: string }
+  | { type: 'thread.mode.set'; threadId: string; mode: BackendModeId }
   | { type: 'thread.todos'; threadId: string }
   | { type: 'thread.permission'; threadId: string; permissionId: string; response: 'once' | 'always' | 'reject' }
   | { type: 'thread.diff'; threadId: string; messageId?: string }

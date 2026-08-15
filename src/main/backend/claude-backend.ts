@@ -1,10 +1,11 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { resolveBackendBin } from '../backend-bin'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
-import type { BackendMessageOptions } from '@shared/backend'
+import type { BackendMessageOptions, BackendModeId } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
@@ -86,7 +87,7 @@ export class ClaudeBackend implements Backend {
   private store: ClaudeStore = { version: 1, sessions: {} }
   private threadBus?: ThreadBusConnection
 
-  constructor(cwd?: string, command = 'claude') {
+  constructor(cwd?: string, command = resolveBackendBin('claude')) {
     this.projectPath = cwd ?? ''
     this.command = command
   }
@@ -474,6 +475,26 @@ export class ClaudeBackend implements Backend {
 
   async abort(sessionId: string): Promise<void> {
     this.processes.get(sessionId)?.child.kill('SIGINT')
+  }
+
+  /** Tell a running Claude Code its permission mode changed.
+   *
+   *  Claude accepts set_permission_mode on the same control channel it sends
+   *  permission requests over, and applies it to every request after it. That
+   *  keeps Claude's own graduated Auto in charge: it goes on escalating the
+   *  tools it wants confirmed instead of BOSS blanket-approving them.
+   *
+   *  Returns false when there is no live process, so the caller can say the
+   *  mode applies from the next message rather than immediately. */
+  async permissionModeSet(sessionId: string, mode: BackendModeId): Promise<boolean> {
+    const process = this.processes.get(sessionId)
+    if (!process?.child.stdin?.writable) return false
+    writeControl(process.child, {
+      type: 'control_request',
+      request_id: `boss-mode-${randomUUID()}`,
+      request: { subtype: 'set_permission_mode', mode: claudePermissionMode(mode) }
+    })
+    return true
   }
 
   async modelsList(): Promise<ModelInfo[]> {

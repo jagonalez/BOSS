@@ -9,6 +9,7 @@ import { resolveMode, resolveVariant } from './thread-defaults'
 import { startMicCapture } from './mic'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
+import { withBackendDefaults } from '@shared/backend'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -325,7 +326,14 @@ export function setDefaultModel(backendId: BackendId, model: BackendModelDescrip
   appStore.setState((state) => {
     const defaultModels = { ...(state.defaultModels ?? {}) }
     if (model) {
-      defaultModels[backendId] = { modelID: model.id, providerID: model.provider || backendId }
+      // Permission mode belongs to the backend, not the model. Switching the
+      // default model must not silently put future threads back into Ask.
+      const mode = defaultModels[backendId]?.mode
+      defaultModels[backendId] = {
+        modelID: model.id,
+        providerID: model.provider || backendId,
+        ...(mode ? { mode } : {})
+      }
     } else {
       delete defaultModels[backendId]
     }
@@ -355,31 +363,37 @@ export function setBackendDefault(
   })
 }
 
-function applyBackendDefaultModel(sessionId: string, backendId: BackendId): void {
-  const preference = appStore.getState().defaultModels?.[backendId]
-  if (preference) setModel(preference.modelID, sessionId, preference.providerID)
+function applyBackendDefaults(sessionId: string, backendId: BackendId): void {
+  const state = appStore.getState()
+  const preference = state.defaultModels?.[backendId]
+  if (preference) {
+    setModel(preference.modelID, sessionId, preference.providerID)
+    if (preference.variant) setVariant(preference.variant, sessionId)
+  }
+  const descriptor = state.backends.find((backend) => backend.id === backendId)
+  setMode(resolveMode(undefined, preference?.mode, state.mode, descriptor?.modes.map((mode) => mode.id) ?? []), sessionId)
 }
 
-function copyThreadModelPreference(sourceId: string, targetId: string): void {
+function copyThreadPreferences(sourceId: string, targetId: string): void {
   const state = appStore.getState()
   const source = state.sessions.find((session) => session.id === sourceId)
   const modelID = state.modelsBySession[sourceId] ?? source?.model?.id
   const providerID = state.modelProvidersBySession?.[sourceId] ?? source?.model?.provider
-  if (!modelID) return
-  setModel(modelID, targetId, providerID)
-  if (Object.prototype.hasOwnProperty.call(state.variantsBySession, sourceId)) {
-    setVariant(state.variantsBySession[sourceId], targetId)
+  if (modelID) {
+    setModel(modelID, targetId, providerID)
+    if (Object.prototype.hasOwnProperty.call(state.variantsBySession, sourceId)) {
+      setVariant(state.variantsBySession[sourceId], targetId)
+    }
   }
+  setMode(modeForSession(sourceId), targetId)
 }
 
 export async function createThreadInGroup(groupId: string, backendId: BackendId = appStore.getState().engine): Promise<void> {
   try {
     const session = await OpenCode.createSession(undefined, backendId)
-    applyBackendDefaultModel(session.id, backendId)
+    applyBackendDefaults(session.id, backendId)
     upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? appStore.getState().projectPath })
     await refreshSessions()
-    const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
-    setMode(defaultMode, session.id)
     await refreshProviders(session.id)
     addWorkspaceTab(groupId, 'thread', session.id)
   } catch {
@@ -786,11 +800,9 @@ export async function runCheckoutReview(
     const backendId = state.engine
     const title = `Review · ${target}`
     session = await OpenCode.createSessionInPath(contextPath, title, backendId)
-    applyBackendDefaultModel(session.id, backendId)
+    applyBackendDefaults(session.id, backendId)
     upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? state.projectPath })
     await refreshSessions()
-    const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
-    setMode(defaultMode, session.id)
     await refreshProviders(session.id)
     updateWorkspaceView((view) => ({
       ...view,
@@ -1037,7 +1049,11 @@ export function variantForSession(sessionId?: string): string | null {
 
 export function modeForSession(sessionId?: string): BackendModeId {
   const state = appStore.getState()
-  const backendId = sessionId ? state.sessions.find((session) => session.id === sessionId)?.backendId : state.engine
+  const session = sessionId ? state.sessions.find((item) => item.id === sessionId) : undefined
+  const backendId = session?.backendId ?? (sessionId ? undefined : state.engine)
+  // Main owns the mode, so its copy wins whenever it has one. The local map is
+  // still consulted below for a thread main has not answered for yet.
+  if (session?.mode) return session.mode
   // What this thread was set to, then what this backend defaults to, then the
   // app's. A default is per backend because the modes are: codex has no
   // accept-edits, and pi has one mode, so a single global would name something
@@ -1146,6 +1162,19 @@ export function setMode(id: BackendModeId, sessionId: string | null = appStore.g
       persistThreadPreference('boss.modesBySession', modesBySession)
       return { modesBySession }
     })
+    // Main owns the mode and tells the running agent, so it has to hear about
+    // this now rather than with the next message. Without this a mid-run
+    // switch changed only the label until the thread was asked something new.
+    void OpenCode.setThreadMode(sessionId, id).then((session) => {
+      // Codex sets its approval policy per turn, so a switch during a turn
+      // cannot take effect until the next one. Say so rather than leave the
+      // label claiming a mode that is not in force yet.
+      if (session?.pendingUntilNextMessage) {
+        appStore.setState((state) => ({
+          modePending: { ...state.modePending, [sessionId]: id }
+        }))
+      }
+    }).catch(() => { /* main keeps its last known mode */ })
     return
   }
   appStore.setState({ mode: id })
@@ -1170,8 +1199,13 @@ export async function cloneThreadToBackend(threadId: string, backendId: BackendI
   if (!source || (source.backendId ?? 'opencode') === backendId) return
   try {
     const preference = appStore.getState().defaultModels?.[backendId]
-    const session = await OpenCode.cloneToBackend(threadId, backendId, undefined, preference ? { model: preference } : undefined)
-    applyBackendDefaultModel(session.id, backendId)
+    const session = await OpenCode.cloneToBackend(
+      threadId,
+      backendId,
+      undefined,
+      preference ? withBackendDefaults(preference) : undefined
+    )
+    applyBackendDefaults(session.id, backendId)
     upsertSessionMeta(session.id, {
       kind: 'fork',
       projectPath: appStore.getState().projectPath,
@@ -1197,9 +1231,9 @@ export async function delegateThread(
       backendId,
       instruction,
       placement,
-      preference ? { model: preference } : undefined
+      preference ? withBackendDefaults(preference) : undefined
     )
-    applyBackendDefaultModel(session.id, backendId)
+    applyBackendDefaults(session.id, backendId)
     upsertSessionMeta(session.id, {
       kind: 'delegate',
       projectPath: session.projectPath ?? appStore.getState().projectPath,
@@ -1235,9 +1269,7 @@ export async function setEmptyThreadBackend(threadId: string, backendId: Backend
       persistThreadPreference('boss.modesBySession', modesBySession)
       return { modelsBySession, modelProvidersBySession, variantsBySession, modesBySession, providersBySession }
     })
-    applyBackendDefaultModel(threadId, backendId)
-    const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
-    setMode(defaultMode, threadId)
+    applyBackendDefaults(threadId, backendId)
     await refreshSessions()
     await refreshProviders(threadId)
     await loadMessages(threadId)
@@ -1269,14 +1301,6 @@ export function setAgent(id: string): void {
   appStore.setState({ agent: id })
   try {
     localStorage.setItem('boss.agent', id)
-  } catch {
-    /* ignore */
-  }
-}
-
-export async function autoRespond(sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject'): Promise<void> {
-  try {
-    await OpenCode.respondPermission(sessionID, permissionID, response)
   } catch {
     /* ignore */
   }
@@ -1591,11 +1615,9 @@ async function createSession(scope: ThreadCreationScope): Promise<void> {
   try {
     const backendId = appStore.getState().engine
     const session = await OpenCode.createSession(undefined, backendId, scope)
-    applyBackendDefaultModel(session.id, backendId)
+    applyBackendDefaults(session.id, backendId)
     upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? '' })
     await refreshSessions()
-    const defaultMode = appStore.getState().backends.find((backend) => backend.id === backendId)?.modes[0]?.id ?? 'ask'
-    setMode(defaultMode, session.id)
     await refreshProviders(session.id)
     selectSession(session.id)
   } catch {
@@ -1730,7 +1752,7 @@ export function archiveAllInPath(path: string): void {
 export async function forkSession(id: string): Promise<void> {
   try {
     const session = await OpenCode.fork(id)
-    copyThreadModelPreference(id, session.id)
+    copyThreadPreferences(id, session.id)
     upsertSessionMeta(session.id, { kind: 'fork', forkedFrom: { sessionId: id } })
     await refreshSessions()
     selectSession(session.id)
@@ -1741,9 +1763,12 @@ export async function forkSession(id: string): Promise<void> {
 
 export async function forkSessionIntoWorktree(id: string): Promise<void> {
   try {
-    const options = modelKeyWithVariant(modelForSession(id), id)
-    const session = await OpenCode.forkIntoWorktree(id, undefined, options ? { model: options } : undefined)
-    copyThreadModelPreference(id, session.id)
+    const model = modelKeyWithVariant(modelForSession(id), id)
+    const session = await OpenCode.forkIntoWorktree(id, undefined, {
+      ...(model ? { model } : {}),
+      mode: modeForSession(id)
+    })
+    copyThreadPreferences(id, session.id)
     upsertSessionMeta(session.id, {
       kind: 'fork',
       projectPath: session.projectPath,
@@ -1809,7 +1834,7 @@ export async function unrevertSession(sessionID: string): Promise<void> {
 export async function forkFromMessage(sessionID: string, messageID?: string, draft?: string): Promise<void> {
   try {
     const session = await OpenCode.fork(sessionID, messageID)
-    copyThreadModelPreference(sessionID, session.id)
+    copyThreadPreferences(sessionID, session.id)
     upsertSessionMeta(session.id, { kind: 'fork', forkedFrom: { sessionId: sessionID, messageId: messageID } })
     await refreshSessions()
     selectSession(session.id)

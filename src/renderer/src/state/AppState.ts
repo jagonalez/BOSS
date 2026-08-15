@@ -98,6 +98,9 @@ export interface AppState {
   modelProvidersBySession: Record<string, string>
   variantsBySession: Record<string, string | null>
   modesBySession: Record<string, BackendModeId>
+  /** Threads whose mode change cannot take effect until their next message,
+   *  because the backend fixes its approval policy for the whole turn. */
+  modePending: Record<string, BackendModeId>
   agent: string
   engine: BackendId
   backends: BackendDescriptor[]
@@ -197,6 +200,7 @@ export const initialState: AppState = {
   modelProvidersBySession: {},
   variantsBySession: {},
   modesBySession: {},
+  modePending: {},
   agent: 'build',
   engine: 'opencode',
   backends: [],

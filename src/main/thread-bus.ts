@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BackendId } from '@shared/backend'
+import { BACKEND_IDS, isBackendId, type BackendId } from '@shared/backend'
 import type { MessageWithParts } from '@shared/opencode'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult, type QaAgentTool, type QaPolicy } from '@shared/qa'
 import type {
@@ -38,7 +38,7 @@ export interface ThreadBusHost {
   threadList(projectId: string): ThreadBusThread[]
   threadMessages(threadId: string, limit: number): Promise<MessageWithParts[]>
   deliverThreadMessage(threadId: string, body: string): Promise<void>
-  spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread>
+  spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId): Promise<ThreadBusThread>
   useWorktree(threadId: string): Promise<{ path: string; branch: string }>
   leaveWorktree(threadId: string): Promise<{ path: string; branch: string }>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
@@ -268,9 +268,15 @@ export class ThreadBus {
       case 'boss_threads_spawn_worktree': {
         if (policy !== 'collaborate') throw new Error('This project does not allow agents to create worktree threads.')
         const instruction = stringArg(args, 'instruction')
+        const requestedAgent = stringArg(args, 'agent')
         if (!instruction) throw new Error('An implementation instruction is required.')
         if (instruction.length > MAX_BODY) throw new Error(`Instructions are limited to ${MAX_BODY.toLocaleString()} characters.`)
-        return this.host.spawnWorktreeThread(caller.id, instruction)
+        let agent: BackendId | undefined
+        if (requestedAgent) {
+          if (!isBackendId(requestedAgent)) throw new Error(`Agent must be one of: ${BACKEND_IDS.join(', ')}.`)
+          agent = requestedAgent
+        }
+        return this.host.spawnWorktreeThread(caller.id, instruction, agent)
       }
       case 'boss_threads_leave_worktree':
         return this.host.leaveWorktree(caller.id)
@@ -492,7 +498,12 @@ export class ThreadBus {
         inputSchema: {
           type: 'object',
           properties: {
-            instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction }
+            instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction },
+            agent: {
+              type: 'string',
+              enum: [...BACKEND_IDS],
+              description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeAgent
+            }
           },
           required: ['instruction'],
           additionalProperties: false

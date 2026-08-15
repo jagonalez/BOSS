@@ -31,8 +31,15 @@ import { TranscriptStore } from './transcript-store'
 import { UpdateChecker } from './updates'
 import { ReviewManager } from './review-manager'
 import { GitHubReviewProvider } from './github-review-provider'
+import { restoreShellPath } from './shell-path'
+import { BinaryOverrides, setBinaryOverrideSource } from './backend-bin'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
+
+// Launched from Finder, the app inherits launchd's bare PATH and cannot see any
+// backend CLI. Repair PATH before the managers below are constructed, since they
+// probe and spawn those binaries at import time.
+restoreShellPath()
 
 // Dev runs get their own userData so a broken dev build cannot corrupt the
 // installed app's workspaces, transcripts, and backend config. Every checkout
@@ -59,6 +66,12 @@ if (!gotLock) {
 
 let mainWindow: BrowserWindow | null = null
 
+// PATH repair covers the common Finder launch, but a non-POSIX login shell defeats the
+// probe. These are the manual escape hatch, and they must be readable before the first
+// spawn below. userData is final by this point — the dev-profile switch runs above.
+const backendBins = new BinaryOverrides(join(app.getPath('userData'), 'backend-bins.json'))
+setBinaryOverrideSource(() => backendBins.all())
+
 const server = new OpenCodeServer()
 const api = new ApiClient(server)
 const events = new EventStream(server)
@@ -75,6 +88,7 @@ const backendMgr = new BackendManager({
   codex: createBackend('codex', { server, api, events }),
   claude: createBackend('claude', { server, api, events })
 }, worktrees, backendAuth, transcripts)
+backendMgr.attachBinaryOverrides(backendBins)
 const threadBus = new ThreadBus(backendMgr)
 backendMgr.attachThreadBus(threadBus)
 const automations = new AutomationManager({
