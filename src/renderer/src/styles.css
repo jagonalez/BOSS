@@ -7107,7 +7107,10 @@ select:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  /* Above the settings page, which is 1000. A confirm is always raised by
+     something already on screen, so it has to sit over whatever asked for it —
+     opening one behind the settings page looked like nothing happened. */
+  z-index: 1100;
 }
 
 .modal {
