@@ -20,6 +20,7 @@ import {
   closeGroup,
   closeTab,
   findGroup,
+  findOwnedResource,
   findSessionTab,
   findTab,
   loadLayouts,
@@ -35,7 +36,6 @@ import {
   updateActiveWorkspaceView,
   updateGroup,
   walkGroups,
-  walkTabs,
   workspaceView
 } from './workspaces'
 
@@ -199,12 +199,13 @@ export function addWorkspaceTab(
     }
   }
   if (kind === 'review' || kind === 'files') {
-    // Deduped by checkout, not by owning thread. Two threads on one checkout
-    // see the same files and the same diff, so a second tab would be a copy of
-    // the first. The owner is still recorded on the tab for the sidebar.
-    const existing = walkTabs(view.root).find((item) =>
-      item.kind === kind && item.contextPath === checkout?.contextPath
-    )
+    // Deduped by owner as well as checkout, so asking twice from one thread
+    // reuses its tab. Deduping on the checkout alone handed a thread the tab
+    // belonging to whichever thread asked first — the diff was right, but the
+    // sidebar nests a resource under its owner, so it appeared under someone
+    // else's thread. Two threads on one checkout get a tab each: the same
+    // content twice is cheaper than a resource filed under the wrong thread.
+    const existing = findOwnedResource(view.root, kind, sessionId, checkout?.contextPath)
     if (existing) {
       const location = findTab(view.root, existing.id)
       if (location) activateWorkspaceTab(location.group.id, existing.id)

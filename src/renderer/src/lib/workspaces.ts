@@ -338,6 +338,25 @@ export function findTab(node: WorkspaceNode, tabId: string): { group: WorkspaceG
   return undefined
 }
 
+/** The resource a thread already has for this checkout, if any.
+ *
+ *  Owner as well as checkout. Matching on the checkout alone handed a thread
+ *  the tab belonging to whichever thread asked first: the diff was right, but
+ *  the sidebar files a resource under its owner, so it appeared under someone
+ *  else's thread. A thread can also move between checkouts — an agent can put
+ *  one on a fresh worktree mid-conversation — so the checkout is not a stable
+ *  name for a thread's own resources. */
+export function findOwnedResource(
+  node: WorkspaceNode,
+  kind: WorkspaceTabKind,
+  sessionId: string | undefined,
+  contextPath: string | undefined
+): WorkspaceTab | undefined {
+  return walkTabs(node).find((item) =>
+    item.kind === kind && item.sessionId === sessionId && item.contextPath === contextPath
+  )
+}
+
 export function findSessionTab(node: WorkspaceNode, sessionId: string): { group: WorkspaceGroup; tab: WorkspaceTab } | undefined {
   for (const item of walkGroups(node)) {
     const found = item.tabs.find((candidate) => candidate.kind === 'thread' && candidate.sessionId === sessionId)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('workspace add menus align to their trigger and stay inside the pane', () => {
   assert.equal(workspaceMenuRight(900, 100, 1_000), 100)
@@ -284,4 +284,42 @@ test('two views sharing an id are separated', () => {
 
   assert.notEqual(fixed.views[0].id, fixed.views[1].id)
   assert.equal(fixed.activeViewId, fixed.views[0].id)
+})
+
+test('a thread gets its own review, not the one another thread opened', () => {
+  // What went wrong: reviews were deduped on the checkout alone, so asking
+  // from a second thread on the same checkout handed back the first thread's
+  // tab. The diff was right; the sidebar files a resource under its owner, so
+  // it appeared under someone else's thread.
+  const theirs = { ...tab('review', 'thread-1', { contextPath: '/src/ralf' }) }
+  const view = workspaceView('Main', group([tab('thread', 'thread-1'), theirs]))
+
+  const found = findOwnedResource(view.root, 'review', 'thread-2', '/src/ralf')
+  assert.equal(found, undefined, 'another thread must not be given this one')
+})
+
+test('asking twice from one thread reuses its review', () => {
+  const mine = { ...tab('review', 'thread-1', { contextPath: '/src/ralf' }) }
+  const view = workspaceView('Main', group([tab('thread', 'thread-1'), mine]))
+
+  const found = findOwnedResource(view.root, 'review', 'thread-1', '/src/ralf')
+  assert.equal(found?.id, mine.id)
+})
+
+test('a thread moved to a worktree gets a review for it', () => {
+  // A thread is not fixed to one checkout: an agent can put it on a fresh
+  // worktree mid-conversation, and a cleaned-up worktree drops it back.
+  const onMain = { ...tab('review', 'thread-1', { contextPath: '/src/ralf' }) }
+  const view = workspaceView('Main', group([tab('thread', 'thread-1'), onMain]))
+
+  const found = findOwnedResource(view.root, 'review', 'thread-1', '/worktrees/thread-1')
+  assert.equal(found, undefined, 'a different checkout is a different review')
+})
+
+test('a files tab and a review on one checkout stay separate', () => {
+  const review = { ...tab('review', 'thread-1', { contextPath: '/src/ralf' }) }
+  const view = workspaceView('Main', group([tab('thread', 'thread-1'), review]))
+
+  assert.equal(findOwnedResource(view.root, 'files', 'thread-1', '/src/ralf'), undefined)
+  assert.equal(findOwnedResource(view.root, 'review', 'thread-1', '/src/ralf')?.id, review.id)
 })
