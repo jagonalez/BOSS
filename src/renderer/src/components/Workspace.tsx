@@ -30,6 +30,7 @@ import {
   undoWorkspaceChange
 } from '../lib/actions'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { tabContentNode } from '../lib/tab-content-nodes'
 import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -374,26 +375,25 @@ function TabContent({
   // Moving the node keeps it: appendChild relocates a live element, with its
   // scroll, focus and selection. This is what TerminalTab already does with
   // xterm's element, which is why a terminal survives what a files tab did not.
-  const own = useRef<HTMLDivElement | null>(null)
-  if (!own.current) {
-    own.current = document.createElement('div')
-    own.current.className = 'workspace-tab-content'
-  }
-  const node = own.current
+  const node = tabContentNode(item.id)
   const host = useTabHost(item.id)
 
   useEffect(() => {
     if (!host) return
-    if (node.parentElement !== host) host.appendChild(node)
+    if (node.parentElement !== host) {
+      // Moving an element blurs whatever inside it had focus, so a search box
+      // or an editor loses the caret on a drag. Selection survives on its own;
+      // focus has to be put back.
+      const focused = document.activeElement
+      const hadFocus = focused instanceof HTMLElement && node.contains(focused)
+      host.appendChild(node)
+      if (hadFocus) (focused as HTMLElement).focus({ preventScroll: true })
+    }
     // The slot carries hidden, not the content: slots are siblings in one pane,
     // so an inactive one has to take no space rather than sit there holding a
     // hidden child.
     host.hidden = !active
   }, [host, node, active])
-
-  // Taken out of the document when the tab goes for good. Without this the node
-  // stays wherever it was last put, holding its subtree alive.
-  useEffect(() => () => { node.remove() }, [node])
 
   return createPortal(content, node)
 }

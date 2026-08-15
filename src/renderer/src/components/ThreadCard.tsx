@@ -145,7 +145,23 @@ export function useHoverCard(): {
     timer.current = null
   }
 
-  useEffect(() => clear, [])
+  // The pointer can leave without a mouseleave: moving off the window edge to
+  // another screen does not always fire one, so a card scheduled on the way
+  // past would appear after the pointer had gone. Watching the document
+  // catches the exit wherever it happens.
+  useEffect(() => {
+    const gone = (): void => {
+      clear()
+      setAt(null)
+    }
+    document.addEventListener('mouseleave', gone)
+    window.addEventListener('blur', gone)
+    return () => {
+      clear()
+      document.removeEventListener('mouseleave', gone)
+      window.removeEventListener('blur', gone)
+    }
+  }, [])
 
   return {
     at,

@@ -2,6 +2,7 @@ import { appStore, type Attachment } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import { disposeTerminalSession } from './terminal-sessions'
+import { disposeTabContentNode } from './tab-content-nodes'
 import { disposeBrowseGuest } from './browse-guests'
 import { startMicCapture } from './mic'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
@@ -368,6 +369,7 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
   // pages and shells that were only being re-parented.
   if (closing?.kind === 'browser') disposeBrowseGuest(`workspace-${tabId}`)
   if (closing?.kind === 'terminal') disposeTerminalSession(tabId)
+  disposeTabContentNode(tabId)
   const next = updateWorkspaceView((item) => {
     const root = closeTab(item.root, groupId, tabId)
     const focusedGroupId = findGroup(root, item.focusedGroupId)?.id ?? walkGroups(root)[0].id
@@ -388,6 +390,7 @@ export function closeWorkspaceGroup(groupId: string): void {
   for (const item of pane?.tabs ?? []) {
     if (item.kind === 'browser') disposeBrowseGuest(`workspace-${item.id}`)
     if (item.kind === 'terminal') disposeTerminalSession(item.id)
+    disposeTabContentNode(item.id)
   }
   const next = updateWorkspaceView((item) => {
     const root = closeGroup(item.root, groupId)
