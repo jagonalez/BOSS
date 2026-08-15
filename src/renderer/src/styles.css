@@ -4423,6 +4423,42 @@ body.workspace-dragging .workspace-tab-slot {
   gap: 8px;
 }
 
+/* A run of neighbouring calls doing the same kind of work. Only long runs draw
+   a head; a short one is just its rows. */
+.step-run {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.step-run-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 8px 3px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--text-muted);
+  font-size: var(--type-meta);
+  cursor: pointer;
+}
+
+.step-run-head:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.step-run-chevron {
+  display: flex;
+  transition: transform 0.12s ease;
+}
+
+.step-run-failed {
+  color: var(--red);
+}
+
 .step-reasoning {
   font-size: 12px;
   color: var(--text-faint);
