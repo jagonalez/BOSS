@@ -4,6 +4,7 @@ import type { SessionInfo } from '@shared/opencode'
 import type { Workspace, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import type { OwnedResource } from '../lib/workspaces'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, findGroup, resourcesByThread, walkGroups } from '../lib/workspaces'
+import { ThreadCard, useHoverCard } from './ThreadCard'
 import {
   archiveAllInPath,
   cloneThreadToBackend,
@@ -97,6 +98,7 @@ function SessionRow({
     return tab?.kind === 'thread' && tab.sessionId === session.id
   })
   const meta = sessionMetaFor(session.id)
+  const card = useHoverCard()
   const busy = useStore(appStore, (s) => Boolean(s.sessionBusy[session.id]))
   const compacting = useStore(appStore, (s) => Boolean(s.compacting[session.id]))
   const preferredModel = useStore(appStore, (s) => s.modelsBySession[session.id])
@@ -121,8 +123,11 @@ function SessionRow({
       }}
       onClick={() => selectSession(session.id)}
       onContextMenu={(e) => onCtx(e, session)}
-      title={meta?.forkedFrom ? `Forked from ${meta.forkedFrom.sessionId.slice(0, 12)}` : meta?.kind === 'side' ? 'Side chat' : session.title}
+      // No title attribute: the native tooltip covers the card and cannot be
+      // told to wait, so the two fight over the same pointer rest.
+      {...card.handlers}
     >
+      {card.at ? <ThreadCard session={session} origin={meta?.forkedFrom?.sessionId} at={card.at} /> : null}
       <span
         className={`session-caret ${expanded ? 'open' : ''} ${resourceCount ? '' : 'leaf'}`}
         onClick={(event) => {
