@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
@@ -155,6 +155,70 @@ function BackendDefaults({
   )
 }
 
+/** Where this backend's CLI lives, when PATH cannot find it.
+ *
+ *  BOSS imports the login shell's PATH at startup, which covers nvm, bun, and Homebrew
+ *  installs that a Finder-launched app would otherwise miss. A non-POSIX login shell
+ *  (nushell, fish) defeats that probe, and no list of fallback directories covers every
+ *  layout — so this is the manual way out of "not installed" on a machine where the CLI
+ *  plainly works in a terminal.
+ *
+ *  Empty means "use PATH". Saving re-probes, so the row's availability badge answers
+ *  immediately instead of staying stale until the next launch. */
+function BackendBinaryPath({
+  backend,
+  path,
+  onSaved
+}: {
+  // Only rendered for a backend that spawns a CLI: `command` is what gets resolved.
+  backend: BackendDescriptor & { command: string }
+  path: string
+  onSaved: (paths: Partial<Record<BackendId, string>>) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(path)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  // The stored value arrives after the first render, and can change when another
+  // backend's save returns the whole set. Do not clobber a path being typed.
+  useEffect(() => {
+    setDraft(path)
+  }, [path])
+
+  const save = async (): Promise<void> => {
+    setError(null)
+    try {
+      onSaved(await OpenCode.setBackendBinary(backend.id, draft))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 1500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the location.')
+    }
+  }
+
+  return (
+    <div className="settings-runtime-path">
+      <label>
+        <span>Location</span>
+        <input
+          className="settings-input"
+          value={draft}
+          spellCheck={false}
+          placeholder={`Found on PATH — or /usr/local/bin/${backend.command}`}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void save()
+          }}
+        />
+      </label>
+      <Button size="small" variant="ghost" disabled={draft === path} onClick={() => void save()}>
+        {saved ? 'Saved' : 'Save'}
+      </Button>
+      {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+    </div>
+  )
+}
+
 /** Mirrors the main process's defaults. Only used to fill a field the stored
  *  settings predate, so a saved file without one does not read as undefined. */
 const DEFAULT_WORKTREE_SETTINGS = { autoCleanupEnabled: true, cleanupAfterDays: 30, location: 'app-data' as const }
@@ -203,14 +267,23 @@ export function SettingsModal(): React.JSX.Element | null {
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
+  const [backendBins, setBackendBins] = useState<Partial<Record<BackendId, string>>>({})
 
   useEffect(() => {
     if (!open) return
     void OpenCode.worktreeSettings().then(setWorktreeSettings).catch(() => {})
+    void OpenCode.backendBinaries().then(setBackendBins).catch(() => {})
     void refreshBackendAuth()
     void refreshBackendModels()
     void refreshQaDefault()
   }, [open])
+
+  // A saved location changes what the next spawn resolves, so re-probe: without this
+  // a backend that now works keeps showing the "not installed" reason it was saved to fix.
+  const saveBackendBins = (paths: Partial<Record<BackendId, string>>): void => {
+    setBackendBins(paths)
+    void loadEngine()
+  }
 
   useEffect(() => {
     const syncTheme = (event: Event): void => {
@@ -370,6 +443,13 @@ export function SettingsModal(): React.JSX.Element | null {
                           <div className="settings-runtime-copy">
                             <h2>{backend.label}</h2>
                             <small>{backend.available ? backend.version || 'CLI available' : backend.unavailableReason}</small>
+                            {backend.command ? (
+                              <BackendBinaryPath
+                                backend={{ ...backend, command: backend.command }}
+                                path={backendBins[backend.id] ?? ''}
+                                onSaved={saveBackendBins}
+                              />
+                            ) : null}
                           </div>
                         </div>
 
