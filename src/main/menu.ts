@@ -1,7 +1,25 @@
 import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from 'electron'
+import { join } from 'node:path'
 import { IpcChannels, type MenuCommand } from '@shared/ipc'
 
 const REPOSITORY = 'https://github.com/jagonalez/ralf'
+const SITE = 'https://getboss.dev'
+
+/** What About shows.
+ *
+ *  Electron's default panel gives the name, the version and nothing else — not
+ *  what the app is for, not where to find it. Version is read from package.json
+ *  so a release cannot ship a stale number here. */
+function aboutPanel(): void {
+  app.setAboutPanelOptions({
+    applicationName: app.name,
+    applicationVersion: app.getVersion(),
+    version: `Electron ${process.versions.electron} · Chromium ${process.versions.chrome}`,
+    copyright: `MIT licensed · ${SITE}`,
+    credits: 'A desktop workspace for coding agents: threads own their terminals, files, reviews and browsers, and each can run on its own Git worktree.',
+    iconPath: join(app.getAppPath(), 'resources', 'icons', '256x256.png')
+  })
+}
 
 /** Send a menu item to the window that has focus.
  *
@@ -20,6 +38,7 @@ function send(command: MenuCommand): void {
  *  in it is ours: the standard roles are what bind copy, paste and select-all
  *  to their shortcuts, and text fields behave oddly without them. */
 export function buildAppMenu(): void {
+  aboutPanel()
   const mac = process.platform === 'darwin'
 
   const appMenu: MenuItemConstructorOptions[] = mac
@@ -81,7 +100,6 @@ export function buildAppMenu(): void {
         { type: 'separator' },
         { role: 'reload' },
         { role: 'forceReload' },
-        { role: 'toggleDevTools' },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
@@ -99,8 +117,20 @@ export function buildAppMenu(): void {
     {
       role: 'help',
       submenu: [
-        { label: 'BOSS on GitHub', click: () => void shell.openExternal(REPOSITORY) },
-        { label: 'Report an Issue', click: () => void shell.openExternal(`${REPOSITORY}/issues/new`) }
+        { label: `${app.name} Website`, click: () => void shell.openExternal(SITE) },
+        { label: `${app.name} on GitHub`, click: () => void shell.openExternal(REPOSITORY) },
+        { label: 'Report an Issue', click: () => void shell.openExternal(`${REPOSITORY}/issues/new`) },
+        { type: 'separator' },
+        // Kept, but here rather than in View. Everyone using this is a
+        // developer, and a console is what a bug report needs — this is where
+        // someone looks when something has gone wrong.
+        { role: 'toggleDevTools', label: 'Developer Tools' },
+        // macOS has About in the application menu; nowhere else does, so it
+        // needs a home here and an explicit call to open the panel.
+        ...(mac ? [] : [
+          { type: 'separator' } as MenuItemConstructorOptions,
+          { label: `About ${app.name}`, click: () => app.showAboutPanel() } as MenuItemConstructorOptions
+        ])
       ]
     }
   ]
