@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
-import type { BackendId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
+import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
 import type { WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
@@ -80,6 +80,79 @@ const THEME_CATEGORIES = ['BOSS', 'Community', 'Accessibility'] as const
 
 function providerIsLocal(provider: string, models: BackendModelDescriptor[], backendId: BackendId): boolean {
   return models.some((model) => (model.provider || backendId) === provider && modelIsLocal(model, backendId))
+}
+
+/** What a new thread on this backend starts with.
+ *
+ *  Mode is per backend because the modes are the backend's own — codex has no
+ *  accept-edits and pi has one mode, so a single setting for all of them would
+ *  offer something half cannot do.
+ *
+ *  Thinking is per model, not per backend: claude's Sonnet stops at high where
+ *  Opus goes to max, and codex reads the levels from each model. A level is
+ *  saved against the default model and ignored if the thread is on another. */
+function BackendDefaults({
+  backend,
+  models,
+  selected
+}: {
+  backend: BackendDescriptor
+  models: BackendModelDescriptor[]
+  selected?: BackendModelPreference
+}): React.JSX.Element | null {
+  const variants = models.find((model) => model.id === selected?.modelID)?.variants ?? []
+  if (backend.modes.length <= 1 && variants.length === 0) return null
+  return (
+    <div className="settings-defaults">
+      {backend.modes.length > 1 ? (
+        <label>
+          <span>Permissions</span>
+          <Select
+            value={selected?.mode ?? backend.modes[0]?.id ?? 'ask'}
+            disabled={!selected}
+            onChange={(event) => {
+              const mode = event.target.value as BackendModeId
+              // Every future thread on this backend, not just one. The picker
+              // in the composer asks before turning auto on for a single
+              // thread; a default that does it for all of them silently would
+              // be the weaker check.
+              if (mode !== 'auto') {
+                setBackendDefault(backend.id, { mode })
+                return
+              }
+              appStore.setState({
+                confirm: {
+                  title: `Start every ${backend.label} thread on auto-approve?`,
+                  message: 'New threads will approve supported actions without asking, so an agent may run destructive commands or modify files before you see them. Each thread can still be changed afterwards.',
+                  confirmLabel: 'Use auto by default',
+                  destructive: true,
+                  action: () => setBackendDefault(backend.id, { mode })
+                }
+              })
+            }}
+          >
+            {backend.modes.map((mode) => (
+              <option key={mode.id} value={mode.id}>{mode.label}</option>
+            ))}
+          </Select>
+        </label>
+      ) : null}
+      {variants.length ? (
+        <label>
+          <span>Thinking</span>
+          <Select
+            value={selected?.variant ?? ''}
+            onChange={(event) => setBackendDefault(backend.id, { variant: event.target.value || undefined })}
+          >
+            <option value="">Backend default</option>
+            {variants.map((variant) => (
+              <option key={variant} value={variant}>{variant}</option>
+            ))}
+          </Select>
+        </label>
+      ) : null}
+    </div>
+  )
 }
 
 function DefaultModelPicker({
@@ -314,6 +387,7 @@ export function SettingsModal(): React.JSX.Element | null {
                             loading={backendModelsLoading}
                             disabled={!backend.available || backendModelsLoading || (models.length === 0 && !selected)}
                           />
+                          <BackendDefaults backend={backend} models={models} selected={selected} />
                         </div>
 
                         <Button size="small" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
