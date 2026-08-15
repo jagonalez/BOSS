@@ -71,18 +71,28 @@ export function ThreadCard({
   const directory = directoryLabel(path)
 
   return createPortal(
-    <div className="thread-card" role="tooltip" style={{ top: at.top, left: at.left }}>
+    <div
+      className="thread-card"
+      role="tooltip"
+      style={{ top: at.top, left: at.left }}
+      // The card renders through a portal but stays a React child of the row,
+      // so clicks still bubble to it and would select the thread. Nothing in
+      // the card means "open this thread".
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.stopPropagation()}
+    >
       <strong className="thread-card-title">{session.title || 'Untitled'}</strong>
 
       <dl className="thread-card-facts">
         {project ? (
           <div>
-            <dt title="Project"><FolderIcon size={13} /></dt>
+            <dt title="Project"><FolderIcon size={14} /></dt>
             <dd>{project}{directory ? <code>{directory}</code> : null}</dd>
           </div>
         ) : null}
         <div>
-          <dt title={session.worktree ? 'Worktree branch' : 'Branch'}><BranchIcon size={13} /></dt>
+          <dt title={session.worktree ? 'Worktree branch' : 'Branch'}><BranchIcon size={14} /></dt>
           <dd>
             <code className="thread-card-branch">{branch ?? 'main checkout'}</code>
             {session.worktree ? <span className="thread-card-tag">worktree</span> : null}
@@ -90,7 +100,7 @@ export function ThreadCard({
         </div>
         {origin ? (
           <div>
-            <dt title="Forked from"><ForkIcon size={13} /></dt>
+            <dt title="Forked from"><ForkIcon size={14} /></dt>
             <dd><code>{origin.slice(0, 12)}</code></dd>
           </div>
         ) : null}
@@ -104,10 +114,10 @@ export function ThreadCard({
             void window.boss.openExternal(changeRequest.url)
           }}
         >
-          <ReviewIcon size={13} />
+          <ReviewIcon size={14} />
           <span className="thread-card-pr-id">{changeRequest.displayId}</span>
           <span className="thread-card-pr-title">{changeRequest.title}</span>
-          <ExternalIcon size={12} />
+          <ExternalIcon size={13} />
         </button>
       ) : null}
     </div>,

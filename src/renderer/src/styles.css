@@ -7682,19 +7682,19 @@ select:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 288px;
+  width: 320px;
   padding: 11px 13px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md, var(--radius-sm));
   background: var(--surface-raised, var(--surface-inset));
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.32);
-  font-size: var(--type-meta);
+  font-size: var(--type-control);
   color: var(--text-muted);
 }
 
 .thread-card-title {
   color: var(--text);
-  font-size: var(--type-control);
+  font-size: var(--type-body);
   font-weight: 600;
   line-height: 1.35;
   /* A long thread title wraps rather than stretching the card. */
@@ -7713,7 +7713,7 @@ select:hover {
 
 .thread-card-facts > div {
   display: grid;
-  grid-template-columns: 16px 1fr;
+  grid-template-columns: 17px 1fr;
   align-items: start;
   gap: 8px;
 }
@@ -7721,7 +7721,7 @@ select:hover {
 .thread-card-facts dt {
   display: flex;
   align-items: center;
-  height: 16px;
+  height: 18px;
   color: var(--text-faint);
 }
 
@@ -7738,7 +7738,7 @@ select:hover {
 .thread-card-facts code {
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
-  font-size: var(--type-meta);
+  font-size: 12px;
   color: var(--text-faint);
 }
 
@@ -7752,7 +7752,7 @@ select:hover {
   border-radius: 3px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -7766,7 +7766,7 @@ select:hover {
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
   color: var(--text);
-  font-size: var(--type-meta);
+  font-size: var(--type-control);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.1s ease, color 0.1s ease;
