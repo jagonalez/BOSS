@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
+import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 
@@ -63,13 +64,13 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   {
     type: 'function',
     name: 'boss_threads_list',
-    description: 'List other BOSS threads in this project that use the same backend.',
+    description: THREAD_TOOL_DESCRIPTIONS.list,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
   {
     type: 'function',
     name: 'boss_threads_read',
-    description: 'Read a bounded recent transcript from another same-project, same-backend BOSS thread.',
+    description: THREAD_TOOL_DESCRIPTIONS.read,
     inputSchema: {
       type: 'object',
       properties: {
@@ -83,7 +84,7 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   {
     type: 'function',
     name: 'boss_threads_send',
-    description: 'Send a durable message to another same-project, same-backend BOSS thread. Busy targets queue the message.',
+    description: THREAD_TOOL_DESCRIPTIONS.send,
     inputSchema: {
       type: 'object',
       properties: {
@@ -99,7 +100,7 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   {
     type: 'function',
     name: 'boss_threads_reply',
-    description: 'Reply to a BOSS thread message addressed to this thread.',
+    description: THREAD_TOOL_DESCRIPTIONS.reply,
     inputSchema: {
       type: 'object',
       properties: {
@@ -114,11 +115,11 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   {
     type: 'function',
     name: 'boss_threads_spawn_worktree',
-    description: 'Fork this conversation into a new BOSS thread running in an isolated Git worktree.',
+    description: THREAD_TOOL_DESCRIPTIONS.spawnWorktree,
     inputSchema: {
       type: 'object',
       properties: {
-        instruction: { type: 'string', description: 'Concrete implementation task for the new worktree thread.' }
+        instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction }
       },
       required: ['instruction'],
       additionalProperties: false
