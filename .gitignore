@@ -15,3 +15,9 @@ resources/cua-driver/*
 *.crt
 *.cer
 *.mobileprovision
+
+# Worktrees. .boss/ is also added to .git/info/exclude when worktrees are set
+# to live in the project; this covers a clone that never enabled that, and
+# .claude/ for the worktrees Claude Code makes with its own EnterWorktree.
+.boss/
+.claude/worktrees/
