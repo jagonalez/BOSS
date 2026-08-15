@@ -366,16 +366,36 @@ function TabContent({
   // and unmounting a terminal disposes its shell, a browser its page. Kept in
   // one list at the workspace root, the component never moves in the React
   // tree however far the tab travels; only the DOM container changes.
+  // Portalled into a node this tab owns, which is then moved into whichever
+  // pane is showing it. Portalling straight at the pane looked equivalent, but
+  // a portal aimed at a new container rebuilds its DOM rather than moving it,
+  // so every change of pane remounted the content and lost what it held.
+  //
+  // Moving the node keeps it: appendChild relocates a live element, with its
+  // scroll, focus and selection. This is what TerminalTab already does with
+  // xterm's element, which is why a terminal survives what a files tab did not.
+  const own = useRef<HTMLDivElement | null>(null)
+  if (!own.current) {
+    own.current = document.createElement('div')
+    own.current.className = 'workspace-tab-content'
+  }
+  const node = own.current
   const host = useTabHost(item.id)
-  // The slot carries the hidden attribute, not the content: slots are siblings
-  // in one pane, so an inactive one has to take no space rather than sit there
-  // holding a hidden child.
-  useEffect(() => {
-    if (host) host.hidden = !active
-  }, [host, active])
 
-  if (!host) return null
-  return createPortal(<div className="workspace-tab-content">{content}</div>, host)
+  useEffect(() => {
+    if (!host) return
+    if (node.parentElement !== host) host.appendChild(node)
+    // The slot carries hidden, not the content: slots are siblings in one pane,
+    // so an inactive one has to take no space rather than sit there holding a
+    // hidden child.
+    host.hidden = !active
+  }, [host, node, active])
+
+  // Taken out of the document when the tab goes for good. Without this the node
+  // stays wherever it was last put, holding its subtree alive.
+  useEffect(() => () => { node.remove() }, [node])
+
+  return createPortal(content, node)
 }
 
 /** Where each tab's content is painted, published by the pane that owns it.
@@ -688,9 +708,9 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
             <small>Terminals, files and reviews belong to a thread, so they come later.</small>
           </button>
         ) : null}
-        {/* Slots only. The content itself lives at the workspace root and is
-            portalled in here, so moving a tab between panes moves the DOM
-            without unmounting the component behind it. */}
+        {/* Slots only, and empty ones: each tab owns its content node and that
+            node is moved in here. The component behind it never moves in the
+            React tree, and the DOM it built is relocated rather than rebuilt. */}
         {group.tabs.map((item) => <TabSlot key={item.id} tabId={item.id} />)}
       </div>
 
