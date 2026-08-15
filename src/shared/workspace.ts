@@ -58,11 +58,11 @@ export interface Workspace {
   updatedAt: number
 }
 
-/** Reusable formats preserve structure and tab kinds, never project/session bindings. */
-export interface LayoutTemplate {
+/** A grid to arrange a view into: how many panes, and how they are split.
+ *  Nothing about what goes in them — applying one moves the tabs you already
+ *  have rather than opening anything. */
+export interface Layout {
   id: string
   name: string
-  favorite: boolean
-  builtIn?: boolean
   root: WorkspaceNode
 }

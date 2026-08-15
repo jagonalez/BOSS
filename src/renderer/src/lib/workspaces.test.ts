@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bindTemplate, closeGroup, group, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, templateFromWorkspace, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('workspace add menus align to their trigger and stay inside the pane', () => {
   assert.equal(workspaceMenuRight(900, 100, 1_000), 100)
@@ -9,42 +9,96 @@ test('workspace add menus align to their trigger and stay inside the pane', () =
   assert.equal(workspaceMenuRight(180, 100, 260), 8)
 })
 
-test('saved formats strip thread and checkout bindings', () => {
-  const view = workspaceView('Main', group([
-    tab('thread', 'thread-1'),
-    tab('terminal', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' }),
-    tab('review', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' }),
-    tab('files', undefined, { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' })
-  ]))
+test('the grids are empty shapes', () => {
+  // A layout that carried tabs would decide what you need open. These describe
+  // panes and nothing else.
+  for (const layout of BUILTIN_LAYOUTS) {
+    assert.deepEqual(walkTabs(layout.root), [], `${layout.name} should hold no tabs`)
+  }
+  assert.deepEqual(BUILTIN_LAYOUTS.map((item) => walkGroups(item.root).length), [1, 2, 2, 3, 4])
+})
 
-  const template = templateFromWorkspace(view, 'Bound layout')
-  for (const item of walkTabs(template.root)) {
-    assert.equal(item.sessionId, undefined)
-    assert.equal(item.contextPath, undefined)
-    assert.equal(item.worktreeId, undefined)
-    assert.equal(item.contextLabel, undefined)
+test('a tab drops into an empty pane', () => {
+  const [full, ...rest] = [group([tab('thread', 'thread-1')]), group(), group(), group()]
+  const root = split('horizontal', split('vertical', full, rest[0]), split('vertical', rest[1], rest[2]))
+
+  const moved = moveTab(root, full.tabs[0].id, rest[0].id, 'center')
+
+  const landed = walkGroups(moved.root).find((item) => item.tabs.length > 0)
+  assert.equal(landed?.id, rest[0].id, 'the tab should be in the pane it was dropped on')
+  assert.equal(moved.focusedGroupId, rest[0].id)
+})
+
+test('moving a tab keeps the rest of the grid', () => {
+  // The pane a tab leaves goes away, because nothing made it. The other empty
+  // panes are the grid the user asked for, so dragging must not delete them.
+  const [full, ...rest] = [group([tab('thread', 'thread-1')]), group(), group(), group()]
+  const root = split('horizontal', split('vertical', full, rest[0]), split('vertical', rest[1], rest[2]))
+
+  const moved = moveTab(root, full.tabs[0].id, rest[2].id, 'center')
+
+  const ids = walkGroups(moved.root).map((item) => item.id)
+  assert.ok(!ids.includes(full.id), 'the emptied pane should collapse')
+  for (const kept of [rest[0], rest[1], rest[2]]) {
+    assert.ok(ids.includes(kept.id), 'an untouched empty pane should survive the drag')
   }
 })
 
-test('applying a format binds checkout tools and removes duplicate singleton surfaces', () => {
-  const template = {
-    id: 'format-1',
-    name: 'Review layout',
-    favorite: true,
-    root: group([tab('thread'), tab('review'), tab('review'), tab('files'), tab('files'), tab('terminal')])
-  }
-  const checkout = { contextPath: '/tmp/worktree', worktreeId: 'wt-1', contextLabel: 'boss/test' }
-  const view = bindTemplate(template, 'Main', ['thread-1'], checkout)
-  const items = walkTabs(view.root)
+test('closing the last tab in a pane leaves the other panes alone', () => {
+  const [closing, empty] = [group([tab('terminal', 'thread-1')]), group()]
+  const root = split('horizontal', closing, empty)
 
-  assert.equal(items.filter((item) => item.kind === 'review').length, 1)
-  assert.equal(items.filter((item) => item.kind === 'files').length, 1)
-  assert.equal(items.find((item) => item.kind === 'thread')?.sessionId, 'thread-1')
-  for (const item of items.filter((candidate) => candidate.kind === 'terminal' || candidate.kind === 'review' || candidate.kind === 'files')) {
-    assert.equal(item.contextPath, checkout.contextPath)
-    assert.equal(item.worktreeId, checkout.worktreeId)
-    assert.equal(item.contextLabel, checkout.contextLabel)
-  }
+  const after = closeTab(root, closing.id, closing.tabs[0].id)
+
+  assert.deepEqual(walkGroups(after).map((item) => item.id), [empty.id])
+})
+
+const gridNamed = (name: string) => BUILTIN_LAYOUTS.find((item) => item.name === name)!
+
+test('a grid deals the panes you already have into its shape', () => {
+  const checkout = { contextPath: '/tmp/wt', worktreeId: 'wt-1', contextLabel: 'boss/test' }
+  const view = workspaceView('Main', split('horizontal',
+    group([tab('thread', 'thread-1')]),
+    group([tab('terminal', 'thread-1', checkout)])
+  ))
+  const before = walkTabs(view.root)
+
+  const arranged = arrangeInto(gridNamed('2 × 2'), view)
+  const after = walkTabs(arranged.root)
+
+  // The same tabs, so a running shell and a loaded page carry over. Ids are
+  // what the terminal and browser caches key on.
+  assert.deepEqual(after.map((item) => item.id).sort(), before.map((item) => item.id).sort())
+  assert.equal(walkGroups(arranged.root).length, 4)
+  assert.equal(after.find((item) => item.kind === 'terminal')?.contextPath, checkout.contextPath)
+})
+
+test('a grid smaller than what is open keeps everything', () => {
+  const view = workspaceView('Main', split('horizontal',
+    group([tab('thread', 'thread-1')]),
+    split('horizontal', group([tab('terminal', 'thread-1')]), group([tab('browser')]))
+  ))
+  const before = walkTabs(view.root)
+
+  // Three panes of tabs, one pane to put them in.
+  const arranged = arrangeInto(gridNamed('1 × 1'), view)
+
+  // Applying a shape must not quietly kill a shell it had no pane for.
+  assert.deepEqual(walkTabs(arranged.root).map((item) => item.id).sort(), before.map((item) => item.id).sort())
+  assert.equal(walkGroups(arranged.root).length, 1)
+})
+
+test('a grid bigger than what is open leaves panes empty', () => {
+  const view = workspaceView('Main', group([tab('thread', 'thread-1')]))
+
+  const arranged = arrangeInto(gridNamed('2 × 2'), view)
+  const panes = walkGroups(arranged.root)
+
+  // A grid describes where things go, not what to open. Filling the spare
+  // panes here would start work the user did not ask for.
+  assert.equal(panes.length, 4)
+  assert.deepEqual(panes.filter((item) => item.tabs.length > 0).length, 1)
+  assert.deepEqual(walkTabs(arranged.root).map((item) => item.kind), ['thread'])
 })
 
 test('the placement index locates every tab across every view', () => {
@@ -133,20 +187,16 @@ test('a view list snapshot restores a closed pane whole', () => {
   assert.equal(walkGroups(before[0].root).length, 2)
 })
 
-test('a name given to a resource does not follow it into a saved format', () => {
+test('a name given to a resource survives a grid', () => {
   const view = workspaceView('Main', group([
     tab('thread', 'thread-1'),
     { ...tab('terminal', 'thread-1', { contextPath: '/tmp/wt' }), title: 'Test runner' }
   ]))
 
-  const named = walkTabs(view.root).find((item) => item.kind === 'terminal')
-  assert.equal(named?.title, 'Test runner')
-
-  // A format is a shape. "Test runner" describes one particular terminal, so
-  // it would be wrong on every layout built from this one.
-  for (const item of walkTabs(templateFromWorkspace(view, 'Saved').root)) {
-    assert.equal(item.title, undefined)
-  }
+  // Applying a grid moves panes about. The terminal is the same terminal
+  // afterwards, so the name the user gave it has to come along.
+  const after = walkTabs(arrangeInto(gridNamed('2 × 1'), view).root)
+  assert.equal(after.find((item) => item.kind === 'terminal')?.title, 'Test runner')
 })
 
 test('threads are not listed as resources of themselves', () => {

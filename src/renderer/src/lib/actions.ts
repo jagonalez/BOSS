@@ -15,24 +15,22 @@ import {
   activeWorkspaceView,
   activateTab,
   addTab,
-  bindTemplate,
+  arrangeInto,
   closeGroup,
   closeTab,
   findGroup,
   findSessionTab,
   findTab,
-  loadTemplates,
+  loadLayouts,
   loadWorkspace,
   mapTabs,
   moveTabAcrossViews,
   nextWorkspaceViewName,
   reorderTab,
   resizeSplit,
-  saveCustomTemplates,
   saveWorkspace,
   splitGroup,
   tab,
-  templateFromWorkspace,
   updateActiveWorkspaceView,
   updateGroup,
   walkGroups,
@@ -47,7 +45,7 @@ export function initializeWorkspaceState(): void {
   } catch {
     /* Retain the focused-checkout default. */
   }
-  appStore.setState({ layoutTemplates: loadTemplates(), terminalStartLocation })
+  appStore.setState({ layouts: loadLayouts(), terminalStartLocation })
 }
 
 export function setTerminalStartLocation(value: TerminalStartLocation): void {
@@ -335,27 +333,27 @@ export function splitWorkspaceGroup(groupId: string, direction: SplitDirection):
  *  otherwise cost a running terminal. The snapshot holds the whole view list,
  *  which is what makes restoring a closed pane the same operation as
  *  restoring a closed tab. */
-let closeUndo: { views: WorkspaceView[]; activeViewId: string; label: string } | null = null
-let closeUndoTimer: number | undefined
+let undoSnapshot: { views: WorkspaceView[]; activeViewId: string; label: string } | null = null
+let undoTimer: number | undefined
 
-export function undoWorkspaceClose(): void {
-  const snapshot = closeUndo
+export function undoWorkspaceChange(): void {
+  const snapshot = undoSnapshot
   if (!snapshot) return
-  closeUndo = null
-  window.clearTimeout(closeUndoTimer)
+  undoSnapshot = null
+  window.clearTimeout(undoTimer)
   updateWorkspace((item) => ({ ...item, views: snapshot.views, activeViewId: snapshot.activeViewId }))
   appStore.setState({ workspaceUndo: null })
   syncFocusedThread()
 }
 
-function rememberClose(label: string): void {
+function rememberViews(label: string): void {
   const workspace = currentWorkspace()
   if (!workspace) return
-  closeUndo = { views: workspace.views, activeViewId: workspace.activeViewId, label }
+  undoSnapshot = { views: workspace.views, activeViewId: workspace.activeViewId, label }
   appStore.setState({ workspaceUndo: { label } })
-  window.clearTimeout(closeUndoTimer)
-  closeUndoTimer = window.setTimeout(() => {
-    closeUndo = null
+  window.clearTimeout(undoTimer)
+  undoTimer = window.setTimeout(() => {
+    undoSnapshot = null
     appStore.setState({ workspaceUndo: null })
   }, 8_000)
 }
@@ -363,7 +361,7 @@ function rememberClose(label: string): void {
 export function closeWorkspaceTab(groupId: string, tabId: string): void {
   const view = currentView()
   const closing = view ? findTab(view.root, tabId)?.tab : undefined
-  rememberClose(closing ? `Closed ${closing.kind}` : 'Closed tab')
+  rememberViews(closing ? `Closed ${closing.kind}` : 'Closed tab')
   // Live surfaces are disposed here rather than when their component unmounts.
   // React unmounts one whenever its tab moves, and StrictMode unmounts
   // everything once on purpose, so tying disposal to unmounting destroyed
@@ -384,7 +382,7 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
 }
 
 export function closeWorkspaceGroup(groupId: string): void {
-  rememberClose('Closed pane')
+  rememberViews('Closed pane')
   const view = currentView()
   const pane = view ? findGroup(view.root, groupId) : undefined
   for (const item of pane?.tabs ?? []) {
@@ -553,55 +551,25 @@ export function revealWorkspaceTab(viewId: string, groupId: string, tabId: strin
   showPage('project')
 }
 
-export function applyLayoutTemplate(templateId: string): void {
+/** Rearrange the active view into a layout's shape.
+ *
+ *  Nothing is created or disposed: these are the same tabs in different
+ *  places, so a running terminal keeps its shell and a loaded page stays
+ *  loaded. Undoable, since a layout can move a lot at once. */
+export function applyLayout(layoutId: string): void {
   const state = appStore.getState()
   const workspace = state.projectWorkspace
-  const template = state.layoutTemplates.find((item) => item.id === templateId)
-  if (!workspace || !template) return
-  const view = activeWorkspaceView(workspace)
-  const focusedGroup = findGroup(view.root, view.focusedGroupId)
-  const focusedTab = focusedGroup?.tabs.find((item) => item.id === focusedGroup.activeTabId)
-  const focused = focusedTab?.kind === 'thread' ? focusedTab.sessionId : undefined
-  const sessions = [focused, ...state.sessions.map((item) => item.id)].filter(
-    (id, index, all): id is string => Boolean(id) && all.indexOf(id) === index
-  )
-  const activeSession = state.sessions.find((item) => item.id === (focused ?? state.activeSessionId))
-  const useFocused = state.terminalStartLocation === 'focused-checkout'
-  const contextPath = useFocused
-    ? activeSession?.executionPath ?? activeSession?.worktree?.path ?? state.projectPath
-    : state.projectPath
-  const checkout: WorkspaceCheckoutBinding | undefined = contextPath
-    ? {
-        contextPath,
-        worktreeId: useFocused ? activeSession?.worktree?.id : undefined,
-        contextLabel: useFocused && activeSession?.worktree?.branch ? activeSession.worktree.branch : 'Main'
-      }
-    : undefined
-  const nextView = bindTemplate(template, view.name, sessions, checkout)
-  const next = updateActiveWorkspaceView(workspace, () => ({ ...nextView, id: view.id, name: view.name }))
+  const layout = state.layouts.find((item) => item.id === layoutId)
+  if (!workspace || !layout) return
+
+  rememberViews(`Applied ${layout.name}`)
+  const next = updateActiveWorkspaceView(workspace, (view) => arrangeInto(layout, view))
+  if (!next) return
   saveWorkspace(next)
   appStore.setState({ projectWorkspace: next })
-  const firstThread = walkTabs(activeWorkspaceView(next).root).find((item) => item.kind === 'thread' && item.sessionId)
-  if (firstThread?.sessionId) selectSession(firstThread.sessionId, false)
+  syncFocusedThread()
 }
 
-export function saveCurrentLayoutTemplate(name: string): void {
-  const state = appStore.getState()
-  if (!state.projectWorkspace) return
-  const template = templateFromWorkspace(activeWorkspaceView(state.projectWorkspace), name)
-  const templates = [...state.layoutTemplates, template]
-  saveCustomTemplates(templates)
-  appStore.setState({ layoutTemplates: templates })
-}
-
-export function removeLayoutTemplate(templateId: string): void {
-  const state = appStore.getState()
-  const target = state.layoutTemplates.find((item) => item.id === templateId)
-  if (!target || target.builtIn) return
-  const templates = state.layoutTemplates.filter((item) => item.id !== templateId)
-  saveCustomTemplates(templates)
-  appStore.setState({ layoutTemplates: templates })
-}
 function persistSessionMeta(meta: Record<string, SessionMeta>): void {
   try {
     localStorage.setItem('boss.sessionMeta', JSON.stringify(meta))

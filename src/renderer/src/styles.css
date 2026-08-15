@@ -1277,12 +1277,12 @@ textarea {
   background: var(--surface-raised);
 }
 
-.workspace-format-control {
+.workspace-layout-control {
   position: relative;
   -webkit-app-region: no-drag;
 }
 
-.workspace-format-menu {
+.workspace-layout-menu {
   position: absolute;
   top: 35px;
   right: 0;
@@ -1294,7 +1294,7 @@ textarea {
   box-shadow: 0 15px 44px rgba(0, 0, 0, 0.42);
 }
 
-.workspace-format-menu button {
+.workspace-layout-menu button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1309,38 +1309,38 @@ textarea {
   font-size: 12.5px;
 }
 
-.workspace-format-row {
+.workspace-layout-row {
   display: flex;
   align-items: stretch;
 }
 
-.workspace-format-row > button:first-child {
+.workspace-layout-row > button:first-child {
   min-width: 0;
   flex: 1;
 }
 
-.workspace-format-row > .workspace-format-delete {
+.workspace-layout-row > .workspace-layout-delete {
   width: 28px;
   flex: 0 0 28px;
   justify-content: center;
   color: var(--text-faint);
 }
 
-.workspace-format-row > .workspace-format-delete:hover {
+.workspace-layout-row > .workspace-layout-delete:hover {
   color: var(--red);
   background: var(--red-soft);
 }
 
-.workspace-format-menu button:hover {
+.workspace-layout-menu button:hover {
   color: var(--text);
   background: var(--surface-raised);
 }
 
-.workspace-format-menu button span {
+.workspace-layout-menu button span {
   flex: 1;
 }
 
-.workspace-format-menu button small {
+.workspace-layout-menu button small {
   color: var(--text-faint);
   font-size: var(--type-label);
 }
