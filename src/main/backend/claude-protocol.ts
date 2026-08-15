@@ -36,6 +36,75 @@ export function parseClaudePermission(value: Record<string, unknown>): ClaudePer
   }
 }
 
+/** The tool Claude calls to put a question to the user.
+ *
+ *  It arrives as an ordinary permission request, so without this it was shown
+ *  as "allow this tool?" and denying it told Claude the question had been
+ *  dismissed — an answer the user never gave and never saw asked for. */
+export const ASK_USER_TOOL = 'AskUserQuestion'
+
+export interface ClaudeQuestionOption {
+  label: string
+  description?: string
+}
+
+export interface ClaudeQuestion {
+  question: string
+  header?: string
+  options: ClaudeQuestionOption[]
+  multiple: boolean
+}
+
+/** Read the questions out of an AskUserQuestion request.
+ *
+ *  Returns nothing for any other tool, and for a malformed request: a question
+ *  with no text is not worth interrupting someone with, and the caller falls
+ *  back to the ordinary permission prompt. */
+export function parseClaudeQuestions(request: ClaudePermissionRequest): ClaudeQuestion[] | undefined {
+  if (request.toolName !== ASK_USER_TOOL) return undefined
+  const raw = request.input.questions
+  if (!Array.isArray(raw)) return undefined
+  const questions = raw.flatMap((entry): ClaudeQuestion[] => {
+    if (!entry || typeof entry !== 'object') return []
+    const item = entry as Record<string, unknown>
+    const question = typeof item.question === 'string' ? item.question.trim() : ''
+    if (!question) return []
+    const options = Array.isArray(item.options)
+      ? item.options.flatMap((option): ClaudeQuestionOption[] => {
+        if (typeof option === 'string') return option.trim() ? [{ label: option.trim() }] : []
+        if (!option || typeof option !== 'object') return []
+        const value = option as Record<string, unknown>
+        const label = typeof value.label === 'string' ? value.label.trim() : ''
+        return label ? [{ label, description: typeof value.description === 'string' ? value.description : undefined }] : []
+      })
+      : []
+    return [{
+      question,
+      header: typeof item.header === 'string' ? item.header : undefined,
+      options,
+      multiple: item.multiSelect === true
+    }]
+  })
+  return questions.length ? questions : undefined
+}
+
+/** Give Claude the user's answers, as the result of the tool it called. */
+export function claudeQuestionResponse(requestId: string, answers: string[][]): Record<string, unknown> {
+  return {
+    type: 'control_response',
+    response: {
+      subtype: 'success',
+      request_id: requestId,
+      response: {
+        behavior: 'allow',
+        // Claude reads the tool result, so the answers go back as the input it
+        // will see rather than as a permission decision.
+        updatedInput: { questions: answers.map((choices) => ({ answers: choices })) }
+      }
+    }
+  }
+}
+
 export function claudePermissionResponse(
   requestId: string,
   pending: Pick<ClaudePermissionRequest, 'input' | 'suggestions'>,

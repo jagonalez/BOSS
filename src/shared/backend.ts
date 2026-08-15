@@ -106,6 +106,7 @@ export type BackendRequest =
   | { type: 'thread.revert'; threadId: string; messageId: string }
   | { type: 'thread.unrevert'; threadId: string }
   | { type: 'thread.command'; threadId: string; command: string; arguments: string; options?: BackendMessageOptions }
+  | { type: 'thread.question'; threadId: string; requestId: string; answers: string[][] }
   | { type: 'thread.compact'; threadId: string; model?: { providerID: string; modelID: string } }
   | { type: 'thread.models'; threadId?: string; backendId?: BackendId }
   | { type: 'supervision.snapshot' }

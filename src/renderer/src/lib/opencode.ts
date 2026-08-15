@@ -157,6 +157,8 @@ export const OpenCode = {
   replyQuestion: (requestID: string, answers: string[][]) =>
     request<boolean>('POST', `/question/${requestID}/reply`, { body: { answers } }),
   rejectQuestion: (requestID: string) => request<boolean>('POST', `/question/${requestID}/reject`),
+  replyQuestionToThread: (threadId: string, requestId: string, answers: string[][]) =>
+    backendRequest<void>({ type: 'thread.question', threadId, requestId, answers }),
   summarize: (id: string, model?: { providerID: string; modelID: string }) =>
     backendRequest<void>({ type: 'thread.compact', threadId: id, model }),
   backendModels: (threadId?: string, backendId?: BackendId) =>

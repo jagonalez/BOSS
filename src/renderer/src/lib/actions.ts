@@ -1201,7 +1201,18 @@ export async function autoRespond(sessionID: string, permissionID: string, respo
 
 export async function respondQuestion(requestID: string, answers: string[][]): Promise<void> {
   try {
-    await OpenCode.replyQuestion(requestID, answers)
+    // A question belongs to the thread that asked it, and each backend takes
+    // its answers its own way — claude on the control channel it asked over,
+    // opencode through its HTTP endpoint.
+    const state = appStore.getState()
+    const entry = Object.entries(state.questions).find(([, question]) => question.id === requestID)
+    const threadId = entry?.[0]
+    const backendId = threadId ? state.sessions.find((session) => session.id === threadId)?.backendId : undefined
+    if (threadId && backendId && backendId !== 'opencode') {
+      await OpenCode.replyQuestionToThread(threadId, requestID, answers)
+    } else {
+      await OpenCode.replyQuestion(requestID, answers)
+    }
   } finally {
     appStore.setState((s) => {
       const entry = Object.entries(s.questions).find(([, question]) => question.id === requestID)

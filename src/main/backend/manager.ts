@@ -1327,6 +1327,12 @@ export class BackendManager {
           request.response
         )
       }
+      case 'thread.question': {
+        const binding = this.binding(request.threadId)
+        const backend = await this.ensureStarted(binding.backendId)
+        if (!backend.questionRespond) throw new Error(`${binding.backendId} cannot be answered this way.`)
+        return backend.questionRespond(binding.nativeSessionId, request.requestId, request.answers)
+      }
       case 'thread.diff': {
         const binding = this.binding(request.threadId)
         return (await this.ensureStarted(binding.backendId)).diffGet(binding.nativeSessionId, request.messageId)
