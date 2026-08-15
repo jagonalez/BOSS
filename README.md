@@ -141,6 +141,17 @@ discarding it would take the branch with it.
 npm ci --silent
 ```
 
+A worktree lives outside the project directory, so Node cannot walk up to the
+original checkout's `node_modules` the way it can for a worktree nested inside
+one. Installing again is the safe answer; sharing the tree is the fast one:
+
+```sh
+#!/bin/sh
+# .worktreesetup — instant, but both checkouts share one dependency tree, so a
+# branch that changes package.json will have the wrong modules.
+ln -s "$BOSS_PROJECT_PATH/node_modules" node_modules
+```
+
 ## Project structure
 
 ```
