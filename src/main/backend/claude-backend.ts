@@ -16,6 +16,7 @@ import type { ClaudePermissionRequest } from './claude-protocol'
 
 interface ClaudeProcess {
   child: ChildProcess
+  sessionId: string
   permissions: Map<string, ClaudePermissionRequest>
 }
 
@@ -83,7 +84,12 @@ export class ClaudeBackend implements Backend {
   private version = ''
   private healthy = false
   private readonly command: string
+  /** Turns that have not settled yet. A session leaves this the moment its
+   *  turn ends, which is what decides whether a new message can be sent. */
   private processes = new Map<string, ClaudeProcess>()
+  /** Children that are still alive, including ones whose turn already
+   *  settled. Claude outlives its own result, so cleanup needs its own list. */
+  private lingering = new Set<ClaudeProcess>()
   private store: ClaudeStore = { version: 1, sessions: {} }
   private threadBus?: ThreadBusConnection
 
@@ -108,7 +114,10 @@ export class ClaudeBackend implements Backend {
   }
 
   async stop(): Promise<void> {
-    for (const process of this.processes.values()) process.child.kill()
+    // Every live child, not just the ones mid-turn: a settled turn can still
+    // have a process waiting to exit, and shutting down has to take those too.
+    for (const process of this.lingering) process.child.kill()
+    this.lingering.clear()
     this.processes.clear()
     this.healthy = false
   }
@@ -179,8 +188,7 @@ export class ClaudeBackend implements Backend {
   }
 
   async sessionDelete(id: string): Promise<void> {
-    this.processes.get(id)?.child.kill()
-    this.processes.delete(id)
+    this.killSession(id)
     this.sessionDirectories.forget(id)
     delete this.store.sessions[id]
     this.save()
@@ -308,8 +316,9 @@ export class ClaudeBackend implements Backend {
         } : {})
       }
     })
-    const process: ClaudeProcess = { child, permissions: new Map() }
+    const process: ClaudeProcess = { child, sessionId, permissions: new Map() }
     this.processes.set(sessionId, process)
+    this.lingering.add(process)
     this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'busy' } })
 
     let buffer = ''
@@ -334,6 +343,12 @@ export class ClaudeBackend implements Backend {
     const settle = (): void => {
       if (settled) return
       settled = true
+      // Free the slot before announcing idle, not when the child exits. Claude
+      // outlives its own result, and whatever acts on idle — a queued follow-up
+      // above all — sends the next message from inside these emits. Holding the
+      // slot until exit failed that send with "already working on this thread"
+      // and left the follow-up sitting in the queue.
+      if (this.processes.get(sessionId) === process) this.processes.delete(sessionId)
       this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'idle' } })
       this.emit({ type: 'session.idle', sessionID: sessionId })
     }
@@ -462,7 +477,10 @@ export class ClaudeBackend implements Backend {
           this.emit({ type: 'permission.replied', sessionID: sessionId, permissionID: requestId, response: 'reject' })
         }
       }
-      this.processes.delete(sessionId)
+      // Only if this child still owns the slot. Once its turn settled, a queued
+      // follow-up may already hold it, and that newer turn must survive.
+      if (this.processes.get(sessionId) === process) this.processes.delete(sessionId)
+      this.lingering.delete(process)
       if (code && code !== 0) this.emit({ type: 'session.error', sessionID: sessionId, error: stderr.trim() || `Claude Code exited with ${code}.` })
       settle()
     })
@@ -473,8 +491,42 @@ export class ClaudeBackend implements Backend {
     })
   }
 
+  /** This session's newest child that is still alive, whether or not its turn
+   *  has ended. A turn ends at the result, but the process stays up while a
+   *  question waits, and the control channel is still open until it exits. */
+  private liveProcess(sessionId: string): ClaudeProcess | undefined {
+    const running = this.processes.get(sessionId)
+    if (running) return running
+    let latest: ClaudeProcess | undefined
+    for (const process of this.lingering) {
+      if (process.sessionId === sessionId) latest = process
+    }
+    return latest
+  }
+
+  /** The child holding this request. A session can briefly have two processes
+   *  — one settled with a question still open, one running the next message —
+   *  so the answer has to go to whichever actually asked. */
+  private awaiting(sessionId: string, requestId: string): ClaudeProcess | undefined {
+    for (const process of this.lingering) {
+      if (process.sessionId === sessionId && process.permissions.has(requestId)) return process
+    }
+    return undefined
+  }
+
+  /** Stop this session's child and give up its turn slot at once, so the next
+   *  message can be sent without waiting for the process to exit. */
+  private killSession(sessionId: string, signal: NodeJS.Signals = 'SIGKILL'): void {
+    this.processes.delete(sessionId)
+    // Every child of this session, not only the one mid-turn: a settled process
+    // holding an unanswered question is still running and still has to stop.
+    for (const process of this.lingering) {
+      if (process.sessionId === sessionId) process.child.kill(signal)
+    }
+  }
+
   async abort(sessionId: string): Promise<void> {
-    this.processes.get(sessionId)?.child.kill('SIGINT')
+    this.killSession(sessionId, 'SIGINT')
   }
 
   /** Tell a running Claude Code its permission mode changed.
@@ -487,7 +539,7 @@ export class ClaudeBackend implements Backend {
    *  Returns false when there is no live process, so the caller can say the
    *  mode applies from the next message rather than immediately. */
   async permissionModeSet(sessionId: string, mode: BackendModeId): Promise<boolean> {
-    const process = this.processes.get(sessionId)
+    const process = this.liveProcess(sessionId)
     if (!process?.child.stdin?.writable) return false
     writeControl(process.child, {
       type: 'control_request',
@@ -511,7 +563,7 @@ export class ClaudeBackend implements Backend {
   async thinkingSet(_level: ThinkingLevel['level']): Promise<void> {}
   async todosGet(_sessionId: string): Promise<Todo[]> { return [] }
   async permissionRespond(sessionId: string, permissionId: string, response: 'once' | 'always' | 'reject'): Promise<void> {
-    const process = this.processes.get(sessionId)
+    const process = this.awaiting(sessionId, permissionId)
     const pending = process?.permissions.get(permissionId)
     if (!process || !pending) throw new Error('Claude Code is no longer waiting for this approval.')
     writeControl(process.child, claudePermissionResponse(permissionId, pending, response))
@@ -522,7 +574,7 @@ export class ClaudeBackend implements Backend {
    *  Answers travel on the same control channel as approvals, so a question is
    *  answered rather than allowed or denied. */
   async questionRespond(sessionId: string, requestId: string, answers: string[][]): Promise<void> {
-    const process = this.processes.get(sessionId)
+    const process = this.awaiting(sessionId, requestId)
     const pending = process?.permissions.get(requestId)
     if (!process || !pending) throw new Error('Claude Code is no longer waiting for this answer.')
     writeControl(process.child, claudeQuestionResponse(requestId, answers))
