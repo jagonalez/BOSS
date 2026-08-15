@@ -31,8 +31,18 @@ export function ModelSelect({
   onPick: (model: BackendModelDescriptor | null) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  /** Opens upward when the row is close enough to the bottom that a downward
+   *  menu would be cut off. Measured on open, since the row's position depends
+   *  on how far the settings page is scrolled. */
+  const [flip, setFlip] = useState(false)
   const [query, setQuery] = useState('')
   const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const rect = root.current?.getBoundingClientRect()
+    // Enough for the search box and a few rows; below that it is better up.
+    setFlip(Boolean(rect && window.innerHeight - rect.bottom < 260))
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -81,7 +91,7 @@ export function ModelSelect({
         <span className="settings-model-picker-chevron">⌄</span>
       </button>
       {open ? (
-        <div className="settings-model-picker-menu">
+        <div className={`settings-model-picker-menu ${flip ? 'flip' : ''}`}>
           <input
             autoFocus
             className="settings-model-search"
