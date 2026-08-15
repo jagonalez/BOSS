@@ -189,3 +189,35 @@ test('a thread keeps its conversation when it gains a worktree', async () => {
     cleanup()
   }
 })
+
+test('a thread can take a second worktree after leaving the first', async () => {
+  // Finish a piece of work, come back to the project, start the next from the
+  // new HEAD. The guard is on 'active', so a left worktree does not block one.
+  const { dir, root, cleanup } = repo()
+  try {
+    const wt = manager(dir)
+    const first = await wt.create({ projectId: 'p', projectPath: root, sourcePath: root, title: 'one', ownerThreadId: 't' })
+    await wt.remove(first.id)
+
+    const second = await wt.create({ projectId: 'p', projectPath: root, sourcePath: root, title: 'two', ownerThreadId: 't' })
+    assert.notEqual(second.branch, first.branch, 'a new branch, not the old one')
+    assert.ok(existsSync(join(second.path, 'file.ts')))
+  } finally {
+    cleanup()
+  }
+})
+
+test('a worktree with uncommitted work is not removed', async () => {
+  // What makes leaving safe to attempt: git refuses rather than discarding.
+  const { dir, root, cleanup } = repo()
+  try {
+    const wt = manager(dir)
+    const created = await wt.create({ projectId: 'p', projectPath: root, sourcePath: root, title: 'dirty', ownerThreadId: 't' })
+    writeFileSync(join(created.path, 'file.ts'), 'export const value = 2\n')
+
+    await assert.rejects(wt.remove(created.id), /uncommitted or untracked/)
+    assert.ok(existsSync(join(created.path, 'file.ts')), 'the work is still there')
+  } finally {
+    cleanup()
+  }
+})
