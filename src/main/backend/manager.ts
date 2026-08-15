@@ -1123,6 +1123,7 @@ export class BackendManager {
         binding.worktree = { ...worktree, ownerThreadId: created.id }
         this.save()
         created = this.session(binding)
+        this.reportSetupFailure(created.id, worktree.setupError, backendId)
       } catch (error) {
         await this.worktrees.remove(worktree.id).catch(() => {})
         throw error
@@ -1183,8 +1184,28 @@ export class BackendManager {
     await this.worktrees.setOwner(worktree.id, created.id)
     binding.worktree = { ...worktree, ownerThreadId: created.id }
     this.save()
+    // Before the first message, so it is read before the agent starts working
+    // in a checkout that may not have its dependencies.
+    this.reportSetupFailure(created.id, worktree.setupError, source.backendId)
     await this.sendMessage(created.id, [{ type: 'text', text: packet }], { ...options, mode: options?.mode ?? 'ask' })
     return this.session(binding)
+  }
+
+  /** Say that a worktree's setup script failed.
+   *
+   *  The checkout is valid and the thread can run, so this is not a throw. But
+   *  an agent about to work in a project whose dependencies were never
+   *  installed should not have to discover that from a build error. */
+  private reportSetupFailure(threadId: string, detail: string | undefined, backendId: BackendId): void {
+    if (!detail) return
+    this.emit({
+      type: 'session.error',
+      properties: {
+        sessionID: threadId,
+        error: `The project's .worktreesetup script failed in this worktree, so it may be missing dependencies. ${detail}`
+      },
+      backendId
+    })
   }
 
   private async cleanupWorktrees(): Promise<void> {

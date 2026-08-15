@@ -118,6 +118,29 @@ The packaged app uses the bundled binary; in dev it uses your PATH `opencode`.
 | `BOSS_DEBUG` | Verbose logging from the opencode child process |
 | `BOSS_MODEL_CACHE` | Directory for speech model downloads (default `~/.cache/boss/models`) |
 
+### Per-project files
+
+Two optional files in a repository's root change what a thread's Git worktree
+looks like when BOSS creates one. A fresh worktree has only what Git tracks, so
+without these an agent starts in a checkout with no `.env` and no dependencies.
+
+| File | Purpose |
+| --- | --- |
+| `.worktreeinclude` | Gitignored files to copy into a new worktree, in `.gitignore` pattern syntax. For `.env` and local config — small files Git does not carry. Matching more than 5,000 files is refused. |
+| `.worktreesetup` | A shell script run once in a new worktree, for anything that has to be *done* rather than copied — `npm install`, a build, a database. |
+
+`.worktreesetup` runs through `/bin/sh` from the worktree root, so it needs no
+executable bit. It is given `BOSS_WORKTREE_PATH` and `BOSS_PROJECT_PATH`, and
+is given up on after ten minutes. If it fails the worktree is kept and the
+thread is told why — a failed install does not make a checkout invalid, and
+discarding it would take the branch with it.
+
+```sh
+#!/bin/sh
+# .worktreesetup
+npm ci --silent
+```
+
 ## Project structure
 
 ```

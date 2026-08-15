@@ -20,6 +20,55 @@ const DEFAULT_SETTINGS: WorktreeSettings = {
   cleanupAfterDays: 30
 }
 
+/** How long a project's setup script may run before it is given up on.
+ *
+ *  Generous: installing dependencies in a fresh checkout is the whole point,
+ *  and that is minutes on a large project. Bounded anyway, because a script
+ *  that waits for input would otherwise hang worktree creation forever. */
+const SETUP_TIMEOUT_MS = 10 * 60 * 1000
+
+/** Run a project's .worktreesetup in a new worktree, if it has one.
+ *
+ *  Copying files gets a worktree its .env; it cannot get it node_modules —
+ *  copying those is slow and often wrong across platforms, so the install has
+ *  to run. Anything a project needs doing once per checkout goes here.
+ *
+ *  A failure is reported but does not undo the worktree. The checkout is valid
+ *  either way, and throwing it away over a failed install would lose the branch
+ *  along with it. */
+async function runSetupScript(repoRoot: string, worktreePath: string): Promise<string | undefined> {
+  const script = join(repoRoot, '.worktreesetup')
+  try {
+    const stat = await lstat(script)
+    if (!stat.isFile() || stat.isSymbolicLink()) return undefined
+  } catch {
+    return undefined
+  }
+  return new Promise((resolveRun) => {
+    execFile(
+      '/bin/sh',
+      [script],
+      {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        timeout: SETUP_TIMEOUT_MS,
+        maxBuffer: 8 * 1024 * 1024,
+        // Told where it is, so a script can copy from the checkout it came from
+        // without having to work out which one that was.
+        env: { ...process.env, BOSS_WORKTREE_PATH: worktreePath, BOSS_PROJECT_PATH: repoRoot }
+      },
+      (error, _stdout, stderr) => {
+        if (!error) {
+          resolveRun(undefined)
+          return
+        }
+        const detail = String(stderr || error.message).trim().split('\n').slice(-4).join(' ').slice(0, 500)
+        resolveRun(detail || 'The setup script failed.')
+      }
+    )
+  })
+}
+
 function git(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolveGit, reject) => {
     execFile('git', args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
@@ -163,6 +212,9 @@ export class WorktreeManager {
       throw error
     }
 
+    // After the copy, so a script can use whatever .worktreeinclude brought.
+    const setupError = await runSetupScript(repoRoot, worktreePath)
+
     const timestamp = Date.now()
     const info: WorktreeInfo = {
       id,
@@ -175,7 +227,8 @@ export class WorktreeManager {
       createdAt: timestamp,
       lastUsedAt: timestamp,
       status: 'active',
-      copiedFiles
+      copiedFiles,
+      setupError
     }
     this.state.worktrees.push(info)
     await this.save()

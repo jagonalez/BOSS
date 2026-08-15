@@ -11,6 +11,10 @@ export interface WorktreeInfo {
   status: 'active' | 'removed'
   removedAt?: number
   copiedFiles: number
+  /** Why the project's .worktreesetup failed, when it did. The worktree is
+   *  still usable — a failed install does not make the checkout invalid — so
+   *  this is reported rather than thrown. */
+  setupError?: string
 }
 
 export interface WorktreeSettings {
