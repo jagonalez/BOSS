@@ -12,6 +12,8 @@ import type {
 import type { ReviewProvider, ReviewProviderMatch, ReviewRepository } from './review-provider.ts'
 // @ts-expect-error Application builds use bundler resolution.
 import { requiredCommand, runCommand } from './review-provider.ts'
+// @ts-expect-error Application builds use bundler resolution.
+import { ChangeRequestCache, changeRequestKey } from './change-request-cache.ts'
 
 interface StoredReviewState {
   version: 1
@@ -39,11 +41,19 @@ export class ReviewManager {
   private state: StoredReviewState
   private readonly stateFile: string
   private readonly providers: ReviewProvider[]
+  private readonly changeRequests: ChangeRequestCache
 
-  constructor(stateFile: string, providers: ReviewProvider[] = []) {
+  constructor(stateFile: string, providers: ReviewProvider[] = [], changeRequests = new ChangeRequestCache()) {
     this.stateFile = stateFile
     this.providers = providers
+    this.changeRequests = changeRequests
     this.state = this.load()
+  }
+
+  /** Forget a branch's change request, so the next look is a fresh one.
+   *  Publishing or submitting changes the pull request we just cached. */
+  private forgetChangeRequest(repository: ReviewRepository): void {
+    this.changeRequests.invalidate(changeRequestKey(repository.root, repository.branch))
   }
 
   private load(): StoredReviewState {
@@ -89,22 +99,46 @@ export class ReviewManager {
     }
     if (!selected) return base
     try {
-      return {
-        ...base,
-        changeRequest: await selected.provider.getChangeRequest(repository, selected.match)
-      }
+      const changeRequest = await this.changeRequestFor(repository, selected)
+      return changeRequest ? { ...base, changeRequest } : { ...base, awaitingChangeRequest: true }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (noChangeRequestYet(message)) return { ...base, awaitingChangeRequest: true }
-      return { ...base, syncError: message }
+      return { ...base, syncError: error instanceof Error ? error.message : String(error) }
     }
+  }
+
+  /** The branch's change request, looked up once and shared.
+   *
+   *  Several threads can sit on one branch, and the sidebar asks for the same
+   *  branch the review tab already has. Undefined means the branch has no
+   *  change request, which is cached like any other answer. */
+  private async changeRequestFor(
+    repository: ReviewRepository,
+    selected: { provider: ReviewProvider; match: ReviewProviderMatch }
+  ): Promise<ChangeRequestSummary | undefined> {
+    return this.changeRequests.get(changeRequestKey(repository.root, repository.branch), async () => {
+      try {
+        return await selected.provider.getChangeRequest(repository, selected.match)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        // A branch with no change request is an answer, not a failure, so it
+        // is cached. Anything else is rethrown and left uncached.
+        if (noChangeRequestYet(message)) return undefined
+        throw error
+      }
+    })
   }
 
   private async providerContext(path: string): Promise<ProviderContext> {
     const repository = await this.repository(path)
     const selected = this.providerFor(repository)
     if (!selected) throw new Error('No remote review provider is configured for this checkout.')
-    const changeRequest = await selected.provider.getChangeRequest(repository, selected.match)
+    const changeRequest = await this.changeRequestFor(repository, selected)
+    // Everything reaching here publishes to a change request, so there has to
+    // be one. Saying which branch beats the provider's own wording, which reads
+    // like a failure rather than "open one first".
+    if (!changeRequest) {
+      throw new Error(`No ${selected.provider.summary.changeRequestLabel.toLowerCase()} is open for ${repository.branch}.`)
+    }
     return { repository, ...selected, changeRequest }
   }
 
@@ -154,6 +188,7 @@ export class ReviewManager {
       : context.provider.summary.capabilities.publishOverallComment
     if (!capability || !context.provider.publishComment) throw new Error(`${context.provider.summary.label} does not support this kind of review comment.`)
     await context.provider.publishComment(context.repository, context.match, context.changeRequest, input)
+    this.forgetChangeRequest(context.repository)
     return this.snapshot(context.repository.root)
   }
 
@@ -163,6 +198,7 @@ export class ReviewManager {
       throw new Error(`${context.provider.summary.label} does not support review replies.`)
     }
     await context.provider.replyToComment(context.repository, context.match, context.changeRequest, commentId, body)
+    this.forgetChangeRequest(context.repository)
     return this.snapshot(context.repository.root)
   }
 
@@ -172,6 +208,7 @@ export class ReviewManager {
       throw new Error(`${context.provider.summary.label} does not support review verdicts.`)
     }
     await context.provider.submitVerdict(context.repository, context.match, context.changeRequest, event, body)
+    this.forgetChangeRequest(context.repository)
     return this.snapshot(context.repository.root)
   }
 }
