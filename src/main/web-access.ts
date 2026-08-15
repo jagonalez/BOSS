@@ -2,9 +2,12 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { execFile } from 'node:child_process'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { app } from 'electron'
 import type { BackendRequest } from '../shared/backend'
 import { mobileRequestAllowed, type MobileAccessConfig, type MobileAccessRole, type MobileAccessStatus } from '../shared/mobile'
 import { MOBILE_PAGE } from './mobile-page'
+import { SERVICE_WORKER, WEB_MANIFEST } from './pwa-assets'
 
 /**
  * Serves the mobile site and a narrow API over loopback. Remote access is
@@ -56,6 +59,22 @@ const FORWARDED_EVENTS = new Set([
 ])
 
 const DEFAULT_PORT = 4517
+
+/** Icon sizes shipped in resources/icons, smallest first. */
+const ICON_SIZES = [96, 128, 256, 512]
+
+/**
+ * Serve the smallest shipped icon at or above the requested size, so the
+ * manifest can ask for 192 even though no 192 file exists.
+ */
+function readIcon(requested: number): Buffer | null {
+  const size = ICON_SIZES.find((candidate) => candidate >= requested) ?? ICON_SIZES[ICON_SIZES.length - 1]
+  try {
+    return readFileSync(join(app.getAppPath(), 'resources', 'icons', `${size}x${size}.png`))
+  } catch {
+    return null
+  }
+}
 
 function tailscaleBin(): string | null {
   for (const candidate of ['/usr/local/bin/tailscale', '/opt/homebrew/bin/tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale']) {
@@ -243,6 +262,26 @@ export class WebAccess {
     if (path === '/' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(MOBILE_PAGE)
       return
+    }
+    // PWA assets stay unauthenticated: a manifest, a service worker, and an
+    // icon carry no user data, and the browser fetches them before the page
+    // can attach a token.
+    if (path === '/manifest.webmanifest' && request.method === 'GET') {
+      response.writeHead(200, { 'content-type': 'application/manifest+json' }).end(WEB_MANIFEST)
+      return
+    }
+    if (path === '/sw.js' && request.method === 'GET') {
+      // A service worker must not be cached, or an update never lands.
+      response.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-cache' }).end(SERVICE_WORKER)
+      return
+    }
+    const icon = /^\/icon-(\d+)\.png$/.exec(path)
+    if (icon && request.method === 'GET') {
+      const body = readIcon(Number(icon[1]))
+      if (body) {
+        response.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=86400' }).end(body)
+        return
+      }
     }
     const access = this.access(request)
     if (!access) {

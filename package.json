@@ -32,6 +32,7 @@
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@tanstack/react-virtual": "^3.14.9",
+    "@types/ws": "^8.18.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "electron-updater": "^6.8.9",
@@ -39,13 +40,16 @@
     "kokoro-js": "^1.2.1",
     "node-pty": "^1.1.0",
     "onnxruntime-node": "^1.27.0",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",

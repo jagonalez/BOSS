@@ -1,0 +1,36 @@
+# Rename the app before the first deploy; fly app names are global.
+app = "boss-relay"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The desktop holds one socket open indefinitely, so the machine must not
+  # stop underneath it. It may sleep when every phone and desktop is gone;
+  # the desktop's reconnect loop wakes it again.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 400
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"
+
+# 256MB is ample: the relay keeps a socket pair and no message history.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
