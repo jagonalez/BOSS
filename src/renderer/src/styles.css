@@ -4916,6 +4916,7 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
 }
 
 .composer {
@@ -5457,8 +5458,16 @@ body.workspace-dragging .workspace-tab-slot {
   word-break: break-word;
 }
 
+/* Auto-growing composer. One text line is --composer-line tall; the box starts
+   at exactly one line and the layout effect in ChatView grows it from
+   scrollHeight up to --composer-max-lines, after which it scrolls. */
 .composer textarea {
-  flex: 1;
+  --composer-line: 1.5em;
+  --composer-pad: 5px;
+  --composer-max-lines: 14;
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   outline: none;
@@ -5467,8 +5476,10 @@ body.workspace-dragging .workspace-tab-slot {
   font-size: 14px;
   line-height: 1.5;
   resize: none;
-  max-height: 200px;
-  padding: 5px 0;
+  overflow-y: auto;
+  min-height: calc(var(--composer-line) + var(--composer-pad) * 2);
+  max-height: calc(var(--composer-line) * var(--composer-max-lines) + var(--composer-pad) * 2);
+  padding: var(--composer-pad) 0;
 }
 
 .composer .row {

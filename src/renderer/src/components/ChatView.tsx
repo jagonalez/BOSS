@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import { abortRun, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, steerFollowUp, toggleAsr, updateFollowUp } from '../lib/actions'
@@ -559,6 +559,28 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     if (effectiveSession) setText(appStore.getState().drafts[effectiveSession] ?? '')
   }, [effectiveSession, composerEpoch])
 
+  // Resize on every value change, whichever path set it: typing, paste,
+  // dictation, completion insert, history recall, draft restore, or the
+  // clear after a send.
+  useLayoutEffect(() => {
+    autoGrow()
+  }, [text, attachments.length])
+
+  // A narrower box re-wraps the text, which changes the line count. Watch the
+  // element itself so sidebar resizes count, not just window resizes.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    let width = el.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      autoGrow()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   useEffect(() => {
     const t = setTimeout(() => {
       if (effectiveSession && text !== (appStore.getState().drafts[effectiveSession] ?? '')) {
@@ -665,7 +687,6 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
       setCompletion(null)
       setHistIdx(-1)
       setDraftBackup('')
-      if (textareaRef.current) textareaRef.current.style.height = 'auto'
       return
     }
     const cmdMatch = /^\/([\w-]+)(?:\s+(.*))?$/.exec(text.trim())
@@ -685,7 +706,6 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         void setQaPolicy(effectiveSession, policy)
         setText('')
         setCompletion(null)
-        if (textareaRef.current) textareaRef.current.style.height = 'auto'
       } else {
         appStore.setState({ lastError: 'Use /qa auto, /qa suggest, /qa off, or /qa default.' })
       }
@@ -699,7 +719,6 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
       setCompletion(null)
       setHistIdx(-1)
       setDraftBackup('')
-      if (textareaRef.current) textareaRef.current.style.height = 'auto'
       return
     }
     if (text.trim()) pushHistory(effectiveSession, text)
@@ -708,7 +727,6 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     setAttachments([])
     setHistIdx(-1)
     setDraftBackup('')
-    if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
   const stepHistory = (dir: 1 | -1): void => {
@@ -790,11 +808,16 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     }
   }
 
+  // Match the box height to the text. Reset to 'auto' first so scrollHeight
+  // reports the shrunk height too, then clamp to the max-height from the
+  // stylesheet so the CSS owns the line budget.
   const autoGrow = (): void => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+    const max = parseFloat(getComputedStyle(el).maxHeight)
+    const next = Number.isFinite(max) ? Math.min(el.scrollHeight, max) : el.scrollHeight
+    el.style.height = `${next}px`
   }
 
   const canSend = text.trim().length > 0 || attachments.length > 0
