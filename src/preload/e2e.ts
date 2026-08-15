@@ -212,6 +212,9 @@ export function installE2EApi(boss: BossApi): void {
         return undefined
       case 'backend.bin.get': return {}
       case 'backend.bin.set': return request.path ? { [request.backendId]: request.path } : {}
+      // Main stops the server and returns the descriptors; nothing about a
+      // backend's advertised capabilities changes because it was restarted.
+      case 'backend.restart': return backends
       case 'thread.list': return sessions
       case 'thread.create': return createThread(request.backendId, request.title)
       case 'thread.get': return sessions.find((session) => session.id === request.threadId)

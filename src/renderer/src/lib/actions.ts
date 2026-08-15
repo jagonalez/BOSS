@@ -290,6 +290,18 @@ export function openBackendLogin(backendId: BackendId): void {
   }))
 }
 
+/** Restart a backend's server, then re-read what it reports about itself.
+ *
+ *  Throws rather than reporting quietly: the manager refuses while a thread on
+ *  that backend is running, and a user who asked for a restart has to be told
+ *  it did not happen. */
+export async function restartBackend(backendId: BackendId): Promise<void> {
+  appStore.setState({ backends: await OpenCode.restartBackend(backendId) })
+  // The server is stopped now, so this reads the CLI rather than a stale
+  // in-memory session — which is the point of restarting after a sign-in.
+  await refreshBackendAuth()
+}
+
 export async function refreshBackendAuth(): Promise<void> {
   try {
     appStore.setState({ backendAuth: await OpenCode.backendAuthStatus() })
@@ -1722,8 +1734,10 @@ export async function deleteSession(id: string): Promise<void> {
       }
     })
     await refreshSessions()
-  } catch {
-    /* ignore */
+  } catch (error) {
+    // Deleting is a thing the user asked for and watched not happen. Staying
+    // quiet here made a failed delete look like a button that does nothing.
+    appStore.setState({ lastError: error instanceof Error ? error.message : 'Could not delete the thread.' })
   }
 }
 

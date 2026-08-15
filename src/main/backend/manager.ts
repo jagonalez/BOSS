@@ -574,6 +574,30 @@ export class BackendManager {
     }
   }
 
+  /** Stop a backend's server and start it again.
+   *
+   *  A backend server reads its credentials when it starts and keeps them for
+   *  as long as it runs. Signing in to a different account therefore leaves the
+   *  running server holding a token for the account that just signed out, and
+   *  every request fails with an authentication error even though the CLI is
+   *  signed in correctly. Restarting the server is what picks the new
+   *  credentials up, and it also clears a server that has otherwise wedged.
+   *
+   *  Refused while a thread on that backend is mid-run, since stopping the
+   *  server would abandon the reply that run is producing. */
+  async restartBackend(id: BackendId): Promise<BackendDescriptor[]> {
+    const backend = this.backends[id]
+    if (!backend) throw new Error(`Unknown backend: ${id}`)
+    const busy = [...this.busyThreads].some((threadId) => this.bindings.get(threadId)?.backendId === id)
+    if (busy) throw new Error(`Wait for the running ${DEFINITIONS[id].label} thread to finish before restarting it.`)
+    await this.starting.get(id)?.catch(() => { /* a failed start still leaves nothing running */ })
+    this.started.delete(id)
+    await backend.stop().catch(() => { /* a server that is already gone is the state we want */ })
+    // Started on demand rather than here, so a backend nothing is using does
+    // not get spun back up merely because it was restarted.
+    return this.descriptors()
+  }
+
   private binding(threadId: string): ThreadBinding {
     const binding = this.bindings.get(threadId)
     if (!binding) throw new Error(`BOSS thread not found: ${threadId}`)
@@ -697,6 +721,11 @@ export class BackendManager {
       : undefined
     const part = properties.part as { sessionID?: string; messageID?: string } | undefined
     const nativeId = (properties.sessionID as string | undefined) ?? sessionInfo?.id ?? messageInfo?.sessionID ?? part?.sessionID
+    // A backend whose process is gone must be startable again. Without this the
+    // started set kept a dead backend marked as running, so ensureStarted
+    // handed back a backend with no process and every later request failed
+    // until BOSS itself was restarted.
+    if (eventType === 'server.disconnected') this.started.delete(backendId)
     const binding = this.bindingForNative(backendId, nativeId)
     if (!binding && nativeId) return
     if (binding) {
@@ -917,8 +946,13 @@ export class BackendManager {
   async sessionDelete(threadId: string): Promise<void> {
     const binding = this.binding(threadId)
     if (binding.nativeSessionOwnership === 'boss') {
-      const backend = await this.ensureStarted(binding.backendId)
-      await backend.sessionDelete(binding.nativeSessionId)
+      // Best effort, like the rename below. The thread is BOSS's own record, so
+      // a backend that cannot be started or cannot answer must not be able to
+      // keep it: a server that was down or signed out of the wrong account left
+      // its threads undeletable, and the renderer showed nothing at all.
+      await this.ensureStarted(binding.backendId)
+        .then((backend) => backend.sessionDelete(binding.nativeSessionId))
+        .catch(() => { /* the native session outlives BOSS's record of it */ })
     }
     this.transcripts?.deleteThread(threadId)
     this.bindings.delete(threadId)
@@ -1697,6 +1731,7 @@ export class BackendManager {
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
       case 'backend.bin.get': return this.binaryPaths()
       case 'backend.bin.set': return this.setBinaryPath(request.backendId, request.path)
+      case 'backend.restart': return this.restartBackend(request.backendId)
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return request.executionPath
         ? this.createScopedThread(request.backendId, this.scopeFor(request.executionPath), request.title ?? 'Untitled thread')

@@ -64,6 +64,20 @@ test('persists backend, model, permission, and thinking defaults through the UI'
   await expect(row.locator('label').filter({ hasText: 'Thinking' }).getByRole('combobox')).toHaveValue('high')
 })
 
+test('a backend server can be restarted from settings', async ({ appPage }) => {
+  // A server reads its credentials once, at startup. Signing in to another
+  // account leaves it using the account that signed out, and this is the way
+  // out of that without quitting BOSS.
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Models & connections' }).click()
+  const row = appPage.locator('.settings-connection-row').filter({ hasText: 'Codex' })
+
+  await row.getByRole('button', { name: 'Restart server' }).click()
+
+  expect((await lastBackendCall(appPage, 'backend.restart')).request).toMatchObject({ backendId: 'codex' })
+  await expect(row.getByRole('button', { name: 'Restarted' })).toBeVisible()
+})
+
 test('quick-create uses the configured backend and exposes its defaults on the new thread', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
   await appPage.getByRole('button', { name: 'Done' }).click()
