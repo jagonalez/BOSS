@@ -237,7 +237,16 @@ function checkoutPath(session: { executionPath?: string; worktree?: { path: stri
   return session.executionPath ?? session.worktree?.path
 }
 
-function AddMenu({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
+function AddMenu({
+  groupId,
+  ownerId: requested,
+  close
+}: {
+  groupId: string
+  /** The thread whose own + was used, when it was one. */
+  ownerId?: string
+  close: () => void
+}): React.JSX.Element {
   const sessions = useStore(appStore, (state) => state.sessions)
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
 
@@ -246,10 +255,17 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
   // fallback to the active session: an empty pane would silently bind its
   // files to whatever thread happened to be selected somewhere else.
   const ownerId = useMemo(() => {
+    if (requested) return requested
     if (!workspace) return undefined
     const pane = findGroup(activeWorkspaceView(workspace).root, groupId)
-    return pane?.tabs.find((item) => item.kind === 'thread')?.sessionId
-  }, [workspace, groupId])
+    if (!pane) return undefined
+    // The thread you are looking at, not the first one in the pane. A pane can
+    // hold several, and taking the leftmost bound a review to whichever thread
+    // happened to be furthest left rather than the open one.
+    const active = pane.tabs.find((item) => item.id === pane.activeTabId)
+    if (active?.kind === 'thread' && active.sessionId) return active.sessionId
+    return pane.tabs.find((item) => item.kind === 'thread')?.sessionId
+  }, [workspace, groupId, requested])
   const owner = sessions.find((session) => session.id === ownerId)
   const inherited: WorkspaceCheckoutBinding | undefined = (() => {
     const path = checkoutPath(owner ?? {})
@@ -487,6 +503,9 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
   const movable = Boolean(view && walkTabs(view.root).length > 1)
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
   const [menuRight, setMenuRight] = useState<number | null>(null)
+  /** Set when the menu was opened from one thread's own + rather than the
+   *  pane's, so it adds to that thread rather than whichever the pane shows. */
+  const [menuOwnerId, setMenuOwnerId] = useState<string | undefined>(undefined)
   const [dropTarget, setDropTarget] = useState<DropPosition | null>(null)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -632,6 +651,9 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
                     const trigger = event.currentTarget.getBoundingClientRect()
                     const container = event.currentTarget.closest('.workspace-group')?.getBoundingClientRect()
                     setMenuRight(container ? workspaceMenuRight(trigger.right, container.left, container.right) : 8)
+                    // This + sits on one thread's tab and says it adds to that
+                    // thread, so it names it rather than letting the menu pick.
+                    setMenuOwnerId(item.sessionId)
                     setMenuOpen(true)
                   }}
                 >
@@ -714,7 +736,7 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
         {group.tabs.map((item) => <TabSlot key={item.id} tabId={item.id} />)}
       </div>
 
-      {menuOpen ? <div ref={menuRef}><AddMenu groupId={group.id} close={() => setMenuOpen(false)} /></div> : null}
+      {menuOpen ? <div ref={menuRef}><AddMenu groupId={group.id} ownerId={menuOwnerId} close={() => setMenuOpen(false)} /></div> : null}
       {tabMenu ? (() => {
         const item = group.tabs.find((candidate) => candidate.id === tabMenu.tabId)
         if (!item) return null
