@@ -6,6 +6,7 @@ import { disposeTerminalSession } from './terminal-sessions'
 import { disposeTabContentNode } from './tab-content-nodes'
 import { disposeBrowseGuest } from './browse-guests'
 import { resolveMode, resolveVariant } from './thread-defaults'
+import { pruneDeletedThreadCaches } from './thread-caches'
 import { startMicCapture } from './mic'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
@@ -1648,9 +1649,8 @@ export async function openProject(path: string): Promise<void> {
     projectCheckouts: info.checkouts,
     activePage: 'project',
     activeSessionId: null,
-    // Sessions span every project now, so blanking them here only made the
-    // whole sidebar flash empty until refreshSessions repopulated it.
-    messages: {},
+    // Thread panes stay mounted across projects. Their cached conversations
+    // must stay with them or every open pane looks empty until selected again.
     diffs: null,
     fileContent: null,
     files: null,
@@ -1681,11 +1681,8 @@ export async function deleteSession(id: string): Promise<void> {
         return { ...item, views }
       })
     }
-    const cur = appStore.getState()
-    if (cur.activeSessionId === id) {
-      appStore.setState({ activeSessionId: null, messages: {}, diffs: null, todos: {} })
-    }
     appStore.setState((s) => {
+      const threadCaches = pruneDeletedThreadCaches(s.messages, s.todos, id)
       const modelsBySession = { ...s.modelsBySession }
       const modelProvidersBySession = { ...(s.modelProvidersBySession ?? {}) }
       const variantsBySession = { ...s.variantsBySession }
@@ -1701,6 +1698,8 @@ export async function deleteSession(id: string): Promise<void> {
       persistThreadPreference('boss.variantsBySession', variantsBySession)
       persistThreadPreference('boss.modesBySession', modesBySession)
       return {
+        ...threadCaches,
+        ...(s.activeSessionId === id ? { activeSessionId: null, diffs: null } : {}),
         archived: s.archived.filter((x) => x !== id),
         modelsBySession,
         modelProvidersBySession,
@@ -2133,7 +2132,6 @@ export async function openProjectFolder(): Promise<void> {
       activePage: 'project',
       activeSessionId: null,
       sessions: [],
-      messages: {},
       diffs: null
     })
     await refreshSessions()
