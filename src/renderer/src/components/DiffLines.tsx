@@ -23,6 +23,45 @@ export function DiffLines({
   const [body, setBody] = React.useState('')
   const [saving, setSaving] = React.useState(false)
 
+  // Indexed once rather than filtered per line. The filter was lines ×
+  // comments: 10,000 lines against 30 comments is 300,000 comparisons for a
+  // handful of matches, repeated on every render.
+  const byLine = React.useMemo(() => {
+    const index = new Map<string, ReviewComment[]>()
+    const add = (key: string, comment: ReviewComment): void => {
+      const list = index.get(key) ?? []
+      list.push(comment)
+      index.set(key, list)
+    }
+    for (const comment of comments) {
+      if (comment.file !== path || comment.line === null) continue
+      // A comment without a side belongs to whichever line matches, which is
+      // what the old per-line filter did by comparing against that line's own
+      // side. Indexing it under both keeps that.
+      if (comment.side) add(`${comment.side}:${comment.line}`, comment)
+      else {
+        add(`LEFT:${comment.line}`, comment)
+        add(`RIGHT:${comment.line}`, comment)
+      }
+    }
+    return index
+  }, [comments, path])
+
+  // Highlighting is the expensive part and depends only on the text, so it is
+  // done once per set of lines rather than on every render — a comment draft
+  // used to re-highlight the whole file on each keystroke.
+  const highlighted = React.useMemo(() => {
+    if (!lang) return null
+    return lines.map((line) => {
+      if (line.kind === 'hunk') return null
+      try {
+        return highlightCode(line.text, path)
+      } catch {
+        return null
+      }
+    })
+  }, [lines, lang, path])
+
   const save = async (publish: boolean): Promise<void> => {
     if (!onAddComment || !commenting || !path || !body.trim()) return
     setSaving(true)
@@ -40,20 +79,13 @@ export function DiffLines({
   return (
     <div className="diff-view">
       {lines.map((line, i) => {
-        const highlightable = lang && line.kind !== 'hunk'
-        let content: React.ReactNode = line.text || ' '
-        if (highlightable) {
-          try {
-            content = <code dangerouslySetInnerHTML={{ __html: highlightCode(line.text, path) }} />
-          } catch {
-            /* fall back to plain text */
-          }
-        }
+        const markup = highlighted?.[i]
+        const content: React.ReactNode = markup
+          ? <code dangerouslySetInnerHTML={{ __html: markup }} />
+          : line.text || ' '
         const number = line.kind === 'del' ? line.oldNo : line.newNo
         const side = line.kind === 'del' ? 'LEFT' : 'RIGHT'
-        const lineComments = number === null ? [] : comments.filter((comment) =>
-          comment.file === path && comment.line === number && (comment.side ?? side) === side
-        )
+        const lineComments = number === null ? [] : byLine.get(`${side}:${number}`) ?? []
         const isCommenting = number !== null && commenting?.line === number && commenting.side === side
         return <React.Fragment key={i}>
           <div className={`diff-line ${line.kind} ${lineComments.length ? 'has-comments' : ''}`}>
