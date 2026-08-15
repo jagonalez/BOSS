@@ -245,6 +245,22 @@ export function Sidebar(): React.JSX.Element {
   )
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  /** Where the menu ends up once its height is known.
+   *
+   *  It opens at the pointer, which runs off the bottom in a short window or on
+   *  a click near it — and the menu grew as thread actions were added, so this
+   *  gets easier to hit over time. Measured rather than guessed: it is a
+   *  different height for a project, a thread, and a thread with a worktree. */
+  const [menuTop, setMenuTop] = useState<number | null>(null)
+  useEffect(() => {
+    if (!ctx) {
+      setMenuTop(null)
+      return
+    }
+    const height = menuRef.current?.offsetHeight ?? 0
+    const overflow = ctx.y + height - (window.innerHeight - 8)
+    setMenuTop(overflow > 0 ? Math.max(8, ctx.y - overflow) : ctx.y)
+  }, [ctx])
   const projectsRef = useRef<HTMLDivElement>(null)
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     try { return localStorage.getItem('boss.sidebarHidden') === 'true' } catch { return false }
@@ -570,7 +586,11 @@ export function Sidebar(): React.JSX.Element {
       </div>
 
       {ctx && (
-        <div ref={menuRef} className="ctx-menu" style={{ left: Math.min(ctx.x, window.innerWidth - 220), top: ctx.y }}>
+        <div
+          ref={menuRef}
+          className="ctx-menu"
+          style={{ left: Math.min(ctx.x, window.innerWidth - 220), top: menuTop ?? ctx.y }}
+        >
           {ctx.project ? (
             <>
               {menuItem('New chat here', () => void newChatInProject(ctx.project!))}

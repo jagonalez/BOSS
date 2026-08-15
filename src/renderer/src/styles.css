@@ -3069,6 +3069,10 @@ body.workspace-dragging .workspace-tab-slot {
 .ctx-menu {
   position: fixed;
   min-width: 180px;
+  /* A menu taller than the window scrolls rather than running off the bottom.
+     Nudging it up is enough in an ordinary window; this is the short one. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);

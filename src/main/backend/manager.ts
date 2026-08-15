@@ -1003,7 +1003,7 @@ export class BackendManager {
    *  created — this is the same conversation in a different checkout, and the
    *  agent needs to know its files moved. */
   async useWorktree(threadId: string): Promise<{ path: string; branch: string }> {
-    const session = await this.moveToWorktree(threadId)
+    const session = await this.moveToWorktree(threadId, true)
     const worktree = session.worktree
     if (!worktree) throw new Error('The worktree was created but could not be bound to this thread.')
     return { path: worktree.path, branch: worktree.branch }
@@ -1172,12 +1172,17 @@ export class BackendManager {
    *
    *  Refuses when the thread already has one — two worktrees for one thread
    *  would leave the first orphaned with its branch. */
-  async moveToWorktree(threadId: string): Promise<SessionInfo> {
+  async moveToWorktree(threadId: string, calledByThread = false): Promise<SessionInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const binding = this.binding(threadId)
     if (binding.worktree?.status === 'active') throw new Error('This thread already has its own worktree.')
     if (binding.projectId === 'global' || !binding.projectPath) throw new Error('Projectless chats cannot use Git worktrees.')
-    if (this.busyThreads.has(threadId)) throw new Error('Wait for this thread to finish before moving it to a worktree.')
+    // Not when the thread asks for itself: an agent calling this is mid-turn by
+    // definition, so the check could never pass. It guards a move from outside,
+    // where changing the directory under a running agent is a surprise.
+    if (!calledByThread && this.busyThreads.has(threadId)) {
+      throw new Error('Wait for this thread to finish before moving it to a worktree.')
+    }
 
     const worktree = await this.worktrees.create({
       projectId: binding.projectId,
