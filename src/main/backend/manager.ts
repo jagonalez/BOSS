@@ -17,6 +17,7 @@ import type {
   QueuedFollowUpAttachment,
   ThreadCreationScope
 } from '@shared/backend'
+import { withBackendDefaults } from '@shared/backend'
 import type { EventMessage, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
@@ -1026,8 +1027,8 @@ export class BackendManager {
     return { path: binding.projectPath, branch: worktree.branch }
   }
 
-  async spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread> {
-    const created = await this.forkIntoWorktree(threadId, instruction)
+  async spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId): Promise<ThreadBusThread> {
+    const created = await this.forkIntoWorktree(threadId, instruction, undefined, agent)
     const info = this.threadInfo(created.id)
     if (!info) throw new Error('The worktree thread was created but could not be registered.')
     return info
@@ -1104,7 +1105,11 @@ export class BackendManager {
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
     }, source.projectId === 'global' ? 'global' : 'current')
-    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { ...options, mode: options?.mode ?? 'ask' })
+    await this.sendMessage(
+      created.id,
+      [{ type: 'text', text: packet }],
+      withBackendDefaults(this.defaultModel(backendId), options, 'ask')
+    )
     return created
   }
 
@@ -1171,12 +1176,14 @@ export class BackendManager {
       )
     }
 
-    await this.sendMessage(created.id, [{ type: 'text', text: packet }], {
-      ...options,
-      mode: options?.mode ?? DEFINITIONS[backendId].modes.find((mode) => mode.id === 'auto')?.id
-        ?? DEFINITIONS[backendId].modes.find((mode) => mode.id === 'accept-edits')?.id
-        ?? DEFINITIONS[backendId].modes[0]?.id
-    })
+    const fallbackMode = DEFINITIONS[backendId].modes.find((mode) => mode.id === 'auto')?.id
+      ?? DEFINITIONS[backendId].modes.find((mode) => mode.id === 'accept-edits')?.id
+      ?? DEFINITIONS[backendId].modes[0]?.id
+    await this.sendMessage(
+      created.id,
+      [{ type: 'text', text: packet }],
+      withBackendDefaults(this.defaultModel(backendId), options, fallbackMode)
+    )
     return this.sessionGet(created.id)
   }
 
@@ -1220,9 +1227,15 @@ export class BackendManager {
     return session
   }
 
-  async forkIntoWorktree(threadId: string, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
+  async forkIntoWorktree(
+    threadId: string,
+    instruction?: string,
+    options?: BackendMessageOptions,
+    targetBackendId?: BackendId
+  ): Promise<SessionInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const source = this.binding(threadId)
+    const backendId = targetBackendId ?? source.backendId
     if (source.projectId === 'global' || !source.projectPath) throw new Error('Projectless chats cannot create Git worktrees.')
     const worktree = await this.worktrees.create({
       projectId: source.projectId,
@@ -1239,7 +1252,7 @@ export class BackendManager {
         instruction ?? `Continue this conversation in the new Git worktree on branch ${worktree.branch}.`
       )
       created = await this.sessionCreateInScope(
-        source.backendId,
+        backendId,
         { projectId: source.projectId, projectPath: source.projectPath, executionPath: worktree.path },
         `${source.title ?? 'Untitled'} · worktree`,
         { kind: 'fork', sourceThreadId: threadId, sourceBackendId: source.backendId },
@@ -1255,8 +1268,12 @@ export class BackendManager {
     this.save()
     // Before the first message, so it is read before the agent starts working
     // in a checkout that may not have its dependencies.
-    this.reportSetupFailure(created.id, worktree.setupError, source.backendId)
-    await this.sendMessage(created.id, [{ type: 'text', text: packet }], { ...options, mode: options?.mode ?? 'ask' })
+    this.reportSetupFailure(created.id, worktree.setupError, backendId)
+    await this.sendMessage(
+      created.id,
+      [{ type: 'text', text: packet }],
+      withBackendDefaults(this.defaultModel(backendId), options, 'ask')
+    )
     return this.session(binding)
   }
 

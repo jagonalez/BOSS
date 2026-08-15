@@ -77,8 +77,9 @@ export const THREAD_TOOL_DESCRIPTIONS = {
   /** The one that failed in practice: the old wording said "fork this
    *  conversation", which reads as one new thread, so a request to take on
    *  several items produced one thread instead of several. */
-  spawnWorktree: 'Hand a piece of work to a new BOSS thread with its own Git worktree, so it proceeds independently of this one. Call it once per piece of work: asked to take on several items, spawn a thread for each rather than one thread for all of them. Each new thread starts from the instruction alone, so say what to do and why, not "the second item above".',
+  spawnWorktree: 'Hand a piece of work to a new BOSS thread with its own Git worktree, so it proceeds independently of this one. Call it once per piece of work: asked to take on several items, spawn a thread for each rather than one thread for all of them. Omit agent to reuse this thread\'s agent; set it only when the task should run on a different configured agent. Each new thread starts from the instruction alone, so say what to do and why, not "the second item above".',
   spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.',
+  spawnWorktreeAgent: 'Agent backend for the child thread. Omit to reuse the current thread\'s agent.',
   leaveWorktree: 'Come off this thread\'s worktree and back to the project directory, once its work is committed or merged. Git refuses while anything is uncommitted or untracked, so nothing is lost by trying; the branch is kept either way.',
   useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. It returns the new path: your working directory changes from your next message, not during this one, so do not start editing files in the new checkout until then. Fails harmlessly if this thread already has a worktree.'
 } as const

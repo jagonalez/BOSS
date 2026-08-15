@@ -191,7 +191,9 @@ export const reply = tool({
 export const spawn_worktree = tool({
   description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktree)},
   args: {
-    instruction: tool.schema.string().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction)})
+    instruction: tool.schema.string().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction)}),
+    agent: tool.schema.enum(["opencode", "pi", "codex", "claude"])
+      .describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeAgent)}).optional()
   },
   execute(args, context) { return call("boss_threads_spawn_worktree", args, context) }
 })

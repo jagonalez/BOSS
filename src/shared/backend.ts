@@ -1,4 +1,9 @@
-export type BackendId = 'opencode' | 'pi' | 'codex' | 'claude'
+export const BACKEND_IDS = ['opencode', 'pi', 'codex', 'claude'] as const
+export type BackendId = typeof BACKEND_IDS[number]
+
+export function isBackendId(value: string): value is BackendId {
+  return (BACKEND_IDS as readonly string[]).includes(value)
+}
 export type BackendModeId = 'ask' | 'auto' | 'plan' | 'accept-edits'
 export type ThreadCreationScope = 'current' | 'global'
 export type DelegatePlacement = 'same-checkout' | 'new-worktree'
@@ -92,6 +97,28 @@ export interface BackendMessageOptions {
    *  it happens to be in, and infers the repository from whatever else it can
    *  see — one asked about a browser tab and guessed. */
   context?: string
+}
+
+/** Fill a newly-created thread's first turn from the owning backend's saved
+ * defaults. Explicit per-thread choices always win. Kept in the shared layer
+ * because renderer-created and agent-created threads must resolve the same
+ * settings even though the latter never pass through renderer state. */
+export function withBackendDefaults(
+  preference: BackendModelPreference | undefined,
+  options?: BackendMessageOptions,
+  fallbackMode?: BackendModeId
+): BackendMessageOptions {
+  const model = options?.model ?? (preference ? {
+    providerID: preference.providerID,
+    modelID: preference.modelID,
+    ...(preference.variant ? { variant: preference.variant } : {})
+  } : undefined)
+  const mode = options?.mode ?? preference?.mode ?? fallbackMode
+  return {
+    ...options,
+    ...(model ? { model } : {}),
+    ...(mode ? { mode } : {})
+  }
 }
 
 export type BackendRequest =
