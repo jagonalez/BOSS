@@ -85,6 +85,10 @@ export interface ReviewSnapshot {
   provider?: ReviewProviderSummary
   changeRequest?: ChangeRequestSummary
   localComments: ReviewComment[]
+  /** The branch has no pull request yet. Not a failure: it is what every
+   *  branch looks like until someone opens one, so it is kept apart from
+   *  syncError, which means the lookup itself went wrong. */
+  awaitingChangeRequest?: boolean
   syncError?: string
 }
 

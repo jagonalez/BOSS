@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { ReviewManager } from './review-manager.ts'
+import { ReviewManager, noChangeRequestYet } from './review-manager.ts'
 import type { ReviewProvider, ReviewProviderMatch, ReviewRepository } from './review-provider.ts'
 import type { AddReviewCommentInput, ChangeRequestFileDiff, ChangeRequestSummary } from '../shared/review.ts'
 
@@ -105,6 +105,71 @@ test('review manager selects providers without knowing forge-specific semantics'
       manager.publishComment(repository, { body: 'Inline', file: 'file.ts', line: 1, side: 'RIGHT' }),
       /does not support this kind of review comment/
     )
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('a branch with no change request yet is not an error', () => {
+  // The exact text `gh pr view` writes to stderr and exits 1 on.
+  assert.equal(noChangeRequestYet('no pull requests found for branch "no-ticket/chat-emoji-clean"'), true)
+  assert.equal(noChangeRequestYet('no merge requests found for branch "topic"'), true)
+
+  // A lookup that actually broke still has to reach the user.
+  for (const real of [
+    'gh: command not found',
+    'HTTP 401: Bad credentials',
+    'could not determine current branch',
+    'failed to run git: not a git repository'
+  ]) {
+    assert.equal(noChangeRequestYet(real), false, `${real} is a real failure`)
+  }
+})
+
+test('the snapshot reports a missing change request without a sync error', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-review-empty-'))
+  const repository = join(directory, 'repo')
+  try {
+    execFileSync('git', ['init', repository])
+    execFileSync('git', ['-C', repository, 'remote', 'add', 'origin', 'https://fake.test/group/repo.git'])
+
+    class NoChangeRequestProvider extends FakeForgeProvider {
+      async getChangeRequest(): Promise<ChangeRequestSummary> {
+        throw new Error('no pull requests found for branch "topic"')
+      }
+    }
+
+    const manager = new ReviewManager(join(directory, 'comments.json'), [new NoChangeRequestProvider()])
+    const snapshot = await manager.snapshot(repository)
+
+    // The provider was found and works. There is simply nothing to review yet,
+    // so warning about the checkout would be wrong.
+    assert.equal(snapshot.provider?.id, 'fake-forge')
+    assert.equal(snapshot.awaitingChangeRequest, true)
+    assert.equal(snapshot.syncError, undefined)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('a real sync failure is still reported', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-review-broken-'))
+  const repository = join(directory, 'repo')
+  try {
+    execFileSync('git', ['init', repository])
+    execFileSync('git', ['-C', repository, 'remote', 'add', 'origin', 'https://fake.test/group/repo.git'])
+
+    class BrokenProvider extends FakeForgeProvider {
+      async getChangeRequest(): Promise<ChangeRequestSummary> {
+        throw new Error('HTTP 401: Bad credentials')
+      }
+    }
+
+    const manager = new ReviewManager(join(directory, 'comments.json'), [new BrokenProvider()])
+    const snapshot = await manager.snapshot(repository)
+
+    assert.equal(snapshot.syncError, 'HTTP 401: Bad credentials')
+    assert.equal(snapshot.awaitingChangeRequest, undefined)
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }

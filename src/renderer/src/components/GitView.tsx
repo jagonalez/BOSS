@@ -256,6 +256,11 @@ export function GitView({
           ))}
         </div>
       ) : null}
+      {reviewSnapshot?.provider && !reviewSnapshot.changeRequest && reviewSnapshot.awaitingChangeRequest ? (
+        <div className="review-sync-note">
+          No {reviewSnapshot.provider.label} pull request for this branch yet. Comments are saved here until you open one.
+        </div>
+      ) : null}
       {reviewSnapshot?.provider && !reviewSnapshot.changeRequest && reviewSnapshot.syncError ? (
         <div className="review-sync-error">{reviewSnapshot.syncError} Remote publishing is unavailable for this checkout; local notes still work.</div>
       ) : null}

@@ -110,6 +110,8 @@ export function ReviewConversation({
       {changeRequest ? <button className="btn-ghost" onClick={() => void window.boss.openExternal(changeRequest.url)}>Open {provider?.changeRequestLabel ?? 'review'} ↗</button> : null}
       <button className="btn-ghost" disabled={loading} onClick={onRefresh}>{loading ? 'Syncing…' : 'Refresh'}</button>
     </div>
+    {/* A branch with no pull request is explained below, next to the local
+        notes it affects, so there is nothing to warn about up here. */}
     {error || snapshot?.syncError ? <div className="review-sync-error">{error || snapshot?.syncError}</div> : null}
     {changeRequest ? <section className="review-pr-summary">
       <div className="review-pr-badges"><span className={`review-status ${changeRequest.isDraft ? 'warning' : statusTone(changeRequest.state)}`}>{changeRequest.isDraft ? 'Draft' : changeRequest.state}</span>{changeRequest.reviewDecision ? <span className={`review-status ${statusTone(changeRequest.reviewDecision)}`}>{changeRequest.reviewDecision.replaceAll('_', ' ')}</span> : null}{changeRequest.mergeStateStatus ? <span className={`review-status ${statusTone(changeRequest.mergeStateStatus)}`}>{changeRequest.mergeStateStatus.replaceAll('_', ' ')}</span> : null}</div>
