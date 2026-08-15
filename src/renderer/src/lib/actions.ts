@@ -1734,8 +1734,10 @@ export async function deleteSession(id: string): Promise<void> {
       }
     })
     await refreshSessions()
-  } catch {
-    /* ignore */
+  } catch (error) {
+    // Deleting is a thing the user asked for and watched not happen. Staying
+    // quiet here made a failed delete look like a button that does nothing.
+    appStore.setState({ lastError: error instanceof Error ? error.message : 'Could not delete the thread.' })
   }
 }
 

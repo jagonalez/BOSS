@@ -946,8 +946,13 @@ export class BackendManager {
   async sessionDelete(threadId: string): Promise<void> {
     const binding = this.binding(threadId)
     if (binding.nativeSessionOwnership === 'boss') {
-      const backend = await this.ensureStarted(binding.backendId)
-      await backend.sessionDelete(binding.nativeSessionId)
+      // Best effort, like the rename below. The thread is BOSS's own record, so
+      // a backend that cannot be started or cannot answer must not be able to
+      // keep it: a server that was down or signed out of the wrong account left
+      // its threads undeletable, and the renderer showed nothing at all.
+      await this.ensureStarted(binding.backendId)
+        .then((backend) => backend.sessionDelete(binding.nativeSessionId))
+        .catch(() => { /* the native session outlives BOSS's record of it */ })
     }
     this.transcripts?.deleteThread(threadId)
     this.bindings.delete(threadId)
