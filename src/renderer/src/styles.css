@@ -4423,6 +4423,49 @@ body.workspace-dragging .workspace-tab-slot {
   gap: 8px;
 }
 
+/* A turn the model only thought about. Quieter than a step card: no border and
+   no surface, because this is part of the reply rather than a panel of
+   machinery beside it. */
+.thought {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 6px;
+}
+
+.thought-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  padding: 2px 4px 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  cursor: pointer;
+}
+
+.thought-head:hover {
+  color: var(--text-muted);
+}
+
+.thought-chevron {
+  display: flex;
+  transition: transform 0.12s ease;
+}
+
+.thought-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--type-meta);
+  line-height: 1.55;
+}
+
 /* A run of neighbouring calls doing the same kind of work. Only long runs draw
    a head; a short one is just its rows. */
 .step-run {
