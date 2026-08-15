@@ -4,7 +4,8 @@ import type { SessionInfo } from '@shared/opencode'
 import type { Workspace, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import type { OwnedResource } from '../lib/workspaces'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, findGroup, resourcesByThread, walkGroups } from '../lib/workspaces'
-import { ThreadCard, useHoverCard } from './ThreadCard'
+import { ThreadCard } from './ThreadCard'
+import { useHoverCard } from '../lib/use-hover-card'
 import {
   archiveAllInPath,
   cloneThreadToBackend,
