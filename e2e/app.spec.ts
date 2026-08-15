@@ -63,7 +63,7 @@ test('quick-create uses the configured backend and exposes its defaults on the n
   const created = await lastBackendCall(appPage, 'thread.create')
   expect(created.request).toMatchObject({ backendId: 'claude', scope: 'global' })
 
-  await expect(appPage.getByText('New claude thread', { exact: true })).toBeVisible()
+  await expect(appPage.getByRole('tab', { name: /^New claude thread/ })).toBeVisible()
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Claude Opus 5' })).toBeVisible()
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Auto' })).toBeVisible()
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'high' })).toBeVisible()

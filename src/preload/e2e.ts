@@ -4,6 +4,7 @@ import type { ApiRequest, ApiResponse, ProjectInfo } from '../shared/ipc'
 import type {
   BackendDescriptor,
   BackendId,
+  BackendModeId,
   BackendModelDescriptor,
   BackendModelPreference,
   BackendRequest
@@ -27,7 +28,7 @@ const capabilities = {
   images: true,
   mcp: true,
   interactiveQuestions: true,
-  nativeAutoMode: false
+  nativeAutoMode: true
 }
 
 const backends: BackendDescriptor[] = [
@@ -38,7 +39,7 @@ const backends: BackendDescriptor[] = [
     available: true,
     healthy: true,
     version: 'e2e',
-    capabilities,
+    capabilities: { ...capabilities, nativeAutoMode: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
       { id: 'auto', label: 'Auto', description: 'Approve supported actions.' },
@@ -52,8 +53,8 @@ const backends: BackendDescriptor[] = [
     available: true,
     healthy: true,
     version: 'e2e',
-    capabilities: { ...capabilities, nativeFork: false },
-    modes: [{ id: 'ask', label: 'Ask', description: 'Pi policy.' }]
+    capabilities: { ...capabilities, permissions: false },
+    modes: [{ id: 'auto', label: 'Approved', description: 'Pi policy.' }]
   },
   {
     id: 'codex',
@@ -76,7 +77,7 @@ const backends: BackendDescriptor[] = [
     available: true,
     healthy: true,
     version: 'e2e',
-    capabilities,
+    capabilities: { ...capabilities, nativeFork: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
       { id: 'accept-edits', label: 'Accept edits', description: 'Accept file edits.' },
@@ -109,14 +110,14 @@ const projectInfo: ProjectInfo = {
 function initialSession(): SessionInfo {
   return {
     id: 'thread-source',
-    backendId: 'codex',
+    backendId: 'opencode',
     nativeSessionId: 'native-source',
     projectId: 'boss-e2e',
     projectPath: PROJECT,
     executionPath: CHECKOUT,
     title: 'Source thread',
     time: { created: Date.now() - 60_000, updated: Date.now() - 2_000 },
-    model: { id: 'gpt-5.6-codex', provider: 'openai' }
+    model: { id: 'gpt-5.6', provider: 'openai' }
   }
 }
 
@@ -126,6 +127,7 @@ function initialSession(): SessionInfo {
 export function installE2EApi(boss: BossApi): void {
   let sessions = [initialSession()]
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
+  let modesBySession: Record<string, BackendModeId> = {}
   let calls: RecordedCall[] = []
   let nextThread = 1
   const eventListeners = new Set<(data: string) => void>()
@@ -154,6 +156,18 @@ export function installE2EApi(boss: BossApi): void {
 
   const backendRequest = async (request: BackendRequest): Promise<unknown> => {
     recordBackend(request)
+    // Kept structurally typed so this fixture still builds on branches from
+    // before thread.mode.set was added to BackendRequest. On current main the
+    // renderer sends this immediately when a running thread changes mode.
+    const modeRequest = request as unknown as {
+      type: string
+      threadId?: string
+      mode?: BackendModeId
+    }
+    if (modeRequest.type === 'thread.mode.set' && modeRequest.threadId && modeRequest.mode) {
+      modesBySession = { ...modesBySession, [modeRequest.threadId]: modeRequest.mode }
+      return sessions.find((session) => session.id === modeRequest.threadId)
+    }
     switch (request.type) {
       case 'backend.list': return backends
       case 'backend.auth.status':
@@ -304,6 +318,32 @@ export function installE2EApi(boss: BossApi): void {
     defaults: () => structuredClone(defaults),
     resetCalls: () => { calls = [] },
     emit: (event: Record<string, unknown>) => {
+      // Current BOSS resolves host-managed Auto/Plan requests in main and only
+      // forwards genuine user decisions to the renderer. Reproduce that seam
+      // here; older branches fall through and exercise their renderer-owned
+      // equivalent, which keeps the harness useful across a moving merge base.
+      const eventType = typeof event.type === 'string' ? event.type : ''
+      const properties = event.properties as { sessionID?: string; id?: string } | undefined
+      if ((eventType === 'permission.asked' || eventType === 'permission.updated')
+        && properties?.sessionID && properties.id) {
+        const session = sessions.find((item) => item.id === properties.sessionID)
+        const backend = backends.find((item) => item.id === session?.backendId)
+        const mode = modesBySession[properties.sessionID]
+        const response = mode === 'plan'
+          ? 'reject'
+          : mode === 'auto' && !backend?.capabilities.nativeAutoMode
+            ? 'once'
+            : undefined
+        if (response) {
+          recordBackend({
+            type: 'thread.permission',
+            threadId: properties.sessionID,
+            permissionId: properties.id,
+            response
+          })
+          return
+        }
+      }
       const data = JSON.stringify(event)
       for (const listener of eventListeners) listener(data)
     }
