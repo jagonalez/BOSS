@@ -789,7 +789,11 @@ export class BackendManager {
 
   async sendMessage(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
     const binding = this.binding(threadId)
-    if (binding.worktree?.status === 'removed') {
+    // Stranded, not merely removed. A thread that left its worktree is back in
+    // its project and can carry on; one whose worktree was reaped underneath it
+    // still points into a directory that is gone. Both end with status
+    // 'removed', so the check is where the thread actually is.
+    if (binding.worktree?.status === 'removed' && binding.executionPath === binding.worktree.path) {
       throw new Error('This thread\'s worktree was cleaned up. Fork it into a new worktree before continuing.')
     }
     const usage = this.transcripts?.usage(threadId).totals ?? { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
@@ -1283,7 +1287,20 @@ export class BackendManager {
     for (const binding of this.bindings.values()) {
       const current = binding.worktree ? worktrees.get(binding.worktree.id) : undefined
       if (current && current.status !== binding.worktree?.status) {
+        const stranded = current.status === 'removed' && binding.executionPath === current.path
         binding.worktree = current
+        // Reaped underneath it: bring it home rather than leaving it pointing
+        // into a directory that is gone. Cleanup only takes worktrees with no
+        // uncommitted work, so there is nothing here to lose.
+        if (stranded) {
+          binding.executionPath = binding.projectPath
+          this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, binding.projectPath)
+          this.emit({
+            type: 'session.updated',
+            properties: { info: this.session(binding) },
+            backendId: binding.backendId
+          })
+        }
         changed = true
       }
     }
