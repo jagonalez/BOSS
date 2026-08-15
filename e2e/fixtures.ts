@@ -1,0 +1,95 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { test as base, expect, type Page } from '@playwright/test'
+import { _electron as electron, type ElectronApplication } from 'playwright'
+
+export interface E2ECall {
+  channel: 'api' | 'backend'
+  request: Record<string, unknown>
+}
+
+interface E2EControl {
+  calls(): Promise<E2ECall[]>
+  sessions(): Promise<Array<Record<string, unknown>>>
+  defaults(): Promise<Record<string, Record<string, unknown>>>
+  resetCalls(): Promise<void>
+  emit(event: Record<string, unknown>): Promise<void>
+}
+
+export async function control(page: Page): Promise<E2EControl> {
+  await page.waitForFunction(() => Boolean((window as unknown as { bossE2E?: unknown }).bossE2E))
+  return {
+    calls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.calls()),
+    sessions: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.sessions()),
+    defaults: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.defaults()),
+    resetCalls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.resetCalls()),
+    emit: (event) => page.evaluate((value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.emit(value), event)
+  }
+}
+
+interface Fixtures {
+  electronApp: ElectronApplication
+  appPage: Page
+}
+
+export const test = base.extend<Fixtures>({
+  electronApp: async ({}, use, testInfo) => {
+    const profile = await mkdtemp(join(tmpdir(), 'boss-e2e-'))
+    const stderr: string[] = []
+    const app = await electron.launch({
+      args: ['.'],
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        BOSS_E2E: '1',
+        BOSS_E2E_USER_DATA: profile,
+        BOSS_DEBUG: '1',
+        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+      }
+    })
+    app.process().stderr?.on('data', (chunk) => stderr.push(String(chunk)))
+    try {
+      await use(app)
+    } finally {
+      if (stderr.length > 0) {
+        await testInfo.attach('electron-stderr', {
+          body: Buffer.from(stderr.join('')),
+          contentType: 'text/plain'
+        })
+      }
+      await app.close().catch(() => {})
+      await rm(profile, { recursive: true, force: true })
+    }
+  },
+  appPage: async ({ electronApp }, use, testInfo) => {
+    const page = await electronApp.firstWindow()
+    const rendererErrors: string[] = []
+    page.on('console', (message) => {
+      if (message.type() === 'error') rendererErrors.push(message.text())
+    })
+    page.on('pageerror', (error) => rendererErrors.push(error.stack || error.message))
+    await control(page)
+    await expect(page).toHaveTitle('BOSS')
+    await use(page)
+    if (rendererErrors.length > 0) {
+      await testInfo.attach('renderer-errors', {
+        body: Buffer.from(rendererErrors.join('\n\n')),
+        contentType: 'text/plain'
+      })
+    }
+    expect(rendererErrors, 'renderer console and page errors').toEqual([])
+  }
+})
+
+export { expect }
+
+export async function backendCalls(page: Page, type?: string): Promise<E2ECall[]> {
+  const calls = (await control(page).then((item) => item.calls())).filter((call) => call.channel === 'backend')
+  return type ? calls.filter((call) => call.request.type === type) : calls
+}
+
+export async function lastBackendCall(page: Page, type: string): Promise<E2ECall> {
+  await expect.poll(async () => (await backendCalls(page, type)).length).toBeGreaterThan(0)
+  return (await backendCalls(page, type)).at(-1)!
+}

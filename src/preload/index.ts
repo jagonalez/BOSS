@@ -4,6 +4,7 @@ import {
   type ApiRequest
 } from '../shared/ipc'
 import type { BossApi } from '../shared/api'
+import { installE2EApi } from './e2e'
 
 function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
   const listener = (_event: IpcRendererEvent, payload: T): void => callback(payload)
@@ -98,5 +99,7 @@ const boss: BossApi = {
   updateRestart: () => ipcRenderer.invoke(IpcChannels.UpdateRestart),
   onMenuCommand: (cb) => subscribe(IpcChannels.MenuCommand, cb)
 }
+
+if (process.env.BOSS_E2E === '1') installE2EApi(boss)
 
 contextBridge.exposeInMainWorld('boss', boss)

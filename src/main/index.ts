@@ -31,6 +31,7 @@ import { restoreShellPath } from './shell-path'
 import { BinaryOverrides, setBinaryOverrideSource } from './backend-bin'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
+const e2e = process.env.BOSS_E2E === '1'
 
 // Launched from Finder, the app inherits launchd's bare PATH and cannot see any
 // backend CLI. Repair PATH before the managers below are constructed, since they
@@ -43,7 +44,11 @@ restoreShellPath()
 // clones. The single-instance lock is keyed on userData, so running two clones
 // at once needs BOSS_PROFILE to separate them. This must run before anything
 // below reads app.getPath('userData').
-if (process.env.ELECTRON_RENDERER_URL) {
+if (e2e && process.env.BOSS_E2E_USER_DATA) {
+  // Playwright runs the real app, but never against the user's BOSS profile.
+  // This also gives each test its own single-instance lock and localStorage.
+  app.setPath('userData', process.env.BOSS_E2E_USER_DATA)
+} else if (process.env.ELECTRON_RENDERER_URL) {
   const profile = process.env.BOSS_PROFILE?.trim()
   const suffix = profile ? `-dev-${profile.replace(/[^A-Za-z0-9_-]/g, '-')}` : '-dev'
   app.setPath('userData', `${app.getPath('userData')}${suffix}`)
@@ -138,6 +143,9 @@ function createWindow(): void {
     ...(process.platform === 'darwin' ? { vibrancy: 'menu' as const } : {}),
     acceptFirstMouse: process.platform === 'darwin',
     backgroundColor: process.platform === 'darwin' ? '#00000000' : '#0b0d10',
+    // Renderer automation does not need to put a second BOSS window over the
+    // user's desktop. Set BOSS_E2E_SHOW=1 when debugging a test interactively.
+    show: !e2e || process.env.BOSS_E2E_SHOW === '1',
     icon: join(app.getAppPath(), 'resources', 'icons', '512x512.png'),
     webPreferences: {
       preload: join(mainDir, '../preload/index.cjs'),
@@ -250,6 +258,7 @@ app.whenReady().then(() => {
   loadRenderer()
   const saved = loadState()
   if (saved.projectPath) server.setInitialCwd(saved.projectPath)
+  if (e2e) return
   void (async () => {
     await sites.start()
     try {
