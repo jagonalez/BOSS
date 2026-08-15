@@ -156,7 +156,7 @@ export const OpenCode = {
     backendRequest<FileDiff[]>({ type: 'thread.diff', threadId: id, messageId: messageID }),
   todos: (id: string) => backendRequest<Todo[]>({ type: 'thread.todos', threadId: id }),
   setThreadMode: (threadId: string, mode: BackendModeId) =>
-    backendRequest<SessionInfo>({ type: 'thread.mode.set', threadId, mode }),
+    backendRequest<SessionInfo & { pendingUntilNextMessage?: boolean }>({ type: 'thread.mode.set', threadId, mode }),
   respondPermission: (sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject') =>
     backendRequest<void>({ type: 'thread.permission', threadId: sessionID, permissionId: permissionID, response }),
   replyQuestion: (requestID: string, answers: string[][]) =>

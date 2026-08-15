@@ -287,34 +287,54 @@ export class BackendManager {
     return resolveThreadMode(binding.mode, DEFINITIONS[binding.backendId].modes.map((mode) => mode.id))
   }
 
-  /** Record the thread's mode and tell everyone watching.
+  /** Record the thread's mode and tell the running agent about it.
    *
    *  This is the write half of the single source of truth. The renderer calls
-   *  it the moment the user picks a mode, so a change lands even mid-run. */
-  async setThreadMode(threadId: string, mode: BackendModeId): Promise<SessionInfo> {
+   *  it the moment the user picks a mode, so a change lands even mid-run.
+   *
+   *  A backend with its own Auto policy has to be told, because BOSS does not
+   *  answer its requests for it. claude accepts the change on its control
+   *  channel and applies it immediately; codex takes its policy per turn, so
+   *  the change waits for the next one. That difference is reported rather
+   *  than hidden: `pendingUntilNextMessage` says the switch has not taken
+   *  effect yet. */
+  async setThreadMode(threadId: string, mode: BackendModeId): Promise<SessionInfo & { pendingUntilNextMessage?: boolean }> {
     const binding = this.binding(threadId)
-    if (binding.mode !== mode) {
+    const changed = binding.mode !== mode
+    if (changed) {
       binding.mode = mode
       binding.updatedAt = now()
       this.save()
     }
+    // Only while the thread is actually running. An idle thread picks the mode
+    // up from its next sendMessage, so there is nothing to tell and nothing
+    // pending.
+    let pendingUntilNextMessage = false
+    if (this.busyThreads.has(threadId)) {
+      const backend = this.backends[binding.backendId]
+      const applied = backend.permissionModeSet
+        ? await backend.permissionModeSet(binding.nativeSessionId, mode).catch(() => false)
+        : true
+      pendingUntilNextMessage = !applied
+    }
     const session = this.session(binding)
     this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
-    return session
+    return pendingUntilNextMessage ? { ...session, pendingUntilNextMessage } : session
   }
 
   /** What BOSS itself should do with a permission request, given the mode now.
    *
-   *  BOSS decides here rather than trusting the backend, because a backend that
-   *  takes its mode as a launch argument is still running under the mode the
-   *  thread started in. Returning undefined means "ask the user".
+   *  Read when the request arrives, never captured, so a mid-run change applies
+   *  to the very next request. Returning undefined means "ask the user".
    *
-   *  Auto answers every request, on every backend. An earlier version skipped
-   *  backends that advertise nativeAutoMode, which is why switching to Auto
-   *  mid-run did nothing on claude and codex: the flag they were launched with
-   *  said Ask, and BOSS had excused itself from enforcing anything. */
+   *  Backends with their own Auto policy are told about the change instead
+   *  (see setThreadMode) and keep deciding for themselves, so what they send is
+   *  an escalation and reaches the user. */
   private hostPermissionResponse(binding: ThreadBinding): 'once' | 'reject' | undefined {
-    return hostPermissionResponse(this.modeFor(binding))
+    return hostPermissionResponse(
+      this.modeFor(binding),
+      DEFINITIONS[binding.backendId].capabilities.nativeAutoMode
+    )
   }
 
   scopeFor(projectPath: string): ProjectScope {

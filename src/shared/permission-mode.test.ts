@@ -9,35 +9,66 @@ import type { BackendModeId } from './backend.ts'
 
 const CLAUDE_MODES: BackendModeId[] = ['ask', 'auto', 'accept-edits', 'plan']
 
-test('Ask prompts the user, Auto answers, Plan refuses', () => {
-  assert.equal(hostPermissionResponse('ask'), undefined)
-  assert.equal(hostPermissionResponse('auto'), 'once')
-  assert.equal(hostPermissionResponse('plan'), 'reject')
-  // accept-edits leaves the decision to the backend's own edit policy.
-  assert.equal(hostPermissionResponse('accept-edits'), undefined)
+// Which backends run their own Auto policy. Mirrors DEFINITIONS in
+// src/main/backend/manager.ts; the wiring test below checks they agree.
+const NATIVE_AUTO = { claude: true, codex: true, pi: true, opencode: false }
+
+test('Ask always prompts, whoever the backend is', () => {
+  assert.equal(hostPermissionResponse('ask', true), undefined)
+  assert.equal(hostPermissionResponse('ask', false), undefined)
 })
 
-/** The bug this file exists for.
+test('Plan refuses, whoever the backend is', () => {
+  // A read-only thread must not act, and a backend that asks anyway is asking
+  // to do something Plan does not allow.
+  assert.equal(hostPermissionResponse('plan', true), 'reject')
+  assert.equal(hostPermissionResponse('plan', false), 'reject')
+})
+
+/** The regression this file exists for, part one.
+ *
+ *  claude and codex decide per tool which calls are safe and only ask about the
+ *  ones they want confirmed. Answering those for them turns a graduated Auto
+ *  into blanket approval — effectively bypassing permissions. */
+test('Auto does not answer for a backend with its own policy', () => {
+  assert.equal(hostPermissionResponse('auto', NATIVE_AUTO.claude), undefined)
+  assert.equal(hostPermissionResponse('auto', NATIVE_AUTO.codex), undefined)
+  assert.equal(hostPermissionResponse('auto', NATIVE_AUTO.pi), undefined)
+})
+
+test('Auto answers for a backend with no policy of its own', () => {
+  // opencode has no internal Auto, so host approval is the only way Auto can
+  // mean anything there.
+  assert.equal(hostPermissionResponse('auto', NATIVE_AUTO.opencode), 'once')
+})
+
+test('accept-edits leaves the decision to the backend', () => {
+  assert.equal(hostPermissionResponse('accept-edits', true), undefined)
+  assert.equal(hostPermissionResponse('accept-edits', false), undefined)
+})
+
+/** The regression this file exists for, part two.
  *
  *  A thread holds one mode. Reading it per request is what makes a mid-run
  *  switch work, so the test changes the mode between two requests on the same
- *  thread and checks that the second answer follows the new mode. */
+ *  thread and checks the second answer follows the new mode. */
 test('a mode changed mid-run applies to the very next permission request', () => {
   const thread: { mode: BackendModeId } = { mode: 'ask' }
+  // opencode, the backend BOSS answers for, so the change is visible here.
   const answer = (): 'once' | 'reject' | undefined =>
-    hostPermissionResponse(resolveThreadMode(thread.mode, CLAUDE_MODES))
+    hostPermissionResponse(resolveThreadMode(thread.mode, CLAUDE_MODES), false)
 
-  // Ask: the first request reaches the user.
   assert.equal(answer(), undefined)
 
-  // The user switches to Auto while the run is still going.
   thread.mode = 'auto'
   assert.equal(answer(), 'once', 'Ask to Auto must stop the prompts without a restart')
 
-  // And back again, in the same run. A one-directional fix passes the line
-  // above and fails this one.
+  // And back again, in the same run. A one-directional fix fails here.
   thread.mode = 'ask'
   assert.equal(answer(), undefined, 'Auto to Ask must start the prompts again')
+
+  thread.mode = 'plan'
+  assert.equal(answer(), 'reject', 'a switch to Plan must start refusing')
 })
 
 test('a stored mode the backend does not offer falls back to one it does', () => {
@@ -49,20 +80,12 @@ test('a stored mode the backend does not offer falls back to one it does', () =>
   assert.equal(resolveThreadMode('ask', ['auto']), 'auto')
 })
 
-/** Auto must not grant anything that outlives the mode.
- *
- *  Answering 'always' would leave a permission granted after a switch back to
- *  Ask, which is the same class of stale state as the launch flag. */
+/** Auto must not grant anything that outlives the mode. */
 test('Auto allows one request at a time, never a lasting grant', () => {
-  assert.notEqual(hostPermissionResponse('auto'), 'always')
+  assert.notEqual(hostPermissionResponse('auto', false), 'always')
 })
 
-/** The manager must read the mode when the request arrives.
- *
- *  The decision itself is covered above; what this guards is the wiring. An
- *  earlier fix answered permissions in the renderer and skipped any backend
- *  claiming nativeAutoMode, so claude never got a host answer at all. */
-test('the manager answers permission requests from the thread binding', () => {
+test('the manager reads the mode and the capability when the request arrives', () => {
   const source = readFileSync(join(import.meta.dirname, '..', 'main', 'backend', 'manager.ts'), 'utf8')
 
   const handler = source.slice(
@@ -77,15 +100,43 @@ test('the manager answers permission requests from the thread binding', () => {
     'the mode must be read from the binding, not captured'
   )
 
-  // nativeAutoMode stays a declared capability, but it must not gate whether
-  // BOSS enforces the mode: that gate is what let claude keep prompting.
-  assert.ok(!handler.includes('nativeAutoMode'), 'capability flags must not gate mode enforcement')
-
-  // The decision comes from the shared module, so there is one rule.
+  // The capability must reach the decision, or graduated Auto gets flattened.
   assert.ok(
-    source.includes("from '@shared/permission-mode'"),
-    'the manager must use the shared decision, not its own copy'
+    source.includes('DEFINITIONS[binding.backendId].capabilities.nativeAutoMode'),
+    'the decision must know whether the backend has its own Auto policy'
   )
+})
+
+test('the capabilities in the manager match what this test assumes', () => {
+  const source = readFileSync(join(import.meta.dirname, '..', 'main', 'backend', 'manager.ts'), 'utf8')
+  for (const [backend, expected] of Object.entries(NATIVE_AUTO)) {
+    const start = source.indexOf(`  ${backend}: {`)
+    assert.ok(start > 0, `expected a definition for ${backend}`)
+    const definition = source.slice(start, source.indexOf('modes:', start))
+    assert.ok(
+      definition.includes(`nativeAutoMode: ${expected}`),
+      `${backend} should declare nativeAutoMode: ${expected}`
+    )
+  }
+})
+
+test('a running agent is told when the mode changes', () => {
+  const manager = readFileSync(join(import.meta.dirname, '..', 'main', 'backend', 'manager.ts'), 'utf8')
+  const setter = manager.slice(manager.indexOf('async setThreadMode('), manager.indexOf('private hostPermissionResponse('))
+  // Only while it is running, and only through the backend's own hook.
+  assert.ok(setter.includes('this.busyThreads.has(threadId)'), 'an idle thread has nothing to tell')
+  assert.ok(setter.includes('permissionModeSet'), 'a running agent must be told directly')
+
+  // claude takes the change on its control channel, so its own Auto keeps
+  // deciding rather than BOSS overriding it.
+  const claude = readFileSync(join(import.meta.dirname, '..', 'main', 'backend', 'claude-backend.ts'), 'utf8')
+  assert.ok(claude.includes("subtype: 'set_permission_mode'"), 'claude must be sent set_permission_mode')
+
+  // codex fixes its approval policy per turn, so it must report honestly that
+  // the change waits rather than silently doing nothing.
+  const codex = readFileSync(join(import.meta.dirname, '..', 'main', 'backend', 'codex-backend.ts'), 'utf8')
+  const codexSetter = codex.slice(codex.indexOf('async permissionModeSet('))
+  assert.ok(codexSetter.includes('!this.activeTurns.has(sessionId)'), 'codex must report a mid-turn change as pending')
 })
 
 test('the renderer tells main the moment the mode changes', () => {
@@ -95,6 +146,7 @@ test('the renderer tells main the moment the mode changes', () => {
   )
   const setMode = actions.slice(actions.indexOf('export function setMode('), actions.indexOf('export async function setEngine('))
   assert.ok(setMode.includes('OpenCode.setThreadMode('), 'a mode change must reach main immediately')
+  assert.ok(setMode.includes('pendingUntilNextMessage'), 'a change that has not taken effect must be surfaced')
 
   // The renderer must no longer answer permissions itself.
   const app = readFileSync(join(import.meta.dirname, '..', 'renderer', 'src', 'App.tsx'), 'utf8')

@@ -149,6 +149,14 @@ export function App(): React.JSX.Element {
           const sid = props.sessionID ?? appStore.getState().activeSessionId ?? ''
           const wasStreaming = Boolean(appStore.getState().streaming[sid])
           if (ev.type === 'session.idle' && sid) {
+            // The turn is over, so a mode that was waiting for it now applies.
+            if (appStore.getState().modePending[sid]) {
+              appStore.setState((state) => {
+                const modePending = { ...state.modePending }
+                delete modePending[sid]
+                return { modePending }
+              })
+            }
             finalizeStalledParts(sid)
             // Idle is the authoritative completion edge. Refreshing here also
             // recovers the final response when intermediate backend events

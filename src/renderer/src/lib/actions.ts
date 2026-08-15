@@ -1162,10 +1162,19 @@ export function setMode(id: BackendModeId, sessionId: string | null = appStore.g
       persistThreadPreference('boss.modesBySession', modesBySession)
       return { modesBySession }
     })
-    // Main decides permissions, so it has to hear about this now rather than
-    // with the next message. Without this a mid-run switch changed only the
-    // label until the thread was asked something new.
-    void OpenCode.setThreadMode(sessionId, id).catch(() => { /* main keeps its last known mode */ })
+    // Main owns the mode and tells the running agent, so it has to hear about
+    // this now rather than with the next message. Without this a mid-run
+    // switch changed only the label until the thread was asked something new.
+    void OpenCode.setThreadMode(sessionId, id).then((session) => {
+      // Codex sets its approval policy per turn, so a switch during a turn
+      // cannot take effect until the next one. Say so rather than leave the
+      // label claiming a mode that is not in force yet.
+      if (session?.pendingUntilNextMessage) {
+        appStore.setState((state) => ({
+          modePending: { ...state.modePending, [sessionId]: id }
+        }))
+      }
+    }).catch(() => { /* main keeps its last known mode */ })
     return
   }
   appStore.setState({ mode: id })

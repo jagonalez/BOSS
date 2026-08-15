@@ -344,7 +344,12 @@ function MessageView({
 }
 
 function ModePicker({ backendId, sessionId }: { backendId: 'opencode' | 'pi' | 'codex' | 'claude'; sessionId?: string }): React.JSX.Element {
-  const mode = useStore(appStore, (s) => (sessionId && s.modesBySession[sessionId]) || s.mode)
+  // Main's copy first: it is what actually decides permissions.
+  const mode = useStore(appStore, (s) =>
+    (sessionId && s.sessions.find((item) => item.id === sessionId)?.mode)
+    || (sessionId && s.modesBySession[sessionId])
+    || s.mode)
+  const pendingMode = useStore(appStore, (s) => (sessionId ? s.modePending[sessionId] : undefined))
   const agent = useStore(appStore, (s) => s.agent)
   const agents = useStore(appStore, (s) => s.agents)
   const descriptor = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId))
@@ -408,8 +413,14 @@ function ModePicker({ backendId, sessionId }: { backendId: 'opencode' | 'pi' | '
 
   return (
     <div className="model-picker" ref={ref}>
-      <button className="model-picker-btn" onClick={() => setOpen((o) => !o)} title="Mode / agent">
-        <span className="model-picker-name">{label}</span>
+      <button
+        className="model-picker-btn"
+        onClick={() => setOpen((o) => !o)}
+        title={pendingMode
+          ? `${selectedMode?.label ?? 'Mode'} applies from your next message: this backend fixes its approval policy for the whole turn.`
+          : 'Mode / agent'}
+      >
+        <span className="model-picker-name">{label}{pendingMode ? ' (next turn)' : ''}</span>
         <span className="model-picker-chevron">
           <ChevronIcon size={12} />
         </span>

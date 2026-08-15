@@ -1,4 +1,4 @@
-import type { BackendId, BackendMessageOptions } from '@shared/backend'
+import type { BackendId, BackendMessageOptions, BackendModeId } from '@shared/backend'
 import type { ThreadBusConnection, ThreadBusToolCall } from '@shared/thread-bus'
 
 export interface BackendInfo {
@@ -91,6 +91,13 @@ export interface Backend {
   /** Todos / Permissions */
   todosGet(sessionId: string): Promise<Todo[]>
   permissionRespond(sessionId: string, permissionId: string, response: 'once' | 'always' | 'reject'): Promise<void>
+  /** Tell a running agent its permission mode changed.
+   *
+   *  Optional: only backends that can be told mid-run implement it. Returns
+   *  true when the running agent accepted the change, false when the mode will
+   *  not apply until the next turn — the caller reports that difference rather
+   *  than pretending the switch landed. */
+  permissionModeSet?(sessionId: string, mode: BackendModeId): Promise<boolean>
   /** Answer a question the agent asked. Optional: only backends that can put a
    *  question to the user implement it, and the answers go back the way that
    *  backend expects rather than through opencode's HTTP endpoint. */
