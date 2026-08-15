@@ -18,7 +18,7 @@ import type {
   QueuedFollowUpAttachment,
   ThreadCreationScope
 } from '@shared/backend'
-import { withBackendDefaults } from '@shared/backend'
+import { isAbortError, withBackendDefaults } from '@shared/backend'
 import type { EventMessage, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
@@ -56,6 +56,28 @@ interface ThreadBinding {
    *  lets the permission handler read what the mode is *now* rather than what
    *  it was at spawn. */
   mode?: BackendModeId
+  /** The model this thread last ran on, for the same reason the mode is here.
+   *
+   *  An agent-created thread resolves its model in main and never passes
+   *  through renderer state, so without this the renderer had nothing to show
+   *  and fell back to the global model — a toolbar that disagreed with the
+   *  model the thread was actually running on. */
+  model?: { providerID: string; modelID: string; variant?: string }
+}
+
+/** The stored form of a thread's model, from a preference or a sent message.
+ *
+ *  Both carry the same three fields, and dropping an absent variant keeps a
+ *  binding that never chose one out of the persisted state. */
+function boundModel(
+  source: { providerID: string; modelID: string; variant?: string } | undefined
+): ThreadBinding['model'] {
+  if (!source) return undefined
+  return {
+    providerID: source.providerID,
+    modelID: source.modelID,
+    ...(source.variant ? { variant: source.variant } : {})
+  }
 }
 
 type LegacyThreadBinding = Omit<ThreadBinding, 'nativeSessionOwnership' | 'projectId' | 'executionPath'>
@@ -191,6 +213,9 @@ export class BackendManager {
   private readonly unsubscribers = new Map<BackendId, () => void>()
   private readonly busyThreads = new Set<string>()
   private readonly followUpDeliveries = new Set<string>()
+  /** Threads BOSS just stopped on purpose, so the abort a backend reports for
+   *  that stop is not shown as a failed turn. Cleared by the next run. */
+  private readonly intentionalAborts = new Set<string>()
   private threadBus?: ThreadBus
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
@@ -589,6 +614,9 @@ export class BackendManager {
       lineage: binding.lineage,
       worktree: binding.worktree,
       mode: this.modeFor(binding),
+      model: binding.model
+        ? { id: binding.model.modelID, provider: binding.model.providerID }
+        : native?.model,
       time: native?.time ?? { created: binding.createdAt, updated: binding.updatedAt }
     }
   }
@@ -714,6 +742,23 @@ export class BackendManager {
         void this.deliverNextFollowUp(binding.id)
         this.setThreadAttention(binding, 'completed')
       } else if (eventType === 'session.error') {
+        // A backend BOSS stopped on purpose reports that stop as an error.
+        // Stop, and Stop & redirect, both end this way, and showing the user
+        // "Aborted" for something they asked for reads as a failure. Only the
+        // abort itself is swallowed: any other error from the stopped thread
+        // is a real one and still surfaces.
+        if (this.intentionalAborts.has(binding.id) && isAbortError(properties.error)) {
+          this.intentionalAborts.delete(binding.id)
+          // Ended, not failed: settle the run the way idle does. Stop &
+          // redirect leaves the instruction queued, and this may be the only
+          // event that says the stop happened, so deliver it here rather than
+          // waiting for an idle the backend may never send.
+          this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
+          this.busyThreads.delete(binding.id)
+          void this.threadBus?.flush(binding.id)
+          void this.deliverNextFollowUp(binding.id)
+          return
+        }
         this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
         this.busyThreads.delete(binding.id)
         this.setThreadAttention(binding, 'error', this.errorDetail(properties.error))
@@ -810,6 +855,10 @@ export class BackendManager {
     binding.projectPath = scope.projectPath
     binding.executionPath = scope.executionPath
     binding.worktree = worktree
+    // What the first message will run on, recorded now so a thread that is
+    // created and left idle still shows its real model rather than the app's.
+    // sendMessage resolves the same default, so the two cannot disagree.
+    binding.model = boundModel(this.defaultModel(backendId))
     this.bindings.set(binding.id, binding)
     this.save()
     const session = this.session(binding, native)
@@ -854,6 +903,9 @@ export class BackendManager {
     }
 
     binding.title = binding.title ?? nextNative.title
+    // The old backend's model cannot describe the new one, and this thread is
+    // blank, so it takes the incoming backend's default like a fresh thread.
+    binding.model = boundModel(this.defaultModel(backendId))
     binding.updatedAt = now()
     this.transcripts?.deleteThread(threadId)
     this.save()
@@ -924,9 +976,16 @@ export class BackendManager {
     // one-off. Recording it here keeps the stored mode and the mode the backend
     // launches under from drifting apart.
     if (options?.mode) binding.mode = options.mode
+    // Same for the model. A thread created by an agent resolves its model from
+    // the backend defaults here in main, so this is the only place that copy
+    // exists for the renderer to display.
+    if (options?.model) binding.model = boundModel(options.model)
     binding.updatedAt = now()
     this.save()
     this.transcripts?.beginRun(this.transcriptSource(binding))
+    // A new run cannot be excused by the last stop, so an abort error after
+    // this point is the backend's own and reaches the user.
+    this.intentionalAborts.delete(threadId)
     this.busyThreads.add(threadId)
     // Do not make visible activity depend on how quickly (or whether) a
     // backend echoes its native busy event. Native events will subsequently
@@ -1106,6 +1165,7 @@ export class BackendManager {
     binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]
     this.save()
     this.emitFollowUps(binding)
+    this.intentionalAborts.add(threadId)
     await backend.abort(binding.nativeSessionId)
     return [...binding.followUps]
   }
@@ -1227,6 +1287,7 @@ export class BackendManager {
   async abort(threadId: string): Promise<void> {
     const binding = this.binding(threadId)
     const backend = await this.ensureStarted(binding.backendId)
+    this.intentionalAborts.add(threadId)
     await backend.abort(binding.nativeSessionId)
     // Settle the run here rather than waiting for the backend to say it
     // stopped. A backend that is interrupted may never send that event, and

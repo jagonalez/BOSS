@@ -25,6 +25,30 @@ export function resolveMode(
   return offered[0] ?? requested
 }
 
+/** The model a thread runs on, and the provider that serves it.
+ *
+ *  This window's choice, then main's copy, then the app's. The local choice
+ *  leads because picking a model only writes renderer state — main learns of it
+ *  with the next message, so preferring main would snap the picker back until
+ *  then.
+ *
+ *  Main's copy matters for a thread an agent created: those resolve their model
+ *  in main and never pass through renderer state, so without it the app default
+ *  showed through — the model last picked in some other thread, not the one
+ *  this thread runs on.
+ *
+ *  The provider follows whichever model won, never a mix: a provider paired
+ *  with another source's model describes a pairing that does not exist. */
+export function resolveModel(
+  own: { modelID?: string; providerID?: string | null } | undefined,
+  fromMain: { modelID?: string; providerID?: string } | undefined,
+  appDefault: { modelID: string | null; providerID: string | null }
+): { modelID: string | null; providerID: string | null } {
+  if (own?.modelID) return { modelID: own.modelID, providerID: own.providerID ?? appDefault.providerID }
+  if (fromMain?.modelID) return { modelID: fromMain.modelID, providerID: fromMain.providerID ?? null }
+  return appDefault
+}
+
 /** The thinking level for a thread.
  *
  *  A level belongs to the model it was saved against — claude's Sonnet stops at
