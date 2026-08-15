@@ -1,9 +1,19 @@
 /**
  * The mobile site, served as one self-contained document — no build step,
- * no external assets, works offline-cached once loaded. It speaks the same
- * BackendRequest protocol as the desktop renderer through POST /api/request
- * and listens on /api/events (SSE). Scope: review and steer — threads,
- * replies, stop, permissions, automations. Never configuration.
+ * no external assets, works offline-cached once loaded. Scope: review and
+ * steer — threads, replies, stop, permissions, automations. Never
+ * configuration.
+ *
+ * It speaks one BackendRequest protocol over either of two transports:
+ *
+ *   local — POST /api/request and SSE /api/events, reached over loopback or
+ *           Tailscale. This is the original path and still the default.
+ *   relay — an encrypted WebSocket to the fly.io relay, used when the phone
+ *           has paired by QR code. Frames are sealed with a key derived from
+ *           the pairing secret, so the relay forwards bytes it cannot read.
+ *
+ * `api()` and `listen()` hide the choice, so the UI code below is identical
+ * on both paths. A native wrapper can load this page unchanged.
  */
 export const MOBILE_PAGE = `<!doctype html>
 <html lang="en">
@@ -11,6 +21,11 @@ export const MOBILE_PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0d10">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BOSS">
 <title>BOSS</title>
 <style>
 :root {
@@ -112,6 +127,20 @@ input, textarea { font-size: 16px !important; }
 <script>
 'use strict';
 var token = localStorage.getItem('boss.token') || '';
+// Relay pairing, stored once the phone scans a QR code. Empty on the
+// Tailscale path, which keeps using the loopback transport.
+var relay = null;
+try { relay = JSON.parse(localStorage.getItem('boss.relay') || 'null'); } catch (e) { relay = null; }
+var relaySocket = null;
+var relayKey = null;
+var relayReady = false;
+var relayAttempt = 0;
+var desktopOnline = true;
+var pending = {};
+var nextRequestId = 1;
+// Set only while a QR-code claim is in flight.
+var pairingClaim = null;
+var pairingTimeout = null;
 var view = { name: 'threads' };
 var threads = [];
 var supervision = { threads: [], totals: {} };
@@ -129,7 +158,88 @@ function esc(s) {
   });
 }
 
+/* ---- transport ---------------------------------------------------------
+ * Two paths behind one api() call. The relay path seals every frame with a
+ * key derived from the pairing secret, so the relay routes bytes it cannot
+ * read. The local path is the original Tailscale/loopback transport.
+ */
+
+function b64u(bytes) {
+  var binary = '';
+  for (var i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+}
+
+function unb64u(value) {
+  var base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  base64 += '='.repeat((4 - (base64.length % 4)) % 4);
+  var binary = atob(base64);
+  var out = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function sha256(text) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+}
+
+function deriveKey(secret) {
+  return sha256('boss-relay-key:' + secret).then(function (raw) {
+    return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  });
+}
+
+function deriveId(prefix, secret) {
+  return sha256(prefix + secret).then(function (raw) {
+    return b64u(new Uint8Array(raw).slice(0, 16));
+  });
+}
+
+function seal(key, message) {
+  var iv = crypto.getRandomValues(new Uint8Array(12));
+  return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, new TextEncoder().encode(JSON.stringify(message)))
+    .then(function (cipher) { return b64u(iv) + '.' + b64u(new Uint8Array(cipher)); });
+}
+
+function unseal(key, sealed) {
+  var parts = String(sealed).split('.');
+  if (parts.length !== 2) return Promise.resolve(null);
+  return crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64u(parts[0]) }, key, unb64u(parts[1]))
+    .then(function (plain) { return JSON.parse(new TextDecoder().decode(plain)); })
+    .catch(function () { return null; });
+}
+
+function relaySend(message) {
+  if (!relaySocket || !relayKey || relaySocket.readyState !== 1) return Promise.resolve(false);
+  return seal(relayKey, message).then(function (sealed) {
+    relaySocket.send(JSON.stringify({ sealed: sealed }));
+    return true;
+  });
+}
+
+/** Requests time out rather than hang when the desktop is asleep. */
+var RELAY_TIMEOUT_MS = 20000;
+
+function relayRequest(request) {
+  return new Promise(function (resolve, reject) {
+    if (!relayReady) { reject(new Error(desktopOnline ? 'Connecting…' : 'Your desktop is offline.')); return; }
+    var id = String(nextRequestId++);
+    var timer = setTimeout(function () {
+      delete pending[id];
+      reject(new Error(desktopOnline ? 'The desktop did not answer.' : 'Your desktop is offline.'));
+    }, RELAY_TIMEOUT_MS);
+    pending[id] = { resolve: resolve, reject: reject, timer: timer };
+    relaySend({ kind: 'request', id: id, request: request, token: relay.token }).then(function (sent) {
+      if (sent) return;
+      clearTimeout(timer);
+      delete pending[id];
+      reject(new Error('Not connected to the relay.'));
+    });
+  });
+}
+
 function api(request) {
+  if (relay) return relayRequest(request);
   return fetch('/api/request', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
@@ -144,6 +254,9 @@ function api(request) {
 }
 
 function refreshAccess() {
+  // The relay path serves only paired control devices, so there is no
+  // read-only role to look up and no /api/access endpoint to call.
+  if (relay) { accessRole = 'control'; return Promise.resolve(); }
   return fetch('/api/access', { headers: { authorization: 'Bearer ' + token } })
     .then(function (res) { return res.json(); })
     .then(function (value) { accessRole = value.role || 'control'; });
@@ -274,12 +387,23 @@ function renderThread() {
 }
 
 function render() {
-  if (!token) {
+  if (!token && !relay) {
     app.innerHTML = '<div class="pair"><h1>BOSS</h1>' +
-      '<p style="color:var(--muted);margin-top:8px">Paste the access token from Settings → Mobile access on your desktop.</p>' +
+      '<p style="color:var(--muted);margin-top:8px">Scan the QR code in Settings → Remote access, or paste a pairing code, to use BOSS from anywhere.</p>' +
+      '<input id="code" type="text" placeholder="boss://pair?…" autocomplete="off" autocapitalize="off" spellcheck="false">' +
+      '<button class="btn primary" style="width:100%" onclick="pairWithCode(document.getElementById(\\'code\\').value)">Pair</button>' +
+      '<p style="color:var(--faint);margin-top:22px;font-size:13px">On the same network or a tailnet? Paste the access token from Settings → Mobile access instead.</p>' +
       '<input id="tok" type="password" placeholder="access token" autocomplete="off">' +
-      '<button class="btn primary" style="width:100%" onclick="pair()">Connect</button>' +
+      '<button class="btn" style="width:100%" onclick="pair()">Connect on this network</button>' +
       '<div class="err" id="pair-err"></div></div>';
+    return;
+  }
+  // Paired to the relay but the desktop is asleep or offline.
+  if (relay && !relay.token) {
+    app.innerHTML = '<div class="pair"><h1>BOSS</h1>' +
+      '<p style="color:var(--muted);margin-top:8px">Pairing…</p>' +
+      '<div class="err" id="pair-err"></div>' +
+      '<button class="btn" style="width:100%;margin-top:16px" onclick="unpairRelay()">Cancel</button></div>';
     return;
   }
   var body = '';
@@ -298,7 +422,13 @@ function render() {
     if (main) window.scrollTo(0, document.body.scrollHeight);
     return;
   }
-  body = '<main>' + (view.name === 'automations' ? renderAutomations() : renderThreads()) + '</main>' +
+  // On the relay path, say plainly when the desktop cannot be reached.
+  var offline = relay && (!desktopOnline || !relayReady)
+    ? '<div class="card" style="border-color:var(--yellow)"><div class="title" style="color:var(--yellow)">' +
+      (desktopOnline ? 'Reconnecting…' : 'Your desktop is offline') + '</div>' +
+      '<div class="sub">' + (desktopOnline ? 'Waiting for the relay.' : 'Open BOSS on your desktop to continue.') + '</div></div>'
+    : '';
+  body = '<main>' + offline + (view.name === 'automations' ? renderAutomations() : renderThreads()) + '</main>' +
     '<nav class="tabs">' +
     '<button class="' + (view.name === 'threads' ? 'active' : '') + '" onclick="showTab(\\'threads\\')">Threads</button>' +
     '<button class="' + (view.name === 'automations' ? 'active' : '') + '" onclick="showTab(\\'automations\\')">Automations</button>' +
@@ -349,26 +479,169 @@ function scheduleRefresh(id) {
   }, 400);
 }
 
+/**
+ * Open the relay socket and keep it open. Backoff matches the desktop's, so
+ * a relay restart does not stampede reconnects from every paired phone.
+ */
+function relayConnect() {
+  if (!relay || (relaySocket && relaySocket.readyState <= 1)) return;
+  var url = relay.relayUrl.replace(/^http/, 'ws');
+  var socket;
+  try { socket = new WebSocket(url); } catch (e) { scheduleRelayReconnect(); return; }
+  relaySocket = socket;
+
+  socket.onopen = function () {
+    Promise.all([
+      deriveKey(relay.secret),
+      deriveId('boss-relay-device:', relay.secret),
+      deriveId('boss-relay-join:', relay.secret)
+    ]).then(function (parts) {
+      relayKey = parts[0];
+      socket.send(JSON.stringify({
+        type: 'hello', side: 'phone', deviceId: parts[1], peerId: relay.peerId, proof: parts[2], v: 1
+      }));
+      relayAttempt = 0;
+      relayReady = true;
+      // A pending QR claim goes out as the first frame on the new socket.
+      if (pairingClaim) relaySend({ kind: 'claim', secret: pairingClaim, label: navigator.platform || 'Phone' });
+      render();
+    });
+  };
+
+  socket.onmessage = function (raw) {
+    var frame;
+    try { frame = JSON.parse(raw.data); } catch (e) { return; }
+    if (frame.type === 'peer.online' || frame.type === 'peer.offline' || frame.type === 'welcome') {
+      desktopOnline = frame.desktopOnline !== false;
+      render();
+      if (desktopOnline && frame.type !== 'peer.offline') boot();
+      return;
+    }
+    if (frame.type === 'error') { render(); return; }
+    if (!frame.sealed || !relayKey) return;
+    unseal(relayKey, frame.sealed).then(function (message) {
+      // A frame we cannot decrypt is not from our desktop. Ignore it.
+      if (!message) return;
+      handleRelayMessage(message);
+    });
+  };
+
+  socket.onclose = function () {
+    relayReady = false;
+    relaySocket = null;
+    scheduleRelayReconnect();
+    render();
+  };
+
+  socket.onerror = function () { /* onclose follows and schedules the retry. */ };
+}
+
+function scheduleRelayReconnect() {
+  if (!relay) return;
+  var delay = Math.min(30000, 500 * Math.pow(2, Math.min(relayAttempt++, 6)));
+  setTimeout(relayConnect, Math.round(delay * (0.5 + Math.random() * 0.5)));
+}
+
+function handleRelayMessage(message) {
+  if (message.kind === 'response') {
+    var waiter = pending[message.id];
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    delete pending[message.id];
+    if (message.ok) waiter.resolve(message.result);
+    else waiter.reject(new Error(message.error || 'request failed'));
+    return;
+  }
+  if (message.kind === 'claimed') {
+    // Pairing accepted: keep the long-lived credentials and drop the
+    // one-time pairing secret.
+    if (pairingTimeout) { clearTimeout(pairingTimeout); pairingTimeout = null; }
+    pairingClaim = null;
+    relay = { relayUrl: relay.relayUrl, secret: message.secret, token: message.token, peerId: relay.peerId };
+    localStorage.setItem('boss.relay', JSON.stringify(relay));
+    // The room key changes with the secret, so reconnect into the real room.
+    relayKey = null;
+    relayReady = false;
+    if (relaySocket) relaySocket.close();
+    relayConnect();
+    boot();
+    return;
+  }
+  if (message.kind === 'event') applyEvent(message.event);
+}
+
 function listen() {
+  if (relay) { relayConnect(); return; }
   var source = new EventSource('/api/events?token=' + encodeURIComponent(token));
   source.onmessage = function (raw) {
     var event;
     try { event = JSON.parse(raw.data); } catch (e) { return; }
-    var props = event.properties || {};
-    var sid = props.sessionID || (props.part && props.part.sessionID) || (props.info && (props.info.sessionID || props.info.id));
-    if (event.type === 'session.status') busy[sid] = Boolean(props.status && (props.status.type === 'busy' || props.status.type === 'retry'));
-    if (event.type === 'session.idle' || event.type === 'session.error') busy[sid] = false;
-    if (event.type === 'permission.asked' || event.type === 'permission.updated') { if (props.sessionID) permissions[props.sessionID] = props; }
-    if (event.type === 'permission.replied') { if (props.sessionID) delete permissions[props.sessionID]; }
-    if (event.type === 'automations.updated') { automations = props.snapshot || automations; if (view.name === 'automations') render(); return; }
-    if (event.type.indexOf('session.') === 0) refreshThreads();
-    if (view.name === 'thread' && sid === view.id) {
-      if (event.type.indexOf('message.') === 0) scheduleRefresh(view.id);
-      else render();
-    }
+    applyEvent(event);
   };
   source.onerror = function () { /* EventSource retries on its own. */ };
 }
+
+/** One event handler for both transports. */
+function applyEvent(event) {
+  var props = event.properties || {};
+  var sid = props.sessionID || (props.part && props.part.sessionID) || (props.info && (props.info.sessionID || props.info.id));
+  if (event.type === 'session.status') busy[sid] = Boolean(props.status && (props.status.type === 'busy' || props.status.type === 'retry'));
+  if (event.type === 'session.idle' || event.type === 'session.error') busy[sid] = false;
+  if (event.type === 'permission.asked' || event.type === 'permission.updated') { if (props.sessionID) permissions[props.sessionID] = props; }
+  if (event.type === 'permission.replied') { if (props.sessionID) delete permissions[props.sessionID]; }
+  if (event.type === 'automations.updated') { automations = props.snapshot || automations; if (view.name === 'automations') render(); return; }
+  if (event.type.indexOf('session.') === 0) refreshThreads();
+  if (view.name === 'thread' && sid === view.id) {
+    if (event.type.indexOf('message.') === 0) scheduleRefresh(view.id);
+    else render();
+  }
+}
+
+/**
+ * Finish pairing from a QR code. The phone seals a claim with the key derived
+ * from the one-time secret; only the desktop can open it, and it answers with
+ * long-lived credentials.
+ */
+window.pairWithCode = function (raw) {
+  var payload = null;
+  var match = /[?&]p=([A-Za-z0-9_-]+)/.exec(String(raw).trim());
+  if (match) {
+    try { payload = JSON.parse(new TextDecoder().decode(unb64u(match[1]))); } catch (e) { payload = null; }
+  }
+  var err = document.getElementById('pair-err');
+  if (!payload || payload.v !== 1 || !payload.r || !payload.s) {
+    if (err) err.textContent = 'That is not a valid BOSS pairing code.';
+    return;
+  }
+  // Pair using the one-time secret, then swap it for the long-lived one.
+  relay = {
+    relayUrl: payload.r,
+    secret: payload.s,
+    token: '',
+    peerId: b64u(crypto.getRandomValues(new Uint8Array(8)))
+  };
+  if (err) err.textContent = 'Pairing…';
+  // relayConnect sends the claim as soon as the socket is ready, and
+  // handleRelayMessage boots the app when the desktop answers.
+  pairingClaim = payload.s;
+  pairingTimeout = setTimeout(function () {
+    if (relay && !relay.token) {
+      unpairRelay();
+      var late = document.getElementById('pair-err');
+      if (late) late.textContent = 'The desktop did not answer. Check that BOSS is open and the code is fresh.';
+    }
+  }, 20000);
+  relayConnect();
+};
+
+window.unpairRelay = function () {
+  relay = null;
+  localStorage.removeItem('boss.relay');
+  if (relaySocket) relaySocket.close();
+  relaySocket = null;
+  relayReady = false;
+  render();
+};
 
 function boot() {
   render();
@@ -376,7 +649,16 @@ function boot() {
   listen();
 }
 
-if (token) boot(); else render();
+// An installed PWA needs the service worker for offline shell and push.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(function () {
+    /* Pairing and chat work without it; only offline and push are lost. */
+  });
+}
+
+if (relay) { relayConnect(); render(); }
+else if (token) boot();
+else render();
 </script>
 </body>
 </html>

@@ -19,6 +19,7 @@ import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
+import type { RemoteAccessStatus } from '@shared/relay'
 import type { SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
 import type { TaskPolicy } from '@shared/task-policy'
 
@@ -201,6 +202,11 @@ export const OpenCode = {
   mcpImportScan: () => backendRequest<McpImportCandidate[]>({ type: 'mcp.import.scan' }),
   notifyWebhook: () => backendRequest<string>({ type: 'automation.webhook.get' }),
   setNotifyWebhook: (url: string) => backendRequest<string>({ type: 'automation.webhook.set', url }),
+  remoteStatus: () => backendRequest<RemoteAccessStatus>({ type: 'remote.status' }),
+  remoteSet: (patch: { enabled?: boolean; relayUrl?: string; forgetDeviceId?: string; revokeAll?: boolean }) =>
+    backendRequest<RemoteAccessStatus>({ type: 'remote.set', patch }),
+  remotePair: () => backendRequest<RemoteAccessStatus>({ type: 'remote.pair' }),
+  remotePairCancel: () => backendRequest<RemoteAccessStatus>({ type: 'remote.pair.cancel' }),
   mobileStatus: () => backendRequest<MobileAccessStatus>({ type: 'mobile.status' }),
   mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean }) =>
     backendRequest<MobileAccessStatus>({ type: 'mobile.set', patch }),

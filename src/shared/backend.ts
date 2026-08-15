@@ -206,6 +206,10 @@ export type BackendRequest =
   | { type: 'mcp.import.scan' }
   | { type: 'mobile.status' }
   | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean } }
+  | { type: 'remote.status' }
+  | { type: 'remote.set'; patch: { enabled?: boolean; relayUrl?: string; forgetDeviceId?: string; revokeAll?: boolean } }
+  | { type: 'remote.pair' }
+  | { type: 'remote.pair.cancel' }
   | { type: 'thread.bus.get'; threadId?: string }
   | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
   | { type: 'thread.bus.clear-failures'; threadId?: string }

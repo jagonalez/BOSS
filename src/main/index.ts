@@ -21,6 +21,10 @@ import { WorktreeManager } from './worktree-manager'
 import { AutomationManager } from './automation-manager'
 import { McpHub } from './mcp-hub'
 import { WebAccess } from './web-access'
+import { RelayClient } from './relay-client'
+// `ws` rather than Node 22's global WebSocket: the client uses the Node-style
+// .on() event API, and ws exposes ping/pong needed for the heartbeat.
+import { WebSocket as NodeWebSocket } from 'ws'
 import { BackendAuth } from './backend-auth'
 import { QaTools } from './qa-tools'
 import { TranscriptStore } from './transcript-store'
@@ -111,6 +115,14 @@ mcpHub.setOnChange(() => {
 const webAccess = new WebAccess(join(app.getPath('userData'), 'mobile-access.json'), backendMgr)
 backendMgr.attachMobile(webAccess)
 webAccess.setOnChange(() => backendMgr.emit({ type: 'mobile.updated', properties: { status: webAccess.status() } }))
+// Remote access dials out to the relay, so it needs no inbound port.
+const relayClient = new RelayClient(
+  join(app.getPath('userData'), 'remote-access.json'),
+  backendMgr,
+  (url) => new NodeWebSocket(url) as never
+)
+backendMgr.attachRemote(relayClient)
+relayClient.setOnChange(() => backendMgr.emit({ type: 'remote.updated', properties: { status: relayClient.status() } }))
 
 const optional = new OptionalDeps(process.env.BOSS_OPTIONAL_CDN)
 const computerUse = new ComputerUse()
@@ -278,6 +290,7 @@ app.whenReady().then(() => {
     await mcpHub.start()
     await automations.start()
     await webAccess.start()
+    await relayClient.start()
     // A download reports progress and completion long after the check that
     // started it returned, so those have to be pushed rather than awaited.
     updates.subscribe((status) => {
@@ -303,6 +316,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   void webAccess.stop()
+  void relayClient.stop()
   void automations.stop()
   void mcpHub.stop()
   void backendMgr.stop()

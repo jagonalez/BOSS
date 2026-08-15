@@ -221,6 +221,7 @@ export class BackendManager {
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
+  private remote?: { handle(request: BackendRequest): Promise<unknown> }
   private binaryOverrides?: BinaryOverrides
   private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
   private loaded = false
@@ -417,6 +418,10 @@ export class BackendManager {
 
   attachMobile(mobile: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.mobile = mobile
+  }
+
+  attachRemote(remote: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.remote = remote
   }
 
   attachBinaryOverrides(overrides: BinaryOverrides): void {
@@ -1724,6 +1729,10 @@ export class BackendManager {
     if (request.type.startsWith('mobile.')) {
       if (!this.mobile) throw new Error('Mobile access is not available.')
       return this.mobile.handle(request)
+    }
+    if (request.type.startsWith('remote.')) {
+      if (!this.remote) throw new Error('Remote access is not available.')
+      return this.remote.handle(request)
     }
     switch (request.type) {
       case 'backend.list': return this.descriptors()

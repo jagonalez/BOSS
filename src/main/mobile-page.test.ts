@@ -14,6 +14,30 @@ test('mobile page contains valid JavaScript and uses the shared supervision API'
   assert.match(match[1], /api\/access/)
 })
 
+test('the page keeps both transports and picks the relay only when paired', () => {
+  const script = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ''
+  // The Tailscale path must survive: same endpoints, same event stream.
+  assert.match(script, /fetch\('\/api\/request'/)
+  assert.match(script, /new EventSource\('\/api\/events/)
+  // The relay path is chosen inside api() and listen(), not by duplicating the UI.
+  assert.match(script, /if \(relay\) return relayRequest\(request\)/)
+  assert.match(script, /if \(relay\) \{ relayConnect\(\); return; \}/)
+})
+
+test('the page seals relay frames and never sends the pairing secret in the clear', () => {
+  const script = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ''
+  assert.match(script, /AES-GCM/)
+  // Every relay frame leaves through seal(); nothing writes a bare payload.
+  assert.match(script, /relaySocket\.send\(JSON\.stringify\(\{ sealed: sealed \}\)\)/)
+  assert.equal(/relaySocket\.send\(JSON\.stringify\(\{ kind:/.test(script), false)
+})
+
+test('the page registers a service worker and a manifest so it installs', () => {
+  assert.match(MOBILE_PAGE, /<link rel="manifest" href="\.\/manifest\.webmanifest">/)
+  assert.match(MOBILE_PAGE, /navigator\.serviceWorker\.register\('\.\/sw\.js'\)/)
+  assert.match(MOBILE_PAGE, /apple-mobile-web-app-capable/)
+})
+
 test('read-only access cannot mutate task or automation state', () => {
   for (const type of [
     'thread.send',
