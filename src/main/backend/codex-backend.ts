@@ -1,7 +1,7 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
-import type { BackendMessageOptions } from '@shared/backend'
+import { BACKEND_IDS, type BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
@@ -120,7 +120,12 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
     inputSchema: {
       type: 'object',
       properties: {
-        instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction }
+        instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction },
+        agent: {
+          type: 'string',
+          enum: [...BACKEND_IDS],
+          description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeAgent
+        }
       },
       required: ['instruction'],
       additionalProperties: false

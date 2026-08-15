@@ -454,7 +454,13 @@ export default function (pi: ExtensionAPI) {
     label: "Spawn BOSS worktree thread",
     description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktree)},
     parameters: Type.Object({
-      instruction: Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction)} })
+      instruction: Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction)} }),
+      agent: Type.Optional(Type.Union([
+        Type.Literal("opencode"),
+        Type.Literal("pi"),
+        Type.Literal("codex"),
+        Type.Literal("claude")
+      ], { description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeAgent)} }))
     }),
     execute: (_id, args, signal) => call("boss_threads_spawn_worktree", args, signal)
   })
