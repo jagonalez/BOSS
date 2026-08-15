@@ -55,6 +55,26 @@ export const SearchIcon = (p: IconProps): React.JSX.Element => (
   </Svg>
 )
 
+/** Two commits on a line, one branching away: the usual git branch glyph. */
+export const BranchIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <circle cx="6" cy="6" r="2.4" />
+    <circle cx="6" cy="18" r="2.4" />
+    <circle cx="17" cy="8" r="2.4" />
+    <path d="M6 8.4v7.2M17 10.4v1.1a4 4 0 0 1-4 4H6" />
+  </Svg>
+)
+
+/** One line splitting into two: a thread taken from another thread. */
+export const ForkIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <circle cx="12" cy="19" r="2.4" />
+    <circle cx="7" cy="5" r="2.4" />
+    <circle cx="17" cy="5" r="2.4" />
+    <path d="M7 7.4v2.1a3 3 0 0 0 3 3h4a3 3 0 0 0 3-3V7.4M12 12.5v4.1" />
+  </Svg>
+)
+
 export const ReviewIcon = (p: IconProps): React.JSX.Element => (
   <Svg {...p}>
     <path d="M5 19 3 17l6-6 4 4 6-8 2 2-8 10-4-4-2 2Z" />
