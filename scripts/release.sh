@@ -74,6 +74,22 @@ if [ ! -f "$DMG" ]; then
   exit 1
 fi
 
+# The manifest electron-updater reads to decide whether a newer version exists.
+# Without it in the release, an installed copy finds the dmg and cannot tell
+# what version it is — so the update banner never appears.
+LATEST_YML="dist/latest-mac.yml"
+if [ ! -f "$LATEST_YML" ]; then
+  echo "No latest-mac.yml in dist/. Auto-update needs it; check build.publish in package.json." >&2
+  exit 1
+fi
+
+# The zip is what auto-update downloads. A dmg needs a user to mount and drag.
+ZIP="$(find dist -maxdepth 1 -name "*${VERSION}*-mac.zip" -print -quit)"
+if [ ! -f "$ZIP" ]; then
+  echo "No .zip for version ${VERSION} in dist/. Auto-update installs from it." >&2
+  exit 1
+fi
+
 # Past this point the version is committed, so the abort trap must not revert it.
 git add package.json package-lock.json
 git commit -m "Release $NEW_VERSION"
@@ -82,8 +98,8 @@ git tag "$NEW_VERSION"
 git push origin HEAD --tags
 
 echo "==> Publishing $DMG"
-gh release create "$NEW_VERSION" "$DMG" \
-  --repo jagonalez/ralf \
+gh release create "$NEW_VERSION" "$DMG" "$ZIP" "$LATEST_YML" \
+  --repo jagonalez/BOSS \
   --title "$NEW_VERSION" \
   --generate-notes
 
