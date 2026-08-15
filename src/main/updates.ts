@@ -4,7 +4,7 @@ import electronUpdater from 'electron-updater'
 const { autoUpdater } = electronUpdater
 import type { UpdateStatus } from '@shared/ipc'
 
-const REPO = 'jagonalez/ralf'
+const REPO = 'jagonalez/BOSS'
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
 
 export class UpdateChecker {

@@ -61,7 +61,7 @@
     "publish": {
       "provider": "github",
       "owner": "jagonalez",
-      "repo": "ralf"
+      "repo": "BOSS"
     },
     "files": [
       "out/**/*",
