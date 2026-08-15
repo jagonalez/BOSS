@@ -95,6 +95,7 @@ const boss: BossApi = {
   updateStatus: () => ipcRenderer.invoke(IpcChannels.UpdateStatusGet),
   updateCheck: () => ipcRenderer.invoke(IpcChannels.UpdateCheck),
   onUpdateChanged: (cb) => subscribe(IpcChannels.UpdateChanged, cb),
+  updateRestart: () => ipcRenderer.invoke(IpcChannels.UpdateRestart),
   onMenuCommand: (cb) => subscribe(IpcChannels.MenuCommand, cb)
 }
 

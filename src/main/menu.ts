@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from
 import { join } from 'node:path'
 import { IpcChannels, type MenuCommand } from '@shared/ipc'
 
-const REPOSITORY = 'https://github.com/jagonalez/ralf'
+const REPOSITORY = 'https://github.com/jagonalez/BOSS'
 const SITE = 'https://getboss.dev'
 
 /** What About shows.
