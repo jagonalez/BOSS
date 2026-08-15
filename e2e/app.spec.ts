@@ -1,4 +1,5 @@
 import { backendCalls, control, expect, lastBackendCall, test } from './fixtures'
+import type { BossApi } from '../src/shared/api'
 
 async function openSettings(page: Parameters<typeof control>[0]): Promise<void> {
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -30,6 +31,16 @@ test('boots the real Electron renderer without covering it with a modal', async 
     const window = BrowserWindow.getAllWindows()[0]
     return { count: BrowserWindow.getAllWindows().length, visible: window?.isVisible() }
   })).toEqual({ count: 1, visible: false })
+})
+
+test('a deleted checkout returns a review snapshot without rejecting the IPC handler', async ({ appPage }) => {
+  const checkout = '/tmp/boss-e2e/deleted-worktree'
+  const snapshot = await appPage.evaluate(
+    (path) => (window as unknown as { boss: BossApi }).boss.reviewSnapshot(path),
+    checkout
+  )
+  expect(snapshot).toMatchObject({ repositoryRoot: checkout, branch: '', localComments: [] })
+  expect(snapshot.syncError).toMatch(/git rev-parse/i)
 })
 
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {
@@ -135,4 +146,22 @@ test('auto mode answers permission requests without leaving a blocking panel', a
   })
   await expect(appPage.locator('.perm-card')).toHaveCount(0)
   await expect(appPage.locator('.modal-backdrop')).toHaveCount(0)
+})
+
+test('Claude Stop & redirect accepts the queued instruction without showing a failure', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Claude stop thread' }).click()
+  await control(appPage).then((item) => item.emit({
+    type: 'session.status',
+    properties: { sessionID: 'thread-claude', status: { type: 'busy' } }
+  }))
+  await expect(appPage.locator('.followup-text')).toHaveText('Continue with the corrected instruction.')
+  await control(appPage).then((item) => item.resetCalls())
+
+  await appPage.getByRole('button', { name: 'Stop & redirect' }).click()
+
+  expect((await lastBackendCall(appPage, 'thread.followups.steer')).request).toMatchObject({
+    threadId: 'thread-claude', followUpId: 'followup-claude'
+  })
+  await expect(appPage.locator('.followup-item')).toHaveCount(0)
+  await expect(appPage.locator('.chat-error')).toHaveCount(0)
 })

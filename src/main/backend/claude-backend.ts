@@ -11,13 +11,14 @@ import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
 import { textFromParts } from './manager'
-import { claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol'
+import { claudeExitError, claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeResultError, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
 
 interface ClaudeProcess {
   child: ChildProcess
   sessionId: string
   permissions: Map<string, ClaudePermissionRequest>
+  intentionallyStopped?: boolean
 }
 
 function writeControl(child: ChildProcess, value: Record<string, unknown>): void {
@@ -445,9 +446,8 @@ export class ClaudeBackend implements Backend {
                 })
               }
             } else if (value.type === 'result') {
-              if (value.subtype !== 'success') {
-                this.emit({ type: 'session.error', sessionID: sessionId, error: String(value.error ?? value.result ?? 'Claude Code failed.') })
-              }
+              const error = claudeResultError(value, process.intentionallyStopped)
+              if (error) this.emit({ type: 'session.error', sessionID: sessionId, error })
               // The turn is over here, whatever the process does next. Waiting
               // for exit left a thread labelled "Working" after its reply was
               // finished, since the process can outlive the result — and now
@@ -481,7 +481,8 @@ export class ClaudeBackend implements Backend {
       // follow-up may already hold it, and that newer turn must survive.
       if (this.processes.get(sessionId) === process) this.processes.delete(sessionId)
       this.lingering.delete(process)
-      if (code && code !== 0) this.emit({ type: 'session.error', sessionID: sessionId, error: stderr.trim() || `Claude Code exited with ${code}.` })
+      const exitError = claudeExitError(code, stderr, process.intentionallyStopped)
+      if (exitError) this.emit({ type: 'session.error', sessionID: sessionId, error: exitError })
       settle()
     })
     writeControl(child, {
@@ -521,7 +522,10 @@ export class ClaudeBackend implements Backend {
     // Every child of this session, not only the one mid-turn: a settled process
     // holding an unanswered question is still running and still has to stop.
     for (const process of this.lingering) {
-      if (process.sessionId === sessionId) process.child.kill(signal)
+      if (process.sessionId === sessionId) {
+        process.intentionallyStopped = true
+        process.child.kill(signal)
+      }
     }
   }
 

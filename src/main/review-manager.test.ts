@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -123,6 +123,24 @@ test('a branch with no change request yet is not an error', () => {
     'failed to run git: not a git repository'
   ]) {
     assert.equal(noChangeRequestYet(real), false, `${real} is a real failure`)
+  }
+})
+
+test('a stale or non-Git checkout returns an unavailable snapshot instead of rejecting IPC', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-review-unavailable-'))
+  const plainDirectory = join(directory, 'plain-folder')
+  mkdirSync(plainDirectory)
+  try {
+    const manager = new ReviewManager(join(directory, 'comments.json'))
+    for (const checkout of [plainDirectory, join(directory, 'deleted-worktree')]) {
+      const snapshot = await manager.snapshot(checkout)
+      assert.equal(snapshot.repositoryRoot, checkout)
+      assert.equal(snapshot.branch, '')
+      assert.deepEqual(snapshot.localComments, [])
+      assert.match(snapshot.syncError ?? '', /git rev-parse|not a git repository/i)
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 })
 
