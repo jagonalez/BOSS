@@ -201,9 +201,24 @@ export const IpcChannels = {
   SitesCfGet: 'sites:cf:get',
   SitesCfSet: 'sites:cf:set',
   SitesCfClear: 'sites:cf:clear',
+  /** A menu item the renderer acts on. The menu knows what it is called; the
+   *  renderer knows how to do it. */
+  MenuCommand: 'menu:command',
   UpdateStatusGet: 'update:status',
   UpdateCheck: 'update:check',
   UpdateChanged: 'update:changed'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
+
+/** What a menu item asks the renderer to do. Anything the menu can trigger has
+ *  a button somewhere too — the menu is a second way to reach it, not a second
+ *  implementation of it. */
+export type MenuCommand =
+  | 'thread.new'
+  | 'thread.new-global'
+  | 'view.new'
+  | 'tab.close'
+  | 'settings.open'
+  | 'pane.split-horizontal'
+  | 'pane.split-vertical'

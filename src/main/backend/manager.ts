@@ -789,7 +789,11 @@ export class BackendManager {
 
   async sendMessage(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
     const binding = this.binding(threadId)
-    if (binding.worktree?.status === 'removed') {
+    // Stranded, not merely removed. A thread that left its worktree is back in
+    // its project and can carry on; one whose worktree was reaped underneath it
+    // still points into a directory that is gone. Both end with status
+    // 'removed', so the check is where the thread actually is.
+    if (binding.worktree?.status === 'removed' && binding.executionPath === binding.worktree.path) {
       throw new Error('This thread\'s worktree was cleaned up. Fork it into a new worktree before continuing.')
     }
     const usage = this.transcripts?.usage(threadId).totals ?? { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
@@ -997,6 +1001,31 @@ export class BackendManager {
     await this.sendMessage(threadId, [{ type: 'text', text: body }], { mode: 'ask' })
   }
 
+  /** Put the calling thread on its own worktree, for the agent tool.
+   *
+   *  Returns where it landed rather than a thread, because nothing was
+   *  created — this is the same conversation in a different checkout, and the
+   *  agent needs to know its files moved. */
+  async useWorktree(threadId: string): Promise<{ path: string; branch: string }> {
+    const session = await this.moveToWorktree(threadId, true)
+    const worktree = session.worktree
+    if (!worktree) throw new Error('The worktree was created but could not be bound to this thread.')
+    return { path: worktree.path, branch: worktree.branch }
+  }
+
+  /** Take the calling thread off its worktree, for the agent tool.
+   *
+   *  Removes the checkout and returns the thread to the project. Git refuses
+   *  while there is uncommitted or untracked work, so nothing is lost by
+   *  asking; the branch is kept either way. */
+  async leaveWorktree(threadId: string): Promise<{ path: string; branch: string }> {
+    const binding = this.binding(threadId)
+    const worktree = binding.worktree
+    if (!worktree || worktree.status !== 'active') throw new Error('This thread is not on a worktree.')
+    await this.removeWorktree(worktree.id, true)
+    return { path: binding.projectPath, branch: worktree.branch }
+  }
+
   async spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread> {
     const created = await this.forkIntoWorktree(threadId, instruction)
     const info = this.threadInfo(created.id)
@@ -1123,6 +1152,7 @@ export class BackendManager {
         binding.worktree = { ...worktree, ownerThreadId: created.id }
         this.save()
         created = this.session(binding)
+        this.reportSetupFailure(created.id, worktree.setupError, backendId)
       } catch (error) {
         await this.worktrees.remove(worktree.id).catch(() => {})
         throw error
@@ -1148,6 +1178,46 @@ export class BackendManager {
         ?? DEFINITIONS[backendId].modes[0]?.id
     })
     return this.sessionGet(created.id)
+  }
+
+  /** Give a thread its own checkout, keeping the conversation.
+   *
+   *  Forking makes a new thread and hands it a summary; this moves the one you
+   *  are in. The natural order is to explore on the main checkout and isolate
+   *  once you know what to change, and until now that meant deciding before
+   *  you knew.
+   *
+   *  Refuses when the thread already has one — two worktrees for one thread
+   *  would leave the first orphaned with its branch. */
+  async moveToWorktree(threadId: string, calledByThread = false): Promise<SessionInfo> {
+    if (!this.worktrees) throw new Error('Git worktrees are not available.')
+    const binding = this.binding(threadId)
+    if (binding.worktree?.status === 'active') throw new Error('This thread already has its own worktree.')
+    if (binding.projectId === 'global' || !binding.projectPath) throw new Error('Projectless chats cannot use Git worktrees.')
+    // Not when the thread asks for itself: an agent calling this is mid-turn by
+    // definition, so the check could never pass. It guards a move from outside,
+    // where changing the directory under a running agent is a surprise.
+    if (!calledByThread && this.busyThreads.has(threadId)) {
+      throw new Error('Wait for this thread to finish before moving it to a worktree.')
+    }
+
+    const worktree = await this.worktrees.create({
+      projectId: binding.projectId,
+      projectPath: binding.projectPath,
+      sourcePath: binding.executionPath || binding.projectPath,
+      title: binding.title,
+      ownerThreadId: threadId
+    })
+    // The binding is what binding() pushes to the backend on every lookup, so
+    // setting it here is what actually moves the agent.
+    binding.executionPath = worktree.path
+    binding.worktree = { ...worktree, ownerThreadId: threadId }
+    this.save()
+    this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, worktree.path)
+    this.reportSetupFailure(threadId, worktree.setupError, binding.backendId)
+    const session = this.session(binding)
+    this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
+    return session
   }
 
   async forkIntoWorktree(threadId: string, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
@@ -1183,8 +1253,28 @@ export class BackendManager {
     await this.worktrees.setOwner(worktree.id, created.id)
     binding.worktree = { ...worktree, ownerThreadId: created.id }
     this.save()
+    // Before the first message, so it is read before the agent starts working
+    // in a checkout that may not have its dependencies.
+    this.reportSetupFailure(created.id, worktree.setupError, source.backendId)
     await this.sendMessage(created.id, [{ type: 'text', text: packet }], { ...options, mode: options?.mode ?? 'ask' })
     return this.session(binding)
+  }
+
+  /** Say that a worktree's setup script failed.
+   *
+   *  The checkout is valid and the thread can run, so this is not a throw. But
+   *  an agent about to work in a project whose dependencies were never
+   *  installed should not have to discover that from a build error. */
+  private reportSetupFailure(threadId: string, detail: string | undefined, backendId: BackendId): void {
+    if (!detail) return
+    this.emit({
+      type: 'session.error',
+      properties: {
+        sessionID: threadId,
+        error: `The project's .worktreesetup script failed in this worktree, so it may be missing dependencies. ${detail}`
+      },
+      backendId
+    })
   }
 
   private async cleanupWorktrees(): Promise<void> {
@@ -1197,7 +1287,20 @@ export class BackendManager {
     for (const binding of this.bindings.values()) {
       const current = binding.worktree ? worktrees.get(binding.worktree.id) : undefined
       if (current && current.status !== binding.worktree?.status) {
+        const stranded = current.status === 'removed' && binding.executionPath === current.path
         binding.worktree = current
+        // Reaped underneath it: bring it home rather than leaving it pointing
+        // into a directory that is gone. Cleanup only takes worktrees with no
+        // uncommitted work, so there is nothing here to lose.
+        if (stranded) {
+          binding.executionPath = binding.projectPath
+          this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, binding.projectPath)
+          this.emit({
+            type: 'session.updated',
+            properties: { info: this.session(binding) },
+            backendId: binding.backendId
+          })
+        }
         changed = true
       }
     }
@@ -1209,13 +1312,30 @@ export class BackendManager {
     return patch ? this.worktrees.setSettings(patch) : this.worktrees.settings()
   }
 
-  async removeWorktree(id: string): Promise<WorktreeInfo> {
+  async removeWorktree(id: string, calledByOwner = false): Promise<WorktreeInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const owner = [...this.bindings.values()].find((binding) => binding.worktree?.id === id)
-    if (owner && this.busyThreads.has(owner.id)) throw new Error('Stop the running agent before removing its worktree.')
+    // Not when the thread is removing its own: an agent calling this is
+    // mid-turn by definition, so the check could never pass. It guards a
+    // removal from outside, where pulling the directory out from under a
+    // running agent is the surprise.
+    if (!calledByOwner && owner && this.busyThreads.has(owner.id)) {
+      throw new Error('Stop the running agent before removing its worktree.')
+    }
     const removed = await this.worktrees.remove(id)
     for (const binding of this.bindings.values()) {
-      if (binding.worktree?.id === id) binding.worktree = removed
+      if (binding.worktree?.id !== id) continue
+      binding.worktree = removed
+      // Back to the project. Marking the worktree removed while leaving the
+      // thread pointing into it left the thread in a directory that no longer
+      // exists — every command after that failed with no explanation.
+      binding.executionPath = binding.projectPath
+      this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, binding.projectPath)
+      this.emit({
+        type: 'session.updated',
+        properties: { info: this.session(binding) },
+        backendId: binding.backendId
+      })
     }
     this.save()
     return removed
@@ -1383,7 +1503,8 @@ export class BackendManager {
       case 'worktree.settings.get': return this.worktreeSettings()
       case 'worktree.settings.set': return this.worktreeSettings({
         autoCleanupEnabled: request.autoCleanupEnabled,
-        cleanupAfterDays: request.cleanupAfterDays
+        cleanupAfterDays: request.cleanupAfterDays,
+        location: request.location
       })
       case 'worktree.remove': return this.removeWorktree(request.worktreeId)
       case 'thread.relay': return this.relay(request.sourceThreadId, request.targetThreadId, request.instruction)

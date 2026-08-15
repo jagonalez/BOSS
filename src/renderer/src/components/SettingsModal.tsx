@@ -6,7 +6,7 @@ import { clearThreadBusFailures, openBackendLogin, refreshBackendAuth, refreshBa
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
-import type { WorktreeSettings } from '@shared/worktree'
+import type { WorktreeLocation, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 import { McpSettings } from './McpSettings'
@@ -154,6 +154,10 @@ function BackendDefaults({
     </div>
   )
 }
+
+/** Mirrors the main process's defaults. Only used to fill a field the stored
+ *  settings predate, so a saved file without one does not read as undefined. */
+const DEFAULT_WORKTREE_SETTINGS = { autoCleanupEnabled: true, cleanupAfterDays: 30, location: 'app-data' as const }
 
 function DefaultModelPicker({
   backendId,
@@ -434,6 +438,26 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {section === 'worktrees' ? (
               <div className="settings-group-stack">
+                <section className="settings-card settings-card-list">
+                  <SettingsRow
+                    title="Where worktrees go"
+                    description={worktreeSettings?.location === 'project'
+                      ? 'In .boss/worktrees inside each project, so a worktree can reach the project\u2019s installed dependencies. BOSS adds .boss/ to the repository\u2019s local exclude file, which is not committed and does not reach your colleagues.'
+                      : 'Outside your projects, in the app\u2019s data directory. Nothing appears in your repositories, but a new worktree starts with nothing installed.'}
+                  >
+                    <Select
+                      value={worktreeSettings?.location ?? 'app-data'}
+                      onChange={(event) => {
+                        const location = event.target.value as WorktreeLocation
+                        setWorktreeSettings((current) => ({ ...DEFAULT_WORKTREE_SETTINGS, ...current, location }))
+                        void OpenCode.setWorktreeSettings({ location }).then(setWorktreeSettings)
+                      }}
+                    >
+                      <option value="app-data">App data directory</option>
+                      <option value="project">Inside the project</option>
+                    </Select>
+                  </SettingsRow>
+                </section>
                 <section className="settings-card">
                   <label className="settings-check">
                     <input
@@ -441,10 +465,7 @@ export function SettingsModal(): React.JSX.Element | null {
                       checked={worktreeSettings?.autoCleanupEnabled ?? true}
                       onChange={(event) => {
                         const autoCleanupEnabled = event.target.checked
-                        setWorktreeSettings((current) => ({
-                          autoCleanupEnabled,
-                          cleanupAfterDays: current?.cleanupAfterDays ?? 30
-                        }))
+                        setWorktreeSettings((current) => ({ ...DEFAULT_WORKTREE_SETTINGS, ...current, autoCleanupEnabled }))
                         void OpenCode.setWorktreeSettings({ autoCleanupEnabled }).then(setWorktreeSettings)
                       }}
                     />
@@ -473,10 +494,7 @@ export function SettingsModal(): React.JSX.Element | null {
                     disabled={worktreeSettings?.autoCleanupEnabled === false}
                     onChange={(event) => {
                       const cleanupAfterDays = Number(event.target.value)
-                      setWorktreeSettings((current) => ({
-                        autoCleanupEnabled: current?.autoCleanupEnabled ?? true,
-                        cleanupAfterDays
-                      }))
+                      setWorktreeSettings((current) => ({ ...DEFAULT_WORKTREE_SETTINGS, ...current, cleanupAfterDays }))
                       void OpenCode.setWorktreeSettings({ cleanupAfterDays }).then(setWorktreeSettings)
                     }}
                   >

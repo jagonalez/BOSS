@@ -94,7 +94,8 @@ const boss: BossApi = {
 
   updateStatus: () => ipcRenderer.invoke(IpcChannels.UpdateStatusGet),
   updateCheck: () => ipcRenderer.invoke(IpcChannels.UpdateCheck),
-  onUpdateChanged: (cb) => subscribe(IpcChannels.UpdateChanged, cb)
+  onUpdateChanged: (cb) => subscribe(IpcChannels.UpdateChanged, cb),
+  onMenuCommand: (cb) => subscribe(IpcChannels.MenuCommand, cb)
 }
 
 contextBridge.exposeInMainWorld('boss', boss)

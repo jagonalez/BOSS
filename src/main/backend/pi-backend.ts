@@ -459,6 +459,20 @@ export default function (pi: ExtensionAPI) {
     execute: (_id, args, signal) => call("boss_threads_spawn_worktree", args, signal)
   })
   pi.registerTool({
+    name: "boss_threads_use_worktree",
+    label: "Use a BOSS worktree",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.useWorktree)},
+    parameters: Type.Object({}),
+    execute: (_id, args, signal) => call("boss_threads_use_worktree", args, signal)
+  })
+  pi.registerTool({
+    name: "boss_threads_leave_worktree",
+    label: "Leave the BOSS worktree",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.leaveWorktree)},
+    parameters: Type.Object({}),
+    execute: (_id, args, signal) => call("boss_threads_leave_worktree", args, signal)
+  })
+  pi.registerTool({
     name: "boss_mcp_list",
     label: "List BOSS MCP tools",
     description: "List external MCP tools available through BOSS connections. Pass tool to get one tool's full input schema before calling it.",

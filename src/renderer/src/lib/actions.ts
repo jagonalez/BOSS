@@ -1,6 +1,7 @@
 import { appStore, type Attachment } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
+import type { MenuCommand } from '@shared/ipc'
 import { disposeTerminalSession } from './terminal-sessions'
 import { disposeTabContentNode } from './tab-content-nodes'
 import { disposeBrowseGuest } from './browse-guests'
@@ -154,6 +155,49 @@ function activeTabInFocusedGroup() {
 function syncFocusedThread(): void {
   const active = activeTabInFocusedGroup()
   if (active?.kind === 'thread' && active.sessionId) selectSession(active.sessionId, false)
+}
+
+/** Do what a menu item asked for.
+ *
+ *  The menu names an action and the renderer performs it, so a shortcut and the
+ *  button that already existed run the same code. Anything needing a target —
+ *  a pane to split, a tab to close — uses the focused one, which is what the
+ *  menu bar refers to when it says "close tab". */
+export function runMenuCommand(command: MenuCommand): void {
+  switch (command) {
+    case 'settings.open':
+      appStore.setState({ settingsOpen: true })
+      return
+    case 'view.new':
+      createWorkspaceView()
+      return
+    case 'thread.new-global':
+      void newGlobalChat()
+      return
+    case 'thread.new': {
+      // In the project you are in. A chat without one is what New Chat is for.
+      const path = appStore.getState().projectPath
+      if (path) void newChatInProject(path)
+      else void newGlobalChat()
+      return
+    }
+    case 'pane.split-horizontal':
+    case 'pane.split-vertical': {
+      const view = currentView()
+      if (!view) return
+      const pane = findGroup(view.root, view.focusedGroupId) ?? walkGroups(view.root)[0]
+      if (pane) splitWorkspaceGroup(pane.id, command === 'pane.split-horizontal' ? 'horizontal' : 'vertical')
+      return
+    }
+    case 'tab.close': {
+      const view = currentView()
+      if (!view) return
+      const pane = findGroup(view.root, view.focusedGroupId) ?? walkGroups(view.root)[0]
+      const tabId = pane?.tabs.find((item) => item.id === pane.activeTabId)?.id ?? pane?.tabs[0]?.id
+      if (pane && tabId) closeWorkspaceTab(pane.id, tabId)
+      return
+    }
+  }
 }
 
 export function focusWorkspaceGroup(groupId: string): void {

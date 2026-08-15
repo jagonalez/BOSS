@@ -106,4 +106,6 @@ export interface BossApi {
   updateStatus(): Promise<UpdateStatus>
   updateCheck(): Promise<UpdateStatus>
   onUpdateChanged(cb: (status: UpdateStatus) => void): () => void
+  /** A menu item was chosen. The menu names the action; the renderer runs it. */
+  onMenuCommand(cb: (command: import('./ipc').MenuCommand) => void): () => void
 }

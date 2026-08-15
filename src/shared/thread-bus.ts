@@ -56,6 +56,8 @@ export type ThreadBusAgentTool =
   | 'boss_threads_send'
   | 'boss_threads_reply'
   | 'boss_threads_spawn_worktree'
+  | 'boss_threads_use_worktree'
+  | 'boss_threads_leave_worktree'
   | 'boss_mcp_list'
   | 'boss_mcp_call'
   | `mcp_${string}`
@@ -76,7 +78,9 @@ export const THREAD_TOOL_DESCRIPTIONS = {
    *  conversation", which reads as one new thread, so a request to take on
    *  several items produced one thread instead of several. */
   spawnWorktree: 'Hand a piece of work to a new BOSS thread with its own Git worktree, so it proceeds independently of this one. Call it once per piece of work: asked to take on several items, spawn a thread for each rather than one thread for all of them. Each new thread starts from the instruction alone, so say what to do and why, not "the second item above".',
-  spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.'
+  spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.',
+  leaveWorktree: 'Come off this thread\'s worktree and back to the project directory, once its work is committed or merged. Git refuses while anything is uncommitted or untracked, so nothing is lost by trying; the branch is kept either way.',
+  useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. It returns the new path: your working directory changes from your next message, not during this one, so do not start editing files in the new checkout until then. Fails harmlessly if this thread already has a worktree.'
 } as const
 
 export interface ThreadBusToolCall {
