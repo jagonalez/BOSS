@@ -10,7 +10,7 @@ import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
 import { textFromParts } from './manager'
-import { claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, parseClaudePermission, parseClaudeQuestions } from './claude-protocol'
+import { claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
 
 interface ClaudeProcess {
@@ -37,17 +37,15 @@ function contentParts(sessionId: string, messageId: string, content: unknown): P
   const firstTextIndex = content.findIndex((block) => (
     Boolean(block) && typeof block === 'object' && (block as { type?: string }).type === 'text'
   ))
+  const firstThinkingIndex = content.findIndex((block) => (
+    Boolean(block) && typeof block === 'object' && (block as { type?: string }).type === 'thinking'
+  ))
   return content.flatMap<Part>((block, index): Part[] => {
     if (!block || typeof block !== 'object') return []
     const item = block as Record<string, unknown>
     if (item.type === 'text' || item.type === 'thinking') {
       return [{
-        // Claude's streaming deltas use this id for the first text block. Keep
-        // the completed message on that identity so the final event replaces
-        // the live projection instead of rendering a second copy.
-        id: item.type === 'text' && index === firstTextIndex
-          ? `${messageId}-text`
-          : `${messageId}-${String(item.type)}-${index}`,
+        id: claudeStreamedPartId(messageId, String(item.type), index, firstTextIndex, firstThinkingIndex),
         type: item.type === 'thinking' ? 'reasoning' as const : 'text' as const,
         sessionID: sessionId,
         messageID: messageId,
@@ -314,6 +312,7 @@ export class ClaudeBackend implements Backend {
     let buffer = ''
     let assistantId: string = randomUUID()
     let liveText = ''
+    let liveThinking = ''
     const initializeRequestId = `boss-init-${randomUUID()}`
     let promptSent = false
     const sendPrompt = (): void => {
@@ -410,11 +409,21 @@ export class ClaudeBackend implements Backend {
                 const message = event.message as { id?: string } | undefined
                 assistantId = message?.id ?? assistantId
                 liveText = ''
+                liveThinking = ''
               } else if (event?.type === 'content_block_delta' && delta?.type === 'text_delta') {
                 liveText += String(delta.text ?? '')
                 this.upsert(sessionId, {
                   info: { id: assistantId, sessionID: sessionId, role: 'assistant', time: { created: Date.now() } },
                   parts: [{ id: `${assistantId}-text`, type: 'text', sessionID: sessionId, messageID: assistantId, text: liveText }]
+                })
+              } else if (event?.type === 'content_block_delta' && delta?.type === 'thinking_delta') {
+                // Without this a long think looked like nothing was happening:
+                // the reasoning arrived in one lump with the finished message,
+                // where every other backend shows it accumulating.
+                liveThinking += String(delta.thinking ?? '')
+                this.upsert(sessionId, {
+                  info: { id: assistantId, sessionID: sessionId, role: 'assistant', time: { created: Date.now() } },
+                  parts: [{ id: `${assistantId}-thinking`, type: 'reasoning', sessionID: sessionId, messageID: assistantId, text: liveThinking }]
                 })
               }
             } else if (value.type === 'result') {

@@ -12,6 +12,26 @@ export interface ClaudePermissionRequest {
   toolUseId?: string
 }
 
+/** The id a streamed part keeps once the finished message replaces it.
+ *
+ *  A live text or thinking part is published under a fixed id as the deltas
+ *  arrive, so the completed message has to use the same id for the block it was
+ *  projecting — otherwise the final event adds a second copy beside the live
+ *  one. Only the first block of each kind can be matched this way: the deltas
+ *  carry no index, so a second thinking block is indistinguishable from more of
+ *  the first. */
+export function claudeStreamedPartId(
+  messageId: string,
+  type: string,
+  index: number,
+  firstTextIndex: number,
+  firstThinkingIndex: number
+): string {
+  if (type === 'text' && index === firstTextIndex) return `${messageId}-text`
+  if (type === 'thinking' && index === firstThinkingIndex) return `${messageId}-thinking`
+  return `${messageId}-${type}-${index}`
+}
+
 export function claudePermissionMode(mode?: BossClaudeMode): ClaudePermissionMode {
   if (mode === 'plan') return 'plan'
   if (mode === 'auto') return 'auto'
