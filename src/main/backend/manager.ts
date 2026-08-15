@@ -22,6 +22,7 @@ import type { EventMessage, MessageWithParts, Part, SessionInfo } from '@shared/
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 import { projectScope, type ProjectScope } from '../project-identity'
+import { envHint, resolveBackendBin, type BinaryOverrides } from '../backend-bin'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
@@ -126,8 +127,9 @@ function now(): number {
 }
 
 function probeVersion(command: string): { available: boolean; version?: string; reason?: string } {
+  const bin = resolveBackendBin(command)
   try {
-    const output = execFileSync(command, ['--version'], {
+    const output = execFileSync(bin, ['--version'], {
       encoding: 'utf8',
       timeout: 2500,
       stdio: ['ignore', 'pipe', 'pipe']
@@ -137,7 +139,10 @@ function probeVersion(command: string): { available: boolean; version?: string; 
     const code = (error as NodeJS.ErrnoException).code
     return {
       available: false,
-      reason: code === 'ENOENT' ? `${command} is not installed or is not on PATH.` : `${command} could not be started.`
+      reason:
+        code === 'ENOENT'
+          ? `${command} is not installed or is not on PATH. Set its location in Settings > Models & connections, or ${envHint(command)}.`
+          : `${command} could not be started.`
     }
   }
 }
@@ -182,6 +187,7 @@ export class BackendManager {
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
+  private binaryOverrides?: BinaryOverrides
   private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
   private loaded = false
   private worktreeCleanupTimer?: NodeJS.Timeout
@@ -319,6 +325,36 @@ export class BackendManager {
 
   attachMobile(mobile: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.mobile = mobile
+  }
+
+  attachBinaryOverrides(overrides: BinaryOverrides): void {
+    this.binaryOverrides = overrides
+  }
+
+  /** Where each backend's CLI lives, keyed by backend id rather than command name so
+   *  the renderer never has to know a backend's command. Backends with no command of
+   *  their own (opencode runs as a server) are absent. */
+  private binaryPaths(): Partial<Record<BackendId, string>> {
+    const stored = this.binaryOverrides?.all() ?? {}
+    const paths: Partial<Record<BackendId, string>> = {}
+    for (const id of Object.keys(DEFINITIONS) as BackendId[]) {
+      const command = DEFINITIONS[id].command
+      if (command && stored[command]) paths[id] = stored[command]
+    }
+    return paths
+  }
+
+  /** Record where a backend's CLI lives. An empty path clears the override and returns
+   *  the backend to a plain PATH lookup. */
+  private setBinaryPath(backendId: BackendId, path: string | undefined): Partial<Record<BackendId, string>> {
+    if (!this.binaryOverrides) throw new Error('Backend locations are not available.')
+    const command = DEFINITIONS[backendId].command
+    if (!command) throw new Error(`${DEFINITIONS[backendId].label} does not run from a CLI on PATH.`)
+    this.binaryOverrides.set(command, path)
+    // probeVersion runs on every descriptors() call rather than being cached, so the
+    // next backend.list already reflects this. The renderer reloads that after saving,
+    // which is what clears a stale "Unavailable".
+    return this.binaryPaths()
   }
 
   async start(projectPath?: string): Promise<void> {
@@ -1447,6 +1483,8 @@ export class BackendManager {
       case 'backend.list': return this.descriptors()
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
+      case 'backend.bin.get': return this.binaryPaths()
+      case 'backend.bin.set': return this.setBinaryPath(request.backendId, request.path)
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return request.executionPath
         ? this.createScopedThread(request.backendId, this.scopeFor(request.executionPath), request.title ?? 'Untitled thread')

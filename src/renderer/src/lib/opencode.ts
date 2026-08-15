@@ -116,6 +116,9 @@ export const OpenCode = {
   backendAuthStatus: () => backendRequest<BackendAuthStatus[]>({ type: 'backend.auth.status' }),
   setBackendDefaults: (defaults: Partial<Record<BackendId, BackendModelPreference>>) =>
     backendRequest<void>({ type: 'backend.defaults.set', defaults }),
+  backendBinaries: () => backendRequest<Partial<Record<BackendId, string>>>({ type: 'backend.bin.get' }),
+  setBackendBinary: (backendId: BackendId, path: string) =>
+    backendRequest<Partial<Record<BackendId, string>>>({ type: 'backend.bin.set', backendId, path }),
   listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
   createSession: (title?: string, backendId: BackendId = 'opencode', scope: ThreadCreationScope = 'current') =>
     backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, scope }),

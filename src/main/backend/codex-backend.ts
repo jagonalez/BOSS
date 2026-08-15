@@ -1,4 +1,5 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { resolveBackendBin } from '../backend-bin'
 import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import { BACKEND_IDS, type BackendMessageOptions } from '@shared/backend'
@@ -343,12 +344,13 @@ export class CodexBackend implements Backend {
 
   async start(): Promise<void> {
     if (this.process) return
+    const bin = resolveBackendBin('codex')
     try {
-      this.version = execFileSync('codex', ['--version'], { encoding: 'utf8', timeout: 2500 }).trim()
+      this.version = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 2500 }).trim()
     } catch {
       throw new Error('Codex CLI is not installed or could not be started.')
     }
-    this.process = spawn('codex', ['app-server', '--stdio'], {
+    this.process = spawn(bin, ['app-server', '--stdio'], {
       cwd: this.projectPath || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe']
     })
