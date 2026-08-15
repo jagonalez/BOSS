@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Electron itself is never launched here, so skip its ~100MB binary download.
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # Catches renames that typecheck but break the preload bridge, since
+      # contextBridge keys and window.* calls are matched as strings.
+      - name: Check preload bridge matches renderer usage
+        run: |
+          bridge=$(grep -oE "exposeInMainWorld\('[a-z]+'" src/preload/index.ts | grep -oE "'[a-z]+'" | tr -d "'")
+          echo "preload exposes: $bridge"
+          stray=$(grep -rhoE "window\.[a-z]+\.(apiRequest|backendRequest|projectSet|openExternal)" src/renderer/src \
+            | grep -oE "window\.[a-z]+" | sort -u | grep -v "^window\.$bridge$" || true)
+          if [ -n "$stray" ]; then
+            echo "Renderer calls a bridge the preload does not expose:" >&2
+            echo "$stray" >&2
+            exit 1
+          fi
+
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # electron-vite compiles with Vite and never launches Electron, so the
+      # binary is dead weight here as well.
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
+      # Compiles main, preload, and renderer. Does not package: the .dmg needs
+      # the bundled opencode binary, which is fetched separately and gitignored.
+      - run: npm run build
