@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('workspace add menus align to their trigger and stay inside the pane', () => {
   assert.equal(workspaceMenuRight(900, 100, 1_000), 100)
@@ -204,4 +204,84 @@ test('threads are not listed as resources of themselves', () => {
   const owned = resourcesByThread([view])
 
   assert.deepEqual((owned.get('thread-1') ?? []).map((item) => item.kind), ['terminal'])
+})
+
+test('a new id never repeats', () => {
+  // The old generator combined a second-resolution timestamp with a counter
+  // that reset on reload, so a tab made after a restart could take the id of
+  // one already on screen.
+  const ids = new Set(Array.from({ length: 500 }, () => workspaceId('tab')))
+  assert.equal(ids.size, 500)
+})
+
+test('a saved workspace with a repeated id is repaired', () => {
+  // Two tabs with one id overwrite each other: the slot each paints into and
+  // the terminal and browser caches are all keyed by it.
+  const first = tab('thread', 'thread-1')
+  const clash = { ...tab('files'), id: first.id }
+  const view = workspaceView('Main', split('horizontal', group([first]), group([clash])))
+
+  const fixed = withUniqueIds({ views: [view], activeViewId: view.id, updatedAt: 0 })
+  const ids = walkTabs(fixed.views[0].root).map((item) => item.id)
+
+  assert.equal(new Set(ids).size, 2, 'both tabs should have their own id')
+  assert.equal(ids[0], first.id, 'the first use keeps its id, so a live terminal is not orphaned')
+  assert.notEqual(ids[1], first.id)
+})
+
+test('repair leaves a clean workspace untouched', () => {
+  const view = workspaceView('Main', split('horizontal',
+    group([tab('thread', 'thread-1')]),
+    group([tab('files'), tab('terminal')])
+  ))
+  const before = { views: [view], activeViewId: view.id, updatedAt: 0 }
+  const after = withUniqueIds(before)
+
+  assert.deepEqual(walkTabs(after.views[0].root).map((item) => item.id), walkTabs(view.root).map((item) => item.id))
+  assert.deepEqual(walkGroups(after.views[0].root).map((item) => item.id), walkGroups(view.root).map((item) => item.id))
+  assert.equal(after.activeViewId, before.activeViewId)
+})
+
+test('the active tab points at a tab that exists after repair', () => {
+  // activeTabId names an id that may have just been replaced. When the clash is
+  // within one pane there is no way to tell which tab was meant — both had the
+  // same id — so it resolves to the first, which at least exists.
+  const first = tab('thread', 'thread-1')
+  const clash = { ...tab('files'), id: first.id }
+  const pane = group([first, clash])
+  pane.activeTabId = clash.id
+  const view = workspaceView('Main', pane)
+
+  const fixed = withUniqueIds({ views: [view], activeViewId: view.id, updatedAt: 0 })
+  const group0 = walkGroups(fixed.views[0].root)[0]
+
+  assert.ok(
+    group0.tabs.some((item) => item.id === group0.activeTabId),
+    'the active tab must be one of the tabs in the pane'
+  )
+})
+
+test('an active tab keeps its place when the clash is elsewhere', () => {
+  // The ordinary case: the duplicate is in another pane, so this pane's own
+  // active tab is unambiguous and must not move.
+  const here = [tab('thread', 'thread-1'), tab('files')]
+  const pane = group(here)
+  pane.activeTabId = here[1].id
+  const elsewhere = group([{ ...tab('terminal'), id: here[0].id }])
+  const view = workspaceView('Main', split('horizontal', pane, elsewhere))
+
+  const fixed = withUniqueIds({ views: [view], activeViewId: view.id, updatedAt: 0 })
+  const group0 = walkGroups(fixed.views[0].root)[0]
+
+  assert.equal(group0.activeTabId, here[1].id, 'the files tab is still the active one')
+})
+
+test('two views sharing an id are separated', () => {
+  const one = workspaceView('One', group([tab('thread', 'a')]))
+  const two = { ...workspaceView('Two', group([tab('thread', 'b')])), id: one.id }
+
+  const fixed = withUniqueIds({ views: [one, two], activeViewId: one.id, updatedAt: 0 })
+
+  assert.notEqual(fixed.views[0].id, fixed.views[1].id)
+  assert.equal(fixed.activeViewId, fixed.views[0].id)
 })
