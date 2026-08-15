@@ -28,11 +28,9 @@ import {
   nextWorkspaceViewName,
   reorderTab,
   resizeSplit,
-  saveCustomLayouts,
   saveWorkspace,
   splitGroup,
   tab,
-  layoutFromView,
   updateActiveWorkspaceView,
   updateGroup,
   walkGroups,
@@ -572,23 +570,6 @@ export function applyLayout(layoutId: string): void {
   syncFocusedThread()
 }
 
-export function saveCurrentLayout(name: string): void {
-  const state = appStore.getState()
-  if (!state.projectWorkspace) return
-  const template = layoutFromView(activeWorkspaceView(state.projectWorkspace), name)
-  const templates = [...state.layouts, template]
-  saveCustomLayouts(templates)
-  appStore.setState({ layouts: templates })
-}
-
-export function removeLayout(templateId: string): void {
-  const state = appStore.getState()
-  const target = state.layouts.find((item) => item.id === templateId)
-  if (!target || target.builtIn) return
-  const templates = state.layouts.filter((item) => item.id !== templateId)
-  saveCustomLayouts(templates)
-  appStore.setState({ layouts: templates })
-}
 function persistSessionMeta(meta: Record<string, SessionMeta>): void {
   try {
     localStorage.setItem('boss.sessionMeta', JSON.stringify(meta))

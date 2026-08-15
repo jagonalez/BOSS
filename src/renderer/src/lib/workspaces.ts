@@ -14,7 +14,6 @@ import type {
 // Unversioned: nothing has shipped, so there is no other shape in the world to
 // migrate from. Version these at the first release, not before.
 const WORKSPACES_KEY = 'boss.workspace'
-const LAYOUTS_KEY = 'boss.layouts'
 /** Drag payload for a workspace tab. Shared so the sidebar can start a drag the
  *  panes already know how to accept. */
 export const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
@@ -93,43 +92,36 @@ export function cloneLayout(node: WorkspaceNode, stripBindings = false): Workspa
   return split(node.direction, cloneLayout(node.first, stripBindings), cloneLayout(node.second, stripBindings), node.ratio)
 }
 
+/** Grids, named for the shape they are.
+ *
+ *  These used to be "Focus", "Web development", "Four up" — and each named the
+ *  tab kinds it wanted, so applying one decided you needed a browser and two
+ *  terminals. A layout is only a shape: how many panes, arranged how. What
+ *  goes in them is whatever you already have open. */
 export const BUILTIN_LAYOUTS: Layout[] = [
-  { id: 'builtin-focus', name: 'Focus', favorite: true, builtIn: true, root: group([tab('thread')]) },
+  { id: 'grid-1x1', name: '1 × 1', root: group() },
   {
-    id: 'builtin-side-by-side',
-    name: 'Side by side',
-    favorite: true,
-    builtIn: true,
-    root: split('horizontal', group([tab('thread')]), group([tab('thread')]))
+    id: 'grid-2x1',
+    name: '2 × 1',
+    root: split('horizontal', group(), group())
   },
   {
-    id: 'builtin-web-development',
-    name: 'Web development',
-    favorite: true,
-    builtIn: true,
+    id: 'grid-1x2',
+    name: '1 × 2',
+    root: split('vertical', group(), group())
+  },
+  {
+    id: 'grid-3x1',
+    name: '3 × 1',
+    root: split('horizontal', group(), split('horizontal', group(), group()), 1 / 3)
+  },
+  {
+    id: 'grid-2x2',
+    name: '2 × 2',
     root: split(
       'horizontal',
-      group([tab('thread')]),
-      split('vertical', group([tab('browser'), tab('browser')]), group([tab('terminal'), tab('files')]), 0.58),
-      0.62
-    )
-  },
-  {
-    id: 'builtin-implementation-review',
-    name: 'Implementation + review',
-    favorite: true,
-    builtIn: true,
-    root: split('horizontal', group([tab('thread')]), group([tab('review'), tab('files')]), 0.64)
-  },
-  {
-    id: 'builtin-four-up',
-    name: 'Four up',
-    favorite: true,
-    builtIn: true,
-    root: split(
-      'horizontal',
-      split('vertical', group([tab('thread')]), group([tab('thread')])),
-      split('vertical', group([tab('browser')]), group([tab('terminal')]))
+      split('vertical', group(), group()),
+      split('vertical', group(), group())
     )
   }
 ]
@@ -164,15 +156,9 @@ function writeJson(key: string, value: unknown): void {
   }
 }
 
+/** The grids. Cloned so applying one cannot mutate the shared shape. */
 export function loadLayouts(): Layout[] {
-  const saved = readJson<Layout[]>(LAYOUTS_KEY, [])
-    .filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string' && isNode(item.root))
-    .map((item) => ({ ...item, builtIn: false }))
-  return [...BUILTIN_LAYOUTS.map((item) => ({ ...item, root: cloneLayout(item.root, true) })), ...saved]
-}
-
-export function saveCustomLayouts(layouts: Layout[]): void {
-  writeJson(LAYOUTS_KEY, layouts.filter((item) => !item.builtIn))
+  return BUILTIN_LAYOUTS.map((item) => ({ ...item, root: cloneLayout(item.root, true) }))
 }
 
 export function saveWorkspace(workspace: Workspace): void {
@@ -334,18 +320,28 @@ function removeTabFromGroup(target: WorkspaceGroup, tabId: string): { group: Wor
   return { group: { ...target, tabs, activeTabId }, tab: removed }
 }
 
-function collapseEmptyGroups(node: WorkspaceNode): WorkspaceNode {
+/** Drop the one pane a tab just left, if leaving emptied it.
+ *
+ *  Only that pane. An empty pane is a place the user made to put something in,
+ *  which is all a grid is, so collapsing every empty pane in the tree would
+ *  delete the rest of the grid on the first drag. `keep` protects the pane
+ *  being dropped on, which is empty right up to the moment the tab lands. */
+function collapseEmptied(node: WorkspaceNode, emptiedId: string, keep?: string): WorkspaceNode {
   if (node.type === 'group') return node
-  const first = collapseEmptyGroups(node.first)
-  const second = collapseEmptyGroups(node.second)
-  if (first.type === 'group' && first.tabs.length === 0) return second
-  if (second.type === 'group' && second.tabs.length === 0) return first
-  return { ...node, first, second }
+  const gone = (child: WorkspaceNode): boolean =>
+    child.type === 'group' && child.id === emptiedId && child.id !== keep && child.tabs.length === 0
+  if (gone(node.first)) return node.second
+  if (gone(node.second)) return node.first
+  return {
+    ...node,
+    first: collapseEmptied(node.first, emptiedId, keep),
+    second: collapseEmptied(node.second, emptiedId, keep)
+  }
 }
 
 export function closeTab(root: WorkspaceNode, groupId: string, tabId: string): WorkspaceNode {
   const updated = updateGroup(root, groupId, (target) => removeTabFromGroup(target, tabId).group)
-  return collapseEmptyGroups(updated)
+  return collapseEmptied(updated, groupId)
 }
 
 export function splitGroup(
@@ -394,7 +390,7 @@ export function moveTab(
   }
 
   let without = updateGroup(root, source.group.id, (target) => removeTabFromGroup(target, tabId).group)
-  without = collapseEmptyGroups(without)
+  without = collapseEmptied(without, source.group.id, targetGroupId)
   const target = findGroup(without, targetGroupId)
   if (!target) return { root, focusedGroupId: source.group.id }
 
@@ -434,8 +430,11 @@ export function moveTabAcrossViews(
 
   const lifted = findTab(source.root, tabId)
   if (!lifted) return views
-  const without = collapseEmptyGroups(
-    updateGroup(source.root, lifted.group.id, (item) => removeTabFromGroup(item, tabId).group)
+  // No `keep` here: the target pane is in the other view's tree, so this pass
+  // cannot reach it.
+  const without = collapseEmptied(
+    updateGroup(source.root, lifted.group.id, (item) => removeTabFromGroup(item, tabId).group),
+    lifted.group.id
   )
   // Re-add to the target, then let moveTab position it. Adding first keeps the
   // edge-split cases in one place rather than repeating splitGroup here.
@@ -473,42 +472,33 @@ export function reorderTab(root: WorkspaceNode, groupId: string, tabId: string, 
  *  layout safe while a terminal is running or a page is loaded — they are the
  *  same tabs, so their shell and their page carry over untouched.
  *
- *  A slot the layout asks for and you cannot fill is dropped. Tabs left over
- *  when the shape runs out go to the pane the layout would have put their kind
- *  in, or the first pane, so nothing is lost by applying a smaller shape. */
+ *  A shape with more panes than you have tabs for leaves the extra ones empty,
+ *  ready to be dragged into. One with fewer empties the remainder into the last
+ *  pane, so applying a smaller grid never loses anything. */
 export function arrangeInto(layout: Layout, view: WorkspaceView): WorkspaceView {
-  const spare = new Map<WorkspaceTabKind, WorkspaceTab[]>()
-  for (const item of walkTabs(view.root)) {
-    const list = spare.get(item.kind) ?? []
-    list.push(item)
-    spare.set(item.kind, list)
-  }
-  const placed = new Set<string>()
-  const claim = (kind: WorkspaceTabKind): WorkspaceTab | undefined => {
-    const item = spare.get(kind)?.shift()
-    if (item) placed.add(item.id)
-    return item
-  }
+  // Pane by pane, in order. Tabs that shared a pane stay together, and a pane
+  // that has nowhere to go in the new shape empties into the last one rather
+  // than being dropped — a layout must not close a running terminal because it
+  // asked for fewer panes than you had.
+  const existing = walkGroups(view.root).map((group) => group.tabs)
 
   const fill = (node: WorkspaceNode): WorkspaceNode => {
     if (node.type === 'split') {
       return { ...node, id: workspaceId('split'), first: fill(node.first), second: fill(node.second) }
     }
-    const tabs = node.tabs.map((slot) => claim(slot.kind)).filter((item): item is WorkspaceTab => Boolean(item))
+    const tabs = existing.shift() ?? []
     return { id: workspaceId('group'), type: 'group', tabs, activeTabId: tabs[0]?.id ?? null }
   }
 
   const root = fill(layout.root)
   const groups = walkGroups(root)
 
-  // Whatever the shape had no room for. Keeping them beats a layout quietly
-  // closing a terminal because it only asked for one. Safe to mutate: fill
-  // built every one of these groups a moment ago.
-  for (const item of walkTabs(view.root)) {
-    if (placed.has(item.id)) continue
-    const home = groups.find((group) => group.tabs.some((tab) => tab.kind === item.kind)) ?? groups[0]
-    home.tabs.push(item)
-    home.activeTabId ??= item.id
+  // Panes the shape had no room for. Safe to mutate: fill built these a moment
+  // ago, and nothing else holds them yet.
+  const last = groups[groups.length - 1]
+  for (const tabs of existing) {
+    last.tabs.push(...tabs)
+    last.activeTabId ??= tabs[0]?.id ?? null
   }
 
   const focused = groups.find((group) => group.id === view.focusedGroupId) ?? groups[0]
@@ -519,7 +509,6 @@ export function layoutFromView(workspace: WorkspaceView, name: string): Layout {
   return {
     id: workspaceId('layout'),
     name: name.trim() || 'Untitled layout',
-    favorite: true,
     root: cloneLayout(workspace.root, true)
   }
 }

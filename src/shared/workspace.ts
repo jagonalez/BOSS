@@ -58,13 +58,11 @@ export interface Workspace {
   updatedAt: number
 }
 
-/** A shape to arrange a view into: splits, ratios, and how many of each kind
- *  of tab sits where. Never a thread or a checkout — applying one rearranges
- *  what is already open rather than building anything new. */
+/** A grid to arrange a view into: how many panes, and how they are split.
+ *  Nothing about what goes in them — applying one moves the tabs you already
+ *  have rather than opening anything. */
 export interface Layout {
   id: string
   name: string
-  favorite: boolean
-  builtIn?: boolean
   root: WorkspaceNode
 }

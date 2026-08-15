@@ -21,10 +21,8 @@ import {
   focusWorkspaceGroup,
   loadMessages,
   loadTodos,
-  removeLayout,
   renameWorkspaceView,
   reorderWorkspaceTab,
-  saveCurrentLayout,
   sendWorkspaceTabToView,
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
@@ -758,7 +756,7 @@ function WorkspaceNodeView({ node, viewId }: { node: WorkspaceNode; viewId: stri
 
 function WorkspaceBar(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
-  const templates = useStore(appStore, (state) => state.layouts)
+  const layouts = useStore(appStore, (state) => state.layouts)
   const undo = useStore(appStore, (state) => state.workspaceUndo)
   const [layoutsOpen, setLayoutsOpen] = useState(false)
   const [editingViewId, setEditingViewId] = useState<string | null>(null)
@@ -794,10 +792,6 @@ function WorkspaceBar(): React.JSX.Element {
     applyLayout(id)
   }
 
-  const saveLayout = (): void => {
-    const name = window.prompt('Name this layout')?.trim()
-    if (name) saveCurrentLayout(name)
-  }
 
   const beginRename = (viewId: string, current: string): void => {
     setEditingViewId(viewId)
@@ -878,21 +872,14 @@ function WorkspaceBar(): React.JSX.Element {
         <button className="workspace-bar-button" onClick={() => setLayoutsOpen((open) => !open)}>Layouts <span>⌄</span></button>
         {layoutsOpen ? (
           <div className="workspace-layout-menu">
-            <div className="workspace-menu-title">Favourite layouts</div>
-            {templates.filter((item) => item.favorite).map((template) => (
-              <div className="workspace-layout-row" key={template.id}>
-                <button onClick={() => apply(template.id)}>
-                  <span>{template.name}</span><small>{template.builtIn ? 'Built in' : 'Custom'}</small>
-                </button>
-                {!template.builtIn ? (
-                  <button className="workspace-layout-delete" title="Delete layout" onClick={() => removeLayout(template.id)}>×</button>
-                ) : null}
-              </div>
+            {layouts.map((layout) => (
+              <button key={layout.id} className="workspace-layout-row" onClick={() => apply(layout.id)}>
+                {layout.name}
+              </button>
             ))}
           </div>
         ) : null}
       </div>
-      <button className="workspace-bar-button" onClick={saveLayout}>Save layout</button>
     </div>
   )
 }
