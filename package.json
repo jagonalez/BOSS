@@ -34,6 +34,7 @@
     "@tanstack/react-virtual": "^3.14.9",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "electron-updater": "^6.8.9",
     "highlight.js": "^11.11.1",
     "kokoro-js": "^1.2.1",
     "node-pty": "^1.1.0",
@@ -57,6 +58,11 @@
   "build": {
     "appId": "dev.boss.app",
     "productName": "BOSS",
+    "publish": {
+      "provider": "github",
+      "owner": "jagonalez",
+      "repo": "ralf"
+    },
     "files": [
       "out/**/*",
       "resources/**/*"

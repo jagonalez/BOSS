@@ -310,6 +310,7 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.SitesCfClear, () => deps.sites.cloudflareClear())
 
   ipcMain.handle(IpcChannels.UpdateStatusGet, () => deps.updates.status())
+  ipcMain.handle(IpcChannels.UpdateRestart, () => deps.updates.restart())
   ipcMain.handle(IpcChannels.UpdateCheck, async () => {
     const status = await deps.updates.check()
     broadcast(IpcChannels.UpdateChanged, status)

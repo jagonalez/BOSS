@@ -250,11 +250,14 @@ app.whenReady().then(() => {
     await mcpHub.start()
     await automations.start()
     await webAccess.start()
-    // Runs last and unawaited: an update check must never delay startup.
-    void updates.check().then((status) => {
-      if (!status.available || !mainWindow || mainWindow.isDestroyed()) return
+    // A download reports progress and completion long after the check that
+    // started it returned, so those have to be pushed rather than awaited.
+    updates.subscribe((status) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return
       mainWindow.webContents.send(IpcChannels.UpdateChanged, status)
     })
+    // Runs last and unawaited: an update check must never delay startup.
+    void updates.check()
   })()
 })
 

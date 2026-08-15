@@ -27,6 +27,11 @@ export interface UpdateStatus {
   latestVersion?: string
   url: string
   error?: string
+  /** How far the download has got, 0 to 100, while one is running. */
+  downloadPercent?: number
+  /** Downloaded and staged. The next quit applies it — there is nothing left
+   *  to do but stop using the old one. */
+  ready?: boolean
 }
 
 export interface BrowseBounds {
@@ -206,6 +211,7 @@ export const IpcChannels = {
   MenuCommand: 'menu:command',
   UpdateStatusGet: 'update:status',
   UpdateCheck: 'update:check',
+  UpdateRestart: 'update:restart',
   UpdateChanged: 'update:changed'
 } as const
 

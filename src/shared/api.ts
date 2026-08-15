@@ -106,6 +106,8 @@ export interface BossApi {
   updateStatus(): Promise<UpdateStatus>
   updateCheck(): Promise<UpdateStatus>
   onUpdateChanged(cb: (status: UpdateStatus) => void): () => void
+  /** Apply a staged update now instead of at the next quit. */
+  updateRestart(): Promise<void>
   /** A menu item was chosen. The menu names the action; the renderer runs it. */
   onMenuCommand(cb: (command: import('./ipc').MenuCommand) => void): () => void
 }

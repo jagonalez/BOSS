@@ -1,44 +1,16 @@
 import { app } from 'electron'
-import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { promisify } from 'node:util'
-import type { UpdateStatus } from '@shared/ipc'
-import { isNewer } from '@shared/version'
+import electronUpdater from 'electron-updater'
 
-const execFileAsync = promisify(execFile)
+const { autoUpdater } = electronUpdater
+import type { UpdateStatus } from '@shared/ipc'
 
 const REPO = 'jagonalez/ralf'
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
-const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`
-
-// A packaged macOS app does not inherit the shell PATH, so `gh` must be located
-// by absolute path the way tailscaleBin() does in web-access.ts.
-function ghBin(): string | null {
-  for (const candidate of ['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/usr/bin/gh']) {
-    if (existsSync(candidate)) return candidate
-  }
-  return null
-}
-
-// The repo is private, so the releases API needs credentials. Reading them from
-// the gh CLI at call time keeps the token out of the shipped bundle, where
-// anyone with the app could extract it.
-async function ghToken(): Promise<string | null> {
-  const fromEnv = process.env.GITHUB_TOKEN || process.env.GH_TOKEN
-  if (fromEnv) return fromEnv
-  const bin = ghBin()
-  if (!bin) return null
-  try {
-    const { stdout } = await execFileAsync(bin, ['auth', 'token'], { timeout: 5000 })
-    const token = stdout.trim()
-    return token || null
-  } catch {
-    return null
-  }
-}
 
 export class UpdateChecker {
   private cached: UpdateStatus
+  private onChange?: (status: UpdateStatus) => void
+  private wired = false
 
   constructor() {
     this.cached = { currentVersion: app.getVersion(), checking: false, available: false, url: RELEASES_PAGE }
@@ -48,45 +20,69 @@ export class UpdateChecker {
     return this.cached
   }
 
+  /** Told when a download progresses or finishes, since those arrive on their
+   *  own rather than in answer to a check. */
+  subscribe(listener: (status: UpdateStatus) => void): void {
+    this.onChange = listener
+  }
+
+  private publish(patch: Partial<UpdateStatus>): void {
+    this.cached = { ...this.cached, ...patch }
+    this.onChange?.(this.cached)
+  }
+
+  /** Downloads in the background and applies on quit.
+   *
+   *  Nothing is installed while the app runs: an agent may be mid-task, and
+   *  swapping the binary underneath it to save a restart is a poor trade. */
+  private wire(): void {
+    if (this.wired) return
+    this.wired = true
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.on('update-available', (info) => {
+      this.publish({ available: true, latestVersion: info.version, checking: false })
+    })
+    autoUpdater.on('update-not-available', () => {
+      this.publish({ available: false, checking: false })
+    })
+    autoUpdater.on('download-progress', (progress) => {
+      this.publish({ downloadPercent: Math.round(progress.percent) })
+    })
+    autoUpdater.on('update-downloaded', (info) => {
+      this.publish({ available: true, ready: true, downloadPercent: 100, latestVersion: info.version })
+    })
+    autoUpdater.on('error', (error) => {
+      // Reported, not thrown. A failed update check is not a reason to
+      // interrupt someone, and the app works perfectly well unupdated.
+      this.publish({ checking: false, error: error instanceof Error ? error.message : String(error) })
+    })
+  }
+
+  /** Apply a staged update now rather than at the next quit.
+   *
+   *  Only when one is staged: quitting to install nothing would just close the
+   *  app on someone who asked for an update. */
+  restart(): void {
+    if (!this.cached.ready) return
+    autoUpdater.quitAndInstall()
+  }
+
   async check(): Promise<UpdateStatus> {
     const currentVersion = app.getVersion()
-    this.cached = { ...this.cached, currentVersion, checking: true, error: undefined }
-    const token = await ghToken()
-    if (!token) {
-      // No credentials on this machine. Staying quiet beats nagging the user
-      // about a check they never asked for.
-      this.cached = { currentVersion, checking: false, available: false, url: RELEASES_PAGE }
+    this.publish({ currentVersion, checking: true, error: undefined })
+    // Only a packaged build can replace itself. In development there is no
+    // installer to apply and electron-updater says so with an error, which
+    // would show as a failure every launch.
+    if (!app.isPackaged) {
+      this.publish({ checking: false, available: false })
       return this.cached
     }
+    this.wire()
     try {
-      const res = await fetch(API_URL, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'User-Agent': 'boss-update-check'
-        },
-        signal: AbortSignal.timeout(10_000)
-      })
-      if (!res.ok) throw new Error(`GitHub responded ${res.status}`)
-      const body = (await res.json()) as { tag_name?: string; html_url?: string; name?: string }
-      const tag = body.tag_name ?? ''
-      const latestVersion = tag.replace(/^v/, '')
-      const available = Boolean(latestVersion) && isNewer(latestVersion, currentVersion)
-      this.cached = {
-        currentVersion,
-        checking: false,
-        available,
-        latestVersion: latestVersion || undefined,
-        url: body.html_url || RELEASES_PAGE
-      }
+      await autoUpdater.checkForUpdates()
     } catch (error) {
-      this.cached = {
-        currentVersion,
-        checking: false,
-        available: false,
-        url: RELEASES_PAGE,
-        error: error instanceof Error ? error.message : String(error)
-      }
+      this.publish({ checking: false, error: error instanceof Error ? error.message : String(error) })
     }
     return this.cached
   }
