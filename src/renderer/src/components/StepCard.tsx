@@ -232,6 +232,30 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
   )
 }
 
+/** A turn the model only thought about, shown as one line in the conversation.
+ *
+ *  Named by how long it took rather than by how much of it there is: a duration
+ *  tells you whether it is worth opening, where "3 notes" does not. */
+function ThoughtLine({ parts, duration }: { parts: Part[]; duration: number | null }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const notes = parts.filter((part) => part.type === 'reasoning' && (part.text ?? '').trim())
+  return (
+    <div className={`thought ${open ? 'open' : ''}`}>
+      <button className="thought-head" onClick={() => setOpen((value) => !value)}>
+        <span className="thought-chevron" style={{ transform: open ? 'rotate(90deg)' : undefined }}>
+          <ChevronIcon size={11} />
+        </span>
+        <span>{duration !== null ? `Thought for ${formatDuration(duration)}` : 'Thought about it'}</span>
+      </button>
+      {open ? (
+        <div className="thought-body">
+          {notes.map((part, index) => <MessageText key={`${part.id}-${index}`} text={part.text ?? ''} />)}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function StepCard({ message }: { message: MessageWithParts }): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const tools = message.parts.filter((p) => p.type === 'tool')
@@ -241,6 +265,15 @@ export function StepCard({ message }: { message: MessageWithParts }): React.JSX.
   const duration = messageDurationMs(message)
 
   if (tools.length === 0 && !hasReasoning && files.size === 0) return null
+
+  // Thinking with nothing to interleave it with is not a sequence of steps, so
+  // it does not get the container built to collapse one. A card counts what it
+  // holds — "12 commands" — and reasoning alone left it with nothing to count
+  // and a fallback label of "worked", which read as a tool panel that had
+  // swallowed the thinking. On its own it reads as part of the reply.
+  if (tools.length === 0 && files.size === 0) {
+    return <ThoughtLine parts={message.parts} duration={duration} />
+  }
 
   const running = tools.some((p) => isRunning(p.state?.status))
   const failed = tools.some((p) => isError(p.state?.status))
