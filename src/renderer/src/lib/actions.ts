@@ -1343,6 +1343,17 @@ export function noteThreadSend(sessionId: string): void {
   lastSendAt[sessionId] = Date.now()
 }
 
+/** End the grace period, because the backend has said the run is over.
+ *
+ *  The window covers the gap between sending and the first busy event, when
+ *  there is nothing authoritative to go on. Once idle arrives there is: leaving
+ *  the window open let the heuristics outvote it, and a thread whose last
+ *  message was the user's kept saying "Working" for the rest of the window —
+ *  or forever, on a reply that arrived with no trailing message event. */
+export function noteThreadSettled(sessionId: string): void {
+  delete lastSendAt[sessionId]
+}
+
 function recentlySent(sessionId: string): boolean {
   return Date.now() - (lastSendAt[sessionId] ?? 0) < SEND_GRACE_MS
 }

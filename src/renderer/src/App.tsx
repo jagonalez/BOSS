@@ -28,6 +28,7 @@ import {
   refreshAutomations,
   syncAutomationThreadPreferences,
   finalizeStalledParts,
+  noteThreadSettled,
   refreshStreaming,
   loadMode,
   loadThreadPreferences,
@@ -152,6 +153,9 @@ export function App(): React.JSX.Element {
             void loadMessages(sid)
             void loadTodos(sid)
           }
+          // Before refreshing, so the run's own grace window cannot outvote
+          // the idle that ended it.
+          noteThreadSettled(sid)
           refreshStreaming(sid)
           if (wasStreaming && !appStore.getState().streaming[sid] && !document.hasFocus()) {
             setAttention('done')
