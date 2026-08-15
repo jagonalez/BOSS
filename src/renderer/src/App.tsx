@@ -39,7 +39,6 @@ import {
   loadSessionMeta,
   loadMessages,
   loadTodos,
-  autoRespond,
   abortRun,
   setAttention,
   clearAttention,
@@ -48,8 +47,7 @@ import {
   loadEngine,
   initializeWorkspaceState,
   loadProjectWorkspace,
-  setNativeViewsSuspended,
-  modeForSession
+  setNativeViewsSuspended
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -178,28 +176,9 @@ export function App(): React.JSX.Element {
         }
         case 'permission.asked':
         case 'permission.updated': {
-          const props = (ev.properties ?? {}) as { sessionID?: string; id?: string }
-          const mode = modeForSession(props.sessionID)
-          const session = appStore.getState().sessions.find((item) => item.id === props.sessionID)
-          const backend = appStore.getState().backends.find((item) => item.id === session?.backendId)
-          const hostAutoResponse = mode === 'plan'
-            ? 'reject'
-            : mode === 'auto' && !backend?.capabilities.nativeAutoMode
-              ? 'once'
-              : undefined
-          if (hostAutoResponse) {
-            if (props.sessionID) {
-              appStore.setState((st) => {
-                const permissions = { ...st.permissions }
-                delete permissions[props.sessionID!]
-                return { permissions }
-              })
-            }
-            if (props.sessionID && props.id) {
-              void autoRespond(props.sessionID, props.id, hostAutoResponse)
-            }
-            break
-          }
+          // Main answers Auto and Plan requests against the thread's current
+          // mode and never forwards them, so anything arriving here is a
+          // request the user is meant to see.
           const patch = applyEvent(appStore.getState(), ev)
           if (Object.keys(patch).length > 0) appStore.setState(patch)
           setAttention('permission')

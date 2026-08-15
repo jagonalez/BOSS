@@ -19,6 +19,9 @@ export interface SessionInfo {
   path?: string
   directory?: string
   model?: SessionModel
+  /** The thread's permission mode. Main owns it, so a mid-run change reaches
+   *  the permission handler; the renderer mirrors it for display only. */
+  mode?: import('./backend').BackendModeId
   parentID?: string
   lineage?: {
     kind: 'fork' | 'clone' | 'relay' | 'delegate'

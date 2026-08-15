@@ -11,6 +11,7 @@ import type {
   BackendRequest,
   BackendCapabilities,
   BackendMessageOptions,
+  BackendModeId,
   BackendModelPreference,
   DelegatePlacement,
   QueuedFollowUp,
@@ -29,6 +30,7 @@ import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
 import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 import { budgetViolation, normalizeTaskPolicy, type TaskPolicy } from '@shared/task-policy'
+import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
 
 interface ThreadBinding {
   id: string
@@ -47,6 +49,13 @@ interface ThreadBinding {
   followUps?: QueuedFollowUp[]
   attention?: ThreadAttention
   policy?: TaskPolicy
+  /** The thread's permission mode, and the only copy that decides anything.
+   *
+   *  A backend that takes its mode as a launch argument reads it once, so a
+   *  mid-run change can never reach the running process. Keeping the mode here
+   *  lets the permission handler read what the mode is *now* rather than what
+   *  it was at spawn. */
+  mode?: BackendModeId
 }
 
 type LegacyThreadBinding = Omit<ThreadBinding, 'nativeSessionOwnership' | 'projectId' | 'executionPath'>
@@ -268,6 +277,44 @@ export class BackendManager {
     if (!binding.attention) return
     binding.attention = undefined
     this.save()
+  }
+
+  /** The mode this thread is in right now.
+   *
+   *  Falls back to the backend's first mode so a thread created before the mode
+   *  was stored here still answers with something its backend offers. */
+  private modeFor(binding: ThreadBinding): BackendModeId {
+    return resolveThreadMode(binding.mode, DEFINITIONS[binding.backendId].modes.map((mode) => mode.id))
+  }
+
+  /** Record the thread's mode and tell everyone watching.
+   *
+   *  This is the write half of the single source of truth. The renderer calls
+   *  it the moment the user picks a mode, so a change lands even mid-run. */
+  async setThreadMode(threadId: string, mode: BackendModeId): Promise<SessionInfo> {
+    const binding = this.binding(threadId)
+    if (binding.mode !== mode) {
+      binding.mode = mode
+      binding.updatedAt = now()
+      this.save()
+    }
+    const session = this.session(binding)
+    this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
+    return session
+  }
+
+  /** What BOSS itself should do with a permission request, given the mode now.
+   *
+   *  BOSS decides here rather than trusting the backend, because a backend that
+   *  takes its mode as a launch argument is still running under the mode the
+   *  thread started in. Returning undefined means "ask the user".
+   *
+   *  Auto answers every request, on every backend. An earlier version skipped
+   *  backends that advertise nativeAutoMode, which is why switching to Auto
+   *  mid-run did nothing on claude and codex: the flag they were launched with
+   *  said Ask, and BOSS had excused itself from enforcing anything. */
+  private hostPermissionResponse(binding: ThreadBinding): 'once' | 'reject' | undefined {
+    return hostPermissionResponse(this.modeFor(binding))
   }
 
   scopeFor(projectPath: string): ProjectScope {
@@ -521,6 +568,7 @@ export class BackendManager {
       parentID: binding.parentID,
       lineage: binding.lineage,
       worktree: binding.worktree,
+      mode: this.modeFor(binding),
       time: native?.time ?? { created: binding.createdAt, updated: binding.updatedAt }
     }
   }
@@ -650,6 +698,21 @@ export class BackendManager {
         this.busyThreads.delete(binding.id)
         this.setThreadAttention(binding, 'error', this.errorDetail(properties.error))
       } else if (eventType === 'permission.asked' || eventType === 'permission.updated') {
+        // Read the mode now, not at spawn. This is the whole fix: whatever the
+        // backend was launched under, the answer follows the mode the thread is
+        // in at the moment the request arrives.
+        const hostResponse = this.hostPermissionResponse(binding)
+        const permissionId = properties.id as string | undefined
+        if (hostResponse && permissionId) {
+          void this.handle({
+            type: 'thread.permission',
+            threadId: binding.id,
+            permissionId,
+            response: hostResponse
+          }).catch(() => { /* the run may have ended before the answer landed */ })
+          // Swallow the event so no surface prompts for something already answered.
+          return
+        }
         this.setThreadAttention(binding, 'permission')
       } else if (eventType === 'permission.replied') {
         if (binding.attention?.kind === 'permission') this.clearThreadAttention(binding)
@@ -837,6 +900,10 @@ export class BackendManager {
     const violation = budgetViolation(binding.policy, usage)
     if (violation) throw new Error(`${violation} Increase or remove the task budget before continuing.`)
     const backend = await this.ensureStarted(binding.backendId)
+    // A caller that names a mode is setting the thread's mode, not passing a
+    // one-off. Recording it here keeps the stored mode and the mode the backend
+    // launches under from drifting apart.
+    if (options?.mode) binding.mode = options.mode
     binding.updatedAt = now()
     this.save()
     this.transcripts?.beginRun(this.transcriptSource(binding))
@@ -1502,6 +1569,7 @@ export class BackendManager {
       case 'thread.followups.move': return this.moveFollowUp(request.threadId, request.followUpId, request.toIndex)
       case 'thread.followups.steer': return this.steerFollowUp(request.threadId, request.followUpId)
       case 'thread.abort': return this.abort(request.threadId)
+      case 'thread.mode.set': return this.setThreadMode(request.threadId, request.mode)
       case 'thread.todos': {
         const binding = this.binding(request.threadId)
         return (await this.ensureStarted(binding.backendId)).todosGet(binding.nativeSessionId)

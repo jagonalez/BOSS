@@ -143,6 +143,7 @@ export type BackendRequest =
   | { type: 'thread.followups.move'; threadId: string; followUpId: string; toIndex: number }
   | { type: 'thread.followups.steer'; threadId: string; followUpId: string }
   | { type: 'thread.abort'; threadId: string }
+  | { type: 'thread.mode.set'; threadId: string; mode: BackendModeId }
   | { type: 'thread.todos'; threadId: string }
   | { type: 'thread.permission'; threadId: string; permissionId: string; response: 'once' | 'always' | 'reject' }
   | { type: 'thread.diff'; threadId: string; messageId?: string }
