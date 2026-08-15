@@ -141,14 +141,23 @@ discarding it would take the branch with it.
 npm ci --silent
 ```
 
-A worktree lives outside the project directory, so Node cannot walk up to the
-original checkout's `node_modules` the way it can for a worktree nested inside
-one. Installing again is the safe answer; sharing the tree is the fast one:
+Whether a script is needed at all depends on **Settings → Worktrees → Where
+worktrees go**:
+
+| | |
+| --- | --- |
+| **App data directory** (default) | Outside your projects. Nothing appears in your repositories, but Node cannot walk up to the project's `node_modules`, so a worktree starts with nothing installed. |
+| **Inside the project** | In `.boss/worktrees`, where Node finds the project's modules by walking up — most Node projects then need no setup script at all. BOSS adds `.boss/` to the repository's `.git/info/exclude`, which is local to that clone and never committed. |
+
+Existing worktrees stay where they were created; the setting applies to new ones.
+
+If you keep worktrees outside the project, sharing the dependency tree is faster
+than installing again:
 
 ```sh
 #!/bin/sh
-# .worktreesetup — instant, but both checkouts share one dependency tree, so a
-# branch that changes package.json will have the wrong modules.
+# .worktreesetup — instant, but both checkouts then share one tree, so a branch
+# that changes package.json will have the wrong modules.
 ln -s "$BOSS_PROJECT_PATH/node_modules" node_modules
 ```
 

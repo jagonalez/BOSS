@@ -100,3 +100,65 @@ test('a script does not need its executable bit', async () => {
     cleanup()
   }
 })
+
+test('a worktree can live inside the project', async () => {
+  // So Node walks up and finds the project's node_modules — the reason to
+  // choose this over the app data directory.
+  const { dir, root, cleanup } = repo()
+  try {
+    const wt = manager(dir)
+    await wt.setSettings({ location: 'project' })
+    const created = await wt.create({ projectId: 'p', projectPath: root, sourcePath: root, title: 'inside' })
+
+    assert.ok(created.path.startsWith(realpathSync(root)), 'it should be under the project')
+    assert.match(created.path, /\.boss\/worktrees\//)
+  } finally {
+    cleanup()
+  }
+})
+
+test('a worktree in the project is excluded from git', async () => {
+  // Without this every worktree shows up as untracked files in the repository
+  // it came from. info/exclude rather than .gitignore: local to this clone,
+  // never committed, invisible to colleagues.
+  const { dir, root, cleanup } = repo()
+  try {
+    const wt = manager(dir)
+    await wt.setSettings({ location: 'project' })
+    await wt.create({ projectId: 'p', projectPath: root, sourcePath: root, title: 'ignored' })
+
+    assert.match(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8'), /^\.boss\/$/m)
+    const status = execFileSync('git', ['-C', root, 'status', '--porcelain'], { encoding: 'utf8' })
+    assert.equal(status.trim(), '', 'the project should have nothing untracked')
+  } finally {
+    cleanup()
+  }
+})
+
+test('the exclude entry is written once', async () => {
+  const { dir, root, cleanup } = repo()
+  try {
+    const wt = manager(dir)
+    await wt.setSettings({ location: 'project' })
+    await wt.create({ projectId: 'p', projectPath: root, sourcePath: root, title: 'one' })
+    await wt.create({ projectId: 'p', projectPath: root, sourcePath: root, title: 'two' })
+
+    const lines = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8').split('\n')
+    assert.equal(lines.filter((line) => line.trim() === '.boss/').length, 1)
+  } finally {
+    cleanup()
+  }
+})
+
+test('worktrees stay out of the project by default', async () => {
+  // Nothing touches a repository unless the setting says so.
+  const { dir, root, cleanup } = repo()
+  try {
+    const created = await manager(dir).create({ projectId: 'p', projectPath: root, sourcePath: root, title: 'outside' })
+    assert.ok(!created.path.startsWith(realpathSync(root)))
+    assert.ok(!existsSync(join(root, '.git', 'info', 'exclude'))
+      || !/\.boss\//.test(readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8')))
+  } finally {
+    cleanup()
+  }
+})

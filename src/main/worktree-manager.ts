@@ -17,7 +17,33 @@ interface WorktreeManagerOptions {
 
 const DEFAULT_SETTINGS: WorktreeSettings = {
   autoCleanupEnabled: true,
-  cleanupAfterDays: 30
+  cleanupAfterDays: 30,
+  // Outside the project by default: putting worktrees inside one means writing
+  // to its exclude file, and that is the user's repository to decide about.
+  location: 'app-data'
+}
+
+/** Where worktrees go when they go in the project. */
+const PROJECT_WORKTREE_DIR = join('.boss', 'worktrees')
+
+/** Keep BOSS's directory out of the repository's status.
+ *
+ *  .git/info/exclude, not .gitignore: it is local to this clone, never
+ *  committed, and does not appear in the user's diffs or reach their
+ *  colleagues. Opting in should not modify a tracked file. */
+async function excludeFromGit(repoRoot: string): Promise<void> {
+  const gitDir = (await git(repoRoot, ['rev-parse', '--git-common-dir'])).trim()
+  const excludeFile = join(isAbsolute(gitDir) ? gitDir : join(repoRoot, gitDir), 'info', 'exclude')
+  let current = ''
+  try {
+    current = await readFile(excludeFile, 'utf8')
+  } catch {
+    /* A clone without one is normal; it is created below. */
+  }
+  if (current.split('\n').some((line) => line.trim() === '.boss/')) return
+  await mkdir(dirname(excludeFile), { recursive: true })
+  const prefix = current && !current.endsWith('\n') ? '\n' : ''
+  await writeFile(excludeFile, `${current}${prefix}# BOSS worktrees\n.boss/\n`)
 }
 
 /** How long a project's setup script may run before it is given up on.
@@ -140,7 +166,8 @@ export class WorktreeManager {
       : Math.max(1, Math.min(365, Math.round(patch.cleanupAfterDays)))
     this.state.settings = {
       autoCleanupEnabled: patch.autoCleanupEnabled ?? this.state.settings.autoCleanupEnabled,
-      cleanupAfterDays: days
+      cleanupAfterDays: days,
+      location: patch.location ?? this.state.settings.location
     }
     await this.save()
     return { ...this.state.settings }
@@ -200,7 +227,13 @@ export class WorktreeManager {
     const name = slug(input.title ?? 'thread')
     const branch = `boss/${name}-${shortId}`
     const repoKey = `${slug(basename(repoRoot))}-${createHash('sha256').update(repoRoot).digest('hex').slice(0, 8)}`
-    const worktreePath = join(this.options.root, repoKey, `${name}-${shortId}`)
+    // In the project when asked for, so Node walks up and finds its
+    // node_modules; existing worktrees stay where they were made.
+    const inProject = this.state.settings.location === 'project'
+    if (inProject) await excludeFromGit(repoRoot)
+    const worktreePath = inProject
+      ? join(repoRoot, PROJECT_WORKTREE_DIR, `${name}-${shortId}`)
+      : join(this.options.root, repoKey, `${name}-${shortId}`)
     await mkdir(dirname(worktreePath), { recursive: true })
     await git(repoRoot, ['worktree', 'add', '-b', branch, worktreePath, baseCommit])
 

@@ -1404,7 +1404,8 @@ export class BackendManager {
       case 'worktree.settings.get': return this.worktreeSettings()
       case 'worktree.settings.set': return this.worktreeSettings({
         autoCleanupEnabled: request.autoCleanupEnabled,
-        cleanupAfterDays: request.cleanupAfterDays
+        cleanupAfterDays: request.cleanupAfterDays,
+        location: request.location
       })
       case 'worktree.remove': return this.removeWorktree(request.worktreeId)
       case 'thread.relay': return this.relay(request.sourceThreadId, request.targetThreadId, request.instruction)
