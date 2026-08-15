@@ -7,7 +7,8 @@ import type {
   BackendModeId,
   BackendModelDescriptor,
   BackendModelPreference,
-  BackendRequest
+  BackendRequest,
+  QueuedFollowUp
 } from '../shared/backend'
 import type { SessionInfo } from '../shared/opencode'
 
@@ -77,7 +78,7 @@ const backends: BackendDescriptor[] = [
     available: true,
     healthy: true,
     version: 'e2e',
-    capabilities: { ...capabilities, nativeFork: false },
+    capabilities: { ...capabilities, nativeFork: false, steering: 'stop-and-redirect' },
     modes: [
       { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
       { id: 'accept-edits', label: 'Accept edits', description: 'Accept file edits.' },
@@ -121,13 +122,36 @@ function initialSession(): SessionInfo {
   }
 }
 
+function initialClaudeSession(): SessionInfo {
+  return {
+    id: 'thread-claude',
+    backendId: 'claude',
+    nativeSessionId: 'native-claude',
+    projectId: 'boss-e2e',
+    projectPath: PROJECT,
+    executionPath: CHECKOUT,
+    title: 'Claude stop thread',
+    time: { created: Date.now() - 45_000, updated: Date.now() - 1_000 },
+    model: { id: 'claude-opus-5', provider: 'anthropic' }
+  }
+}
+
 /** Replace external I/O while preserving the real Electron window, preload
  * boundary, React tree, localStorage, and user interactions. This module is
  * reachable only when the main process explicitly starts with BOSS_E2E=1. */
 export function installE2EApi(boss: BossApi): void {
-  let sessions = [initialSession()]
+  let sessions = [initialSession(), initialClaudeSession()]
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
   let modesBySession: Record<string, BackendModeId> = {}
+  let followUps: Record<string, QueuedFollowUp[]> = {
+    'thread-claude': [{
+      id: 'followup-claude',
+      threadId: 'thread-claude',
+      text: 'Continue with the corrected instruction.',
+      attachments: [],
+      createdAt: Date.now()
+    }]
+  }
   let calls: RecordedCall[] = []
   let nextThread = 1
   const eventListeners = new Set<(data: string) => void>()
@@ -201,12 +225,22 @@ export function installE2EApi(boss: BossApi): void {
       case 'thread.todos': return []
       case 'thread.diff': return []
       case 'thread.models': return models[request.backendId ?? sessions.find((session) => session.id === request.threadId)?.backendId ?? 'opencode']
-      case 'thread.followups.list':
-      case 'thread.followups.add':
-      case 'thread.followups.update':
+      case 'thread.followups.list': return followUps[request.threadId] ?? []
+      case 'thread.followups.add': return followUps[request.threadId] ?? []
+      case 'thread.followups.update': return followUps[request.threadId] ?? []
       case 'thread.followups.remove':
-      case 'thread.followups.move':
-      case 'thread.followups.steer': return []
+        followUps = {
+          ...followUps,
+          [request.threadId]: (followUps[request.threadId] ?? []).filter((item) => item.id !== request.followUpId)
+        }
+        return followUps[request.threadId]
+      case 'thread.followups.move': return followUps[request.threadId] ?? []
+      case 'thread.followups.steer':
+        followUps = {
+          ...followUps,
+          [request.threadId]: (followUps[request.threadId] ?? []).filter((item) => item.id !== request.followUpId)
+        }
+        return followUps[request.threadId]
       case 'thread.clone':
       case 'thread.delegate': return createThread(request.backendId, request.type === 'thread.delegate' ? 'Delegated worker' : 'Continued thread')
       case 'thread.fork':

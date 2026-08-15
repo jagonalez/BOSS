@@ -88,7 +88,21 @@ export class ReviewManager {
   }
 
   async snapshot(path: string): Promise<ReviewSnapshot> {
-    const repository = await this.repository(path)
+    let repository: ReviewRepository
+    try {
+      repository = await this.repository(path)
+    } catch (error) {
+      // A thread can outlive its worktree. Hovering that thread still asks for
+      // a review snapshot, and rejecting the IPC call makes Electron print a
+      // stack for an expected stale-checkout state. Keep the snapshot shaped
+      // like every other unavailable review so callers can quietly ignore it.
+      return {
+        repositoryRoot: path,
+        branch: '',
+        localComments: this.state.comments[path] ?? [],
+        syncError: error instanceof Error ? error.message : String(error)
+      }
+    }
     const selected = this.providerFor(repository)
     const base: ReviewSnapshot = {
       repositoryRoot: repository.root,

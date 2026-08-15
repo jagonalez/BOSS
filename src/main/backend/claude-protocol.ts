@@ -12,6 +12,22 @@ export interface ClaudePermissionRequest {
   toolUseId?: string
 }
 
+/** Report a failed Claude result unless BOSS deliberately stopped the turn.
+ *
+ * Claude may write a non-success result while handling SIGINT. That is the
+ * expected end of Stop & redirect, not a failed turn worth showing to the
+ * user. Every other non-success result remains an error. */
+export function claudeResultError(value: Record<string, unknown>, intentionallyStopped = false): string | undefined {
+  if (value.type !== 'result' || value.subtype === 'success' || intentionallyStopped) return undefined
+  return String(value.error ?? value.result ?? 'Claude Code failed.')
+}
+
+/** A non-zero process exit is only an error when BOSS did not request it. */
+export function claudeExitError(code: number | null, stderr: string, intentionallyStopped = false): string | undefined {
+  if (intentionallyStopped || !code) return undefined
+  return stderr.trim() || `Claude Code exited with ${code}.`
+}
+
 /** The id a streamed part keeps once the finished message replaces it.
  *
  *  A live text or thinking part is published under a fixed id as the deltas

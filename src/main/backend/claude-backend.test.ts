@@ -2,13 +2,25 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol.ts'
+import { claudeExitError, claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeResultError, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol.ts'
 
 test('maps BOSS modes to current Claude permission modes', () => {
   assert.equal(claudePermissionMode('ask'), 'manual')
   assert.equal(claudePermissionMode('accept-edits'), 'acceptEdits')
   assert.equal(claudePermissionMode('auto'), 'auto')
   assert.equal(claudePermissionMode('plan'), 'plan')
+})
+
+test('an intentionally stopped Claude turn is not reported as a failure', () => {
+  const failed = { type: 'result', subtype: 'error_during_execution' }
+  assert.equal(claudeResultError(failed), 'Claude Code failed.')
+  assert.equal(claudeResultError({ ...failed, error: 'Actual failure' }), 'Actual failure')
+  assert.equal(claudeResultError(failed, true), undefined)
+  assert.equal(claudeResultError({ type: 'result', subtype: 'success' }), undefined)
+  assert.equal(claudeExitError(1, 'Process failure'), 'Process failure')
+  assert.equal(claudeExitError(1, '', false), 'Claude Code exited with 1.')
+  assert.equal(claudeExitError(1, 'Expected interrupt', true), undefined)
+  assert.equal(claudeExitError(0, ''), undefined)
 })
 
 test('parses Claude tool requests and builds once, always, and deny responses', () => {
