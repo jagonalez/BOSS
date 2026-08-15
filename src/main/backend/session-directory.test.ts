@@ -5,9 +5,9 @@ import test from 'node:test'
 import { SessionDirectories } from './session-directory.ts'
 
 test('a thread runs in its own checkout, not the last project selected', () => {
-  // What went wrong: a thread in the ralf project reported /Users/jeremy/dev/
-  // autofix, reasoned about the wrong repository, and on codex would have been
-  // given write access to it.
+  // Found by inspection, not from a report: setSessionDirectory was optional
+  // on the Backend interface and unimplemented by claude and codex, so the
+  // manager's call did nothing and both fell back to the one global path.
   const directories = new SessionDirectories()
   directories.set('thread-ralf', '/src/ralf')
   directories.set('thread-autofix', '/src/autofix')
