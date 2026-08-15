@@ -9,6 +9,7 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
+    "postinstall": "node scripts/fix-pty-permissions.mjs",
     "start": "electron-vite preview",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",

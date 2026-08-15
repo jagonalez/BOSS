@@ -30,6 +30,7 @@ import {
   undoWorkspaceChange
 } from '../lib/actions'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { tabContentNode } from '../lib/tab-content-nodes'
 import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
@@ -236,7 +237,16 @@ function checkoutPath(session: { executionPath?: string; worktree?: { path: stri
   return session.executionPath ?? session.worktree?.path
 }
 
-function AddMenu({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element {
+function AddMenu({
+  groupId,
+  ownerId: requested,
+  close
+}: {
+  groupId: string
+  /** The thread whose own + was used, when it was one. */
+  ownerId?: string
+  close: () => void
+}): React.JSX.Element {
   const sessions = useStore(appStore, (state) => state.sessions)
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
 
@@ -245,10 +255,17 @@ function AddMenu({ groupId, close }: { groupId: string; close: () => void }): Re
   // fallback to the active session: an empty pane would silently bind its
   // files to whatever thread happened to be selected somewhere else.
   const ownerId = useMemo(() => {
+    if (requested) return requested
     if (!workspace) return undefined
     const pane = findGroup(activeWorkspaceView(workspace).root, groupId)
-    return pane?.tabs.find((item) => item.kind === 'thread')?.sessionId
-  }, [workspace, groupId])
+    if (!pane) return undefined
+    // The thread you are looking at, not the first one in the pane. A pane can
+    // hold several, and taking the leftmost bound a review to whichever thread
+    // happened to be furthest left rather than the open one.
+    const active = pane.tabs.find((item) => item.id === pane.activeTabId)
+    if (active?.kind === 'thread' && active.sessionId) return active.sessionId
+    return pane.tabs.find((item) => item.kind === 'thread')?.sessionId
+  }, [workspace, groupId, requested])
   const owner = sessions.find((session) => session.id === ownerId)
   const inherited: WorkspaceCheckoutBinding | undefined = (() => {
     const path = checkoutPath(owner ?? {})
@@ -366,16 +383,35 @@ function TabContent({
   // and unmounting a terminal disposes its shell, a browser its page. Kept in
   // one list at the workspace root, the component never moves in the React
   // tree however far the tab travels; only the DOM container changes.
+  // Portalled into a node this tab owns, which is then moved into whichever
+  // pane is showing it. Portalling straight at the pane looked equivalent, but
+  // a portal aimed at a new container rebuilds its DOM rather than moving it,
+  // so every change of pane remounted the content and lost what it held.
+  //
+  // Moving the node keeps it: appendChild relocates a live element, with its
+  // scroll, focus and selection. This is what TerminalTab already does with
+  // xterm's element, which is why a terminal survives what a files tab did not.
+  const node = tabContentNode(item.id)
   const host = useTabHost(item.id)
-  // The slot carries the hidden attribute, not the content: slots are siblings
-  // in one pane, so an inactive one has to take no space rather than sit there
-  // holding a hidden child.
-  useEffect(() => {
-    if (host) host.hidden = !active
-  }, [host, active])
 
-  if (!host) return null
-  return createPortal(<div className="workspace-tab-content">{content}</div>, host)
+  useEffect(() => {
+    if (!host) return
+    if (node.parentElement !== host) {
+      // Moving an element blurs whatever inside it had focus, so a search box
+      // or an editor loses the caret on a drag. Selection survives on its own;
+      // focus has to be put back.
+      const focused = document.activeElement
+      const hadFocus = focused instanceof HTMLElement && node.contains(focused)
+      host.appendChild(node)
+      if (hadFocus) (focused as HTMLElement).focus({ preventScroll: true })
+    }
+    // The slot carries hidden, not the content: slots are siblings in one pane,
+    // so an inactive one has to take no space rather than sit there holding a
+    // hidden child.
+    host.hidden = !active
+  }, [host, node, active])
+
+  return createPortal(content, node)
 }
 
 /** Where each tab's content is painted, published by the pane that owns it.
@@ -467,6 +503,9 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
   const movable = Boolean(view && walkTabs(view.root).length > 1)
   const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
   const [menuRight, setMenuRight] = useState<number | null>(null)
+  /** Set when the menu was opened from one thread's own + rather than the
+   *  pane's, so it adds to that thread rather than whichever the pane shows. */
+  const [menuOwnerId, setMenuOwnerId] = useState<string | undefined>(undefined)
   const [dropTarget, setDropTarget] = useState<DropPosition | null>(null)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -612,6 +651,9 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
                     const trigger = event.currentTarget.getBoundingClientRect()
                     const container = event.currentTarget.closest('.workspace-group')?.getBoundingClientRect()
                     setMenuRight(container ? workspaceMenuRight(trigger.right, container.left, container.right) : 8)
+                    // This + sits on one thread's tab and says it adds to that
+                    // thread, so it names it rather than letting the menu pick.
+                    setMenuOwnerId(item.sessionId)
                     setMenuOpen(true)
                   }}
                 >
@@ -688,13 +730,13 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
             <small>Terminals, files and reviews belong to a thread, so they come later.</small>
           </button>
         ) : null}
-        {/* Slots only. The content itself lives at the workspace root and is
-            portalled in here, so moving a tab between panes moves the DOM
-            without unmounting the component behind it. */}
+        {/* Slots only, and empty ones: each tab owns its content node and that
+            node is moved in here. The component behind it never moves in the
+            React tree, and the DOM it built is relocated rather than rebuilt. */}
         {group.tabs.map((item) => <TabSlot key={item.id} tabId={item.id} />)}
       </div>
 
-      {menuOpen ? <div ref={menuRef}><AddMenu groupId={group.id} close={() => setMenuOpen(false)} /></div> : null}
+      {menuOpen ? <div ref={menuRef}><AddMenu groupId={group.id} ownerId={menuOwnerId} close={() => setMenuOpen(false)} /></div> : null}
       {tabMenu ? (() => {
         const item = group.tabs.find((candidate) => candidate.id === tabMenu.tabId)
         if (!item) return null

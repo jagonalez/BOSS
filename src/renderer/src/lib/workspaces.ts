@@ -23,11 +23,20 @@ export const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
  *  not exist. A thread already on screen drags as a TAB_DRAG_TYPE instead. */
 export const SESSION_DRAG_TYPE = 'application/x-boss-session'
 
-let sequence = 0
-
+/** A new id for a tab, pane or view.
+ *
+ *  Random, not a counter. The counter reset to zero on every reload while the
+ *  workspace itself was saved, so a tab made after a restart could take the id
+ *  of one already on screen — the timestamp is only second-resolution in base
+ *  36, so two tabs made in the same second after a reload collided outright.
+ *
+ *  Two tabs sharing an id is not a cosmetic problem. Tabs are keyed by id
+ *  everywhere: the slot each one paints into, the terminal and browser caches,
+ *  React's own reconciliation. A collision had two tabs overwriting each
+ *  other's slot, so both unmounted and remounted repeatedly and a files tab
+ *  lost its open file. */
 export function workspaceId(prefix: string): string {
-  sequence += 1
-  return `${prefix}-${Date.now().toString(36)}-${sequence.toString(36)}`
+  return `${prefix}-${crypto.randomUUID()}`
 }
 
 export function tab(kind: WorkspaceTabKind, sessionId?: string, checkout?: WorkspaceCheckoutBinding): WorkspaceTab {
@@ -172,6 +181,54 @@ export function saveWorkspace(workspace: Workspace): void {
  *  projects swapped your layout out from under you, and going back showed a
  *  different one. A thread carries its own project, so nothing above it needs
  *  to. */
+/** Give a repeated id a new one, leaving first uses alone.
+ *
+ *  Workspaces saved before ids were random can hold duplicates, and a duplicate
+ *  is not survivable: tabs are keyed by id for the slot they paint into and for
+ *  the terminal and browser caches, so two tabs with one id overwrite each
+ *  other. Only the later use is renamed, so a tab that already owns a live
+ *  terminal keeps it. */
+export function withUniqueIds(workspace: Workspace): Workspace {
+  const seen = new Set<string>()
+  const fresh = (id: string, prefix: string): string => {
+    if (!seen.has(id)) {
+      seen.add(id)
+      return id
+    }
+    const replacement = workspaceId(prefix)
+    seen.add(replacement)
+    return replacement
+  }
+  const fixNode = (node: WorkspaceNode): WorkspaceNode => {
+    if (node.type === 'split') {
+      return { ...node, id: fresh(node.id, 'split'), first: fixNode(node.first), second: fixNode(node.second) }
+    }
+    const tabs = node.tabs.map((item) => ({ ...item, id: fresh(item.id, 'tab') }))
+    const activeIndex = node.tabs.findIndex((item) => item.id === node.activeTabId)
+    return {
+      ...node,
+      id: fresh(node.id, 'group'),
+      tabs,
+      // By position: the id it pointed at may have just been replaced.
+      activeTabId: activeIndex >= 0 ? tabs[activeIndex].id : tabs[0]?.id ?? null
+    }
+  }
+  const views = workspace.views.map((view) => {
+    const root = fixNode(view.root)
+    const groups = walkGroups(root)
+    return {
+      ...view,
+      id: fresh(view.id, 'view'),
+      root,
+      focusedGroupId: groups.some((item) => item.id === view.focusedGroupId) ? view.focusedGroupId : groups[0]?.id ?? view.focusedGroupId
+    }
+  })
+  const activeViewId = views.some((view) => view.id === workspace.activeViewId)
+    ? workspace.activeViewId
+    : views[0]?.id ?? workspace.activeViewId
+  return { ...workspace, views, activeViewId }
+}
+
 export function loadWorkspace(sessionId?: string): Workspace {
   const saved = readJson<Workspace | null>(WORKSPACES_KEY, null)
   if (
@@ -179,7 +236,7 @@ export function loadWorkspace(sessionId?: string): Workspace {
     saved.views.length > 0 &&
     saved.views.every((view) => view && typeof view.id === 'string' && typeof view.name === 'string' && isNode(view.root))
   ) {
-    return saved
+    return withUniqueIds(saved)
   }
   // Anything else is a shape this build does not read, so start fresh rather
   // than carry a reader for it. A layout is an arrangement, not content.
@@ -279,6 +336,25 @@ export function findTab(node: WorkspaceNode, tabId: string): { group: WorkspaceG
     if (found) return { group: item, tab: found }
   }
   return undefined
+}
+
+/** The resource a thread already has for this checkout, if any.
+ *
+ *  Owner as well as checkout. Matching on the checkout alone handed a thread
+ *  the tab belonging to whichever thread asked first: the diff was right, but
+ *  the sidebar files a resource under its owner, so it appeared under someone
+ *  else's thread. A thread can also move between checkouts — an agent can put
+ *  one on a fresh worktree mid-conversation — so the checkout is not a stable
+ *  name for a thread's own resources. */
+export function findOwnedResource(
+  node: WorkspaceNode,
+  kind: WorkspaceTabKind,
+  sessionId: string | undefined,
+  contextPath: string | undefined
+): WorkspaceTab | undefined {
+  return walkTabs(node).find((item) =>
+    item.kind === kind && item.sessionId === sessionId && item.contextPath === contextPath
+  )
 }
 
 export function findSessionTab(node: WorkspaceNode, sessionId: string): { group: WorkspaceGroup; tab: WorkspaceTab } | undefined {
