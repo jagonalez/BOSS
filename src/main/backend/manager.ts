@@ -1009,6 +1009,19 @@ export class BackendManager {
     return { path: worktree.path, branch: worktree.branch }
   }
 
+  /** Take the calling thread off its worktree, for the agent tool.
+   *
+   *  Removes the checkout and returns the thread to the project. Git refuses
+   *  while there is uncommitted or untracked work, so nothing is lost by
+   *  asking; the branch is kept either way. */
+  async leaveWorktree(threadId: string): Promise<{ path: string; branch: string }> {
+    const binding = this.binding(threadId)
+    const worktree = binding.worktree
+    if (!worktree || worktree.status !== 'active') throw new Error('This thread is not on a worktree.')
+    await this.removeWorktree(worktree.id)
+    return { path: binding.projectPath, branch: worktree.branch }
+  }
+
   async spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread> {
     const created = await this.forkIntoWorktree(threadId, instruction)
     const info = this.threadInfo(created.id)
@@ -1288,7 +1301,18 @@ export class BackendManager {
     if (owner && this.busyThreads.has(owner.id)) throw new Error('Stop the running agent before removing its worktree.')
     const removed = await this.worktrees.remove(id)
     for (const binding of this.bindings.values()) {
-      if (binding.worktree?.id === id) binding.worktree = removed
+      if (binding.worktree?.id !== id) continue
+      binding.worktree = removed
+      // Back to the project. Marking the worktree removed while leaving the
+      // thread pointing into it left the thread in a directory that no longer
+      // exists — every command after that failed with no explanation.
+      binding.executionPath = binding.projectPath
+      this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, binding.projectPath)
+      this.emit({
+        type: 'session.updated',
+        properties: { info: this.session(binding) },
+        backendId: binding.backendId
+      })
     }
     this.save()
     return removed

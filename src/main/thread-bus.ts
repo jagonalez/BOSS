@@ -40,6 +40,7 @@ export interface ThreadBusHost {
   deliverThreadMessage(threadId: string, body: string): Promise<void>
   spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread>
   useWorktree(threadId: string): Promise<{ path: string; branch: string }>
+  leaveWorktree(threadId: string): Promise<{ path: string; branch: string }>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
 }
 
@@ -223,7 +224,7 @@ export class ThreadBus {
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
-    if (!['boss_threads_list', 'boss_threads_read', 'boss_threads_send', 'boss_threads_reply', 'boss_threads_spawn_worktree', 'boss_threads_use_worktree'].includes(tool)) {
+    if (!['boss_threads_list', 'boss_threads_read', 'boss_threads_send', 'boss_threads_reply', 'boss_threads_spawn_worktree', 'boss_threads_use_worktree', 'boss_threads_leave_worktree'].includes(tool)) {
       throw new Error('Unknown BOSS thread tool.')
     }
 
@@ -271,6 +272,8 @@ export class ThreadBus {
         if (instruction.length > MAX_BODY) throw new Error(`Instructions are limited to ${MAX_BODY.toLocaleString()} characters.`)
         return this.host.spawnWorktreeThread(caller.id, instruction)
       }
+      case 'boss_threads_leave_worktree':
+        return this.host.leaveWorktree(caller.id)
       case 'boss_threads_use_worktree': {
         // No policy check: this isolates the caller rather than reaching
         // another thread, so it is the one thread tool that takes nothing away
@@ -498,6 +501,11 @@ export class ThreadBus {
       {
         name: 'boss_threads_use_worktree',
         description: THREAD_TOOL_DESCRIPTIONS.useWorktree,
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      {
+        name: 'boss_threads_leave_worktree',
+        description: THREAD_TOOL_DESCRIPTIONS.leaveWorktree,
         inputSchema: { type: 'object', properties: {}, additionalProperties: false }
       },
       ...QA_TOOL_DEFINITIONS.map((tool) => ({
