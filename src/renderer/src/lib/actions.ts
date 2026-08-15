@@ -5,6 +5,7 @@ import type { MenuCommand } from '@shared/ipc'
 import { disposeTerminalSession } from './terminal-sessions'
 import { disposeTabContentNode } from './tab-content-nodes'
 import { disposeBrowseGuest } from './browse-guests'
+import { resolveMode, resolveVariant } from './thread-defaults'
 import { startMicCapture } from './mic'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
@@ -328,6 +329,26 @@ export function setDefaultModel(backendId: BackendId, model: BackendModelDescrip
     } else {
       delete defaultModels[backendId]
     }
+    persistThreadPreference('boss.defaultModels', defaultModels)
+    void OpenCode.setBackendDefaults(defaultModels).catch(() => {})
+    return { defaultModels }
+  })
+}
+
+/** Change part of what a backend's new threads start with.
+ *
+ *  Merged into the existing preference rather than replacing it, so setting a
+ *  permission mode does not clear the model or the thinking level chosen
+ *  beside it. Does nothing without a default model, since a thinking level is
+ *  saved against a model and has nowhere to live without one. */
+export function setBackendDefault(
+  backendId: BackendId,
+  patch: Partial<Pick<BackendModelPreference, 'mode' | 'variant'>>
+): void {
+  appStore.setState((state) => {
+    const current = state.defaultModels?.[backendId]
+    if (!current) return {}
+    const defaultModels = { ...(state.defaultModels ?? {}), [backendId]: { ...current, ...patch } }
     persistThreadPreference('boss.defaultModels', defaultModels)
     void OpenCode.setBackendDefaults(defaultModels).catch(() => {})
     return { defaultModels }
@@ -1003,17 +1024,31 @@ export function modelProviderForSession(sessionId?: string): string | null {
 
 export function variantForSession(sessionId?: string): string | null {
   const state = appStore.getState()
-  return sessionId && Object.prototype.hasOwnProperty.call(state.variantsBySession, sessionId)
-    ? state.variantsBySession[sessionId]
-    : state.variant
+  const backendId = sessionId ? state.sessions.find((session) => session.id === sessionId)?.backendId : state.engine
+  const preference = backendId ? state.defaultModels?.[backendId] : undefined
+  return resolveVariant(
+    Boolean(sessionId && Object.prototype.hasOwnProperty.call(state.variantsBySession, sessionId)),
+    sessionId ? state.variantsBySession[sessionId] : null,
+    sessionId ? state.modelsBySession[sessionId] ?? preference?.modelID : preference?.modelID,
+    preference,
+    state.variant
+  )
 }
 
 export function modeForSession(sessionId?: string): BackendModeId {
   const state = appStore.getState()
-  const requested = (sessionId && state.modesBySession[sessionId]) || state.mode
   const backendId = sessionId ? state.sessions.find((session) => session.id === sessionId)?.backendId : state.engine
+  // What this thread was set to, then what this backend defaults to, then the
+  // app's. A default is per backend because the modes are: codex has no
+  // accept-edits, and pi has one mode, so a single global would name something
+  // half of them cannot do.
   const descriptor = state.backends.find((backend) => backend.id === backendId)
-  return descriptor?.modes.some((mode) => mode.id === requested) ? requested : descriptor?.modes[0]?.id ?? requested
+  return resolveMode(
+    sessionId ? state.modesBySession[sessionId] : undefined,
+    backendId ? state.defaultModels?.[backendId]?.mode : undefined,
+    state.mode,
+    descriptor?.modes.map((mode) => mode.id) ?? []
+  )
 }
 
 export function setModel(id: string, sessionId: string | null = appStore.getState().activeSessionId, providerID?: string): void {

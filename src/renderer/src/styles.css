@@ -749,6 +749,28 @@ textarea {
   font-weight: 600;
 }
 
+/* What a new thread on this backend starts with, under the model it starts
+   with. Two columns so the labels line up when a backend offers both. */
+.settings-defaults {
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.settings-defaults label {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-defaults span {
+  color: var(--text-faint);
+  font-size: var(--type-label);
+  font-weight: 600;
+}
+
 .settings-model-picker {
   position: relative;
   min-width: 0;
@@ -816,11 +838,18 @@ textarea {
   top: calc(100% + 5px);
   right: 0;
   width: max(100%, 390px);
+  display: flex;
+  flex-direction: column;
   padding: 6px;
   border: 1px solid var(--line-default);
   border-radius: 10px;
   background: var(--surface-overlay);
   box-shadow: var(--shadow-lg);
+}
+
+.settings-model-picker-menu.flip {
+  top: auto;
+  bottom: calc(100% + 5px);
 }
 
 .settings-model-search {
@@ -841,8 +870,11 @@ textarea {
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
+/* Against the window, not a fixed number: the menu opens downward from a row
+   that can sit near the bottom of a short window, and the list is as long as
+   the backend has models. */
 .settings-model-results {
-  max-height: min(330px, 48vh);
+  max-height: min(330px, 40vh);
   margin-top: 5px;
   overflow-y: auto;
 }
@@ -7085,7 +7117,10 @@ select:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  /* Above the settings page, which is 1000. A confirm is always raised by
+     something already on screen, so it has to sit over whatever asked for it —
+     opening one behind the settings page looked like nothing happened. */
+  z-index: 1100;
 }
 
 .modal {

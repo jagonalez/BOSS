@@ -70,6 +70,15 @@ export interface BackendModelDescriptor {
 export interface BackendModelPreference {
   modelID: string
   providerID: string
+  /** Thinking level, when the chosen model offers one. Stored beside the model
+   *  rather than per backend because the levels belong to the model: claude's
+   *  Sonnet stops at high where Opus goes to max, and codex reads them from
+   *  each model's own list. A level saved against one model means nothing to
+   *  another. */
+  variant?: string
+  /** How much the agent may do without asking. Per backend, because the modes
+   *  are the backend's own — codex has no accept-edits, pi has one mode. */
+  mode?: BackendModeId
 }
 
 export interface BackendMessageOptions {
