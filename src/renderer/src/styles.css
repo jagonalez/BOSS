@@ -3147,36 +3147,28 @@ body.workspace-dragging .workspace-tab-slot {
   color: var(--text-faint);
 }
 
+/* Portalled to the body, so it is positioned against the viewport rather than
+   the row it belongs to. The menu scrolls when it is taller than the window,
+   and a scroll container clips both axes — there is no overflow pair that
+   scrolls vertically and lets a flyout spill sideways, so it cannot be a child
+   of the menu and be seen. React sets left and top; it opens leftward or is
+   pulled up when there is no room. Above the menu's own z-index so it draws
+   over the row it came from. */
 .ctx-submenu-items {
-  position: absolute;
-  top: -4px;
-  left: 100%;
-  min-width: 160px;
-  margin-left: 2px;
+  position: fixed;
+  min-width: 170px;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-elevated);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 1px;
+  z-index: 201;
 }
 
-/* Opens leftward when the menu sits near the right edge, so the submenu does
-   not run off the window. */
-.ctx-submenu.flip .ctx-submenu-items {
-  left: auto;
-  right: 100%;
-  margin-left: 0;
-  margin-right: 2px;
-}
-
-.ctx-submenu:hover .ctx-submenu-items {
-  display: flex;
-}
-
-.ctx-submenu:hover .ctx-parent {
+.ctx-parent.open {
   background: var(--bg-hover);
   color: var(--text);
 }

@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
 import type { Workspace, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
@@ -52,6 +53,79 @@ const ADDABLE: Array<{ kind: WorkspaceTabKind; label: string }> = [
   { kind: 'review', label: 'Review' },
   { kind: 'browser', label: 'Browser' }
 ]
+
+/** A flyout for a row of the context menu.
+ *
+ *  The menu scrolls when it is taller than the window, and a scroll container
+ *  clips its own overflow on both axes — CSS has no way to scroll one axis and
+ *  let the other spill, since overflow-x: visible computes to auto beside an
+ *  overflow-y. So the flyout cannot be a child of the menu and be seen. It is
+ *  portalled to the body and positioned against the viewport instead, which
+ *  also keeps it clear of the menu's own scrolling. */
+function CtxSubmenu({
+  label,
+  children
+}: {
+  label: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const rowRef = useRef<HTMLDivElement>(null)
+  const flyoutRef = useRef<HTMLDivElement>(null)
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
+
+  // Placed from the flyout's real size, not from an item count and an assumed
+  // row height — those drift the moment a label wraps or the type scale
+  // changes, and the error shows up as a flyout hanging off the bottom.
+  //
+  // A layout effect, so the measurement and the move both happen before the
+  // browser paints: it is never seen in the corner it was measured in.
+  useLayoutEffect(() => {
+    if (!open) {
+      setAt(null)
+      return
+    }
+    const row = rowRef.current?.getBoundingClientRect()
+    const flyout = flyoutRef.current?.getBoundingClientRect()
+    if (!row || !flyout) return
+    // Opens leftward when there is no room to the right, and is pulled up when
+    // it would run off the bottom, the way the menu itself is.
+    const left =
+      row.right + flyout.width + 8 > window.innerWidth ? row.left - flyout.width - 2 : row.right + 2
+    const top = Math.max(8, Math.min(row.top - 4, window.innerHeight - 8 - flyout.height))
+    setAt({ left, top })
+  }, [open])
+
+  return (
+    <div
+      ref={rowRef}
+      className="ctx-submenu"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button className={`ctx-item ctx-parent ${open ? 'open' : ''}`}>
+        <span>{label}</span>
+        <span className="ctx-arrow">›</span>
+      </button>
+      {open
+        ? createPortal(
+            <div
+              ref={flyoutRef}
+              className="ctx-submenu-items"
+              // Rendered at the row so it can be measured, then moved to its
+              // final place by the layout effect above — both before paint.
+              style={at ? { left: at.left, top: at.top } : { left: 0, top: 0 }}
+              onMouseEnter={() => setOpen(true)}
+              onMouseLeave={() => setOpen(false)}
+            >
+              {children}
+            </div>,
+            document.body
+          )
+        : null}
+    </div>
+  )
+}
 
 function timeAgo(ts?: number): string {
   if (!ts) return ''
@@ -320,7 +394,13 @@ export function Sidebar(): React.JSX.Element {
       if (e.key === 'Escape') close()
     }
     const onDoc = (e: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) close()
+      const target = e.target as Node
+      if (!menuRef.current || menuRef.current.contains(target)) return
+      // A submenu is portalled to the body to escape the menu's scrolling, so
+      // it is not inside menuRef. Without this a click on Add's items closed
+      // the menu on mousedown and the item never received the click.
+      if ((target as Element).closest?.('.ctx-submenu-items')) return
+      close()
     }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
@@ -613,31 +693,25 @@ export function Sidebar(): React.JSX.Element {
               {/* A chat has no checkout, so a terminal or diff has nowhere to
                   point and Add is left out entirely. */}
               {(ctx.session.projectPath ?? ctx.session.directory ?? ctx.session.path) ? (
-                <div className={`ctx-submenu ${ctx.x > window.innerWidth - 400 ? 'flip' : ''}`}>
-                  <button className="ctx-item ctx-parent">
-                    <span>Add</span>
-                    <span className="ctx-arrow">›</span>
-                  </button>
-                  <div className="ctx-submenu-items">
-                    {ADDABLE.map(({ kind, label }) => {
-                      const Icon = RESOURCE_ICONS[kind] ?? ChatIcon
-                      return (
-                        <button
-                          key={kind}
-                          className="ctx-item"
-                          onClick={() => {
-                            const target = ctx.session!
-                            setCtx(null)
-                            addResourceToSession(target.id, kind)
-                          }}
-                        >
-                          <Icon size={13} />
-                          <span>{label}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
+                <CtxSubmenu label="Add">
+                  {ADDABLE.map(({ kind, label }) => {
+                    const Icon = RESOURCE_ICONS[kind] ?? ChatIcon
+                    return (
+                      <button
+                        key={kind}
+                        className="ctx-item"
+                        onClick={() => {
+                          const target = ctx.session!
+                          setCtx(null)
+                          addResourceToSession(target.id, kind)
+                        }}
+                      >
+                        <Icon size={13} />
+                        <span>{label}</span>
+                      </button>
+                    )
+                  })}
+                </CtxSubmenu>
               ) : null}
               {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Delegate…', () => appStore.setState({ delegateTarget: ctx.session!.id }))}
