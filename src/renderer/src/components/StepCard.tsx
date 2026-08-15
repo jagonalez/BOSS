@@ -252,6 +252,11 @@ export function StepCard({ message }: { message: MessageWithParts }): React.JSX.
   if (pages) summary.push(`${pages} ${pages === 1 ? 'page' : 'pages'} fetched`)
   if (files.size) summary.push(`edited ${files.size} ${files.size === 1 ? 'file' : 'files'}`)
   if (summary.length === 0 && tools.length) summary.push(`${tools.length} steps`)
+  // A turn can be all reasoning and no tools — a model that thinks at length
+  // before answering, and some local ones always do. Counting only tools left
+  // the card saying "worked" with the thinking hidden behind it, which reads
+  // as a tool panel rather than as something worth opening.
+  if (summary.length === 0 && hasReasoning) summary.push('thought about it')
 
   return (
     <div className={`step-card ${running ? 'running' : ''} ${failed ? 'failed' : ''}`}>
