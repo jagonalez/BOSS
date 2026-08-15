@@ -10,6 +10,7 @@ import type {
   BackendRequest,
   QueuedFollowUp
 } from '../shared/backend'
+import { isAbortError } from '../shared/backend'
 import type { SessionInfo } from '../shared/opencode'
 
 type RecordedCall =
@@ -40,7 +41,9 @@ const backends: BackendDescriptor[] = [
     available: true,
     healthy: true,
     version: 'e2e',
-    capabilities: { ...capabilities, nativeAutoMode: false },
+    // Opencode has no native steering: BOSS stops the run and sends the queued
+    // instruction next, which is what makes it report an abort.
+    capabilities: { ...capabilities, nativeAutoMode: false, steering: 'stop-and-redirect' },
     modes: [
       { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
       { id: 'auto', label: 'Auto', description: 'Approve supported actions.' },
@@ -150,11 +153,19 @@ export function installE2EApi(boss: BossApi): void {
       text: 'Continue with the corrected instruction.',
       attachments: [],
       createdAt: Date.now()
+    }],
+    'thread-source': [{
+      id: 'followup-source',
+      threadId: 'thread-source',
+      text: 'Redirect this opencode run instead.',
+      attachments: [],
+      createdAt: Date.now()
     }]
   }
   let calls: RecordedCall[] = []
   let nextThread = 1
   const eventListeners = new Set<(data: string) => void>()
+  const intentionallyStopped = new Set<string>()
 
   const recordBackend = (request: BackendRequest): void => {
     calls.push({ channel: 'backend', request: structuredClone(request) })
@@ -240,6 +251,10 @@ export function installE2EApi(boss: BossApi): void {
           ...followUps,
           [request.threadId]: (followUps[request.threadId] ?? []).filter((item) => item.id !== request.followUpId)
         }
+        // A backend that cannot steer is stopped instead, and reports that stop
+        // as an error on the run. Main recognises its own stop and settles the
+        // thread rather than forwarding a failure, so nothing is emitted here.
+        intentionallyStopped.add(request.threadId)
         return followUps[request.threadId]
       case 'thread.clone':
       case 'thread.delegate': return createThread(request.backendId, request.type === 'thread.delegate' ? 'Delegated worker' : 'Continued thread')
@@ -351,6 +366,16 @@ export function installE2EApi(boss: BossApi): void {
     sessions: () => structuredClone(sessions),
     defaults: () => structuredClone(defaults),
     resetCalls: () => { calls = [] },
+    /** Add a thread the way an agent's spawn does: created in main, carrying
+     *  the model main resolved, and never passing through renderer state.
+     *  Announced with the same event main sends, which is what makes the
+     *  renderer list it. */
+    spawnThread: (backendId: BackendId, title: string) => {
+      const session = createThread(backendId, title)
+      const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId })
+      for (const listener of eventListeners) listener(data)
+      return structuredClone(session)
+    },
     emit: (event: Record<string, unknown>) => {
       // Current BOSS resolves host-managed Auto/Plan requests in main and only
       // forwards genuine user decisions to the renderer. Reproduce that seam
@@ -377,6 +402,17 @@ export function installE2EApi(boss: BossApi): void {
           })
           return
         }
+      }
+      // The other seam main owns: an abort a thread was stopped with is the
+      // end of that stop, not a failure, so main settles the run and forwards
+      // nothing. Any other error still reaches the renderer.
+      if (eventType === 'session.error' && properties?.sessionID
+        && intentionallyStopped.has(properties.sessionID)
+        && isAbortError((event.properties as { error?: unknown } | undefined)?.error)) {
+        intentionallyStopped.delete(properties.sessionID)
+        const idle = JSON.stringify({ type: 'session.idle', properties: { sessionID: properties.sessionID } })
+        for (const listener of eventListeners) listener(idle)
+        return
       }
       const data = JSON.stringify(event)
       for (const listener of eventListeners) listener(data)

@@ -5,7 +5,7 @@ import type { MenuCommand } from '@shared/ipc'
 import { disposeTerminalSession } from './terminal-sessions'
 import { disposeTabContentNode } from './tab-content-nodes'
 import { disposeBrowseGuest } from './browse-guests'
-import { resolveMode, resolveVariant } from './thread-defaults'
+import { resolveMode, resolveModel, resolveVariant } from './thread-defaults'
 import { pruneDeletedThreadCaches } from './thread-caches'
 import { startMicCapture } from './mic'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
@@ -1025,14 +1025,25 @@ export function loadThreadPreferences(): void {
   }
 }
 
-export function modelForSession(sessionId?: string): string | null {
+/** The model and provider for a thread, resolved together by resolveModel. */
+function sessionModel(sessionId?: string): { modelID: string | null; providerID: string | null } {
   const state = appStore.getState()
-  return (sessionId && state.modelsBySession[sessionId]) || state.model
+  const appDefault = { modelID: state.model, providerID: state.modelProvider }
+  if (!sessionId) return appDefault
+  const session = state.sessions.find((item) => item.id === sessionId)
+  return resolveModel(
+    { modelID: state.modelsBySession[sessionId], providerID: state.modelProvidersBySession?.[sessionId] },
+    session?.model ? { modelID: session.model.id, providerID: session.model.provider } : undefined,
+    appDefault
+  )
+}
+
+export function modelForSession(sessionId?: string): string | null {
+  return sessionModel(sessionId).modelID
 }
 
 export function modelProviderForSession(sessionId?: string): string | null {
-  const state = appStore.getState()
-  return (sessionId && state.modelProvidersBySession?.[sessionId]) || state.modelProvider
+  return sessionModel(sessionId).providerID
 }
 
 export function variantForSession(sessionId?: string): string | null {
@@ -1042,7 +1053,9 @@ export function variantForSession(sessionId?: string): string | null {
   return resolveVariant(
     Boolean(sessionId && Object.prototype.hasOwnProperty.call(state.variantsBySession, sessionId)),
     sessionId ? state.variantsBySession[sessionId] : null,
-    sessionId ? state.modelsBySession[sessionId] ?? preference?.modelID : preference?.modelID,
+    // The same model modelForSession reports, so a variant is never resolved
+    // against a model this thread is not on.
+    sessionId ? modelForSession(sessionId) ?? preference?.modelID : preference?.modelID,
     preference,
     state.variant
   )

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { resolveMode, resolveVariant } from './thread-defaults.ts'
+import { resolveMode, resolveModel, resolveVariant } from './thread-defaults.ts'
 
 const CLAUDE = ['ask', 'auto', 'plan', 'accept-edits'] as const
 const CODEX = ['ask', 'auto', 'plan'] as const
@@ -25,6 +25,44 @@ test('a mode the backend does not offer is not passed through', () => {
   assert.equal(resolveMode(undefined, 'accept-edits', 'ask', [...CODEX]), 'ask')
   // Pi has one mode, so everything resolves to it.
   assert.equal(resolveMode('plan', 'ask', 'ask', [...PI]), 'auto')
+})
+
+const APP_MODEL = { modelID: 'gpt-5.6-sol', providerID: 'openai' }
+
+test('a model the thread was set to in this window wins', () => {
+  assert.deepEqual(
+    resolveModel({ modelID: 'opus', providerID: 'anthropic' }, { modelID: 'sonnet', providerID: 'anthropic' }, APP_MODEL),
+    { modelID: 'opus', providerID: 'anthropic' }
+  )
+})
+
+test('a thread main knows the model of does not show the app default', () => {
+  // An agent-created thread resolves its model in main and never passes through
+  // renderer state. Falling through to the app default showed the model last
+  // picked in some other thread instead of the one this thread runs on.
+  assert.deepEqual(
+    resolveModel(undefined, { modelID: 'opus', providerID: 'anthropic' }, APP_MODEL),
+    { modelID: 'opus', providerID: 'anthropic' }
+  )
+})
+
+test('a thread nobody has set a model for falls back to the app', () => {
+  assert.deepEqual(resolveModel(undefined, undefined, APP_MODEL), APP_MODEL)
+})
+
+test('the provider follows the model that won', () => {
+  // Pairing one source's provider with another's model names a model that
+  // provider does not serve.
+  assert.deepEqual(
+    resolveModel(undefined, { modelID: 'opus', providerID: 'anthropic' }, { modelID: 'gpt-5.6-sol', providerID: 'openai' }),
+    { modelID: 'opus', providerID: 'anthropic' }
+  )
+  // A local choice with no provider recorded keeps the app's rather than
+  // borrowing main's, which belongs to a different model.
+  assert.deepEqual(
+    resolveModel({ modelID: 'opus' }, { modelID: 'sonnet', providerID: 'anthropic' }, { modelID: 'x', providerID: 'openai' }),
+    { modelID: 'opus', providerID: 'openai' }
+  )
 })
 
 test('a thinking level a thread chose wins', () => {

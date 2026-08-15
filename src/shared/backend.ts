@@ -121,6 +121,27 @@ export function withBackendDefaults(
   }
 }
 
+/** Whether an error only says a run was stopped.
+ *
+ * A backend reports the stop BOSS asked for as an error on the run, naming it
+ * rather than describing a fault: opencode sends MessageAbortedError, and
+ * others say the request was aborted or cancelled. Shown to the user, that
+ * reads as a failure of something they asked for. Matched on the name as well
+ * as the message, so a genuine fault that merely happens during a stop still
+ * gets through. */
+export function isAbortError(value: unknown): boolean {
+  const record = value && typeof value === 'object'
+    ? value as { name?: unknown; message?: unknown; data?: { message?: unknown } }
+    : undefined
+  const text = [
+    typeof value === 'string' ? value : undefined,
+    typeof record?.name === 'string' ? record.name : undefined,
+    typeof record?.message === 'string' ? record.message : undefined,
+    typeof record?.data?.message === 'string' ? record.data.message : undefined
+  ].filter(Boolean).join(' ')
+  return text ? /\b(abort|aborted|cancelled|canceled)\b/i.test(text) : false
+}
+
 export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'backend.auth.status' }

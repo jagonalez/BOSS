@@ -80,6 +80,21 @@ test('quick-create uses the configured backend and exposes its defaults on the n
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'high' })).toBeVisible()
 })
 
+test('a thread an agent spawned shows the model it runs on, not the app default', async ({ appPage }) => {
+  // The composer reported the app's model for a thread the renderer never
+  // created, because only main knew what that thread had resolved. It also sent
+  // that wrong model with the next message, so the display and the thread's
+  // real model disagreed.
+  await configureClaudeDefaults(appPage)
+  await appPage.getByRole('button', { name: 'Done' }).click()
+
+  const spawned = await control(appPage).then((item) => item.spawnThread('claude', 'Agent spawned thread'))
+  expect(spawned).toMatchObject({ model: { id: 'claude-opus-5', provider: 'anthropic' } })
+
+  await appPage.locator('.session-row').filter({ hasText: 'Agent spawned thread' }).click()
+  await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Claude Opus 5' })).toBeVisible()
+})
+
 test('delegation sends the chosen backend, worktree placement, and target defaults', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
   await appPage.getByRole('button', { name: 'Done' }).click()
@@ -146,6 +161,55 @@ test('auto mode answers permission requests without leaving a blocking panel', a
   })
   await expect(appPage.locator('.perm-card')).toHaveCount(0)
   await expect(appPage.locator('.modal-backdrop')).toHaveCount(0)
+})
+
+test('an opencode Stop & redirect does not report the stop as a failure', async ({ appPage }) => {
+  // Opencode answers the abort BOSS sends with MessageAbortedError. The
+  // redirect works, so showing that to the user names a failure that did not
+  // happen.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await control(appPage).then((item) => item.emit({
+    type: 'session.status',
+    properties: { sessionID: 'thread-source', status: { type: 'busy' } }
+  }))
+  await expect(appPage.locator('.followup-text')).toHaveText('Redirect this opencode run instead.')
+
+  await appPage.getByRole('button', { name: 'Stop & redirect' }).click()
+  expect((await lastBackendCall(appPage, 'thread.followups.steer')).request).toMatchObject({
+    threadId: 'thread-source', followUpId: 'followup-source'
+  })
+
+  // What opencode answers the abort with. The user asked for this, so it must
+  // not reach them as a failure.
+  await control(appPage).then((item) => item.emit({
+    type: 'session.error',
+    properties: {
+      sessionID: 'thread-source',
+      error: { name: 'MessageAbortedError', message: 'Aborted' }
+    }
+  }))
+
+  await expect(appPage.locator('.followup-item')).toHaveCount(0)
+  await expect(appPage.locator('.chat-error')).toHaveCount(0)
+})
+
+test('a real opencode failure still reaches the user after a stop', async ({ appPage }) => {
+  // The counterpart to swallowing the abort: only the stop is hidden, so a
+  // fault the thread genuinely hit is still shown.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await control(appPage).then((item) => item.emit({
+    type: 'session.status',
+    properties: { sessionID: 'thread-source', status: { type: 'busy' } }
+  }))
+  await expect(appPage.locator('.followup-text')).toHaveText('Redirect this opencode run instead.')
+  await appPage.getByRole('button', { name: 'Stop & redirect' }).click()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'session.error',
+    properties: { sessionID: 'thread-source', error: { name: 'Error', message: 'Connection refused' } }
+  }))
+
+  await expect(appPage.locator('.chat-error')).toContainText('Connection refused')
 })
 
 test('Claude Stop & redirect accepts the queued instruction without showing a failure', async ({ appPage }) => {
