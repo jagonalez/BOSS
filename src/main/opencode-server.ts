@@ -196,6 +196,18 @@ export const spawn_worktree = tool({
   execute(args, context) { return call("boss_threads_spawn_worktree", args, context) }
 })
 
+export const use_worktree = tool({
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.useWorktree)},
+  args: {},
+  execute(args, context) { return call("boss_threads_use_worktree", args, context) }
+})
+
+export const leave_worktree = tool({
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.leaveWorktree)},
+  args: {},
+  execute(args, context) { return call("boss_threads_leave_worktree", args, context) }
+})
+
 export const mcp_list = tool({
   description: "List external MCP tools available through BOSS connections. Pass tool to get one tool's full input schema before calling it.",
   args: {

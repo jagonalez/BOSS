@@ -124,7 +124,7 @@ export type BackendRequest =
   | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string; options?: BackendMessageOptions }
   | { type: 'worktree.list'; threadId?: string }
   | { type: 'worktree.settings.get' }
-  | { type: 'worktree.settings.set'; autoCleanupEnabled?: boolean; cleanupAfterDays?: number }
+  | { type: 'worktree.settings.set'; autoCleanupEnabled?: boolean; cleanupAfterDays?: number; location?: import('./worktree').WorktreeLocation }
   | { type: 'worktree.remove'; worktreeId: string }
   | { type: 'thread.relay'; sourceThreadId: string; targetThreadId: string; instruction?: string }
   | { type: 'automation.list' }
