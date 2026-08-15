@@ -741,17 +741,23 @@ function SplitView({ node, viewId }: { node: WorkspaceSplit; viewId: string }): 
   }
   return (
     <div ref={ref} className={`workspace-split ${node.direction}`}>
-      <div className="workspace-split-child" style={{ flexBasis: `${node.ratio * 100}%` }}><WorkspaceNodeView node={node.first} viewId={viewId} /></div>
-      <div className="workspace-splitter" onMouseDown={onMouseDown} />
-      <div className="workspace-split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}><WorkspaceNodeView node={node.second} viewId={viewId} /></div>
+      {/* Keyed by node id, and the wrappers too. Closing a pane collapses a
+          split into the pane beside it, so every surviving node moves up a
+          level. Reconciled by position React saw a different component at each
+          slot and rebuilt the subtree, which recreates the slot a tab portals
+          into: a files tab in an untouched pane lost its open files, its
+          expanded folders and its scroll. */}
+      <div key={node.first.id} className="workspace-split-child" style={{ flexBasis: `${node.ratio * 100}%` }}><WorkspaceNodeView node={node.first} viewId={viewId} /></div>
+      <div key={`splitter-${node.id}`} className="workspace-splitter" onMouseDown={onMouseDown} />
+      <div key={node.second.id} className="workspace-split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}><WorkspaceNodeView node={node.second} viewId={viewId} /></div>
     </div>
   )
 }
 
 function WorkspaceNodeView({ node, viewId }: { node: WorkspaceNode; viewId: string }): React.JSX.Element {
   return node.type === 'group'
-    ? <GroupView group={node} viewId={viewId} />
-    : <SplitView node={node} viewId={viewId} />
+    ? <GroupView key={node.id} group={node} viewId={viewId} />
+    : <SplitView key={node.id} node={node} viewId={viewId} />
 }
 
 function WorkspaceBar(): React.JSX.Element {
