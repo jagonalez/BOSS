@@ -10,7 +10,8 @@ import { pruneDeletedThreadCaches } from './thread-caches'
 import { startMicCapture } from './mic'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
-import { withBackendDefaults } from '@shared/backend'
+import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
+import { threadIsWorking } from './status'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -1520,17 +1521,8 @@ export function refreshStreaming(sessionId?: string): void {
       }
       continue
     }
-    const msgs = s.messages[sid] ?? []
-    const parts = msgs.flatMap((m) => m.parts)
-    const runningPart = parts.some((p) => p.state?.status === 'running' || p.state?.status === 'pending')
-    const last = msgs[msgs.length - 1]
-    const awaiting =
-      last !== undefined && (last.info.role === 'user' || (last.info.role === 'assistant' && !last.info.time?.completed))
-    const busy = Boolean(s.sessionBusy[sid]) || Boolean(s.compacting[sid])
-    // Heuristics (stuck running parts, user-last message) only count near a
-    // send; afterwards the backend's busy signal is authoritative. Otherwise
-    // aborted runs look alive forever.
-    const working = busy || ((runningPart || awaiting) && recentlySent(sid))
+    const session = s.sessions.find((item) => item.id === sid)
+    const working = threadIsWorking(s.sessionBusy[sid], session?.busy, s.compacting[sid])
     if (working !== Boolean(streaming[sid])) {
       streaming[sid] = working
       changed = true
@@ -1966,7 +1958,7 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
   const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
   const options = { model: modelKey, agent, mode }
-  if (cur.streaming[sessionID] || cur.sessionBusy[sessionID]) {
+  const queue = async (): Promise<void> => {
     try {
       const followUps = await OpenCode.addFollowUp(sessionID, text, attachments, options)
       appStore.setState((state) => ({
@@ -1977,6 +1969,9 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     } catch (error) {
       setSessionError(sessionID, errorSummary(error))
     }
+  }
+  if (cur.streaming[sessionID] || cur.sessionBusy[sessionID]) {
+    await queue()
     return
   }
   appStore.setState((st) => ({
@@ -1990,6 +1985,14 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     await OpenCode.sendMessageAsync(sessionID, parts, options)
   } catch (err) {
     const raw = String((err as Error).message ?? err)
+    // Main refused because the thread was already running: this window read a
+    // stale busy state. The message is not lost — it goes where it would have
+    // gone had this window been up to date.
+    if (raw.includes(THREAD_BUSY_ERROR)) {
+      await queue()
+      await loadMessages(sessionID)
+      return
+    }
     const isNetwork = /-> 0:|fetch failed|ECONNREFUSED/i.test(raw)
     const msg = isNetwork
       ? 'Couldn’t reach the selected backend. Your message was not sent; please try again.'

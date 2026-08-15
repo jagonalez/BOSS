@@ -10,7 +10,7 @@ import type {
   BackendRequest,
   QueuedFollowUp
 } from '../shared/backend'
-import { isAbortError } from '../shared/backend'
+import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
 import type { SessionInfo } from '../shared/opencode'
 
 type RecordedCall =
@@ -139,11 +139,25 @@ function initialClaudeSession(): SessionInfo {
   }
 }
 
+function initialOpenCodeStopSession(): SessionInfo {
+  return {
+    id: 'thread-opencode-stop',
+    backendId: 'opencode',
+    nativeSessionId: 'native-opencode-stop',
+    projectId: 'boss-e2e',
+    projectPath: PROJECT,
+    executionPath: CHECKOUT,
+    title: 'OpenCode stop thread',
+    time: { created: Date.now() - 30_000, updated: Date.now() - 1_000 },
+    model: { id: 'gpt-5.6', provider: 'openai' }
+  }
+}
+
 /** Replace external I/O while preserving the real Electron window, preload
  * boundary, React tree, localStorage, and user interactions. This module is
  * reachable only when the main process explicitly starts with BOSS_E2E=1. */
 export function installE2EApi(boss: BossApi): void {
-  let sessions = [initialSession(), initialClaudeSession()]
+  let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
   let modesBySession: Record<string, BackendModeId> = {}
   let followUps: Record<string, QueuedFollowUp[]> = {
@@ -154,9 +168,11 @@ export function installE2EApi(boss: BossApi): void {
       attachments: [],
       createdAt: Date.now()
     }],
-    'thread-source': [{
+    // On its own thread, not thread-source: a thread that starts with something
+    // queued cannot also be used to test what an ordinary first send does.
+    'thread-opencode-stop': [{
       id: 'followup-source',
-      threadId: 'thread-source',
+      threadId: 'thread-opencode-stop',
       text: 'Redirect this opencode run instead.',
       attachments: [],
       createdAt: Date.now()
@@ -164,8 +180,10 @@ export function installE2EApi(boss: BossApi): void {
   }
   let calls: RecordedCall[] = []
   let nextThread = 1
+  let nextFollowUp = 1
   const eventListeners = new Set<(data: string) => void>()
   const intentionallyStopped = new Set<string>()
+  const busyThreads = new Set<string>()
 
   const recordBackend = (request: BackendRequest): void => {
     calls.push({ channel: 'backend', request: structuredClone(request) })
@@ -236,11 +254,29 @@ export function installE2EApi(boss: BossApi): void {
         return changed
       }
       case 'thread.messages': return []
+      // Main allows one run per thread and refuses the rest, because only it
+      // knows without a race. The renderer is expected to queue what it refuses
+      // rather than drop it.
+      case 'thread.send':
+        if (busyThreads.has(request.threadId)) throw new Error(THREAD_BUSY_ERROR)
+        busyThreads.add(request.threadId)
+        return undefined
       case 'thread.todos': return []
       case 'thread.diff': return []
       case 'thread.models': return models[request.backendId ?? sessions.find((session) => session.id === request.threadId)?.backendId ?? 'opencode']
       case 'thread.followups.list': return followUps[request.threadId] ?? []
-      case 'thread.followups.add': return followUps[request.threadId] ?? []
+      case 'thread.followups.add': {
+        const queued: QueuedFollowUp = {
+          id: `followup-added-${nextFollowUp++}`,
+          threadId: request.threadId,
+          text: request.text,
+          attachments: request.attachments ?? [],
+          options: request.options,
+          createdAt: Date.now()
+        }
+        followUps = { ...followUps, [request.threadId]: [...(followUps[request.threadId] ?? []), queued] }
+        return followUps[request.threadId]
+      }
       case 'thread.followups.update': return followUps[request.threadId] ?? []
       case 'thread.followups.remove':
         followUps = {
@@ -416,6 +452,13 @@ export function installE2EApi(boss: BossApi): void {
         const idle = JSON.stringify({ type: 'session.idle', properties: { sessionID: properties.sessionID } })
         for (const listener of eventListeners) listener(idle)
         return
+      }
+      // Keep the fixture's own busy state in step with what the test says the
+      // thread is doing, the way main keeps its busyThreads set.
+      if (properties?.sessionID) {
+        const status = (event.properties as { status?: { type?: string } } | undefined)?.status?.type
+        if (eventType === 'session.idle' || status === 'idle') busyThreads.delete(properties.sessionID)
+        else if (status === 'busy' || status === 'retry') busyThreads.add(properties.sessionID)
       }
       const data = JSON.stringify(event)
       for (const listener of eventListeners) listener(data)

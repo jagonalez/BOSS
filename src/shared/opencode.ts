@@ -22,6 +22,10 @@ export interface SessionInfo {
   /** The thread's permission mode. Main owns it, so a mid-run change reaches
    *  the permission handler; the renderer mirrors it for display only. */
   mode?: import('./backend').BackendModeId
+  /** Whether a run is in flight. Main owns this too: it marks the thread busy
+   *  when it sends, before any backend event, so a renderer that opens or
+   *  reloads mid-run reads the truth instead of inferring one from timestamps. */
+  busy?: boolean
   parentID?: string
   lineage?: {
     kind: 'fork' | 'clone' | 'relay' | 'delegate'

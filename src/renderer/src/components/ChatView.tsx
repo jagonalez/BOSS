@@ -10,6 +10,7 @@ import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
 import { BackendControls } from './BackendControls'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
+import { turnCompletedAt } from '../lib/status'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -1091,13 +1092,17 @@ function groupTurns(messages: MessageWithParts[]): TurnGroup[] {
 function combineAssistants(messages: MessageWithParts[]): MessageWithParts {
   const parts = uniqueNarrativeParts(messages.flatMap((m) => m.parts))
   const created = Math.min(...messages.map((m) => m.info.time?.created).filter((t): t is number => typeof t === 'number'))
-  const completed = Math.max(...messages.map((m) => m.info.time?.completed).filter((t): t is number => typeof t === 'number'))
+  // A turn is finished only when every message in it is. Taking the latest
+  // completion regardless reported a turn as done while one of its messages was
+  // still running, which is the field the rest of the UI reads to decide
+  // whether a thread is still working.
+  const completed = turnCompletedAt(messages.map((m) => m.info.time?.completed))
   return {
     info: {
       ...messages[0].info,
       time: {
         created: Number.isFinite(created) ? created : undefined,
-        completed: Number.isFinite(completed) ? completed : undefined
+        completed
       }
     },
     parts

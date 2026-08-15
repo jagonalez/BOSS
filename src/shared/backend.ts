@@ -121,6 +121,14 @@ export function withBackendDefaults(
   }
 }
 
+/** What main throws when a thread is asked to run while it is already running.
+ *
+ * Main is the only place that knows this without a race: the renderer decides
+ * between sending and queueing from a snapshot of the busy state, and two sends
+ * in quick succession both read "idle". Sent as a recognisable message rather
+ * than an error subclass because IPC delivers only the message across. */
+export const THREAD_BUSY_ERROR = 'boss:thread-busy'
+
 /** Whether an error only says a run was stopped.
  *
  * A backend reports the stop BOSS asked for as an error on the run, naming it
