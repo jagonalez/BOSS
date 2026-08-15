@@ -1,7 +1,7 @@
 {
   "name": "boss",
   "productName": "BOSS",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Configurable multi-backend desktop workspace for coding agents",
   "main": "./out/main/index.js",
   "author": "jeremy",
