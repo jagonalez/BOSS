@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { resolveBackendBin } from '../backend-bin'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
@@ -86,7 +87,7 @@ export class ClaudeBackend implements Backend {
   private store: ClaudeStore = { version: 1, sessions: {} }
   private threadBus?: ThreadBusConnection
 
-  constructor(cwd?: string, command = 'claude') {
+  constructor(cwd?: string, command = resolveBackendBin('claude')) {
     this.projectPath = cwd ?? ''
     this.command = command
   }

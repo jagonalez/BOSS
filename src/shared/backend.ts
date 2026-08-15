@@ -98,6 +98,9 @@ export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'backend.auth.status' }
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
+  | { type: 'backend.bin.get' }
+  /** An empty or omitted path clears the override, returning the backend to PATH. */
+  | { type: 'backend.bin.set'; backendId: BackendId; path?: string }
   | { type: 'thread.list' }
   | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope; executionPath?: string }
   | { type: 'thread.backend.set'; threadId: string; backendId: BackendId }

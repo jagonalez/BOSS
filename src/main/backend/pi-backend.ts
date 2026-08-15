@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { resolveBackendBin } from '../backend-bin'
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -166,7 +167,7 @@ class PiRpcSession {
 
   async start(): Promise<void> {
     if (this.process) return
-    this.process = spawn('pi', [
+    this.process = spawn(resolveBackendBin('pi'), [
       '--mode', 'rpc',
       '--session-id', this.sessionId,
       '--approve',
@@ -273,7 +274,7 @@ export class PiBackend implements Backend {
 
   async start(): Promise<void> {
     try {
-      this.version = execFileSync('pi', ['--version'], { encoding: 'utf8', timeout: 2500 }).trim()
+      this.version = execFileSync(resolveBackendBin('pi'), ['--version'], { encoding: 'utf8', timeout: 2500 }).trim()
       this.healthy = true
     } catch {
       this.healthy = false
@@ -742,7 +743,7 @@ export default function (pi: ExtensionAPI) {
     const runtime = this.sessions.values().next().value as PiRpcSession | undefined
     if (!runtime) {
       try {
-        const output = execFileSync('pi', ['--offline', '--list-models'], { encoding: 'utf8', timeout: 12_000 })
+        const output = execFileSync(resolveBackendBin('pi'), ['--offline', '--list-models'], { encoding: 'utf8', timeout: 12_000 })
         return output.split(/\r?\n/).slice(1).flatMap((line) => {
           const fields = line.trim().split(/\s{2,}/)
           if (fields.length < 6) return []
