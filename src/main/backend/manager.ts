@@ -18,7 +18,7 @@ import type {
   QueuedFollowUpAttachment,
   ThreadCreationScope
 } from '@shared/backend'
-import { isAbortError, withBackendDefaults } from '@shared/backend'
+import { isAbortError, withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import type { EventMessage, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
@@ -643,6 +643,7 @@ export class BackendManager {
       lineage: binding.lineage,
       worktree: binding.worktree,
       mode: this.modeFor(binding),
+      busy: this.busyThreads.has(binding.id),
       model: binding.model
         ? { id: binding.model.modelID, provider: binding.model.providerID }
         : native?.model,
@@ -753,6 +754,7 @@ export class BackendManager {
           this.transcriptSource(binding),
           properties.part as MessageWithParts['parts'][number]
         )
+        this.publishTodosAfterToolCall(binding, properties.part as MessageWithParts['parts'][number])
       }
       if (eventType === 'session.status') {
         const status = (properties.status as { type?: string } | undefined)?.type
@@ -1006,6 +1008,14 @@ export class BackendManager {
     // 'removed', so the check is where the thread actually is.
     if (binding.worktree?.status === 'removed' && binding.executionPath === binding.worktree.path) {
       throw new Error('This thread\'s worktree was cleaned up. Fork it into a new worktree before continuing.')
+    }
+    // One run per thread. The renderer decides between sending and queueing
+    // from its own copy of the busy state, which is a snapshot: two sends in
+    // quick succession both read "idle" and both started a run, and the second
+    // transcript reload then replaced the first message with whatever the
+    // backend had recorded. Only main knows, and it knows synchronously.
+    if (this.busyThreads.has(threadId) && !this.followUpDeliveries.has(threadId)) {
+      throw new Error(THREAD_BUSY_ERROR)
     }
     const usage = this.transcripts?.usage(threadId).totals ?? { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
     const violation = budgetViolation(binding.policy, usage)
@@ -1579,6 +1589,31 @@ export class BackendManager {
       },
       backendId
     })
+  }
+
+  /** Publish a thread's todo list when the agent has just changed it.
+   *
+   *  Opencode has no todo event: it keeps the list behind a GET, and writes to
+   *  it with a tool call like any other. Reading it when that call finishes is
+   *  what makes the list fill in during a run — before this it was fetched only
+   *  when the thread went idle, so it stayed empty for exactly as long as it
+   *  was worth watching. Backends without todos return an empty list, and the
+   *  tool name never matches, so this costs them nothing. */
+  private publishTodosAfterToolCall(binding: ThreadBinding, part: MessageWithParts['parts'][number]): void {
+    if (part.type !== 'tool' || part.state?.status !== 'completed') return
+    const tool = String(part.state?.tool ?? '').toLowerCase()
+    if (!tool.includes('todo')) return
+    const backend = this.backends[binding.backendId]
+    if (!backend?.todosGet) return
+    void backend.todosGet(binding.nativeSessionId)
+      .then((todos) => {
+        this.emit({
+          type: 'todo.updated',
+          properties: { sessionID: binding.id, todos },
+          backendId: binding.backendId
+        })
+      })
+      .catch(() => { /* the list is a display, not something to fail a run over */ })
   }
 
   private async cleanupWorktrees(): Promise<void> {
