@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { ServerInfo } from '@shared/ipc'
 import type { ThreadBusConnection } from '@shared/thread-bus'
+import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { qaDescription } from '@shared/qa'
 
 interface Health {
   healthy: boolean
@@ -151,13 +153,13 @@ async function call(name, args, context) {
 }
 
 export const list = tool({
-  description: "List other BOSS threads in this project using OpenCode.",
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.list)},
   args: {},
   execute(args, context) { return call("boss_threads_list", args, context) }
 })
 
 export const read = tool({
-  description: "Read a bounded recent transcript from another BOSS OpenCode thread.",
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.read)},
   args: {
     threadId: tool.schema.string().describe("BOSS thread id returned by boss_threads_list"),
     limit: tool.schema.number().min(1).max(20).optional()
@@ -166,7 +168,7 @@ export const read = tool({
 })
 
 export const send = tool({
-  description: "Send a durable message to another BOSS OpenCode thread. Busy targets queue it.",
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.send)},
   args: {
     threadId: tool.schema.string().describe("Target BOSS thread id"),
     message: tool.schema.string().describe("Concise context, question, or requested task"),
@@ -177,7 +179,7 @@ export const send = tool({
 })
 
 export const reply = tool({
-  description: "Reply to a BOSS thread message addressed to this thread.",
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.reply)},
   args: {
     messageId: tool.schema.string().describe("Message id from the incoming BOSS thread message"),
     message: tool.schema.string().describe("Reply for the sending thread"),
@@ -187,9 +189,9 @@ export const reply = tool({
 })
 
 export const spawn_worktree = tool({
-  description: "Fork this conversation into a new BOSS thread in an isolated Git worktree.",
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktree)},
   args: {
-    instruction: tool.schema.string().describe("Concrete implementation task for the new worktree thread")
+    instruction: tool.schema.string().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction)})
   },
   execute(args, context) { return call("boss_threads_spawn_worktree", args, context) }
 })
@@ -242,37 +244,37 @@ async function call(name, args, context) {
 }
 
 export const browser_tabs = tool({
-  description: "List browser tiles open in the BOSS workspace. Use this before other browser tools.",
+  description: ${JSON.stringify(qaDescription("boss_browser_tabs"))},
   args: {},
   execute(args, context) { return call("boss_browser_tabs", args, context) }
 })
 export const browser_navigate = tool({
-  description: "Navigate a BOSS browser tile to an HTTP or HTTPS URL. Requires Automatic QA.",
+  description: ${JSON.stringify(qaDescription("boss_browser_navigate"))},
   args: { tabId: tool.schema.string(), url: tool.schema.string() },
   execute(args, context) { return call("boss_browser_navigate", args, context) }
 })
 export const browser_snapshot = tool({
-  description: "Read visible page text and indexed interactive elements from a BOSS browser tile.",
+  description: ${JSON.stringify(qaDescription("boss_browser_snapshot"))},
   args: { tabId: tool.schema.string() },
   execute(args, context) { return call("boss_browser_snapshot", args, context) }
 })
 export const browser_screenshot = tool({
-  description: "Capture a rendered BOSS browser tile for visual QA.",
+  description: ${JSON.stringify(qaDescription("boss_browser_screenshot"))},
   args: { tabId: tool.schema.string() },
   execute(args, context) { return call("boss_browser_screenshot", args, context) }
 })
 export const browser_click = tool({
-  description: "Click a ref returned by boss_browser_snapshot. Requires Automatic QA; inspect again afterward.",
+  description: ${JSON.stringify(qaDescription("boss_browser_click"))},
   args: { tabId: tool.schema.string(), ref: tool.schema.string() },
   execute(args, context) { return call("boss_browser_click", args, context) }
 })
 export const browser_type = tool({
-  description: "Type into a ref returned by boss_browser_snapshot. Requires Automatic QA.",
+  description: ${JSON.stringify(qaDescription("boss_browser_type"))},
   args: { tabId: tool.schema.string(), ref: tool.schema.string(), text: tool.schema.string(), submit: tool.schema.boolean().optional() },
   execute(args, context) { return call("boss_browser_type", args, context) }
 })
 export const computer = tool({
-  description: "Inspect or operate a native app through scoped BOSS Computer Use. Input actions require Automatic QA.",
+  description: ${JSON.stringify(qaDescription("boss_computer"))},
   args: {
     operation: tool.schema.enum(["list_apps", "list_windows", "get_window_state", "get_desktop_state", "screenshot", "zoom", "click", "type_text", "press_key", "hotkey", "scroll", "wait"]),
     arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional()

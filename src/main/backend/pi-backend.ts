@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
+import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { qaDescription } from '@shared/qa'
 import { QA_GUIDANCE } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 
@@ -346,7 +348,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "boss_browser_tabs",
     label: "List BOSS browser tabs",
-    description: "List browser tiles open in this BOSS workspace.",
+    description: ${JSON.stringify(qaDescription("boss_browser_tabs"))},
     parameters: Type.Object({}),
     promptSnippet: "Inspect BOSS browser tabs",
     promptGuidelines: [${JSON.stringify(QA_GUIDANCE)}],
@@ -355,35 +357,35 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "boss_browser_navigate",
     label: "Navigate BOSS browser",
-    description: "Navigate a BOSS browser tile. Requires Automatic QA.",
+    description: ${JSON.stringify(qaDescription("boss_browser_navigate"))},
     parameters: Type.Object({ tabId: Type.String(), url: Type.String() }),
     execute: (_id, args, signal) => call("boss_browser_navigate", args, signal)
   })
   pi.registerTool({
     name: "boss_browser_snapshot",
     label: "Inspect BOSS browser",
-    description: "Read visible page text and indexed interactive elements.",
+    description: ${JSON.stringify(qaDescription("boss_browser_snapshot"))},
     parameters: Type.Object({ tabId: Type.String() }),
     execute: (_id, args, signal) => call("boss_browser_snapshot", args, signal)
   })
   pi.registerTool({
     name: "boss_browser_screenshot",
     label: "Screenshot BOSS browser",
-    description: "Capture a rendered browser tile for visual QA.",
+    description: ${JSON.stringify(qaDescription("boss_browser_screenshot"))},
     parameters: Type.Object({ tabId: Type.String() }),
     execute: (_id, args, signal) => call("boss_browser_screenshot", args, signal)
   })
   pi.registerTool({
     name: "boss_browser_click",
     label: "Click BOSS browser",
-    description: "Click a ref from boss_browser_snapshot. Requires Automatic QA.",
+    description: ${JSON.stringify(qaDescription("boss_browser_click"))},
     parameters: Type.Object({ tabId: Type.String(), ref: Type.String() }),
     execute: (_id, args, signal) => call("boss_browser_click", args, signal)
   })
   pi.registerTool({
     name: "boss_browser_type",
     label: "Type in BOSS browser",
-    description: "Type into a ref from boss_browser_snapshot. Requires Automatic QA.",
+    description: ${JSON.stringify(qaDescription("boss_browser_type"))},
     parameters: Type.Object({
       tabId: Type.String(),
       ref: Type.String(),
@@ -395,7 +397,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "boss_computer",
     label: "BOSS Computer Use",
-    description: "Inspect or operate a native app through scoped BOSS Computer Use. Input actions require Automatic QA.",
+    description: ${JSON.stringify(qaDescription("boss_computer"))},
     parameters: Type.Object({
       operation: Type.Union([
         Type.Literal("list_apps"), Type.Literal("list_windows"), Type.Literal("get_window_state"),
@@ -410,14 +412,14 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "boss_threads_list",
     label: "List BOSS threads",
-    description: "List other threads in this project that use the same backend.",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.list)},
     parameters: Type.Object({}),
     execute: (_id, args, signal) => call("boss_threads_list", args, signal)
   })
   pi.registerTool({
     name: "boss_threads_read",
     label: "Read BOSS thread",
-    description: "Read recent messages from another same-project, same-backend thread.",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.read)},
     parameters: Type.Object({
       threadId: Type.String({ description: "BOSS thread id returned by boss_threads_list." }),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 8 }))
@@ -427,7 +429,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "boss_threads_send",
     label: "Send BOSS thread message",
-    description: "Send a bounded message to another same-project, same-backend thread.",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.send)},
     parameters: Type.Object({
       threadId: Type.String({ description: "BOSS thread id returned by boss_threads_list." }),
       message: Type.String({ description: "Message to send to the other agent." }),
@@ -439,7 +441,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "boss_threads_reply",
     label: "Reply to BOSS thread message",
-    description: "Reply once to a BOSS thread message addressed to this thread.",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.reply)},
     parameters: Type.Object({
       messageId: Type.String({ description: "Message id from the incoming BOSS thread message." }),
       message: Type.String({ description: "Reply to send to the other agent." }),
@@ -450,9 +452,9 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "boss_threads_spawn_worktree",
     label: "Spawn BOSS worktree thread",
-    description: "Fork this conversation into a new thread in an isolated Git worktree.",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktree)},
     parameters: Type.Object({
-      instruction: Type.String({ description: "Concrete implementation task for the new worktree thread." })
+      instruction: Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction)} })
     }),
     execute: (_id, args, signal) => call("boss_threads_spawn_worktree", args, signal)
   })

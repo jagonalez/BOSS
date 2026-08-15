@@ -61,6 +61,24 @@ export type ThreadBusAgentTool =
   | `mcp_${string}`
   | QaAgentTool
 
+/** What the agent is told the thread tools are for.
+ *
+ *  Shared because each backend registers these tools in its own format, and
+ *  four copies of the same sentence drift apart. What an agent is told about a
+ *  tool decides whether it ever reaches for one, so it is worth keeping in a
+ *  single place. */
+export const THREAD_TOOL_DESCRIPTIONS = {
+  list: 'Find the other BOSS threads working in this project on the same backend. Start here when you need to know who else is working, or to get a thread id for reading or sending.',
+  read: 'Catch up on what another thread has been doing, by reading its recent messages. Use it before asking a question the transcript already answers.',
+  send: 'Say something to another BOSS thread — a question, a piece of context it lacks, or a task. It arrives durably, and a busy thread gets it when it finishes.',
+  reply: 'Answer a message another thread sent this one. Only messages addressed here can be replied to.',
+  /** The one that failed in practice: the old wording said "fork this
+   *  conversation", which reads as one new thread, so a request to take on
+   *  several items produced one thread instead of several. */
+  spawnWorktree: 'Hand a piece of work to a new BOSS thread with its own Git worktree, so it proceeds independently of this one. Call it once per piece of work: asked to take on several items, spawn a thread for each rather than one thread for all of them. Each new thread starts from the instruction alone, so say what to do and why, not "the second item above".',
+  spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.'
+} as const
+
 export interface ThreadBusToolCall {
   nativeThreadId: string
   tool: ThreadBusAgentTool

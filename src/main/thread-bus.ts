@@ -14,6 +14,7 @@ import type {
   ThreadBusSnapshot,
   ThreadBusThread
 } from '@shared/thread-bus'
+import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { projectScope } from './project-identity'
 import type { QaTools } from './qa-tools'
 import { MCP_TOOL_PREFIX } from '@shared/mcp'
@@ -431,13 +432,13 @@ export class ThreadBus {
     return [
       {
         name: 'boss_threads_list',
-        description: 'List other threads in this project that use the same backend.',
+        description: THREAD_TOOL_DESCRIPTIONS.list,
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         annotations: { readOnlyHint: true }
       },
       {
         name: 'boss_threads_read',
-        description: 'Read recent messages from another same-project, same-backend thread.',
+        description: THREAD_TOOL_DESCRIPTIONS.read,
         inputSchema: {
           type: 'object',
           properties: { threadId, limit: { type: 'integer', minimum: 1, maximum: 20, default: 8 } },
@@ -448,7 +449,7 @@ export class ThreadBus {
       },
       {
         name: 'boss_threads_send',
-        description: 'Send a bounded message to another same-project, same-backend thread.',
+        description: THREAD_TOOL_DESCRIPTIONS.send,
         inputSchema: {
           type: 'object',
           properties: {
@@ -463,7 +464,7 @@ export class ThreadBus {
       },
       {
         name: 'boss_threads_reply',
-        description: 'Reply once to a BOSS thread message addressed to this thread.',
+        description: THREAD_TOOL_DESCRIPTIONS.reply,
         inputSchema: {
           type: 'object',
           properties: {
@@ -477,11 +478,11 @@ export class ThreadBus {
       },
       {
         name: 'boss_threads_spawn_worktree',
-        description: 'Fork this conversation into a new BOSS thread running in an isolated Git worktree.',
+        description: THREAD_TOOL_DESCRIPTIONS.spawnWorktree,
         inputSchema: {
           type: 'object',
           properties: {
-            instruction: { type: 'string', description: 'The concrete task the new worktree thread should implement.' }
+            instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction }
           },
           required: ['instruction'],
           additionalProperties: false
