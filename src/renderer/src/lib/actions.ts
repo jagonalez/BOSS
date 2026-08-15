@@ -1049,7 +1049,11 @@ export function variantForSession(sessionId?: string): string | null {
 
 export function modeForSession(sessionId?: string): BackendModeId {
   const state = appStore.getState()
-  const backendId = sessionId ? state.sessions.find((session) => session.id === sessionId)?.backendId : state.engine
+  const session = sessionId ? state.sessions.find((item) => item.id === sessionId) : undefined
+  const backendId = session?.backendId ?? (sessionId ? undefined : state.engine)
+  // Main owns the mode, so its copy wins whenever it has one. The local map is
+  // still consulted below for a thread main has not answered for yet.
+  if (session?.mode) return session.mode
   // What this thread was set to, then what this backend defaults to, then the
   // app's. A default is per backend because the modes are: codex has no
   // accept-edits, and pi has one mode, so a single global would name something
@@ -1158,6 +1162,19 @@ export function setMode(id: BackendModeId, sessionId: string | null = appStore.g
       persistThreadPreference('boss.modesBySession', modesBySession)
       return { modesBySession }
     })
+    // Main owns the mode and tells the running agent, so it has to hear about
+    // this now rather than with the next message. Without this a mid-run
+    // switch changed only the label until the thread was asked something new.
+    void OpenCode.setThreadMode(sessionId, id).then((session) => {
+      // Codex sets its approval policy per turn, so a switch during a turn
+      // cannot take effect until the next one. Say so rather than leave the
+      // label claiming a mode that is not in force yet.
+      if (session?.pendingUntilNextMessage) {
+        appStore.setState((state) => ({
+          modePending: { ...state.modePending, [sessionId]: id }
+        }))
+      }
+    }).catch(() => { /* main keeps its last known mode */ })
     return
   }
   appStore.setState({ mode: id })
@@ -1284,14 +1301,6 @@ export function setAgent(id: string): void {
   appStore.setState({ agent: id })
   try {
     localStorage.setItem('boss.agent', id)
-  } catch {
-    /* ignore */
-  }
-}
-
-export async function autoRespond(sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject'): Promise<void> {
-  try {
-    await OpenCode.respondPermission(sessionID, permissionID, response)
   } catch {
     /* ignore */
   }

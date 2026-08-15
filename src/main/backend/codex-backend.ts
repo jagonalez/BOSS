@@ -2,7 +2,7 @@ import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { resolveBackendBin } from '../backend-bin'
 import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
-import { BACKEND_IDS, type BackendMessageOptions } from '@shared/backend'
+import { BACKEND_IDS, type BackendMessageOptions, type BackendModeId } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
@@ -710,6 +710,17 @@ export class CodexBackend implements Backend {
   async thinkingGet(): Promise<ThinkingLevel> { return { level: 'medium' } }
   async thinkingSet(_level: ThinkingLevel['level']): Promise<void> {}
   async todosGet(_sessionId: string): Promise<Todo[]> { return [] }
+
+  /** Codex takes its approval policy per turn, at turn/start, so a running turn
+   *  cannot be told about a mode change.
+   *
+   *  In Auto it runs with approvalPolicy 'never' and stops sending approval
+   *  requests altogether, so there is nothing to intercept either. The mode
+   *  applies from the next turn, and saying so is better than a switch that
+   *  silently does nothing. */
+  async permissionModeSet(sessionId: string, _mode: BackendModeId): Promise<boolean> {
+    return !this.activeTurns.has(sessionId)
+  }
 
   async permissionRespond(sessionId: string, permissionId: string, response: 'once' | 'always' | 'reject'): Promise<void> {
     const approval = this.approvals.get(permissionId)
