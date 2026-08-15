@@ -358,7 +358,7 @@ function TabContent({
       content = <ReviewTab contextPath={item.contextPath} sessionId={item.sessionId} groupId={groupId} tabId={item.id} />
       break
     case 'files':
-      content = <FilesTab contextPath={item.contextPath} />
+      content = <FilesTab contextPath={item.contextPath} tabId={item.id} />
       break
   }
   // Portalled into its pane rather than rendered inside it. React reconciles

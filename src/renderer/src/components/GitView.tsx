@@ -7,6 +7,7 @@ import { DiffReview, type DiffFileData } from './DiffReview'
 import { ReviewIcon } from './icons'
 import type { AddReviewCommentInput, ReviewSnapshot, SubmitReviewEvent } from '@shared/review'
 import { ReviewConversation } from './ReviewConversation'
+import { rememberReviewView, reviewViewState } from '../lib/tab-view-state'
 
 type Scope = 'worktree' | 'staged' | 'compare' | 'commits' | 'change-request' | 'conversation'
 
@@ -35,17 +36,35 @@ export function GitView({
   const gitRefresh = useStore(appStore, (s) => s.gitRefresh)
   const activeSessionId = sessionId
   const reviews = useStore(appStore, (s) => (activeSessionId ? s.sessionMeta[activeSessionId]?.reviews ?? [] : []))
-  const [scope, setScope] = useState<Scope>('worktree')
+  // Moving this tab to another pane remounts it, so the choices made here are
+  // read back from a cache that outlives the component. The diff itself is not
+  // cached — it is fetched again, which is cheap now, and holding one per tab
+  // for the life of the app is not.
+  const remembered = reviewViewState(reviewTabId)
+  const [scope, setScope] = useState<Scope>((remembered?.scope as Scope) ?? 'worktree')
   const [branches, setBranches] = useState<string[]>([])
-  const [baseBranch, setBaseBranch] = useState('origin/main')
+  const [baseBranch, setBaseBranch] = useState(remembered?.baseBranch ?? 'origin/main')
   const [commits, setCommits] = useState<Array<{ sha: string; msg: string }>>([])
-  const [selectedCommit, setSelectedCommit] = useState<string | null>(null)
+  const [selectedCommit, setSelectedCommit] = useState<string | null>(remembered?.selectedCommit ?? null)
   const [data, setData] = useState<DiffFileData[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [reviewError, setReviewError] = useState('')
+
+  // Written on the way out, the only moment the component knows it is going.
+  // Nothing clears it: a tab can move more than once, and each move has to find
+  // what the last one left. Removed when the tab is closed for good.
+  const latest = useRef({ scope, baseBranch, selectedCommit })
+  latest.current = { scope, baseBranch, selectedCommit }
+  useEffect(() => () => {
+    rememberReviewView(reviewTabId, {
+      scope: latest.current.scope,
+      baseBranch: latest.current.baseBranch,
+      selectedCommit: latest.current.selectedCommit
+    })
+  }, [reviewTabId])
   const reviewRequest = useRef(0)
   const visibleComments = scope === 'change-request'
     ? [...(reviewSnapshot?.changeRequest?.comments ?? []), ...(reviewSnapshot?.localComments ?? [])]

@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { FileNode } from '@shared/opencode'
 import { OpenCode } from '../lib/opencode'
 import { ChevronIcon, FileIcon } from './icons'
+import { filesViewState, rememberFilesView } from '../lib/tab-view-state'
 import { CodeView } from './CodeView'
 
 function baseName(path: string): string {
@@ -56,15 +57,18 @@ function FileNodeRow({
   )
 }
 
-export function FilesTab({ contextPath }: { contextPath?: string }): React.JSX.Element {
+export function FilesTab({ contextPath, tabId }: { contextPath?: string; tabId?: string }): React.JSX.Element {
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const gitRefresh = useStore(appStore, (s) => s.gitRefresh)
   const directory = contextPath || projectPath
+  // Moving this tab to another pane remounts it, so what was on screen is read
+  // back from a cache that outlives the component rather than from state.
+  const remembered = filesViewState(tabId)
   const [files, setFiles] = useState<FileNode[] | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(remembered?.expanded ?? []))
   const [tabs, setTabs] = useState<Array<{ path: string; text: string }>>([])
-  const [activePath, setActivePath] = useState<string | null>(null)
-  const [treeWidth, setTreeWidth] = useState(280)
+  const [activePath, setActivePath] = useState<string | null>(remembered?.activePath ?? null)
+  const [treeWidth, setTreeWidth] = useState(remembered?.treeWidth ?? 280)
 
   const onTreeResize = (e: React.MouseEvent): void => {
     e.preventDefault()
@@ -81,14 +85,52 @@ export function FilesTab({ contextPath }: { contextPath?: string }): React.JSX.E
     window.addEventListener('mouseup', up)
   }
 
+  // Reads the tree on mount, and again whenever the checkout changes. It only
+  // resets what is on screen when the directory actually changed: on a remount
+  // after a move, clearing here would undo what was just restored.
+  const loadedFor = useRef<string | null>(null)
   useEffect(() => {
+    if (loadedFor.current !== null && loadedFor.current !== directory) {
+      setExpanded(new Set())
+      setTabs([])
+      setActivePath(null)
+    }
+    loadedFor.current = directory
     setFiles(null)
-    setExpanded(new Set())
-    setTabs([])
-    setActivePath(null)
     if (!directory) return
     void OpenCode.fileTree('', directory).then(setFiles).catch(() => setFiles([]))
   }, [directory, gitRefresh])
+
+  // Re-open what was open before the move. The paths are remembered, not the
+  // text: a file is one read, and holding every open file's contents for every
+  // tab that ever existed is a cost worth not paying.
+  useEffect(() => {
+    const paths = remembered?.openPaths ?? []
+    if (!paths.length || !directory) return
+    let live = true
+    void Promise.all(paths.map((path) =>
+      OpenCode.fileContent(path, directory).then((file) => ({ path, text: file.content })).catch(() => null)
+    )).then((opened) => {
+      if (live) setTabs(opened.filter((item): item is { path: string; text: string } => item !== null))
+    })
+    return () => { live = false }
+    // Once, on mount: after that the user's own opening and closing owns this.
+  }, [])
+
+  // Written on the way out, which is the only moment the component knows it is
+  // going. Nothing clears it: a tab can move more than once, and each move has
+  // to find what the last one left.
+  const latest = useRef({ expanded, tabs, activePath, treeWidth })
+  latest.current = { expanded, tabs, activePath, treeWidth }
+  useEffect(() => () => {
+    const { expanded: exp, tabs: open, activePath: active, treeWidth: width } = latest.current
+    rememberFilesView(tabId, {
+      expanded: [...exp],
+      openPaths: open.map((item) => item.path),
+      activePath: active,
+      treeWidth: width
+    })
+  }, [tabId])
 
   const toggle = async (path: string): Promise<void> => {
     const next = new Set(expanded)
