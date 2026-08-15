@@ -101,12 +101,18 @@ export function FilesTab({ contextPath, tabId }: { contextPath?: string; tabId?:
     void OpenCode.fileTree('', directory).then(setFiles).catch(() => setFiles([]))
   }, [directory, gitRefresh])
 
-  // Re-open what was open before the move. The paths are remembered, not the
-  // text: a file is one read, and holding every open file's contents for every
-  // tab that ever existed is a cost worth not paying.
+  // Re-open what was open before the tab moved. The paths are remembered, not
+  // the text: a file is one read, and holding every open file's contents for
+  // every tab that ever existed is a cost worth not paying.
+  //
+  // Waits for the directory rather than giving up without one — on the first
+  // render after a split it is not always resolved yet. Runs once either way:
+  // after that the user's own opening and closing owns this.
+  const restored = useRef(false)
   useEffect(() => {
     const paths = remembered?.openPaths ?? []
-    if (!paths.length || !directory) return
+    if (restored.current || !paths.length || !directory) return
+    restored.current = true
     let live = true
     void Promise.all(paths.map((path) =>
       OpenCode.fileContent(path, directory).then((file) => ({ path, text: file.content })).catch(() => null)
@@ -114,8 +120,7 @@ export function FilesTab({ contextPath, tabId }: { contextPath?: string; tabId?:
       if (live) setTabs(opened.filter((item): item is { path: string; text: string } => item !== null))
     })
     return () => { live = false }
-    // Once, on mount: after that the user's own opening and closing owns this.
-  }, [])
+  }, [directory])
 
   // Written on the way out, which is the only moment the component knows it is
   // going. Nothing clears it: a tab can move more than once, and each move has
