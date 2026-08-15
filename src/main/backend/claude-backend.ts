@@ -289,7 +289,7 @@ export class ClaudeBackend implements Backend {
       '--input-format', 'stream-json',
       '--permission-prompt-tool', 'stdio',
       '--permission-mode', mode,
-      '--append-system-prompt', QA_GUIDANCE,
+      '--append-system-prompt', options?.context ? `${options.context}\n\n${QA_GUIDANCE}` : QA_GUIDANCE,
       ...(threadBusConfig ? ['--mcp-config', threadBusConfig, '--allowedTools', allowedThreadTools] : []),
       ...(options?.strictTools && threadBusConfig ? ['--strict-mcp-config'] : []),
       ...(hasHistory ? [`--resume=${sessionId}`] : [`--session-id=${sessionId}`]),

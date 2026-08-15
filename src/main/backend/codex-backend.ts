@@ -649,6 +649,9 @@ export class CodexBackend implements Backend {
     }
     if (options?.model?.modelID) params.model = options.model.modelID
     if (options?.model?.variant) params.effort = options.model.variant
+    // Per turn, not per session: a thread can move to a worktree, and the
+    // instructions set when it was created would still describe the old one.
+    if (options?.context) params.developerInstructions = `${options.context}\n\n${QA_GUIDANCE}`
     const result = await this.request('turn/start', params) as { turn?: CodexTurn }
     if (result.turn?.id) this.activeTurns.set(sessionId, result.turn.id)
   }
