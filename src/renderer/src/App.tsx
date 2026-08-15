@@ -30,6 +30,7 @@ import {
   finalizeStalledParts,
   noteThreadSettled,
   refreshStreaming,
+  runMenuCommand,
   loadMode,
   loadThreadPreferences,
   loadAgent,
@@ -95,6 +96,10 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     if (projectPath) void refreshThreadBus()
   }, [projectPath])
+
+  // The menu names an action and this runs it, so a shortcut and the button
+  // that already existed reach the same code.
+  useEffect(() => window.boss.onMenuCommand(runMenuCommand), [])
 
   // Native views are composited over the window, not inside it, so a hidden
   // workspace would leave its browsers floating on top of whichever page is

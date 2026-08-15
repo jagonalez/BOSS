@@ -1,4 +1,5 @@
 import { app, BrowserWindow, session, shell } from 'electron'
+import { buildAppMenu } from './menu'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { OpenCodeServer, resolveOpenCodeBin } from './opencode-server'
@@ -135,7 +136,13 @@ function createWindow(): void {
       webviewTag: true
     }
   })
-  win.setMenuBarVisibility(false)
+  // Hidden but reachable with Alt. The window has its own title bar and the
+  // menu would sit awkwardly under it, but the shortcuts and items still work.
+  // Not on macOS, where the menu lives in the system bar and this does nothing.
+  if (process.platform !== 'darwin') {
+    win.setMenuBarVisibility(false)
+    win.autoHideMenuBar = true
+  }
 
   // A guest page may only be what BOSS asks for: its own hardened partition,
   // no preload of its own, sandboxed, with node off. The renderer sets these
@@ -223,6 +230,7 @@ app.whenReady().then(() => {
     callback(false)
   })
 
+  buildAppMenu()
   createWindow()
   registerIpcOnce()
   loadRenderer()
