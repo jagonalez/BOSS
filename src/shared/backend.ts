@@ -122,9 +122,6 @@ export type BackendRequest =
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }
   | { type: 'thread.delegate'; threadId: string; backendId: BackendId; instruction: string; placement: DelegatePlacement; options?: BackendMessageOptions }
   | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string; options?: BackendMessageOptions }
-  /** Move this thread onto its own worktree, keeping its conversation, rather
-   *  than forking a new thread and handing it a summary. */
-  | { type: 'thread.worktree.move'; threadId: string }
   | { type: 'worktree.list'; threadId?: string }
   | { type: 'worktree.settings.get' }
   | { type: 'worktree.settings.set'; autoCleanupEnabled?: boolean; cleanupAfterDays?: number; location?: import('./worktree').WorktreeLocation }

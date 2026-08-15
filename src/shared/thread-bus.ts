@@ -56,6 +56,7 @@ export type ThreadBusAgentTool =
   | 'boss_threads_send'
   | 'boss_threads_reply'
   | 'boss_threads_spawn_worktree'
+  | 'boss_threads_use_worktree'
   | 'boss_mcp_list'
   | 'boss_mcp_call'
   | `mcp_${string}`
@@ -76,7 +77,8 @@ export const THREAD_TOOL_DESCRIPTIONS = {
    *  conversation", which reads as one new thread, so a request to take on
    *  several items produced one thread instead of several. */
   spawnWorktree: 'Hand a piece of work to a new BOSS thread with its own Git worktree, so it proceeds independently of this one. Call it once per piece of work: asked to take on several items, spawn a thread for each rather than one thread for all of them. Each new thread starts from the instruction alone, so say what to do and why, not "the second item above".',
-  spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.'
+  spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.',
+  useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. Fails harmlessly if this thread already has a worktree.'
 } as const
 
 export interface ThreadBusToolCall {

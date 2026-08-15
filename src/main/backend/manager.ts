@@ -997,6 +997,18 @@ export class BackendManager {
     await this.sendMessage(threadId, [{ type: 'text', text: body }], { mode: 'ask' })
   }
 
+  /** Put the calling thread on its own worktree, for the agent tool.
+   *
+   *  Returns where it landed rather than a thread, because nothing was
+   *  created — this is the same conversation in a different checkout, and the
+   *  agent needs to know its files moved. */
+  async useWorktree(threadId: string): Promise<{ path: string; branch: string }> {
+    const session = await this.moveToWorktree(threadId)
+    const worktree = session.worktree
+    if (!worktree) throw new Error('The worktree was created but could not be bound to this thread.')
+    return { path: worktree.path, branch: worktree.branch }
+  }
+
   async spawnWorktreeThread(threadId: string, instruction: string): Promise<ThreadBusThread> {
     const created = await this.forkIntoWorktree(threadId, instruction)
     const info = this.threadInfo(created.id)
@@ -1431,7 +1443,6 @@ export class BackendManager {
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction, request.options)
       case 'thread.delegate': return this.delegate(request.threadId, request.backendId, request.instruction, request.placement, request.options)
       case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction, request.options)
-      case 'thread.worktree.move': return this.moveToWorktree(request.threadId)
       case 'worktree.list': {
         if (!this.worktrees) return []
         const projectId = request.threadId ? this.binding(request.threadId).projectId : this.currentScope.projectId

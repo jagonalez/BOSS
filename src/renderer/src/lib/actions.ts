@@ -1660,21 +1660,6 @@ export async function forkSession(id: string): Promise<void> {
   }
 }
 
-/** Move this thread onto its own worktree, keeping the conversation.
- *
- *  Forking starts a new thread from a summary; this keeps the one you are in.
- *  Its terminals stay in the old checkout — they were opened there and moving
- *  a running shell underneath someone is worse than leaving it where it is. */
-export async function moveSessionToWorktree(id: string): Promise<void> {
-  try {
-    const session = await OpenCode.moveToWorktree(id)
-    upsertSessionMeta(id, { gitBranch: session.worktree?.branch })
-    await refreshSessions()
-  } catch (error) {
-    setSessionError(id, errorSummary(error))
-  }
-}
-
 export async function forkSessionIntoWorktree(id: string): Promise<void> {
   try {
     const options = modelKeyWithVariant(modelForSession(id), id)

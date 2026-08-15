@@ -126,6 +126,12 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
       additionalProperties: false
     }
   },
+  {
+    type: 'function',
+    name: 'boss_threads_use_worktree',
+    description: THREAD_TOOL_DESCRIPTIONS.useWorktree,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
   ...QA_TOOL_DEFINITIONS.map((tool) => ({
     type: 'function',
     name: tool.name,
