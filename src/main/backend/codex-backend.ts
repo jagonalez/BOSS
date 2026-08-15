@@ -6,6 +6,7 @@ import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
+import { SessionDirectories } from './session-directory'
 
 type RpcId = string | number
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
@@ -313,6 +314,7 @@ export class CodexBackend implements Backend {
   private liveText = new Map<string, string>()
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
+  private readonly sessionDirectories = new SessionDirectories()
   private version = ''
   private healthy = false
   private buffer = ''
@@ -559,6 +561,16 @@ export class CodexBackend implements Backend {
     return (result.data ?? []).map(threadInfo)
   }
 
+  /** Put a thread in its own checkout. The manager calls this on every lookup
+   *  with the path from the thread's own binding. */
+  setSessionDirectory(id: string, directory: string): void {
+    this.sessionDirectories.set(id, directory)
+  }
+
+  private directoryFor(sessionId: string): string | undefined {
+    return this.sessionDirectories.resolve(sessionId, this.projectPath)
+  }
+
   async sessionCreate(title?: string, directory?: string): Promise<SessionInfo> {
     const params = {
       cwd: directory || this.projectPath || undefined,
@@ -584,6 +596,7 @@ export class CodexBackend implements Backend {
   async sessionDelete(id: string): Promise<void> {
     await this.request('thread/delete', { threadId: id })
     this.loadedThreads.delete(id)
+    this.sessionDirectories.forget(id)
   }
 
   async sessionRename(id: string, title: string): Promise<SessionInfo> {
@@ -620,13 +633,15 @@ export class CodexBackend implements Backend {
     const params: Record<string, unknown> = {
       threadId: sessionId,
       input: userInputs(parts),
-      cwd: this.projectPath || undefined,
+      cwd: this.directoryFor(sessionId),
       approvalPolicy: mode === 'auto' ? 'never' : 'on-request',
       sandboxPolicy: mode === 'plan'
         ? { type: 'readOnly', networkAccess: false }
         : {
             type: 'workspaceWrite',
-            writableRoots: this.projectPath ? [this.projectPath] : [],
+            // Scoped to this thread's checkout. The global path would hand a
+            // thread write access to a project it has nothing to do with.
+            writableRoots: (() => { const dir = this.directoryFor(sessionId); return dir ? [dir] : [] })(),
             networkAccess: false,
             excludeTmpdirEnvVar: false,
             excludeSlashTmp: false
@@ -700,7 +715,7 @@ export class CodexBackend implements Backend {
   async fileContent(path: string): Promise<FileContent> { return { path, content: '' } }
 
   async fork(sessionId: string): Promise<SessionInfo> {
-    const result = await this.request('thread/fork', { threadId: sessionId, cwd: this.projectPath || undefined }) as { thread: CodexThread }
+    const result = await this.request('thread/fork', { threadId: sessionId, cwd: this.directoryFor(sessionId) }) as { thread: CodexThread }
     this.loadedThreads.add(result.thread.id)
     return threadInfo(result.thread)
   }

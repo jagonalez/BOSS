@@ -8,6 +8,7 @@ import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
+import { SessionDirectories } from './session-directory'
 import { textFromParts } from './manager'
 import { claudePermissionMode, claudePermissionResponse, parseClaudePermission } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
@@ -79,6 +80,7 @@ export class ClaudeBackend implements Backend {
   readonly id = 'claude' as const
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
+  private readonly sessionDirectories = new SessionDirectories()
   private version = ''
   private healthy = false
   private readonly command: string
@@ -151,6 +153,23 @@ export class ClaudeBackend implements Backend {
       }))
   }
 
+  /** Put a thread in its own checkout.
+   *
+   *  The manager owns which project a thread belongs to and calls this on every
+   *  lookup. Without it a session kept whatever path it was created with, so a
+   *  thread moved to a worktree, or created before its project was known, ran
+   *  in the wrong directory and reasoned about the wrong repository.
+   *
+   *  Also written to the session record, which is what sessionsList reports and
+   *  what survives a restart. */
+  setSessionDirectory(id: string, directory: string): void {
+    this.sessionDirectories.set(id, directory)
+    const record = this.store.sessions[id]
+    if (!record || !directory || record.projectPath === directory) return
+    record.projectPath = directory
+    this.save()
+  }
+
   async sessionCreate(title?: string, directory?: string): Promise<SessionInfo> {
     const id = randomUUID()
     const time = Date.now()
@@ -163,6 +182,7 @@ export class ClaudeBackend implements Backend {
   async sessionDelete(id: string): Promise<void> {
     this.processes.get(id)?.child.kill()
     this.processes.delete(id)
+    this.sessionDirectories.forget(id)
     delete this.store.sessions[id]
     this.save()
   }
@@ -277,7 +297,7 @@ export class ClaudeBackend implements Backend {
       ...(options?.model?.variant ? ['--effort', options.model.variant] : [])
     ]
     const child = spawn(this.command, args, {
-      cwd: record.projectPath || this.projectPath || globalThis.process.cwd(),
+      cwd: this.sessionDirectories.resolve(sessionId, record.projectPath || this.projectPath) || globalThis.process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...globalThis.process.env,
