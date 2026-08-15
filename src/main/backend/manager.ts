@@ -969,6 +969,52 @@ export class BackendManager {
     })
   }
 
+  /** Show a steered message in the transcript as soon as it is accepted.
+   *  A backend that steers folds the text into the run it is already doing,
+   *  and reports it only when that run ends — so without this the message the
+   *  user just sent left the queue and appeared nowhere until the reply came. */
+  private echoSteeredMessage(binding: ThreadBinding, item: QueuedFollowUp): void {
+    const messageId = `steer-${item.id}`
+    const info = {
+      id: messageId,
+      sessionID: binding.id,
+      role: 'user' as const,
+      time: { created: now() }
+    }
+    this.transcripts?.recordMessage(this.transcriptSource(binding), info)
+    this.emit({
+      type: 'message.updated',
+      properties: { info },
+      backendId: binding.backendId
+    })
+    const parts: Part[] = [
+      ...item.attachments.map((attachment, index) => ({
+        id: `${messageId}-file-${index}`,
+        type: 'file' as const,
+        sessionID: binding.id,
+        messageID: messageId,
+        state: { status: 'completed' as const, path: attachment.name, name: attachment.name }
+      })),
+      ...(item.text.trim()
+        ? [{
+            id: `${messageId}-text`,
+            type: 'text' as const,
+            sessionID: binding.id,
+            messageID: messageId,
+            text: item.text
+          }]
+        : [])
+    ]
+    for (const part of parts) {
+      this.transcripts?.recordPart(this.transcriptSource(binding), part)
+      this.emit({
+        type: 'message.part.updated',
+        properties: { part },
+        backendId: binding.backendId
+      })
+    }
+  }
+
   private followUpParts(item: QueuedFollowUp): unknown[] {
     return [
       ...item.attachments.map((attachment) => ({
@@ -1054,6 +1100,7 @@ export class BackendManager {
     }
     if (DEFINITIONS[binding.backendId].capabilities.steering === 'native' && backend.steer) {
       await backend.steer(binding.nativeSessionId, this.followUpParts(item))
+      this.echoSteeredMessage(binding, item)
       return this.removeFollowUp(threadId, followUpId)
     }
     binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]
@@ -1181,6 +1228,23 @@ export class BackendManager {
     const binding = this.binding(threadId)
     const backend = await this.ensureStarted(binding.backendId)
     await backend.abort(binding.nativeSessionId)
+    // Settle the run here rather than waiting for the backend to say it
+    // stopped. A backend that is interrupted may never send that event, and
+    // the thread then stayed "busy" — which quietly diverted the next message
+    // the user typed into the follow-up queue instead of sending it.
+    if (this.busyThreads.delete(threadId)) {
+      this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
+      this.emit({
+        type: 'session.status',
+        properties: { sessionID: threadId, status: { type: 'idle' } },
+        backendId: binding.backendId
+      })
+      this.emit({
+        type: 'session.idle',
+        properties: { sessionID: threadId },
+        backendId: binding.backendId
+      })
+    }
   }
 
   async fork(threadId: string, messageId?: string): Promise<SessionInfo> {
