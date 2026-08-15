@@ -91,6 +91,10 @@ export interface Backend {
   /** Todos / Permissions */
   todosGet(sessionId: string): Promise<Todo[]>
   permissionRespond(sessionId: string, permissionId: string, response: 'once' | 'always' | 'reject'): Promise<void>
+  /** Answer a question the agent asked. Optional: only backends that can put a
+   *  question to the user implement it, and the answers go back the way that
+   *  backend expects rather than through opencode's HTTP endpoint. */
+  questionRespond?(sessionId: string, requestId: string, answers: string[][]): Promise<void>
 
   /** Files / Diff */
   diffGet(sessionId: string, messageId?: string): Promise<FileDiff[]>

@@ -10,7 +10,7 @@ import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
 import { textFromParts } from './manager'
-import { claudePermissionMode, claudePermissionResponse, parseClaudePermission } from './claude-protocol'
+import { claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, parseClaudePermission, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
 
 interface ClaudeProcess {
@@ -341,7 +341,29 @@ export class ClaudeBackend implements Backend {
               if (response?.request_id === initializeRequestId && response.subtype === 'success') sendPrompt()
             } else if (value.type === 'control_request') {
               const permission = parseClaudePermission(value)
-              if (permission) {
+              const questions = permission ? parseClaudeQuestions(permission) : undefined
+              if (permission && questions) {
+                // A question, not a request for consent. Asking "allow this
+                // tool?" hid what was being asked, and denying it reported a
+                // dismissal the user never made.
+                process.permissions.set(permission.requestId, permission)
+                this.emit({
+                  type: 'question.asked',
+                  question: {
+                    id: permission.requestId,
+                    sessionID: sessionId,
+                    questions: questions.map((item) => ({
+                      question: item.question,
+                      header: item.header,
+                      options: item.options.map((option) => ({ label: option.label, description: option.description })),
+                      multiple: item.multiple,
+                      // Claude's own tool always allows a written answer.
+                      custom: true
+                    })),
+                    tool: { callID: permission.toolUseId }
+                  }
+                })
+              } else if (permission) {
                 process.permissions.set(permission.requestId, permission)
                 this.emit({
                   type: 'permission.asked',
@@ -443,6 +465,18 @@ export class ClaudeBackend implements Backend {
     process.permissions.delete(permissionId)
     this.emit({ type: 'permission.replied', sessionID: sessionId, permissionID: permissionId, response })
   }
+  /** Hand back what the user chose, as the result of the tool Claude called.
+   *  Answers travel on the same control channel as approvals, so a question is
+   *  answered rather than allowed or denied. */
+  async questionRespond(sessionId: string, requestId: string, answers: string[][]): Promise<void> {
+    const process = this.processes.get(sessionId)
+    const pending = process?.permissions.get(requestId)
+    if (!process || !pending) throw new Error('Claude Code is no longer waiting for this answer.')
+    writeControl(process.child, claudeQuestionResponse(requestId, answers))
+    process.permissions.delete(requestId)
+    this.emit({ type: 'question.replied', sessionID: sessionId, requestID: requestId, answers })
+  }
+
   async diffGet(_sessionId: string, _messageId?: string): Promise<FileDiff[]> { return [] }
   async fileTree(_path?: string): Promise<FileNode[]> { return [] }
   async fileContent(path: string): Promise<FileContent> { return { path, content: '' } }
