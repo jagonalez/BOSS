@@ -17,6 +17,9 @@ function aboutPanel(): void {
     version: `Electron ${process.versions.electron} · Chromium ${process.versions.chrome}`,
     copyright: `MIT licensed · ${SITE}`,
     credits: 'A desktop workspace for coding agents: threads own their terminals, files, reviews and browsers, and each can run on its own Git worktree.',
+    // Windows and Linux only. macOS takes the icon from the app bundle, so in
+    // development it shows Electron's — the packaged build has its own icns
+    // and shows that.
     iconPath: join(app.getAppPath(), 'resources', 'icons', '256x256.png')
   })
 }
