@@ -152,6 +152,33 @@ test('the snapshot reports a missing change request without a sync error', async
   }
 })
 
+test('two threads on one branch look the change request up once', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-review-shared-'))
+  const repository = join(directory, 'repo')
+  try {
+    execFileSync('git', ['init', repository])
+    execFileSync('git', ['-C', repository, 'remote', 'add', 'origin', 'https://fake.test/group/repo.git'])
+
+    let lookups = 0
+    class CountingProvider extends FakeForgeProvider {
+      async getChangeRequest(...args: Parameters<FakeForgeProvider['getChangeRequest']>): Promise<ChangeRequestSummary> {
+        lookups += 1
+        return super.getChangeRequest(...args)
+      }
+    }
+
+    const manager = new ReviewManager(join(directory, 'comments.json'), [new CountingProvider()])
+    // The review tab asking, then the sidebar asking for the same branch.
+    await manager.snapshot(repository)
+    const second = await manager.snapshot(repository)
+
+    assert.equal(second.changeRequest?.displayId, '!42')
+    assert.equal(lookups, 1, 'the second ask should be served from the cache')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('a real sync failure is still reported', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'boss-review-broken-'))
   const repository = join(directory, 'repo')
