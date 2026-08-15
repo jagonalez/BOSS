@@ -18,6 +18,16 @@ interface StoredReviewState {
   comments: Record<string, ReviewComment[]>
 }
 
+/** Tell "you have not opened one yet" apart from "the lookup broke".
+ *
+ *  Both arrive as a non-zero exit from the provider CLI, but only one is worth
+ *  interrupting someone over. Matching the message is unpleasant and will need
+ *  revisiting if a provider rewords it; the alternative is showing a warning to
+ *  everyone who has ever pushed a branch before opening a pull request. */
+export function noChangeRequestYet(message: string): boolean {
+  return /\bno (?:pull requests?|merge requests?) found\b/i.test(message)
+}
+
 interface ProviderContext {
   repository: ReviewRepository
   provider: ReviewProvider
@@ -84,7 +94,9 @@ export class ReviewManager {
         changeRequest: await selected.provider.getChangeRequest(repository, selected.match)
       }
     } catch (error) {
-      return { ...base, syncError: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      if (noChangeRequestYet(message)) return { ...base, awaitingChangeRequest: true }
+      return { ...base, syncError: message }
     }
   }
 
