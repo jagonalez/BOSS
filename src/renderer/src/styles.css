@@ -663,7 +663,7 @@ textarea {
 .settings-connections-table-head,
 .settings-connection-row {
   display: grid;
-  grid-template-columns: minmax(145px, 0.78fr) minmax(175px, 1fr) minmax(220px, 1.15fr) 86px;
+  grid-template-columns: minmax(145px, 0.78fr) minmax(175px, 1fr) minmax(220px, 1.15fr) 116px;
   align-items: center;
   gap: 16px;
 }
@@ -712,6 +712,28 @@ textarea {
 .settings-runtime-copy small {
   color: var(--text-faint);
   font-size: var(--type-label);
+}
+
+/* The account button and the server restart under it. Stacked rather than side
+   by side: the row's last column is narrow, and restarting is the rarer action. */
+.settings-connection-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.settings-runtime-restart {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-runtime-restart .ui-status-badge {
+  white-space: normal;
+  text-align: left;
 }
 
 /* Where the CLI lives, under the version it explains. Only shown when PATH cannot

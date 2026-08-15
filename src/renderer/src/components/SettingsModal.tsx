@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
@@ -213,6 +213,47 @@ function BackendBinaryPath({
       </label>
       <Button size="small" variant="ghost" disabled={draft === path} onClick={() => void save()}>
         {saved ? 'Saved' : 'Save'}
+      </Button>
+      {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+    </div>
+  )
+}
+
+/** Stop a backend's server so the next request starts a fresh one.
+ *
+ *  A server reads its credentials once, when it starts. Signing in to another
+ *  account therefore leaves the running server using the account that signed
+ *  out, and every request fails as unauthorized while the CLI itself is signed
+ *  in correctly. This is the way out of that without quitting BOSS. */
+function RestartBackendServer({ backend }: { backend: BackendDescriptor }): React.JSX.Element {
+  const [error, setError] = useState<string | null>(null)
+  const [restarting, setRestarting] = useState(false)
+  const [done, setDone] = useState(false)
+
+  const restart = async (): Promise<void> => {
+    setError(null)
+    setRestarting(true)
+    try {
+      await restartBackend(backend.id)
+      setDone(true)
+      setTimeout(() => setDone(false), 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not restart the server.')
+    } finally {
+      setRestarting(false)
+    }
+  }
+
+  return (
+    <div className="settings-runtime-restart">
+      <Button
+        size="small"
+        variant="ghost"
+        disabled={!backend.available || restarting}
+        title="Stop this agent server so the next message starts a fresh one. Use after signing in to a different account."
+        onClick={() => void restart()}
+      >
+        {restarting ? 'Restarting…' : done ? 'Restarted' : 'Restart server'}
       </Button>
       {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
     </div>
@@ -474,9 +515,12 @@ export function SettingsModal(): React.JSX.Element | null {
                           <BackendDefaults backend={backend} models={models} selected={selected} />
                         </div>
 
-                        <Button size="small" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
-                          {hasCloudAccount ? 'Manage' : 'Add account'}
-                        </Button>
+                        <div className="settings-connection-actions">
+                          <Button size="small" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
+                            {hasCloudAccount ? 'Manage' : 'Add account'}
+                          </Button>
+                          <RestartBackendServer backend={backend} />
+                        </div>
                       </div>
                     )
                   })}

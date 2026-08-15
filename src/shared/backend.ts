@@ -149,6 +149,9 @@ export type BackendRequest =
   | { type: 'backend.bin.get' }
   /** An empty or omitted path clears the override, returning the backend to PATH. */
   | { type: 'backend.bin.set'; backendId: BackendId; path?: string }
+  /** Stop this backend's server so the next request starts a fresh one. Reads
+   *  credentials again, which a running server never does. */
+  | { type: 'backend.restart'; backendId: BackendId }
   | { type: 'thread.list' }
   | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope; executionPath?: string }
   | { type: 'thread.backend.set'; threadId: string; backendId: BackendId }
