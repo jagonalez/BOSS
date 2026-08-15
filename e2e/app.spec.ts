@@ -201,6 +201,7 @@ test('a real opencode failure still reaches the user after a stop', async ({ app
     type: 'session.status',
     properties: { sessionID: 'thread-source', status: { type: 'busy' } }
   }))
+  await expect(appPage.locator('.followup-text')).toHaveText('Redirect this opencode run instead.')
   await appPage.getByRole('button', { name: 'Stop & redirect' }).click()
 
   await control(appPage).then((item) => item.emit({

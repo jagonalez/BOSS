@@ -41,7 +41,9 @@ const backends: BackendDescriptor[] = [
     available: true,
     healthy: true,
     version: 'e2e',
-    capabilities: { ...capabilities, nativeAutoMode: false },
+    // Opencode has no native steering: BOSS stops the run and sends the queued
+    // instruction next, which is what makes it report an abort.
+    capabilities: { ...capabilities, nativeAutoMode: false, steering: 'stop-and-redirect' },
     modes: [
       { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
       { id: 'auto', label: 'Auto', description: 'Approve supported actions.' },
