@@ -132,10 +132,14 @@ export class OpenCodeBackend implements Backend {
   }
 
   async sendMessage(sessionId: string, parts: unknown[], opts?: any): Promise<void> {
+    // context is BOSS's own field and not an OpenCode parameter, so it is
+    // dropped here. OpenCode is told the directory per session already, and
+    // inventing a prompt field to carry the rest is worse than leaving it.
+    const { context: _context, ...rest } = opts ?? {}
     await this.api.request({
       method: 'POST',
       path: `/session/${sessionId}/prompt_async`,
-      body: { parts, ...opts },
+      body: { parts, ...rest },
       directory: this.sessionDirectories.get(sessionId)
     })
     // The manager already exposes an optimistic busy state. Mirroring it here

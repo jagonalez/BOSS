@@ -78,6 +78,11 @@ export interface BackendMessageOptions {
   mode?: BackendModeId
   /** Headless runs: restrict the agent to BOSS-provided tools, ignoring user-level MCP configs. */
   strictTools?: boolean
+  /** Which project and checkout this thread is working in, ready to put in the
+   *  system prompt. Without it an agent infers its project from the directory
+   *  it happens to be in, and infers the repository from whatever else it can
+   *  see — one asked about a browser tab and guessed. */
+  context?: string
 }
 
 export type BackendRequest =

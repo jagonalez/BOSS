@@ -289,7 +289,7 @@ export class ClaudeBackend implements Backend {
       '--input-format', 'stream-json',
       '--permission-prompt-tool', 'stdio',
       '--permission-mode', mode,
-      '--append-system-prompt', QA_GUIDANCE,
+      '--append-system-prompt', options?.context ? `${options.context}\n\n${QA_GUIDANCE}` : QA_GUIDANCE,
       ...(threadBusConfig ? ['--mcp-config', threadBusConfig, '--allowedTools', allowedThreadTools] : []),
       ...(options?.strictTools && threadBusConfig ? ['--strict-mcp-config'] : []),
       ...(hasHistory ? [`--resume=${sessionId}`] : [`--session-id=${sessionId}`]),
@@ -325,6 +325,15 @@ export class ClaudeBackend implements Backend {
         message: { role: 'user', content: prompt },
         parent_tool_use_id: null
       })
+    }
+    // Ends the turn exactly once. It ends at the result, or at exit if the
+    // process dies before producing one; both paths call this.
+    let settled = false
+    const settle = (): void => {
+      if (settled) return
+      settled = true
+      this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'idle' } })
+      this.emit({ type: 'session.idle', sessionID: sessionId })
     }
     const decoder = new TextDecoder()
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -412,6 +421,11 @@ export class ClaudeBackend implements Backend {
               if (value.subtype !== 'success') {
                 this.emit({ type: 'session.error', sessionID: sessionId, error: String(value.error ?? value.result ?? 'Claude Code failed.') })
               }
+              // The turn is over here, whatever the process does next. Waiting
+              // for exit left a thread labelled "Working" after its reply was
+              // finished, since the process can outlive the result — and now
+              // does whenever a question is still waiting to be answered.
+              settle()
               child.stdin?.end()
             }
           } catch {
@@ -425,13 +439,20 @@ export class ClaudeBackend implements Backend {
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
     child.on('error', (error) => this.emit({ type: 'session.error', sessionID: sessionId, error: error.message }))
     child.on('exit', (code) => {
-      for (const permissionId of process.permissions.keys()) {
-        this.emit({ type: 'permission.replied', sessionID: sessionId, permissionID: permissionId, response: 'reject' })
+      // Nothing can be answered once the process is gone, so clear whatever is
+      // still on screen. A question is withdrawn rather than reported as a
+      // denied permission, which would leave its card waiting for an answer
+      // that can no longer go anywhere.
+      for (const [requestId, pending] of process.permissions) {
+        if (parseClaudeQuestions(pending)) {
+          this.emit({ type: 'question.rejected', sessionID: sessionId, requestID: requestId })
+        } else {
+          this.emit({ type: 'permission.replied', sessionID: sessionId, permissionID: requestId, response: 'reject' })
+        }
       }
       this.processes.delete(sessionId)
       if (code && code !== 0) this.emit({ type: 'session.error', sessionID: sessionId, error: stderr.trim() || `Claude Code exited with ${code}.` })
-      this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'idle' } })
-      this.emit({ type: 'session.idle', sessionID: sessionId })
+      settle()
     })
     writeControl(child, {
       type: 'control_request',

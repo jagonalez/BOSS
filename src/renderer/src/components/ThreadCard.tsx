@@ -4,9 +4,12 @@ import type { SessionInfo } from '@shared/opencode'
 import type { ChangeRequestSummary } from '@shared/review'
 import { BranchIcon, ExternalIcon, FolderIcon, ForkIcon, ReviewIcon } from './icons'
 
-/** How long the pointer rests on a row before the card appears. Long enough
- *  that running the mouse down the sidebar does not flash a card per row. */
-const HOVER_DELAY_MS = 400
+/** How long the pointer rests on a row before the card appears.
+ *
+ *  Long: the card is big enough to cover the rows around it, so it has to be
+ *  clearly asked for. Crossing the sidebar to reach something else, or pausing
+ *  over a row while reading it, must not raise one. */
+const HOVER_DELAY_MS = 900
 
 /** Pull request lookups already made, kept for as long as the app runs.
  *

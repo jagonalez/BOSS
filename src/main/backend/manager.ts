@@ -2,8 +2,9 @@ import { app, BrowserWindow, Notification } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { Backend } from './backend'
+import { threadContextPrompt } from './thread-context'
 import type {
   BackendDescriptor,
   BackendId,
@@ -808,7 +809,18 @@ export class BackendManager {
       backendId: binding.backendId
     })
     try {
-      await backend.sendMessage(binding.nativeSessionId, parts, options)
+      // Built here rather than in each backend: the manager is what knows
+      // which project a thread belongs to.
+      await backend.sendMessage(binding.nativeSessionId, parts, {
+        ...options,
+        context: options?.context ?? threadContextPrompt({
+          projectName: binding.projectPath ? basename(binding.projectPath) : undefined,
+          projectPath: binding.projectPath,
+          executionPath: binding.executionPath,
+          branch: binding.worktree?.branch,
+          worktree: binding.worktree?.status === 'active'
+        })
+      })
     } catch (error) {
       this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
       this.busyThreads.delete(threadId)
