@@ -387,7 +387,7 @@ function TabContent({
  *  tells the content it has somewhere new to go. */
 const TabSlots = React.createContext<{
   slots: React.MutableRefObject<Map<string, HTMLElement>>
-  publish: (tabId: string, element: HTMLElement | null) => void
+  publish: (tabId: string, element: HTMLElement | null, previous?: HTMLElement | null) => void
   version: number
 }>({ slots: { current: new Map() }, publish: () => {}, version: 0 })
 
@@ -403,8 +403,14 @@ function useTabHost(tabId: string): HTMLElement | null {
  *  put in the React tree. */
 function TabSlot({ tabId }: { tabId: string }): React.JSX.Element {
   const { publish } = React.useContext(TabSlots)
+  // The slot remembers its own element so a detach can say which one is going.
+  const mine = useRef<HTMLElement | null>(null)
   const attach = React.useCallback(
-    (element: HTMLElement | null) => publish(tabId, element),
+    (element: HTMLElement | null) => {
+      const previous = mine.current
+      mine.current = element
+      publish(tabId, element, previous)
+    },
     [publish, tabId]
   )
   return <div className="workspace-tab-slot" data-tab-slot={tabId} ref={attach} />
@@ -413,9 +419,15 @@ function TabSlot({ tabId }: { tabId: string }): React.JSX.Element {
 function TabSlotProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const slots = useRef(new Map<string, HTMLElement>())
   const [version, setVersion] = useState(0)
-  const publish = React.useCallback((tabId: string, element: HTMLElement | null) => {
+  const publish = React.useCallback((tabId: string, element: HTMLElement | null, previous?: HTMLElement | null) => {
     const current = slots.current.get(tabId)
     if (element === (current ?? null)) return
+    // A tab moving pane detaches its old slot and attaches a new one, and React
+    // runs the cleanup first. Clearing on any detach left the tab with no host
+    // in between, so its content unmounted and lost everything it held — a
+    // files tab lost its open files and scroll. A detach only clears the entry
+    // if that slot still owns it.
+    if (!element && previous && current !== previous) return
     if (element) slots.current.set(tabId, element)
     else slots.current.delete(tabId)
     // Only when the set of slots actually changed, so a re-render that hands
