@@ -162,3 +162,30 @@ test('worktrees stay out of the project by default', async () => {
     cleanup()
   }
 })
+
+test('a thread keeps its conversation when it gains a worktree', async () => {
+  // The natural order is to explore on the main checkout and isolate once you
+  // know what to change. Forking starts a new thread from a summary; this has
+  // to keep the one you are in, which means the same worktree machinery but
+  // bound to an existing thread rather than a new one.
+  const { dir, root, cleanup } = repo()
+  try {
+    const wt = manager(dir)
+    const created = await wt.create({
+      projectId: 'p',
+      projectPath: root,
+      sourcePath: root,
+      title: 'moved',
+      ownerThreadId: 'thread-1'
+    })
+
+    assert.equal(created.ownerThreadId, 'thread-1', 'the worktree belongs to the thread that moved')
+    assert.ok(existsSync(join(created.path, 'file.ts')), 'and is a real checkout')
+    // Branched from the checkout it moved out of, so the work so far is there.
+    const head = execFileSync('git', ['-C', created.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    const origin = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    assert.equal(head, origin)
+  } finally {
+    cleanup()
+  }
+})

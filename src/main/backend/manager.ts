@@ -1151,6 +1151,41 @@ export class BackendManager {
     return this.sessionGet(created.id)
   }
 
+  /** Give a thread its own checkout, keeping the conversation.
+   *
+   *  Forking makes a new thread and hands it a summary; this moves the one you
+   *  are in. The natural order is to explore on the main checkout and isolate
+   *  once you know what to change, and until now that meant deciding before
+   *  you knew.
+   *
+   *  Refuses when the thread already has one — two worktrees for one thread
+   *  would leave the first orphaned with its branch. */
+  async moveToWorktree(threadId: string): Promise<SessionInfo> {
+    if (!this.worktrees) throw new Error('Git worktrees are not available.')
+    const binding = this.binding(threadId)
+    if (binding.worktree?.status === 'active') throw new Error('This thread already has its own worktree.')
+    if (binding.projectId === 'global' || !binding.projectPath) throw new Error('Projectless chats cannot use Git worktrees.')
+    if (this.busyThreads.has(threadId)) throw new Error('Wait for this thread to finish before moving it to a worktree.')
+
+    const worktree = await this.worktrees.create({
+      projectId: binding.projectId,
+      projectPath: binding.projectPath,
+      sourcePath: binding.executionPath || binding.projectPath,
+      title: binding.title,
+      ownerThreadId: threadId
+    })
+    // The binding is what binding() pushes to the backend on every lookup, so
+    // setting it here is what actually moves the agent.
+    binding.executionPath = worktree.path
+    binding.worktree = { ...worktree, ownerThreadId: threadId }
+    this.save()
+    this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, worktree.path)
+    this.reportSetupFailure(threadId, worktree.setupError, binding.backendId)
+    const session = this.session(binding)
+    this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
+    return session
+  }
+
   async forkIntoWorktree(threadId: string, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const source = this.binding(threadId)
@@ -1396,6 +1431,7 @@ export class BackendManager {
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction, request.options)
       case 'thread.delegate': return this.delegate(request.threadId, request.backendId, request.instruction, request.placement, request.options)
       case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction, request.options)
+      case 'thread.worktree.move': return this.moveToWorktree(request.threadId)
       case 'worktree.list': {
         if (!this.worktrees) return []
         const projectId = request.threadId ? this.binding(request.threadId).projectId : this.currentScope.projectId

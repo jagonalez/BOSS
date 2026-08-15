@@ -12,6 +12,7 @@ import {
   deleteSession,
   forkSession,
   forkSessionIntoWorktree,
+  moveSessionToWorktree,
   newGlobalChat,
   newChatInProject,
   openCommitDialog,
@@ -623,6 +624,16 @@ export function Sidebar(): React.JSX.Element {
               {menuItem('Delegate…', () => appStore.setState({ delegateTarget: ctx.session!.id }))}
               {menuItem('Goal & budget…', () => appStore.setState({ policyTarget: ctx.session!.id }))}
               {menuItem('Fork', () => void forkSession(ctx.session!.id))}
+              {ctx.session.projectId !== 'global' && ctx.session.worktree?.status !== 'active' ? menuItem('Move to worktree…', () =>
+                appStore.setState({
+                  confirm: {
+                    title: 'Give this thread its own worktree?',
+                    message: 'BOSS will create an isolated branch from the current HEAD and continue this conversation there. Forking would start a new thread from a summary; this keeps the one you are in. Terminals already open stay in the original checkout.',
+                    confirmLabel: 'Move to worktree',
+                    action: () => void moveSessionToWorktree(ctx.session!.id)
+                  }
+                })
+              ) : null}
               {ctx.session.projectId !== 'global' ? menuItem('Fork into worktree…', () =>
                 appStore.setState({
                   confirm: {

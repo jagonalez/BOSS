@@ -176,6 +176,8 @@ export const OpenCode = {
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction, options }),
   delegate: (threadId: string, backendId: BackendId, instruction: string, placement: DelegatePlacement, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.delegate', threadId, backendId, instruction, placement, options }),
+  moveToWorktree: (threadId: string) =>
+    backendRequest<SessionInfo>({ type: 'thread.worktree.move', threadId }),
   forkIntoWorktree: (threadId: string, instruction?: string, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.worktree.create', threadId, instruction, options }),
   listWorktrees: (threadId?: string) =>
