@@ -370,6 +370,7 @@ export class CodexBackend implements Backend {
     this.process.on('exit', () => {
       this.process = null
       this.healthy = false
+      this.forgetServerState()
       this.rejectAll(new Error('Codex app-server exited.'))
       this.emit({ type: 'server.disconnected' })
     })
@@ -388,7 +389,22 @@ export class CodexBackend implements Backend {
     this.process?.kill()
     this.process = null
     this.healthy = false
+    this.forgetServerState()
     this.rejectAll(new Error('Codex app-server stopped.'))
+  }
+
+  /** Drop what BOSS believed about a server that is no longer running.
+   *
+   *  These record the server's state, not BOSS's: which threads it has resumed,
+   *  which turns it is running, and the text those turns had streamed so far. A
+   *  new app-server knows none of it. Keeping the old answers made BOSS skip the
+   *  resume for a thread it thought was already loaded, and the fresh server
+   *  then rejected the id — "thread not found" for a thread still on disk. */
+  private forgetServerState(): void {
+    this.loadedThreads.clear()
+    this.activeTurns.clear()
+    this.liveText.clear()
+    this.approvals.clear()
   }
 
   async setProject(path: string): Promise<void> {

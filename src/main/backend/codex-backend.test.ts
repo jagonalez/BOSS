@@ -25,6 +25,23 @@ test('every per-thread request uses the thread checkout, not the global path', (
   )
 })
 
+test('a server that goes away takes what BOSS believed about it', () => {
+  // loadedThreads gates thread/resume. Keeping it across a restart made BOSS
+  // skip the resume for a thread it thought was already loaded, and the fresh
+  // app-server then rejected the id: "thread not found" for a thread still on
+  // disk. Both ways a server can end have to forget it.
+  const exit = source.slice(source.indexOf("this.process.on('exit'"), source.indexOf('await this.request(\'initialize\''))
+  assert.ok(exit.includes('this.forgetServerState()'), 'the exit handler should forget server state')
+
+  const stop = source.slice(source.indexOf('async stop('), source.indexOf('async setProject('))
+  assert.ok(stop.includes('this.forgetServerState()'), 'stop should forget server state')
+
+  const forget = source.slice(source.indexOf('private forgetServerState('))
+  for (const cleared of ['loadedThreads.clear()', 'activeTurns.clear()', 'liveText.clear()']) {
+    assert.ok(forget.includes(cleared), `expected ${cleared}`)
+  }
+})
+
 test('the global project path is only a fallback', () => {
   // Reaching for it directly is what caused the bug, so it should appear in
   // the resolver and in server startup, not scattered through request builders.

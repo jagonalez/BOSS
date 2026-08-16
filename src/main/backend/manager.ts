@@ -579,6 +579,32 @@ export class BackendManager {
     }
   }
 
+  /** End the runs a backend was working on when its server went away.
+   *
+   *  Nothing is going to finish them, and nothing else will say so: the idle
+   *  event that normally settles a run dies with the process. A thread left
+   *  busy shows Working for ever, and — since main refuses a second run on a
+   *  busy thread — cannot be written to again either. */
+  private settleRunsOn(backendId: BackendId): void {
+    for (const threadId of [...this.busyThreads]) {
+      const binding = this.bindings.get(threadId)
+      if (binding?.backendId !== backendId) continue
+      this.busyThreads.delete(threadId)
+      this.intentionalAborts.delete(threadId)
+      this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
+      this.emit({
+        type: 'session.status',
+        properties: { sessionID: threadId, status: { type: 'idle' } },
+        backendId
+      })
+      this.emit({
+        type: 'session.idle',
+        properties: { sessionID: threadId },
+        backendId
+      })
+    }
+  }
+
   /** Stop a backend's server and start it again.
    *
    *  A backend server reads its credentials when it starts and keeps them for
@@ -731,7 +757,10 @@ export class BackendManager {
     // started set kept a dead backend marked as running, so ensureStarted
     // handed back a backend with no process and every later request failed
     // until BOSS itself was restarted.
-    if (eventType === 'server.disconnected') this.started.delete(backendId)
+    if (eventType === 'server.disconnected') {
+      this.started.delete(backendId)
+      this.settleRunsOn(backendId)
+    }
     const binding = this.bindingForNative(backendId, nativeId)
     if (!binding && nativeId) return
     if (binding) {

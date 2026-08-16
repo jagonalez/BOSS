@@ -285,6 +285,13 @@ export class PiBackend implements Backend {
   async stop(): Promise<void> {
     for (const session of this.sessions.values()) session.stop()
     this.sessions.clear()
+    // Keyed to sessions that no longer exist: the message a session was
+    // streaming into, the text it had streamed, and the entry ids a fork
+    // mapped. A restarted session issues its own, so keeping these attributed
+    // new output to a message from the process that is gone.
+    this.messageIds.clear()
+    this.liveText.clear()
+    this.forkEntryIds.clear()
     this.healthy = false
   }
 
