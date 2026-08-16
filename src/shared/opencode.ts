@@ -79,6 +79,14 @@ export interface Part {
     path?: string
     content?: string
     text?: string
+    /** An image this part is, so the transcript can show it rather than name it.
+     *
+     *  `mime` says whether there is one at all. `url` is what an <img> loads:
+     *  a data URL for something the user attached, which is small and already
+     *  arrives that way, or a boss-image:// URL for a screenshot an agent took,
+     *  whose bytes live beside the transcript instead of inside it. */
+    mime?: string
+    url?: string
   }
 }
 
