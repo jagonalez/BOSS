@@ -110,6 +110,7 @@ const backendMgr = new BackendManager({
 }, worktrees, backendAuth, transcripts)
 backendMgr.attachBinaryOverrides(backendBins)
 const threadBus = new ThreadBus(backendMgr)
+backendMgr.attachImageStore(images)
 backendMgr.attachThreadBus(threadBus)
 const automations = new AutomationManager({
   stateFile: join(app.getPath('userData'), 'automations.json'),

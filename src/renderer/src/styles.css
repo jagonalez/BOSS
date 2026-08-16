@@ -5085,6 +5085,34 @@ body.workspace-dragging .workspace-tab-slot {
   gap: 8px;
 }
 
+/* An image in the transcript. Bounded by height rather than width so a tall
+   screenshot cannot push the rest of the conversation off the screen, and
+   scaled down rather than cropped: what the agent saw has to stay readable. */
+.part-image {
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.part-image img {
+  max-width: 100%;
+  max-height: 420px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-pane);
+}
+
+.part-image figcaption {
+  color: var(--text-faint);
+  font-size: var(--type-label);
+}
+
 .attachment {
   position: relative;
   width: 64px;
