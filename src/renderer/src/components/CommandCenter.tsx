@@ -64,6 +64,12 @@ function ThreadCard({ thread, state, label, depth = 0, parentTitle }: {
     thread.policy?.budget.maxTokens ? `${compactNumber(thread.policy.budget.maxTokens)} token cap` : '',
     thread.policy?.budget.maxDurationMinutes ? `${thread.policy.budget.maxDurationMinutes}m cap` : ''
   ].filter(Boolean).join(' · ')
+  const result = [
+    thread.result?.changedFiles
+      ? `${thread.result.changedFiles} file${thread.result.changedFiles === 1 ? '' : 's'} changed`
+      : '',
+    thread.result?.branch ?? ''
+  ].filter(Boolean).join(' · ')
   // A nested worker names the thread it came from. Depth alone reads as an
   // unexplained indent once a list is filtered or scrolled.
   const origin = thread.lineage && depth > 0
@@ -81,6 +87,8 @@ function ThreadCard({ thread, state, label, depth = 0, parentTitle }: {
         <small>{projectName(thread.projectPath)} · {thread.backendId} · {label}</small>
         {origin ? <small className="command-session-origin">{origin}</small> : null}
         {thread.policy?.goal ? <span className="command-session-goal">{thread.policy.goal}</span> : null}
+        {thread.result?.summary ? <span className="command-session-result">{thread.result.summary}</span> : null}
+        {result ? <small className="command-session-changed">{result}</small> : null}
         {metrics ? <small className="command-session-metrics">{metrics}</small> : null}
         {budget ? <small className="command-session-budget">Budget · {budget}</small> : null}
       </span>

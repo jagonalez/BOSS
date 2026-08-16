@@ -19,7 +19,7 @@ import type {
   ThreadCreationScope
 } from '@shared/backend'
 import { isAbortError, withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
-import type { EventMessage, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
+import type { EventMessage, FileDiff, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 import { projectScope, type ProjectScope } from '../project-identity'
@@ -30,7 +30,8 @@ import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
 import type { ImageStore } from '../image-store'
 import type { AgentToolImage } from '@shared/qa'
-import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
+import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadResult, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
+import { extractSummary, lastAssistantText } from '@shared/thread-result'
 import {
   budgetViolation,
   EMPTY_TASK_POLICY_STATE,
@@ -63,6 +64,8 @@ interface ThreadBinding {
   /** What the policy has already done for this thread. Separate from the
    *  policy itself so editing the configuration never rewrites history. */
   policyState?: TaskPolicyState
+  /** What this thread's last finished run produced. */
+  result?: ThreadResult
   /** The thread's permission mode, and the only copy that decides anything.
    *
    *  A backend that takes its mode as a launch argument reads it once, so a
@@ -358,6 +361,31 @@ export class BackendManager {
    *
    *  A run the user stopped on purpose never arrives here. That stop is not a
    *  failure, so falling back from it would restart work the user just ended. */
+  /** Record what the run produced, then let the policy act on it.
+   *
+   *  The result is captured first so a reviewer that reads the thread sees the
+   *  same summary and file count the user does. */
+  private async captureResult(binding: ThreadBinding, outcome: RunOutcome): Promise<void> {
+    const backend = await this.ensureStarted(binding.backendId)
+    const [messages, diffs] = await Promise.all([
+      backend.messagesList(binding.nativeSessionId).catch(() => [] as MessageWithParts[]),
+      backend.diffGet(binding.nativeSessionId).catch(() => [] as FileDiff[])
+    ])
+    binding.result = {
+      summary: extractSummary(messages),
+      changedFiles: Array.isArray(diffs) ? diffs.length : 0,
+      branch: binding.worktree?.branch,
+      finishedAt: now(),
+      status: outcome
+    }
+    this.save()
+    this.emit({
+      type: 'thread.result',
+      properties: { threadId: binding.id, result: binding.result },
+      backendId: binding.backendId
+    })
+  }
+
   private async runPolicy(binding: ThreadBinding, outcome: RunOutcome): Promise<void> {
     // A reviewer finishing is a reviewer verdict, not a new task to review.
     // This is checked before the policy, because a reviewer thread carries no
@@ -464,12 +492,7 @@ export class BackendManager {
 
     const backend = await this.ensureStarted(binding.backendId)
     const messages = await backend.messagesList(binding.nativeSessionId).catch(() => [])
-    const lastReply = [...messages].reverse().find((message) => message.info?.role === 'assistant')
-    const text = (lastReply?.parts ?? [])
-      .filter((part) => part.type === 'text')
-      .map((part) => part.text ?? '')
-      .join('\n')
-    const parsed = parseReviewVerdict(text)
+    const parsed = parseReviewVerdict(lastAssistantText(messages))
     record.finishedAt = now()
     record.verdict = parsed?.verdict
     record.notes = parsed?.notes
@@ -533,7 +556,12 @@ export class BackendManager {
    *  reviewer must not stop that handler from reporting the run itself, so the
    *  failure is reported as its own event and goes no further. */
   private settleRun(binding: ThreadBinding, outcome: RunOutcome): void {
-    void this.runPolicy(binding, outcome).catch((error) => {
+    // Capture first, so a reviewer reads the same result the user sees, and so
+    // every finished thread records one — including reviewers, which return
+    // early from the policy step below.
+    void this.captureResult(binding, outcome)
+      .then(() => this.runPolicy(binding, outcome))
+      .catch((error) => {
       this.emit({
         type: 'thread.policy.failed',
         properties: {
@@ -839,7 +867,10 @@ export class BackendManager {
       })
       this.emit({
         type: 'session.idle',
-        properties: { sessionID: threadId },
+        // The run did not finish, it was lost with the server. Say so, or the
+        // task policy reads this idle as a clean finish and reviews work that
+        // never completed instead of falling back.
+        properties: { sessionID: threadId, lost: true },
         backendId
       })
     }
@@ -1041,12 +1072,19 @@ export class BackendManager {
           this.busyThreads.delete(binding.id)
         }
       } else if (eventType === 'session.idle') {
-        this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
+        // A run whose server died is reported as idle so the thread stops
+        // showing Working, but it did not finish. Settle it as an error, so the
+        // fallback answers it and no reviewer reads unfinished work as done.
+        const lost = properties.lost === true
+        const stopped = properties.stopped === true
+        this.transcripts?.finishRun(this.transcriptSource(binding), lost ? 'error' : 'completed')
         this.busyThreads.delete(binding.id)
         void this.threadBus?.flush(binding.id)
         void this.deliverNextFollowUp(binding.id)
-        this.setThreadAttention(binding, 'completed')
-        this.settleRun(binding, 'completed')
+        this.setThreadAttention(binding, lost ? 'error' : 'completed', lost ? 'The backend server went away mid-run.' : undefined)
+        // A run the user stopped settles nothing: it is neither work to review
+        // nor a failure to fall back from.
+        if (!stopped) this.settleRun(binding, lost ? 'error' : 'completed')
       } else if (eventType === 'session.error') {
         // A backend BOSS stopped on purpose reports that stop as an error.
         // Stop, and Stop & redirect, both end this way, and showing the user
@@ -1634,7 +1672,9 @@ export class BackendManager {
       })
       this.emit({
         type: 'session.idle',
-        properties: { sessionID: threadId },
+        // Stopped on purpose, so the task policy stays out of it: neither a
+        // reviewer nor the fallback should answer a run the user ended.
+        properties: { sessionID: threadId, stopped: true },
         backendId: binding.backendId
       })
     }
@@ -1989,7 +2029,8 @@ export class BackendManager {
         lastRun: usage.lastRun,
         usage: usage.totals,
         policy: binding.policy,
-        lineage: binding.lineage
+        lineage: binding.lineage,
+        result: binding.result
       }
     }).sort((a, b) => b.updatedAt - a.updatedAt)
     const totals = threads.reduce<ThreadUsageTotals>((value, thread) => ({

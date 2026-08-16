@@ -2519,6 +2519,21 @@ body.workspace-dragging .workspace-tab-slot {
   border-bottom-left-radius: 0;
 }
 
+.command-session-result {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-session-main .command-session-changed {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
 .command-session-main .command-session-origin {
   margin-top: 2px;
   color: var(--text-muted);
