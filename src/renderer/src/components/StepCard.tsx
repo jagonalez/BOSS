@@ -308,7 +308,7 @@ export function StepCard({ message }: { message: MessageWithParts }): React.JSX.
             <div className="step-files">
               <div className="step-files-label">Edited files — click to review</div>
               {[...files.entries()].map(([path, stats]) => (
-                <div key={path} className="step-file" onClick={() => void openReviewFile(path)}>
+                <div key={path} className="step-file" onClick={() => void openReviewFile(path, message.info.sessionID)}>
                   <span className="step-file-path">{path}</span>
                   <span className="step-file-stats">
                     <span className="add">+{stats.adds}</span>

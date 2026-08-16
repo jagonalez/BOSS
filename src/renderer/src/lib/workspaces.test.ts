@@ -1,6 +1,29 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+
+test('a resource opened from a thread looks at that thread’s checkout', () => {
+  // A review opened from a worktree thread fell back to the main project
+  // checkout, which does not contain the change — the pane showed no files.
+  assert.deepEqual(
+    threadCheckout({ executionPath: '/repo/.boss/worktrees/feature', worktree: { id: 'wt1', path: '/repo/.boss/worktrees/feature', branch: 'feature' } }),
+    { contextPath: '/repo/.boss/worktrees/feature', worktreeId: 'wt1', contextLabel: 'feature' }
+  )
+})
+
+test('a thread on the main checkout is labelled as such', () => {
+  assert.deepEqual(
+    threadCheckout({ executionPath: '/repo' }),
+    { contextPath: '/repo', worktreeId: undefined, contextLabel: 'Main' }
+  )
+})
+
+test('a thread with no checkout leaves the resource unbound', () => {
+  // Unbound rather than pointed somewhere wrong: a projectless chat has no
+  // repository of its own to review.
+  assert.equal(threadCheckout(undefined), undefined)
+  assert.equal(threadCheckout({}), undefined)
+})
 
 test('workspace add menus align to their trigger and stay inside the pane', () => {
   assert.equal(workspaceMenuRight(900, 100, 1_000), 100)

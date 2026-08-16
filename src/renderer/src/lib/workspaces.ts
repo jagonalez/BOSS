@@ -35,6 +35,25 @@ export const SESSION_DRAG_TYPE = 'application/x-boss-session'
  *  React's own reconciliation. A collision had two tabs overwriting each
  *  other's slot, so both unmounted and remounted repeatedly and a files tab
  *  lost its open file. */
+/** Which checkout a resource opened from a thread should look at.
+ *
+ *  A thread working in a Git worktree edits files that do not exist in the main
+ *  project checkout. A review opened without this binding fell back to that
+ *  checkout and showed no files at all — the change was real, but in another
+ *  repository. Undefined for a thread with no checkout of its own, which leaves
+ *  the resource unbound rather than pointing it somewhere wrong. */
+export function threadCheckout(
+  session: { executionPath?: string; worktree?: { id?: string; path?: string; branch?: string } } | undefined
+): WorkspaceCheckoutBinding | undefined {
+  const contextPath = session?.executionPath ?? session?.worktree?.path
+  if (!contextPath) return undefined
+  return {
+    contextPath,
+    worktreeId: session?.worktree?.id,
+    contextLabel: session?.worktree?.branch ?? 'Main'
+  }
+}
+
 export function workspaceId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`
 }

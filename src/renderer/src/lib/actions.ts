@@ -38,6 +38,7 @@ import {
   saveWorkspace,
   splitGroup,
   tab,
+  threadCheckout,
   updateActiveWorkspaceView,
   updateGroup,
   walkGroups,
@@ -2130,11 +2131,23 @@ export async function refreshComputerUsePermissions(promptIfMissing = false): Pr
   }
 }
 
-export async function openReviewFile(path: string): Promise<void> {
+/** Open a review of the thread that edited this file.
+ *
+ *  Bound to the thread's own checkout, the way the Add menu binds one. Without
+ *  it the tab fell back to the main project checkout, so a file edited by an
+ *  agent in a worktree opened a review of a repository that does not contain
+ *  the change — a pane with no files in it. */
+export async function openReviewFile(path: string, sessionId?: string): Promise<void> {
   appStore.setState({ reviewFile: path })
   const workspace = currentWorkspace()
   if (!workspace) return
-  addWorkspaceTab(activeWorkspaceView(workspace).focusedGroupId, 'review')
+  const session = sessionId ? appStore.getState().sessions.find((item) => item.id === sessionId) : undefined
+  addWorkspaceTab(
+    activeWorkspaceView(workspace).focusedGroupId,
+    'review',
+    sessionId,
+    threadCheckout(session)
+  )
 }
 
 export async function refreshProject(): Promise<void> {
