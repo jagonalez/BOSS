@@ -27,6 +27,14 @@ export interface ThreadUsageTotals {
   toolCalls: number
 }
 
+export type LineageKind = 'fork' | 'clone' | 'relay' | 'delegate' | 'review' | 'fallback'
+
+export interface ThreadLineage {
+  kind: LineageKind
+  sourceThreadId: string
+  sourceBackendId?: BackendId
+}
+
 export interface SupervisedThread {
   threadId: string
   backendId: BackendId
@@ -40,6 +48,10 @@ export interface SupervisedThread {
   lastRun?: RunMetrics
   usage: ThreadUsageTotals
   policy?: TaskPolicy
+  /** Where this thread came from. The manager has always recorded it on the
+   *  binding; carrying it here is what lets a surface nest a delegated worker
+   *  under the thread that created it instead of listing both as peers. */
+  lineage?: ThreadLineage
 }
 
 export interface SupervisionSnapshot {

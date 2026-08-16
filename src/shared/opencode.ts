@@ -27,11 +27,7 @@ export interface SessionInfo {
    *  reloads mid-run reads the truth instead of inferring one from timestamps. */
   busy?: boolean
   parentID?: string
-  lineage?: {
-    kind: 'fork' | 'clone' | 'relay' | 'delegate'
-    sourceThreadId: string
-    sourceBackendId?: BackendId
-  }
+  lineage?: import('./supervision').ThreadLineage
 }
 
 export interface SessionTime {

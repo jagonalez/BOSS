@@ -2510,6 +2510,22 @@ body.workspace-dragging .workspace-tab-slot {
   opacity: 0.82;
 }
 
+/* A delegated worker sits under the thread that created it. The rule marks the
+   nesting so an indent still reads as lineage when the list is scrolled. */
+.command-session-card.nested {
+  position: relative;
+  border-left: 2px solid var(--border);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.command-session-main .command-session-origin {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-style: italic;
+  opacity: 0.9;
+}
+
 .command-search-result {
   width: 100%;
   min-width: 0;

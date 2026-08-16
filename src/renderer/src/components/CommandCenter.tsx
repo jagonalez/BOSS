@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import type { SupervisedThread, SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
+import { buildTaskTree, flattenTaskTree, type TaskNode } from '@shared/task-tree'
 import { useStore, appStore } from '../state/AppState'
 import { openProject, selectSession } from '../lib/actions'
 import { OpenCode } from '../lib/opencode'
@@ -37,10 +38,21 @@ async function openThread(thread: Pick<SupervisedThread, 'threadId' | 'projectPa
   void OpenCode.acknowledgeAttention(thread.threadId).catch(() => {})
 }
 
-function ThreadCard({ thread, state, label }: {
+const LINEAGE_LABELS: Record<NonNullable<SupervisedThread['lineage']>['kind'], string> = {
+  delegate: 'Delegated by',
+  fork: 'Forked from',
+  clone: 'Cloned from',
+  relay: 'Relayed from',
+  review: 'Reviewing',
+  fallback: 'Fallback for'
+}
+
+function ThreadCard({ thread, state, label, depth = 0, parentTitle }: {
   thread: SupervisedThread
   state: 'attention' | 'running' | 'recent'
   label: string
+  depth?: number
+  parentTitle?: string
 }): React.JSX.Element {
   const metrics = [
     thread.lastRun?.durationMs ? duration(thread.lastRun.durationMs) : '',
@@ -52,12 +64,22 @@ function ThreadCard({ thread, state, label }: {
     thread.policy?.budget.maxTokens ? `${compactNumber(thread.policy.budget.maxTokens)} token cap` : '',
     thread.policy?.budget.maxDurationMinutes ? `${thread.policy.budget.maxDurationMinutes}m cap` : ''
   ].filter(Boolean).join(' · ')
+  // A nested worker names the thread it came from. Depth alone reads as an
+  // unexplained indent once a list is filtered or scrolled.
+  const origin = thread.lineage && depth > 0
+    ? `${LINEAGE_LABELS[thread.lineage.kind]} ${parentTitle ?? 'another thread'}`
+    : undefined
   return (
-    <button className="command-session-card" onClick={() => void openThread(thread)}>
+    <button
+      className={`command-session-card${depth > 0 ? ' nested' : ''}`}
+      style={depth > 0 ? { marginLeft: `${Math.min(depth, 4) * 18}px` } : undefined}
+      onClick={() => void openThread(thread)}
+    >
       <span className={`command-state-icon ${state}`}><ChatIcon size={14} /></span>
       <span className="command-session-main">
         <strong>{thread.title}</strong>
         <small>{projectName(thread.projectPath)} · {thread.backendId} · {label}</small>
+        {origin ? <small className="command-session-origin">{origin}</small> : null}
         {thread.policy?.goal ? <span className="command-session-goal">{thread.policy.goal}</span> : null}
         {metrics ? <small className="command-session-metrics">{metrics}</small> : null}
         {budget ? <small className="command-session-budget">Budget · {budget}</small> : null}
@@ -65,6 +87,29 @@ function ThreadCard({ thread, state, label }: {
       <span className="command-session-time">{timeAgo(thread.updatedAt)}</span>
       <ChevronIcon size={14} />
     </button>
+  )
+}
+
+/** Render a lineage tree as an indented list. */
+function ThreadTree({ nodes, state, label, titles }: {
+  nodes: TaskNode[]
+  state: 'attention' | 'running' | 'recent'
+  label: string
+  titles: Map<string, string>
+}): React.JSX.Element {
+  return (
+    <>
+      {flattenTaskTree(nodes).map((node) => (
+        <ThreadCard
+          key={node.thread.threadId}
+          thread={node.thread}
+          state={state}
+          label={label}
+          depth={node.depth}
+          parentTitle={node.thread.lineage ? titles.get(node.thread.lineage.sourceThreadId) : undefined}
+        />
+      ))}
+    </>
   )
 }
 
@@ -158,10 +203,19 @@ export function CommandCenter(): React.JSX.Element {
       return label ? [{ thread, label }] : []
     })
     const attentionIds = new Set(attention.map((item) => item.thread.threadId))
+    const running = threads.filter((thread) => thread.running && !attentionIds.has(thread.threadId))
+    // Build the tree first, then cap by root. Slicing the flat list would keep a
+    // worker whose parent fell off the end, which is exactly the orphaned-indent
+    // case the tree is meant to remove.
+    const recentRoots = buildTaskTree(
+      threads.filter((thread) => !thread.running && !attentionIds.has(thread.threadId))
+    ).slice(0, 8)
     return {
       attention,
-      running: threads.filter((thread) => thread.running && !attentionIds.has(thread.threadId)),
-      recent: threads.filter((thread) => !thread.running && !attentionIds.has(thread.threadId)).slice(0, 8)
+      running,
+      runningTree: buildTaskTree(running),
+      recent: recentRoots,
+      titles: new Map(threads.map((thread) => [thread.threadId, thread.title]))
     }
   }, [snapshot, permissions, questions, errors, threadBus])
 
@@ -226,16 +280,16 @@ export function CommandCenter(): React.JSX.Element {
             <div className="command-section-head"><h2>Running</h2><span>{classified.running.length}</span></div>
             <div className="command-list">
               {classified.running.length > 0
-                ? classified.running.map((thread) => <ThreadCard key={thread.threadId} thread={thread} state="running" label="Working" />)
+                ? <ThreadTree nodes={classified.runningTree} state="running" label="Working" titles={classified.titles} />
                 : <div className="command-empty">No agents are currently running.</div>}
             </div>
           </section>
 
           <section className="command-section command-recent">
-            <div className="command-section-head"><h2>Recently active</h2><span>{classified.recent.length}</span></div>
+            <div className="command-section-head"><h2>Recently active</h2><span>{flattenTaskTree(classified.recent).length}</span></div>
             <div className="command-list">
               {classified.recent.length > 0
-                ? classified.recent.map((thread) => <ThreadCard key={thread.threadId} thread={thread} state="recent" label="Updated" />)
+                ? <ThreadTree nodes={classified.recent} state="recent" label="Updated" titles={classified.titles} />
                 : <div className="command-empty">Your recent work will appear here.</div>}
             </div>
           </section>
