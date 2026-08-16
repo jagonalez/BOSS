@@ -11,7 +11,7 @@ import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
 import { textFromParts } from './manager'
-import { claudeExitError, claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeResultError, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol'
+import { claudeExitError, claudeMessageContent, claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeResultError, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
 
 interface ClaudeProcess {
@@ -258,6 +258,10 @@ export class ClaudeBackend implements Backend {
   async sendMessage(sessionId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
     if (this.processes.has(sessionId)) throw new Error('Claude Code is already working on this thread.')
     const record = this.record(sessionId)
+    // What Claude is sent, which carries an attached image as a block rather
+    // than describing it. The transcript echo below stays text: main records
+    // the image part itself, so repeating it here would show it twice.
+    const content = claudeMessageContent(parts)
     const prompt = textFromParts(parts)
     const userId = randomUUID()
     this.upsert(sessionId, {
@@ -334,7 +338,7 @@ export class ClaudeBackend implements Backend {
       writeControl(child, {
         type: 'user',
         session_id: sessionId,
-        message: { role: 'user', content: prompt },
+        message: { role: 'user', content },
         parent_tool_use_id: null
       })
     }
