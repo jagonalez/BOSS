@@ -83,6 +83,18 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
     case 'file': {
       const path = part.state?.path
       const content = partText(part)
+      // An image is shown, not named. Naming it made a screenshot the agent
+      // took, or a picture the user attached, into a row of text — the one
+      // party who could not see it was the person reading the thread.
+      if (part.state?.mime?.startsWith('image/') && part.state.url) {
+        const label = part.state.name || path || 'image'
+        return (
+          <figure className="part-image">
+            <img src={part.state.url} alt={label} loading="lazy" />
+            <figcaption>{label}</figcaption>
+          </figure>
+        )
+      }
       return (
         <div className="tool-call">
           <div className="tool-call-head">

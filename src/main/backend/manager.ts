@@ -28,6 +28,8 @@ import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
+import type { ImageStore } from '../image-store'
+import type { AgentToolImage } from '@shared/qa'
 import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 import { budgetViolation, normalizeTaskPolicy, type TaskPolicy } from '@shared/task-policy'
 import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
@@ -139,7 +141,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before tools that need approval' },
       { id: 'auto', label: 'Auto', description: 'let Claude decide which tool calls can run automatically' },
@@ -217,6 +219,7 @@ export class BackendManager {
    *  that stop is not shown as a failed turn. Cleared by the next run. */
   private readonly intentionalAborts = new Set<string>()
   private threadBus?: ThreadBus
+  private images?: ImageStore
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
@@ -233,6 +236,36 @@ export class BackendManager {
     private readonly backendAuth?: BackendAuth,
     private readonly transcripts?: TranscriptStore
   ) {}
+
+  attachImageStore(images: ImageStore): void {
+    this.images = images
+  }
+
+  /** Put an image a tool returned into the thread's transcript.
+   *
+   *  Called for every agent tool that answers with one — a QA screenshot, an
+   *  MCP server's chart — so the user sees what the agent saw rather than
+   *  taking its word for it. The bytes go to disk and the part carries a URL,
+   *  since a transcript is read in full every time its thread is opened. */
+  publishToolImage(threadId: string, tool: string, image: AgentToolImage): void {
+    const binding = this.bindings.get(threadId)
+    if (!binding || !this.images) return
+    const stored = this.images.write(threadId, image.mimeType, image.data)
+    if (!stored) return
+    const part: Part = {
+      id: `tool-image-${randomUUID()}`,
+      type: 'file',
+      sessionID: threadId,
+      messageID: `assistant-tool-image-${randomUUID()}`,
+      state: { status: 'completed', name: tool, mime: stored.mime, url: stored.url }
+    }
+    this.transcripts?.recordPart(this.transcriptSource(binding), part)
+    this.emit({
+      type: 'message.part.updated',
+      properties: { part },
+      backendId: binding.backendId
+    })
+  }
 
   attachThreadBus(threadBus: ThreadBus): void {
     this.threadBus = threadBus
@@ -991,6 +1024,9 @@ export class BackendManager {
         .catch(() => { /* the native session outlives BOSS's record of it */ })
     }
     this.transcripts?.deleteThread(threadId)
+    // The images belonged to the transcript, so they go with it rather than
+    // sitting in userData for a thread that no longer exists.
+    this.images?.forget(threadId)
     this.bindings.delete(threadId)
     this.save()
     this.emit({ type: 'session.deleted', properties: { info: this.session(binding) }, backendId: binding.backendId })
@@ -1130,7 +1166,14 @@ export class BackendManager {
         type: 'file' as const,
         sessionID: binding.id,
         messageID: messageId,
-        state: { status: 'completed' as const, path: attachment.name, name: attachment.name }
+        // Carrying the image itself, not just its name: the transcript shows
+        // what was attached rather than reporting that something was.
+        state: {
+          status: 'completed' as const,
+          path: attachment.name,
+          name: attachment.name,
+          ...(attachment.mime?.startsWith('image/') ? { mime: attachment.mime, url: attachment.dataUrl } : {})
+        }
       })),
       ...(item.text.trim()
         ? [{
