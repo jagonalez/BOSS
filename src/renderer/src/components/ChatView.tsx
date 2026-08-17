@@ -1113,7 +1113,14 @@ function groupTurns(messages: MessageWithParts[]): TurnGroup[] {
   return groups
 }
 
+/** One message standing for every assistant message in a turn.
+ *
+ *  A turn with no reply yet is normal, not a mistake: groupTurns opens a group
+ *  the moment the user sends, and it stays empty until the first message
+ *  arrives. Returning an empty message rather than reading info off a message
+ *  that is not there keeps that first frame renderable. */
 function combineAssistants(messages: MessageWithParts[]): MessageWithParts {
+  if (messages.length === 0) return { info: {} as MessageWithParts['info'], parts: [] }
   const parts = uniqueNarrativeParts(messages.flatMap((m) => m.parts))
   const created = Math.min(...messages.map((m) => m.info.time?.created).filter((t): t is number => typeof t === 'number'))
   // A turn is finished only when every message in it is. Taking the latest

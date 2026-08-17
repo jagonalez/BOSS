@@ -164,6 +164,12 @@ test('empty text and unrenderable parts open no segment', () => {
   assert.equal(segments[0].type === 'steps' && segments[0].parts.length, 1)
 })
 
+test('a turn with no parts yields no segments', () => {
+  // The state between sending a prompt and the first message arriving. The
+  // renderer builds a turn for it, so this must not throw.
+  assert.deepEqual(segmentTurn([]), [])
+})
+
 test('a turn with no work is all narrative', () => {
   const segments = segmentTurn([text('t1', 'Just an answer.')])
   assert.deepEqual(segments.map((s) => s.type), ['narrative'])
