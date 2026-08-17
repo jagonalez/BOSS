@@ -1008,7 +1008,12 @@ export function Workspace(): React.JSX.Element {
     const key = (event: KeyboardEvent): void => {
       if (!(event.metaKey || event.ctrlKey)) return
       const target = event.target as HTMLElement | null
-      if (target?.matches('input, textarea, [contenteditable="true"]')) return
+      // Typing a shortcut into a text field should insert nothing and do
+      // nothing. The terminal is the exception: xterm takes input through a
+      // hidden textarea, so without this it would look like a text field and
+      // swallow every workspace shortcut whenever a terminal had focus.
+      const inTerminal = Boolean(target?.closest('.terminal-view, .xterm'))
+      if (!inTerminal && target?.matches('input, textarea, [contenteditable="true"]')) return
       const state = appStore.getState()
       const current = state.projectWorkspace
       if (!current) return
@@ -1022,9 +1027,34 @@ export function Workspace(): React.JSX.Element {
         event.preventDefault()
         const activeTab = focused.tabs.find((item) => item.id === focused.activeTabId)
         if (activeTab) requestCloseWorkspaceTab(focused.id, activeTab)
-      } else if (event.key.startsWith('Arrow')) {
+      } else if (event.code === 'BracketLeft' || event.code === 'BracketRight') {
+        // Cmd+Shift+[ and ] step through the tabs of the focused pane, as they
+        // do in VS Code. Wrapping at the ends matches every tabbed app.
+        //
+        // Matched on code rather than key: holding Shift turns [ into {, so
+        // comparing event.key never matched and the shortcut did nothing.
+        if (!event.shiftKey) return
         event.preventDefault()
-        const direction = event.key.replace('Arrow', '').toLowerCase() as 'left' | 'right' | 'up' | 'down'
+        const index = focused.tabs.findIndex((item) => item.id === focused.activeTabId)
+        if (index < 0 || focused.tabs.length < 2) return
+        const step = event.code === 'BracketRight' ? 1 : -1
+        const next = (index + step + focused.tabs.length) % focused.tabs.length
+        activateWorkspaceTab(focused.id, focused.tabs[next].id)
+      } else if (/^Digit[1-9]$/.test(event.code)) {
+        // Cmd+9 means the last tab rather than the ninth, again as in VS Code.
+        event.preventDefault()
+        const position = Number(event.code.slice(-1))
+        const target = position === 9 ? focused.tabs[focused.tabs.length - 1] : focused.tabs[position - 1]
+        if (target) activateWorkspaceTab(focused.id, target.id)
+      } else if (event.code.startsWith('Arrow')) {
+        // Option+Cmd+Arrow moves between split panes. Plain Cmd+Arrow is left
+        // alone so it keeps meaning line and document navigation inside text.
+        //
+        // Matched on code, as elsewhere here: Option is a compose key on macOS
+        // and the reported key is not dependable while it is held.
+        if (!event.altKey) return
+        event.preventDefault()
+        const direction = event.code.replace('Arrow', '').toLowerCase() as 'left' | 'right' | 'up' | 'down'
         focusNeighbor(direction)
       }
     }

@@ -36,6 +36,7 @@
     "@tanstack/react-virtual": "^3.14.9",
     "@types/ws": "^8.18.1",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "electron-updater": "^6.8.9",
     "highlight.js": "^11.11.1",

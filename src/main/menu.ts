@@ -83,6 +83,11 @@ export function buildAppMenu(): void {
     },
     {
       // Ours by name only. These roles are what make the shortcuts work.
+      //
+      // The terminal needs Cmd+C and Cmd+V to mean something else, and handles
+      // them itself in terminal-clipboard.ts. The roles stay because text
+      // fields elsewhere depend on them; removing the accelerators is not an
+      // option either, since registerAccelerator is ignored on macOS.
       label: 'Edit',
       submenu: [
         { role: 'undo' },

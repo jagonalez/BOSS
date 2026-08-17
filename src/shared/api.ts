@@ -72,6 +72,17 @@ export interface BossApi {
   terminalWrite(id: string, data: string): Promise<boolean>
   terminalResize(id: string, cols: number, rows: number): Promise<boolean>
   terminalDispose(id: string): Promise<boolean>
+  /** Report that xterm has parsed `chars` characters, releasing flow control. */
+  terminalAck(id: string, chars: number): void
+  /** Report that this terminal is listening, releasing output the shell wrote
+   *  before the renderer knew its id. */
+  terminalReady(id: string): void
+
+  /** Read the system clipboard. Use instead of navigator.clipboard, which the
+   *  renderer lacks permission for. */
+  clipboardRead(): string
+  /** Write the system clipboard. */
+  clipboardWrite(text: string): void
   onTerminalData(cb: (evt: TerminalDataEvent) => void): () => void
   onTerminalExit(cb: (evt: TerminalExitEvent) => void): () => void
 

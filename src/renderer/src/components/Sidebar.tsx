@@ -779,7 +779,7 @@ export function Sidebar(): React.JSX.Element {
                   }
                 })
               )}
-              {menuItem('Copy ID', () => void navigator.clipboard.writeText(ctx.session!.id))}
+              {menuItem('Copy ID', () => window.boss.clipboardWrite(ctx.session!.id))}
             </>
           ) : null}
         </div>
