@@ -402,6 +402,14 @@ export class BackendManager {
       return
     }
     if (outcome !== 'completed') return
+    // Nothing changed, so there is nothing to review. A thread can finish a run
+    // having only talked — asked a question, reported a blocker — and starting
+    // a reviewer on an empty diff spends a run to be told the work was never
+    // done. Say that directly instead.
+    if (!binding.result?.changedFiles && policy.reviewers.length) {
+      this.setThreadAttention(binding, 'completed', 'Finished without changing any files, so no reviewer ran.')
+      return
+    }
     await this.startNextReviewer(binding, policy)
   }
 
@@ -1346,6 +1354,14 @@ export class BackendManager {
     binding.updatedAt = now()
     this.save()
     this.transcripts?.beginRun(this.transcriptSource(binding))
+    // Carried as a message part, not only in the context prompt: opencode and
+    // pi have no system-prompt hook and drop that field entirely. A goal is the
+    // task itself rather than a fact about the checkout, so it has to reach
+    // every backend. Without this, a thread told to "do the task in the goal"
+    // has nowhere to read it and searches the disk for a goal file.
+    const goalParts = binding.policy?.goal
+      ? [{ type: 'text', text: `Standing goal for this thread: ${binding.policy.goal}` }, ...parts]
+      : parts
     // A new run cannot be excused by the last stop, so an abort error after
     // this point is the backend's own and reaches the user.
     this.intentionalAborts.delete(threadId)
@@ -1361,7 +1377,7 @@ export class BackendManager {
     try {
       // Built here rather than in each backend: the manager is what knows
       // which project a thread belongs to.
-      await backend.sendMessage(binding.nativeSessionId, parts, {
+      await backend.sendMessage(binding.nativeSessionId, goalParts, {
         ...options,
         context: options?.context ?? threadContextPrompt({
           projectName: binding.projectPath ? basename(binding.projectPath) : undefined,
