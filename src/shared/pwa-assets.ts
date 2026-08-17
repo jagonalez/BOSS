@@ -32,7 +32,10 @@ export const WEB_MANIFEST = JSON.stringify({
  */
 export const SERVICE_WORKER = `/* BOSS PWA service worker */
 'use strict';
-var SHELL = 'boss-shell-v1';
+// Bump this whenever the page changes in a way a stale cache would hide.
+// A fixed name meant a phone could keep serving an old page through every
+// fix, which is indistinguishable from the fix not working.
+var SHELL = 'boss-shell-v2';
 
 self.addEventListener('install', function (event) {
   event.waitUntil(
