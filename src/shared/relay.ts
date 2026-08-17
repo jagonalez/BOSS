@@ -43,7 +43,20 @@ export type RelayMessage =
   | { kind: 'request'; id: string; request: unknown; token: string }
   | { kind: 'response'; id: string; ok: true; result: unknown }
   | { kind: 'response'; id: string; ok: false; error: string }
-  | { kind: 'event'; event: Record<string, unknown> }
+  /**
+   * `seq` increases by one per event for the life of the desktop connection.
+   * A phone tracks the last one it applied and asks for anything newer when it
+   * reconnects, so sleeping through a burst does not silently lose it.
+   */
+  | { kind: 'event'; event: Record<string, unknown>; seq: number }
+  /** Phone → desktop on reconnect: "send me everything after `since`". */
+  | { kind: 'resume'; since: number; token: string }
+  /**
+   * Desktop → phone. `events` is what it still had buffered. `gap` is true when
+   * the phone was away longer than the buffer, so the UI must refetch rather
+   * than trust an incomplete stream.
+   */
+  | { kind: 'resumed'; events: Array<{ event: Record<string, unknown>; seq: number }>; gap: boolean; seq: number }
   | { kind: 'ping' }
   | { kind: 'claim'; secret: string; label?: string }
   | { kind: 'claimed'; secret: string; token: string; role: string }
@@ -90,16 +103,40 @@ export interface PairingPayload {
   d: string
   /** One-time pairing secret, base64url. */
   s: string
+  /**
+   * The desktop's join proof for its room.
+   *
+   * Both `d` and this are derived from the room secret, which a pairing phone
+   * does not have yet. Without them the phone derives a room of its own from
+   * the pairing secret, joins it alone, and its claim reaches nobody. Carrying
+   * them costs nothing: they are one-way hashes, and the relay already sees
+   * both on every connection.
+   */
+  j?: string
 }
 
+/**
+ * Encode a pairing code as an ordinary web URL pointing at the relay, which
+ * also serves the phone page. A phone camera opens http(s) links and refuses
+ * custom schemes like `boss://` with "no usable data found", so the scheme is
+ * not cosmetic — it decides whether scanning works at all.
+ *
+ * The payload rides in the fragment. Browsers never send a fragment to the
+ * server, so the one-time secret reaches the page without the relay seeing it,
+ * even though the relay served that page.
+ */
 export function encodePairing(payload: PairingPayload): string {
   const json = JSON.stringify(payload)
-  return `boss://pair?p=${toBase64Url(new TextEncoder().encode(json))}`
+  const encoded = toBase64Url(new TextEncoder().encode(json))
+  const base = payload.r.replace(/^ws(s?):\/\//, 'http$1://').replace(/\/+$/, '')
+  return `${base}/#p=${encoded}`
 }
 
+/** Accepts the fragment form this version emits and the `?p=` form, so a code
+ *  pasted from an older desktop still pairs. */
 export function decodePairing(input: string): PairingPayload | null {
   const trimmed = input.trim()
-  const match = /[?&]p=([A-Za-z0-9_-]+)/.exec(trimmed)
+  const match = /[#?&]p=([A-Za-z0-9_-]+)/.exec(trimmed)
   if (!match) return null
   try {
     const json = new TextDecoder().decode(fromBase64Url(match[1]))

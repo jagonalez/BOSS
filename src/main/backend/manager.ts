@@ -18,8 +18,8 @@ import type {
   QueuedFollowUpAttachment,
   ThreadCreationScope
 } from '@shared/backend'
-import { isAbortError, withBackendDefaults } from '@shared/backend'
-import type { EventMessage, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
+import { isAbortError, withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
+import type { EventMessage, FileDiff, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 import { projectScope, type ProjectScope } from '../project-identity'
@@ -28,8 +28,20 @@ import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
-import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
-import { budgetViolation, normalizeTaskPolicy, type TaskPolicy } from '@shared/task-policy'
+import type { ImageStore } from '../image-store'
+import type { AgentToolImage } from '@shared/qa'
+import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadResult, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
+import { extractSummary, lastAssistantText } from '@shared/thread-result'
+import {
+  budgetViolation,
+  EMPTY_TASK_POLICY_STATE,
+  fallbackApplies,
+  normalizeTaskPolicy,
+  parseReviewVerdict,
+  type RunOutcome,
+  type TaskPolicy,
+  type TaskPolicyState
+} from '@shared/task-policy'
 import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
 
 interface ThreadBinding {
@@ -49,6 +61,11 @@ interface ThreadBinding {
   followUps?: QueuedFollowUp[]
   attention?: ThreadAttention
   policy?: TaskPolicy
+  /** What the policy has already done for this thread. Separate from the
+   *  policy itself so editing the configuration never rewrites history. */
+  policyState?: TaskPolicyState
+  /** What this thread's last finished run produced. */
+  result?: ThreadResult
   /** The thread's permission mode, and the only copy that decides anything.
    *
    *  A backend that takes its mode as a launch argument reads it once, so a
@@ -139,7 +156,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before tools that need approval' },
       { id: 'auto', label: 'Auto', description: 'let Claude decide which tool calls can run automatically' },
@@ -217,6 +234,7 @@ export class BackendManager {
    *  that stop is not shown as a failed turn. Cleared by the next run. */
   private readonly intentionalAborts = new Set<string>()
   private threadBus?: ThreadBus
+  private images?: ImageStore
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
@@ -234,6 +252,36 @@ export class BackendManager {
     private readonly backendAuth?: BackendAuth,
     private readonly transcripts?: TranscriptStore
   ) {}
+
+  attachImageStore(images: ImageStore): void {
+    this.images = images
+  }
+
+  /** Put an image a tool returned into the thread's transcript.
+   *
+   *  Called for every agent tool that answers with one — a QA screenshot, an
+   *  MCP server's chart — so the user sees what the agent saw rather than
+   *  taking its word for it. The bytes go to disk and the part carries a URL,
+   *  since a transcript is read in full every time its thread is opened. */
+  publishToolImage(threadId: string, tool: string, image: AgentToolImage): void {
+    const binding = this.bindings.get(threadId)
+    if (!binding || !this.images) return
+    const stored = this.images.write(threadId, image.mimeType, image.data)
+    if (!stored) return
+    const part: Part = {
+      id: `tool-image-${randomUUID()}`,
+      type: 'file',
+      sessionID: threadId,
+      messageID: `assistant-tool-image-${randomUUID()}`,
+      state: { status: 'completed', name: tool, mime: stored.mime, url: stored.url }
+    }
+    this.transcripts?.recordPart(this.transcriptSource(binding), part)
+    this.emit({
+      type: 'message.part.updated',
+      properties: { part },
+      backendId: binding.backendId
+    })
+  }
 
   attachThreadBus(threadBus: ThreadBus): void {
     this.threadBus = threadBus
@@ -304,6 +352,234 @@ export class BackendManager {
     if (!binding.attention) return
     binding.attention = undefined
     this.save()
+  }
+
+  /** Start the next reviewer, or the fallback, for a thread whose run ended.
+   *
+   *  Reviewers and fallback need the same three things: the moment a run ends,
+   *  how it ended, and permission to start another thread. Both therefore hang
+   *  off this one trigger rather than growing separate ones.
+   *
+   *  A run the user stopped on purpose never arrives here. That stop is not a
+   *  failure, so falling back from it would restart work the user just ended. */
+  /** Record what the run produced, then let the policy act on it.
+   *
+   *  The result is captured first so a reviewer that reads the thread sees the
+   *  same summary and file count the user does. */
+  private async captureResult(binding: ThreadBinding, outcome: RunOutcome): Promise<void> {
+    const backend = await this.ensureStarted(binding.backendId)
+    const [messages, diffs] = await Promise.all([
+      backend.messagesList(binding.nativeSessionId).catch(() => [] as MessageWithParts[]),
+      backend.diffGet(binding.nativeSessionId).catch(() => [] as FileDiff[])
+    ])
+    binding.result = {
+      summary: extractSummary(messages),
+      changedFiles: Array.isArray(diffs) ? diffs.length : 0,
+      branch: binding.worktree?.branch,
+      finishedAt: now(),
+      status: outcome
+    }
+    this.save()
+    this.emit({
+      type: 'thread.result',
+      properties: { threadId: binding.id, result: binding.result },
+      backendId: binding.backendId
+    })
+  }
+
+  private async runPolicy(binding: ThreadBinding, outcome: RunOutcome): Promise<void> {
+    // A reviewer finishing is a reviewer verdict, not a new task to review.
+    // This is checked before the policy, because a reviewer thread carries no
+    // policy of its own — the one it serves belongs to the thread that spawned
+    // it. Checking the policy first would make every verdict unreachable.
+    if (binding.lineage?.kind === 'review' || binding.lineage?.kind === 'fallback') {
+      await this.recordReviewerOutcome(binding)
+      return
+    }
+    const policy = binding.policy
+    if (!policy) return
+    if (fallbackApplies(policy, outcome)) {
+      await this.startFallback(binding, policy.fallback!, outcome)
+      return
+    }
+    if (outcome !== 'completed') return
+    // Nothing changed, so there is nothing to review. A thread can finish a run
+    // having only talked — asked a question, reported a blocker — and starting
+    // a reviewer on an empty diff spends a run to be told the work was never
+    // done. Say that directly instead.
+    if (!binding.result?.changedFiles && policy.reviewers.length) {
+      this.setThreadAttention(binding, 'completed', 'Finished without changing any files, so no reviewer ran.')
+      return
+    }
+    await this.startNextReviewer(binding, policy)
+  }
+
+  private policyStateOf(binding: ThreadBinding): TaskPolicyState {
+    if (!binding.policyState) binding.policyState = { ...EMPTY_TASK_POLICY_STATE, reviewers: [] }
+    return binding.policyState
+  }
+
+  private async startNextReviewer(binding: ThreadBinding, policy: TaskPolicy): Promise<void> {
+    const state = this.policyStateOf(binding)
+    const reviewer = policy.reviewers[state.cursor]
+    if (!reviewer) return
+    // Claim the slot before the await. Two completion events for one run would
+    // otherwise start the same reviewer twice.
+    state.cursor += 1
+    this.save()
+
+    const instruction = [
+      'You are a reviewer. Review the work described below against the goal.',
+      policy.goal ? `Goal: ${policy.goal}` : '',
+      reviewer.instruction ? `Review instructions: ${reviewer.instruction}` : '',
+      'Inspect the diff and any tests or checks you need.',
+      'Finish your reply with a single line reading exactly PASS or CHANGES_REQUESTED.',
+      'When requesting changes, follow that line with one "- " bullet per issue.'
+    ].filter(Boolean).join('\n')
+
+    const created = await this.delegateForPolicy(binding, reviewer.backendId, instruction, 'review')
+    state.reviewers.push({
+      backendId: reviewer.backendId,
+      threadId: created.id,
+      startedAt: now()
+    })
+    this.save()
+    this.emit({
+      type: 'thread.policy.reviewer.started',
+      properties: { threadId: binding.id, reviewerThreadId: created.id, backendId: reviewer.backendId },
+      backendId: binding.backendId
+    })
+  }
+
+  private async startFallback(
+    binding: ThreadBinding,
+    fallback: NonNullable<TaskPolicy['fallback']>,
+    outcome: RunOutcome
+  ): Promise<void> {
+    const state = this.policyStateOf(binding)
+    // One fallback per thread. A backend that fails repeatedly must not spawn a
+    // new thread for every failure.
+    if (state.fallbackThreadId) return
+    state.fallbackThreadId = 'pending'
+    this.save()
+
+    const instruction = [
+      `The previous attempt on this task ended (${outcome}). Continue it on a different backend.`,
+      binding.policy?.goal ? `Goal: ${binding.policy.goal}` : '',
+      'Review what the previous attempt did before repeating any of it.'
+    ].filter(Boolean).join('\n')
+
+    try {
+      const created = await this.delegateForPolicy(binding, fallback.backendId, instruction, 'fallback')
+      state.fallbackThreadId = created.id
+      state.fallbackAt = now()
+      this.save()
+      this.emit({
+        type: 'thread.policy.fallback.started',
+        properties: { threadId: binding.id, fallbackThreadId: created.id, backendId: fallback.backendId },
+        backendId: binding.backendId
+      })
+    } catch (error) {
+      // Release the claim so a later failure can still fall back.
+      state.fallbackThreadId = undefined
+      this.save()
+      throw error
+    }
+  }
+
+  /** Record a finished reviewer's verdict, then continue the chain.
+   *
+   *  A pass moves to the next reviewer. Requested changes stop the chain and
+   *  leave the result for the user, who decides what to do about it. */
+  private async recordReviewerOutcome(binding: ThreadBinding): Promise<void> {
+    const ownerId = binding.lineage?.sourceThreadId
+    if (!ownerId) return
+    const owner = this.bindings.get(ownerId)
+    if (!owner?.policyState) return
+    const record = owner.policyState.reviewers.find((entry) => entry.threadId === binding.id)
+    if (!record || record.verdict) return
+
+    const backend = await this.ensureStarted(binding.backendId)
+    const messages = await backend.messagesList(binding.nativeSessionId).catch(() => [])
+    const parsed = parseReviewVerdict(lastAssistantText(messages))
+    record.finishedAt = now()
+    record.verdict = parsed?.verdict
+    record.notes = parsed?.notes
+    this.save()
+    this.emit({
+      type: 'thread.policy.reviewer.finished',
+      properties: { threadId: ownerId, reviewerThreadId: binding.id, verdict: record.verdict ?? null },
+      backendId: owner.backendId
+    })
+    // Only a clear pass advances. No verdict means the reviewer did not follow
+    // the contract, and treating that as a pass would approve unreviewed work.
+    if (record.verdict !== 'pass') {
+      this.setThreadAttention(owner, 'completed', record.verdict === 'changes-requested'
+        ? 'A reviewer requested changes.'
+        : 'A reviewer finished without a verdict.')
+      return
+    }
+    if (owner.policy) await this.startNextReviewer(owner, owner.policy)
+  }
+
+  /** Spawn a policy-owned worker beside the thread it serves.
+   *
+   *  Reviewers run in the same checkout as the work they review; a worktree of
+   *  their own would show them a tree without that work in it. */
+  private async delegateForPolicy(
+    binding: ThreadBinding,
+    backendId: BackendId,
+    instruction: string,
+    kind: 'review' | 'fallback'
+  ): Promise<SessionInfo> {
+    const packet = await this.contextPacket(binding.id, instruction)
+    const label = kind === 'review' ? 'Review' : 'Fallback'
+    const created = await this.sessionCreateInScope(
+      backendId,
+      {
+        projectId: binding.projectId,
+        projectPath: binding.projectPath,
+        executionPath: binding.executionPath
+      },
+      `${label} · ${binding.title ?? 'Untitled'}`.slice(0, 72),
+      { kind, sourceThreadId: binding.id, sourceBackendId: binding.backendId },
+      binding.worktree
+    )
+    const mode = kind === 'review'
+      ? DEFINITIONS[backendId].modes.find((entry) => entry.id === 'ask')?.id
+        ?? DEFINITIONS[backendId].modes.find((entry) => entry.id === 'plan')?.id
+        ?? DEFINITIONS[backendId].modes[0]?.id
+      : DEFINITIONS[backendId].modes.find((entry) => entry.id === 'auto')?.id
+        ?? DEFINITIONS[backendId].modes[0]?.id
+    await this.sendMessage(
+      created.id,
+      [{ type: 'text', text: packet }],
+      withBackendDefaults(this.defaultModel(backendId), undefined, mode)
+    )
+    return created
+  }
+
+  /** Hand a settled run to the policy, without letting it break the caller.
+   *
+   *  This runs inside the backend event handler. A policy that cannot start a
+   *  reviewer must not stop that handler from reporting the run itself, so the
+   *  failure is reported as its own event and goes no further. */
+  private settleRun(binding: ThreadBinding, outcome: RunOutcome): void {
+    // Capture first, so a reviewer reads the same result the user sees, and so
+    // every finished thread records one — including reviewers, which return
+    // early from the policy step below.
+    void this.captureResult(binding, outcome)
+      .then(() => this.runPolicy(binding, outcome))
+      .catch((error) => {
+      this.emit({
+        type: 'thread.policy.failed',
+        properties: {
+          threadId: binding.id,
+          message: this.errorDetail(error) ?? 'The task policy could not run.'
+        },
+        backendId: binding.backendId
+      })
+    })
   }
 
   /** The mode this thread is in right now.
@@ -584,6 +860,35 @@ export class BackendManager {
     }
   }
 
+  /** End the runs a backend was working on when its server went away.
+   *
+   *  Nothing is going to finish them, and nothing else will say so: the idle
+   *  event that normally settles a run dies with the process. A thread left
+   *  busy shows Working for ever, and — since main refuses a second run on a
+   *  busy thread — cannot be written to again either. */
+  private settleRunsOn(backendId: BackendId): void {
+    for (const threadId of [...this.busyThreads]) {
+      const binding = this.bindings.get(threadId)
+      if (binding?.backendId !== backendId) continue
+      this.busyThreads.delete(threadId)
+      this.intentionalAborts.delete(threadId)
+      this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
+      this.emit({
+        type: 'session.status',
+        properties: { sessionID: threadId, status: { type: 'idle' } },
+        backendId
+      })
+      this.emit({
+        type: 'session.idle',
+        // The run did not finish, it was lost with the server. Say so, or the
+        // task policy reads this idle as a clean finish and reviews work that
+        // never completed instead of falling back.
+        properties: { sessionID: threadId, lost: true },
+        backendId
+      })
+    }
+  }
+
   /** Stop a backend's server and start it again.
    *
    *  A backend server reads its credentials when it starts and keeps them for
@@ -648,6 +953,7 @@ export class BackendManager {
       lineage: binding.lineage,
       worktree: binding.worktree,
       mode: this.modeFor(binding),
+      busy: this.busyThreads.has(binding.id),
       model: binding.model
         ? { id: binding.model.modelID, provider: binding.model.providerID }
         : native?.model,
@@ -735,7 +1041,10 @@ export class BackendManager {
     // started set kept a dead backend marked as running, so ensureStarted
     // handed back a backend with no process and every later request failed
     // until BOSS itself was restarted.
-    if (eventType === 'server.disconnected') this.started.delete(backendId)
+    if (eventType === 'server.disconnected') {
+      this.started.delete(backendId)
+      this.settleRunsOn(backendId)
+    }
     const binding = this.bindingForNative(backendId, nativeId)
     if (!binding && nativeId) return
     if (binding) {
@@ -758,6 +1067,7 @@ export class BackendManager {
           this.transcriptSource(binding),
           properties.part as MessageWithParts['parts'][number]
         )
+        this.publishTodosAfterToolCall(binding, properties.part as MessageWithParts['parts'][number])
       }
       if (eventType === 'session.status') {
         const status = (properties.status as { type?: string } | undefined)?.type
@@ -775,11 +1085,19 @@ export class BackendManager {
           this.busyThreads.delete(binding.id)
         }
       } else if (eventType === 'session.idle') {
-        this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
+        // A run whose server died is reported as idle so the thread stops
+        // showing Working, but it did not finish. Settle it as an error, so the
+        // fallback answers it and no reviewer reads unfinished work as done.
+        const lost = properties.lost === true
+        const stopped = properties.stopped === true
+        this.transcripts?.finishRun(this.transcriptSource(binding), lost ? 'error' : 'completed')
         this.busyThreads.delete(binding.id)
         void this.threadBus?.flush(binding.id)
         void this.deliverNextFollowUp(binding.id)
-        this.setThreadAttention(binding, 'completed')
+        this.setThreadAttention(binding, lost ? 'error' : 'completed', lost ? 'The backend server went away mid-run.' : undefined)
+        // A run the user stopped settles nothing: it is neither work to review
+        // nor a failure to fall back from.
+        if (!stopped) this.settleRun(binding, lost ? 'error' : 'completed')
       } else if (eventType === 'session.error') {
         // A backend BOSS stopped on purpose reports that stop as an error.
         // Stop, and Stop & redirect, both end this way, and showing the user
@@ -801,6 +1119,9 @@ export class BackendManager {
         this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
         this.busyThreads.delete(binding.id)
         this.setThreadAttention(binding, 'error', this.errorDetail(properties.error))
+        // A stop the user asked for is handled above and never reaches here, so
+        // this is a real failure and the fallback should answer it.
+        this.settleRun(binding, 'error')
       } else if (eventType === 'permission.asked' || eventType === 'permission.updated') {
         // Read the mode now, not at spawn. This is the whole fix: whatever the
         // backend was launched under, the answer follows the mode the thread is
@@ -965,6 +1286,9 @@ export class BackendManager {
         .catch(() => { /* the native session outlives BOSS's record of it */ })
     }
     this.transcripts?.deleteThread(threadId)
+    // The images belonged to the transcript, so they go with it rather than
+    // sitting in userData for a thread that no longer exists.
+    this.images?.forget(threadId)
     this.bindings.delete(threadId)
     this.save()
     this.emit({ type: 'session.deleted', properties: { info: this.session(binding) }, backendId: binding.backendId })
@@ -1012,6 +1336,14 @@ export class BackendManager {
     if (binding.worktree?.status === 'removed' && binding.executionPath === binding.worktree.path) {
       throw new Error('This thread\'s worktree was cleaned up. Fork it into a new worktree before continuing.')
     }
+    // One run per thread. The renderer decides between sending and queueing
+    // from its own copy of the busy state, which is a snapshot: two sends in
+    // quick succession both read "idle" and both started a run, and the second
+    // transcript reload then replaced the first message with whatever the
+    // backend had recorded. Only main knows, and it knows synchronously.
+    if (this.busyThreads.has(threadId) && !this.followUpDeliveries.has(threadId)) {
+      throw new Error(THREAD_BUSY_ERROR)
+    }
     const usage = this.transcripts?.usage(threadId).totals ?? { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
     const violation = budgetViolation(binding.policy, usage)
     if (violation) throw new Error(`${violation} Increase or remove the task budget before continuing.`)
@@ -1027,6 +1359,14 @@ export class BackendManager {
     binding.updatedAt = now()
     this.save()
     this.transcripts?.beginRun(this.transcriptSource(binding))
+    // Carried as a message part, not only in the context prompt: opencode and
+    // pi have no system-prompt hook and drop that field entirely. A goal is the
+    // task itself rather than a fact about the checkout, so it has to reach
+    // every backend. Without this, a thread told to "do the task in the goal"
+    // has nowhere to read it and searches the disk for a goal file.
+    const goalParts = binding.policy?.goal
+      ? [{ type: 'text', text: `Standing goal for this thread: ${binding.policy.goal}` }, ...parts]
+      : parts
     // A new run cannot be excused by the last stop, so an abort error after
     // this point is the backend's own and reaches the user.
     this.intentionalAborts.delete(threadId)
@@ -1042,7 +1382,7 @@ export class BackendManager {
     try {
       // Built here rather than in each backend: the manager is what knows
       // which project a thread belongs to.
-      await backend.sendMessage(binding.nativeSessionId, parts, {
+      await backend.sendMessage(binding.nativeSessionId, goalParts, {
         ...options,
         context: options?.context ?? threadContextPrompt({
           projectName: binding.projectPath ? basename(binding.projectPath) : undefined,
@@ -1096,7 +1436,14 @@ export class BackendManager {
         type: 'file' as const,
         sessionID: binding.id,
         messageID: messageId,
-        state: { status: 'completed' as const, path: attachment.name, name: attachment.name }
+        // Carrying the image itself, not just its name: the transcript shows
+        // what was attached rather than reporting that something was.
+        state: {
+          status: 'completed' as const,
+          path: attachment.name,
+          name: attachment.name,
+          ...(attachment.mime?.startsWith('image/') ? { mime: attachment.mime, url: attachment.dataUrl } : {})
+        }
       })),
       ...(item.text.trim()
         ? [{
@@ -1346,7 +1693,9 @@ export class BackendManager {
       })
       this.emit({
         type: 'session.idle',
-        properties: { sessionID: threadId },
+        // Stopped on purpose, so the task policy stays out of it: neither a
+        // reviewer nor the fallback should answer a run the user ended.
+        properties: { sessionID: threadId, stopped: true },
         backendId: binding.backendId
       })
     }
@@ -1586,6 +1935,31 @@ export class BackendManager {
     })
   }
 
+  /** Publish a thread's todo list when the agent has just changed it.
+   *
+   *  Opencode has no todo event: it keeps the list behind a GET, and writes to
+   *  it with a tool call like any other. Reading it when that call finishes is
+   *  what makes the list fill in during a run — before this it was fetched only
+   *  when the thread went idle, so it stayed empty for exactly as long as it
+   *  was worth watching. Backends without todos return an empty list, and the
+   *  tool name never matches, so this costs them nothing. */
+  private publishTodosAfterToolCall(binding: ThreadBinding, part: MessageWithParts['parts'][number]): void {
+    if (part.type !== 'tool' || part.state?.status !== 'completed') return
+    const tool = String(part.state?.tool ?? '').toLowerCase()
+    if (!tool.includes('todo')) return
+    const backend = this.backends[binding.backendId]
+    if (!backend?.todosGet) return
+    void backend.todosGet(binding.nativeSessionId)
+      .then((todos) => {
+        this.emit({
+          type: 'todo.updated',
+          properties: { sessionID: binding.id, todos },
+          backendId: binding.backendId
+        })
+      })
+      .catch(() => { /* the list is a display, not something to fail a run over */ })
+  }
+
   private async cleanupWorktrees(): Promise<void> {
     if (!this.worktrees) return
     const result = await this.worktrees.cleanup().catch(() => undefined)
@@ -1675,7 +2049,9 @@ export class BackendManager {
         attention: binding.attention,
         lastRun: usage.lastRun,
         usage: usage.totals,
-        policy: binding.policy
+        policy: binding.policy,
+        lineage: binding.lineage,
+        result: binding.result
       }
     }).sort((a, b) => b.updatedAt - a.updatedAt)
     const totals = threads.reduce<ThreadUsageTotals>((value, thread) => ({

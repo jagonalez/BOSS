@@ -2,6 +2,7 @@ import { webcrypto, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { BackendRequest } from '../shared/backend'
 import { mobileRequestAllowed, type MobileAccessRole } from '../shared/mobile'
+import { EventBuffer } from '../shared/event-buffer'
 import {
   deriveDeviceId,
   deriveJoinProof,
@@ -78,6 +79,15 @@ export const DEFAULT_RELAY_URL = 'wss://boss-relay.fly.dev'
 /** A pairing code is short-lived; an unused one must not stay valid. */
 const PAIRING_TTL_MS = 5 * 60_000
 
+/**
+ * How many recent events the desktop keeps so a phone that slept can catch up.
+ * A busy turn emits a few hundred small events, and a typical one measures
+ * ~320 bytes, so 1000 costs roughly 0.3 MB — cheap enough to hold, deep enough
+ * to cover a phone locking for a minute mid-turn. Beyond it the phone is told
+ * there is a gap and refetches instead of showing a stream with holes in it.
+ */
+const EVENT_BUFFER_SIZE = 1000
+
 interface RelayHost {
   handle(request: BackendRequest): Promise<unknown>
   onEvent(callback: (event: Record<string, unknown>) => void): () => void
@@ -119,15 +129,24 @@ export class RelayClient {
   private key?: AesKey
   private deviceId?: string
   private readonly peerId = randomBytes(8).toString('base64url')
+  /** Sequencing is monotonic per desktop run. A restart resets it, and the
+   *  buffer reports a gap, so a phone refetches rather than trusting stale
+   *  numbers. See event-buffer.ts for the replay rules. */
+  private readonly events = new EventBuffer(EVENT_BUFFER_SIZE)
   private pairing?: { secret: string; code: string; expiresAt: number; timer: NodeJS.Timeout }
   /** Stopping must not trigger the reconnect loop. */
   private closing = false
 
-  constructor(
-    private readonly configFile: string,
-    private readonly host: RelayHost,
-    private readonly connect: SocketFactory
-  ) {
+  private readonly configFile: string
+  private readonly host: RelayHost
+  private readonly connect: SocketFactory
+
+  // Plain fields rather than parameter properties: Node's type-stripping test
+  // runner rejects the shorthand, and this class needs to be testable.
+  constructor(configFile: string, host: RelayHost, connect: SocketFactory) {
+    this.configFile = configFile
+    this.host = host
+    this.connect = connect
     this.config = this.load()
   }
 
@@ -292,13 +311,27 @@ export class RelayClient {
     if (typeof frame.sealed !== 'string' || !this.key) return
     const peerId = typeof frame.peerId === 'string' ? frame.peerId : ''
 
-    const message = await open(crypto, this.key, frame.sealed)
+    let message = await open(crypto, this.key, frame.sealed)
+
+    // A phone that has only scanned the QR code holds the one-time pairing
+    // secret, not the room secret, so its claim is sealed with a different
+    // key and the room key above cannot open it. Try the pairing key too,
+    // but only while a code is live — otherwise pairing can never complete.
+    if (!message && this.pairing && this.pairing.expiresAt >= Date.now()) {
+      const pairingKey = await deriveKey(crypto, this.pairing.secret)
+      message = await open(crypto, pairingKey, frame.sealed)
+    }
+
     // A frame we cannot decrypt is not from a paired phone. Drop it silently:
     // an error reply would tell an unpaired prober that the room is live.
     if (!message) return
 
     if (message.kind === 'claim') {
       await this.completeClaim(peerId, message)
+      return
+    }
+    if (message.kind === 'resume') {
+      await this.resume(peerId, message)
       return
     }
     if (message.kind === 'request') {
@@ -313,8 +346,18 @@ export class RelayClient {
    */
   private async completeClaim(peerId: string, message: Extract<RelayMessage, { kind: 'claim' }>): Promise<void> {
     const pairing = this.pairing
-    if (!pairing || pairing.expiresAt < Date.now()) return
-    if (!sameSecret(message.secret, pairing.secret)) return
+    if (!pairing) {
+      process.stderr.write('[relay] claim arrived but no pairing code is active\n')
+      return
+    }
+    if (pairing.expiresAt < Date.now()) {
+      process.stderr.write('[relay] claim arrived but the pairing code had expired\n')
+      return
+    }
+    if (!sameSecret(message.secret, pairing.secret)) {
+      process.stderr.write('[relay] claim arrived with a secret that does not match the shown code\n')
+      return
+    }
 
     // Each phone gets its own token, so revoking one does not sign out the rest.
     const token = randomBytes(24).toString('base64url')
@@ -328,9 +371,13 @@ export class RelayClient {
     }
     this.config.devices = [...this.config.devices.filter((d) => d.id !== peerId), device]
     this.save()
+    // The phone still only holds the pairing secret, so this one reply must be
+    // sealed with the pairing key. Everything after it uses the room key that
+    // this message hands over. Send before clearing, or the key is gone.
+    const pairingKey = await deriveKey(crypto, pairing.secret)
+    await this.sendTo(peerId, { kind: 'claimed', secret: this.config.secret, token, role: 'control' }, pairingKey)
     // A pairing code is single-use: consuming it here stops a second scan.
     this.clearPairing()
-    await this.sendTo(peerId, { kind: 'claimed', secret: this.config.secret, token, role: 'control' })
     this.onChange?.()
   }
 
@@ -370,14 +417,30 @@ export class RelayClient {
 
   private async broadcast(event: Record<string, unknown>): Promise<void> {
     if (!FORWARDED_EVENTS.has(String(event.type ?? ''))) return
-    await this.sendTo(undefined, { kind: 'event', event })
+    // Number and retain before sending. A phone that is not connected right
+    // now still gets this on its next resume, which is the whole point.
+    const seq = this.events.push(event)
+    await this.sendTo(undefined, { kind: 'event', event, seq })
+  }
+
+  /**
+   * Answer a reconnecting phone. If the requested point has fallen out of the
+   * buffer we say so rather than sending a partial stream: a visible refetch
+   * beats a thread that is quietly missing messages.
+   */
+  private async resume(peerId: string, message: Extract<RelayMessage, { kind: 'resume' }>): Promise<void> {
+    if (!(await this.deviceFor(message.token))) return
+    const { events, gap, seq } = this.events.since(message.since)
+    await this.sendTo(peerId, { kind: 'resumed', events, gap, seq })
   }
 
   /** `to` undefined fans out to every paired phone; that is how events flow. */
-  private async sendTo(to: string | undefined, message: RelayMessage): Promise<void> {
+  /** `key` overrides the room key, which only the pairing reply needs. */
+  private async sendTo(to: string | undefined, message: RelayMessage, key?: AesKey): Promise<void> {
     const socket = this.socket
-    if (!socket || !this.key || socket.readyState !== 1) return
-    const sealed = await seal(crypto, this.key, message)
+    const sealWith = key ?? this.key
+    if (!socket || !sealWith || socket.readyState !== 1) return
+    const sealed = await seal(crypto, sealWith, message)
     socket.send(JSON.stringify({ sealed, to }))
   }
 
@@ -391,9 +454,11 @@ export class RelayClient {
    * the long-lived secret is handed over only after the phone proves it holds
    * that code, so a photographed QR code alone expires in five minutes.
    */
-  private beginPairing(): RemoteAccessStatus {
+  private async beginPairing(): Promise<RemoteAccessStatus> {
     this.clearPairing()
     const secret = randomBytes(18).toString('base64url')
+    // The phone needs this desktop's room coordinates to reach it at all.
+    const joinProof = await deriveJoinProof(crypto, this.config.secret)
     const expiresAt = Date.now() + PAIRING_TTL_MS
     const timer = setTimeout(() => {
       this.pairing = undefined
@@ -408,7 +473,8 @@ export class RelayClient {
         v: RELAY_PROTOCOL_VERSION,
         r: this.config.relayUrl,
         d: this.deviceId ?? '',
-        s: secret
+        s: secret,
+        j: joinProof
       })
     }
     return this.status()
@@ -442,7 +508,7 @@ export class RelayClient {
       }
       case 'remote.pair': {
         if (!this.deviceId) this.deviceId = await deriveDeviceId(crypto, this.config.secret)
-        return this.beginPairing()
+        return await this.beginPairing()
       }
       case 'remote.pair.cancel': {
         this.clearPairing()

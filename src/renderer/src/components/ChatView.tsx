@@ -10,6 +10,8 @@ import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
 import { BackendControls } from './BackendControls'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
+import { turnCompletedAt } from '../lib/status'
+import { segmentTurn } from '../lib/part-runs'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -82,6 +84,18 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
     case 'file': {
       const path = part.state?.path
       const content = partText(part)
+      // An image is shown, not named. Naming it made a screenshot the agent
+      // took, or a picture the user attached, into a row of text — the one
+      // party who could not see it was the person reading the thread.
+      if (part.state?.mime?.startsWith('image/') && part.state.url) {
+        const label = part.state.name || path || 'image'
+        return (
+          <figure className="part-image">
+            <img src={part.state.url} alt={label} loading="lazy" />
+            <figcaption>{label}</figcaption>
+          </figure>
+        )
+      }
       return (
         <div className="tool-call">
           <div className="tool-call-head">
@@ -106,11 +120,18 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
   }
 }
 
+/** What the thread is doing right now, for the line pinned under the transcript.
+ *
+ *  The title carries the argument — the command, the path — where the tool name
+ *  alone repeats itself for every call. Prefer it, and keep the name as the
+ *  fallback for a backend that sends no title. */
 function runningLabel(part: Part): string {
-  const title = part.state?.title || part.state?.tool || part.state?.name
-  if (part.type === 'agent') return `Agent ${title || 'working'}…`
-  if (part.type === 'tool') return `Running ${title || 'tool'}…`
-  return 'Working…'
+  const title = part.state?.title
+  const tool = part.state?.tool || part.state?.name
+  if (part.type === 'agent') return `Agent ${title || tool || 'working'}…`
+  if (part.type !== 'tool') return 'Working…'
+  if (title && tool && title !== tool) return `${tool} — ${title}`
+  return `Running ${title || tool || 'tool'}…`
 }
 
 function msgText(m: MessageWithParts): string {
@@ -330,12 +351,16 @@ function MessageView({
           item.parts.map((part) => <PartView key={part.id} part={part} />)
         ) : (
           <>
-            <StepCard message={item} />
-            {item.parts
-              .filter((p) => p.type === 'text')
-              .map((part) => (
-                <PartView key={part.id} part={part} />
-              ))}
+            {segmentTurn(item.parts).map((segment, index) =>
+              segment.type === 'narrative' ? (
+                <PartView key={segment.part.id} part={segment.part} />
+              ) : (
+                <StepCard
+                  key={`steps-${index}-${segment.parts[0].id}`}
+                  message={{ ...item, parts: segment.parts }}
+                />
+              )
+            )}
           </>
         )}
       </div>
@@ -1088,16 +1113,27 @@ function groupTurns(messages: MessageWithParts[]): TurnGroup[] {
   return groups
 }
 
+/** One message standing for every assistant message in a turn.
+ *
+ *  A turn with no reply yet is normal, not a mistake: groupTurns opens a group
+ *  the moment the user sends, and it stays empty until the first message
+ *  arrives. Returning an empty message rather than reading info off a message
+ *  that is not there keeps that first frame renderable. */
 function combineAssistants(messages: MessageWithParts[]): MessageWithParts {
+  if (messages.length === 0) return { info: {} as MessageWithParts['info'], parts: [] }
   const parts = uniqueNarrativeParts(messages.flatMap((m) => m.parts))
   const created = Math.min(...messages.map((m) => m.info.time?.created).filter((t): t is number => typeof t === 'number'))
-  const completed = Math.max(...messages.map((m) => m.info.time?.completed).filter((t): t is number => typeof t === 'number'))
+  // A turn is finished only when every message in it is. Taking the latest
+  // completion regardless reported a turn as done while one of its messages was
+  // still running, which is the field the rest of the UI reads to decide
+  // whether a thread is still working.
+  const completed = turnCompletedAt(messages.map((m) => m.info.time?.completed))
   return {
     info: {
       ...messages[0].info,
       time: {
         created: Number.isFinite(created) ? created : undefined,
-        completed: Number.isFinite(completed) ? completed : undefined
+        completed
       }
     },
     parts
@@ -1114,11 +1150,12 @@ function TurnView({
   onCtx?: (e: React.MouseEvent, item: MessageWithParts) => void
 }): React.JSX.Element {
   const model = turn.assistants[0]?.info.model?.id
-  const texts = uniqueNarrativeParts(turn.assistants.flatMap((m) => m.parts))
+  const combined = combineAssistants(turn.assistants)
+  const segments = segmentTurn(combined.parts)
+  const parts = combined.parts
+  const speakable = parts
     .filter((p) => p.type === 'text')
-    .map((part) => ({ key: part.id, part }))
-  const speakable = texts
-    .map(({ part }) => partText(part))
+    .map((part) => partText(part))
     .filter(Boolean)
     .join('\n')
   const lastAssistant = turn.assistants[turn.assistants.length - 1]
@@ -1145,10 +1182,19 @@ function TurnView({
           <MessageError error={lastAssistant.info.error} />
           <div className="msg-body">
             {modelChanged && model ? <span className="model-chip">{model}</span> : null}
-            <StepCard message={combineAssistants(turn.assistants)} />
-            {texts.map(({ key, part }) => (
-              <PartView key={key} part={part} />
-            ))}
+            {/* Stream order, so each card sits under the line that introduced
+                it. One card for the whole turn put a long run's calls far above
+                the prose explaining them. */}
+            {segments.map((segment, index) =>
+              segment.type === 'narrative' ? (
+                <PartView key={segment.part.id} part={segment.part} />
+              ) : (
+                <StepCard
+                  key={`steps-${index}-${segment.parts[0].id}`}
+                  message={{ ...combined, parts: segment.parts }}
+                />
+              )
+            )}
           </div>
         </div>
       ) : null}

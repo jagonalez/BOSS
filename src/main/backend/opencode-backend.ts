@@ -51,6 +51,12 @@ export class OpenCodeBackend implements Backend {
     if (this.statusTimer) clearInterval(this.statusTimer)
     this.statusTimer = undefined
     this.events.stop()
+    // What the server was running, which after this is nothing. Keeping these
+    // left sessions marked busy against a server that had never heard of them.
+    // sessionDirectories stays: which checkout a session belongs to is BOSS's
+    // own knowledge, and a restarted server still needs telling.
+    this.observedStatuses.clear()
+    this.submittedAt.clear()
     await this.server.stop()
   }
 

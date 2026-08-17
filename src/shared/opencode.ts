@@ -22,12 +22,12 @@ export interface SessionInfo {
   /** The thread's permission mode. Main owns it, so a mid-run change reaches
    *  the permission handler; the renderer mirrors it for display only. */
   mode?: import('./backend').BackendModeId
+  /** Whether a run is in flight. Main owns this too: it marks the thread busy
+   *  when it sends, before any backend event, so a renderer that opens or
+   *  reloads mid-run reads the truth instead of inferring one from timestamps. */
+  busy?: boolean
   parentID?: string
-  lineage?: {
-    kind: 'fork' | 'clone' | 'relay' | 'delegate'
-    sourceThreadId: string
-    sourceBackendId?: BackendId
-  }
+  lineage?: import('./supervision').ThreadLineage
 }
 
 export interface SessionTime {
@@ -75,6 +75,14 @@ export interface Part {
     path?: string
     content?: string
     text?: string
+    /** An image this part is, so the transcript can show it rather than name it.
+     *
+     *  `mime` says whether there is one at all. `url` is what an <img> loads:
+     *  a data URL for something the user attached, which is small and already
+     *  arrives that way, or a boss-image:// URL for a screenshot an agent took,
+     *  whose bytes live beside the transcript instead of inside it. */
+    mime?: string
+    url?: string
   }
 }
 

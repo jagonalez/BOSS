@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { DropPosition, Workspace as WorkspaceState, WorkspaceCheckoutBinding, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
+import type { DropPosition, Workspace as WorkspaceState, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import { useStore, appStore } from '../state/AppState'
 import { ChatView } from './ChatView'
 import { BrowseTab } from './BrowseTab'
@@ -31,7 +31,7 @@ import {
   splitWorkspaceGroup,
   undoWorkspaceChange
 } from '../lib/actions'
-import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { tabContentNode } from '../lib/tab-content-nodes'
 import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PluginIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
@@ -247,10 +247,6 @@ function NewThreadButtons({ groupId, close }: { groupId: string; close: () => vo
   )
 }
 
-function checkoutPath(session: { executionPath?: string; worktree?: { path: string } }): string | undefined {
-  return session.executionPath ?? session.worktree?.path
-}
-
 function AddMenu({
   groupId,
   ownerId: requested,
@@ -281,15 +277,7 @@ function AddMenu({
     return pane.tabs.find((item) => item.kind === 'thread')?.sessionId
   }, [workspace, groupId, requested])
   const owner = sessions.find((session) => session.id === ownerId)
-  const inherited: WorkspaceCheckoutBinding | undefined = (() => {
-    const path = checkoutPath(owner ?? {})
-    if (!path) return undefined
-    return {
-      contextPath: path,
-      worktreeId: owner?.worktree?.id,
-      contextLabel: owner?.worktree?.branch ?? 'Main'
-    }
-  })()
+  const inherited = threadCheckout(owner)
 
   const hasThread = Boolean(owner)
 

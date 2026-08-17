@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BACKEND_IDS, isBackendId, type BackendId } from '@shared/backend'
 import type { MessageWithParts } from '@shared/opencode'
-import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult, type QaAgentTool, type QaPolicy } from '@shared/qa'
+import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult, type AgentToolImage, type QaAgentTool, type QaPolicy } from '@shared/qa'
 import type {
   CollaborationPolicy,
   ThreadBusAgentTool,
@@ -45,6 +45,10 @@ export interface ThreadBusHost {
   useWorktree(threadId: string): Promise<{ path: string; branch: string }>
   leaveWorktree(threadId: string): Promise<{ path: string; branch: string }>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
+  /** Put an image a tool returned into the thread's transcript, so the user
+   *  sees what the agent saw. Optional: a host without image storage simply
+   *  passes the result to the model as before. */
+  publishToolImage?(threadId: string, tool: string, image: AgentToolImage): void
 }
 
 const MAX_MESSAGES = 500
@@ -205,6 +209,20 @@ export class ThreadBus {
 
   async agentCall(backendId: BackendId, nativeThreadId: string, tool: ThreadBusAgentTool, args: unknown): Promise<unknown> {
     const caller = this.host.threadForNative(backendId, nativeThreadId)
+    if (!caller) throw new Error('BOSS could not identify the calling thread.')
+    const result = await this.runAgentCall(caller.id, tool, args)
+    // Every tool that can return an image comes through here — QA screenshots,
+    // an MCP server's chart, anything else that answers with one. Showing it in
+    // the transcript is what stops the user being the only party in the
+    // conversation who cannot see what the agent was looking at.
+    if (isAgentToolResult(result) && result.image) {
+      this.host.publishToolImage?.(caller.id, tool, result.image)
+    }
+    return result
+  }
+
+  private async runAgentCall(callerId: string, tool: ThreadBusAgentTool, args: unknown): Promise<unknown> {
+    const caller = this.host.threadInfo(callerId)
     if (!caller) throw new Error('BOSS could not identify the calling thread.')
     if (tool.startsWith('boss_browser_') || tool === 'boss_computer') {
       if (!this.qaTools) throw new Error('BOSS QA tools are not ready.')

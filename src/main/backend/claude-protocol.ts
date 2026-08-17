@@ -12,6 +12,39 @@ export interface ClaudePermissionRequest {
   toolUseId?: string
 }
 
+/** What Claude Code is sent as the content of a user message.
+ *
+ *  A string for text alone, and a block array when an image is attached —
+ *  Claude Code accepts the same image block the Anthropic API does over its
+ *  stream-json input. Flattening every part to text described the picture
+ *  instead of sending it: the model was told "[Attached file: shot.png]" and
+ *  answered as if it had seen nothing. */
+export function claudeMessageContent(parts: unknown[]): string | Array<Record<string, unknown>> {
+  const blocks: Array<Record<string, unknown>> = []
+  const text: string[] = []
+  for (const part of parts) {
+    if (!part || typeof part !== 'object') continue
+    const item = part as { type?: string; text?: string; filename?: string; mime?: string; url?: string }
+    if (item.type === 'text' && item.text) {
+      text.push(item.text)
+    } else if (item.type === 'file' && item.mime?.startsWith('image/') && item.url) {
+      const data = item.url.match(/^data:[^;]+;base64,(.+)$/)?.[1]
+      if (data) blocks.push({ type: 'image', source: { type: 'base64', media_type: item.mime, data } })
+      // A file: or http: url is not something Claude Code can read from here,
+      // so it stays named rather than silently dropped.
+      else text.push(`[Attached file: ${item.filename ?? item.mime}]`)
+    } else if (item.type === 'file') {
+      text.push(`[Attached file: ${item.filename ?? item.mime ?? 'file'}]`)
+    } else if (item.text) {
+      text.push(item.text)
+    }
+  }
+  const prompt = text.join('\n')
+  if (!blocks.length) return prompt
+  // Text last: the instruction reads better after what it refers to.
+  return prompt ? [...blocks, { type: 'text', text: prompt }] : blocks
+}
+
 /** Report a failed Claude result unless BOSS deliberately stopped the turn.
  *
  * Claude may write a non-success result while handling SIGINT. That is the

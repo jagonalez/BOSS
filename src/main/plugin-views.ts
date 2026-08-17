@@ -1,4 +1,4 @@
-import { ipcMain, protocol, session, type WebContents } from 'electron'
+import { ipcMain, session, type WebContents } from 'electron'
 import { readFile } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -34,17 +34,15 @@ const MIME: Record<string, string> = {
 }
 
 /**
- * Registered before app ready: a custom scheme has to be privileged to get a
- * normal origin, and without one the page counts as opaque, which blocks
- * fetch and localStorage inside the view.
+ * The plugin scheme's entry for registerSchemesAsPrivileged, which index.ts
+ * calls once with every scheme BOSS serves. Exported as data rather than as a
+ * function that registers it: Electron honours only the first call, so a second
+ * one here would leave this scheme opaque — and an opaque origin has no fetch
+ * and no localStorage, which a plugin's own page depends on.
  */
-export function registerPluginScheme(): void {
-  protocol.registerSchemesAsPrivileged([
-    {
-      scheme: PLUGIN_SCHEME,
-      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
-    }
-  ])
+export const PLUGIN_SCHEME_PRIVILEGES = {
+  scheme: PLUGIN_SCHEME,
+  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
 }
 
 /** A plugin view URL, one origin per plugin so pages cannot reach each other. */

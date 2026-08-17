@@ -177,20 +177,43 @@ test('auto mode answers permission requests without leaving a blocking panel', a
   await expect(appPage.locator('.modal-backdrop')).toHaveCount(0)
 })
 
+test('a second message sent before the first is acknowledged is queued, not lost', async ({ appPage }) => {
+  // The renderer decided between sending and queueing from its own copy of the
+  // busy state. Two quick sends both read "idle", both started a run, and the
+  // next transcript reload replaced one message with the other. Main refuses
+  // the second run now, and the renderer queues what it refuses.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const composer = appPage.getByPlaceholder(/^Ask /)
+  await composer.fill('First message.')
+  await composer.press('Enter')
+  await composer.fill('Second message, sent immediately.')
+  await composer.press('Enter')
+
+  // Scoped: this thread is seeded with a queued follow-up of its own.
+  await expect(
+    appPage.locator('.followup-text').filter({ hasText: 'Second message, sent immediately.' })
+  ).toHaveCount(1)
+  // Both were attempted; only the first became a run.
+  expect(await backendCalls(appPage, 'thread.send')).toHaveLength(2)
+  expect((await lastBackendCall(appPage, 'thread.followups.add')).request).toMatchObject({
+    threadId: 'thread-source', text: 'Second message, sent immediately.'
+  })
+})
+
 test('an opencode Stop & redirect does not report the stop as a failure', async ({ appPage }) => {
   // Opencode answers the abort BOSS sends with MessageAbortedError. The
   // redirect works, so showing that to the user names a failure that did not
   // happen.
-  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'OpenCode stop thread' }).click()
   await control(appPage).then((item) => item.emit({
     type: 'session.status',
-    properties: { sessionID: 'thread-source', status: { type: 'busy' } }
+    properties: { sessionID: 'thread-opencode-stop', status: { type: 'busy' } }
   }))
   await expect(appPage.locator('.followup-text')).toHaveText('Redirect this opencode run instead.')
 
   await appPage.getByRole('button', { name: 'Stop & redirect' }).click()
   expect((await lastBackendCall(appPage, 'thread.followups.steer')).request).toMatchObject({
-    threadId: 'thread-source', followUpId: 'followup-source'
+    threadId: 'thread-opencode-stop', followUpId: 'followup-source'
   })
 
   // What opencode answers the abort with. The user asked for this, so it must
@@ -198,7 +221,7 @@ test('an opencode Stop & redirect does not report the stop as a failure', async 
   await control(appPage).then((item) => item.emit({
     type: 'session.error',
     properties: {
-      sessionID: 'thread-source',
+      sessionID: 'thread-opencode-stop',
       error: { name: 'MessageAbortedError', message: 'Aborted' }
     }
   }))
@@ -210,17 +233,17 @@ test('an opencode Stop & redirect does not report the stop as a failure', async 
 test('a real opencode failure still reaches the user after a stop', async ({ appPage }) => {
   // The counterpart to swallowing the abort: only the stop is hidden, so a
   // fault the thread genuinely hit is still shown.
-  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'OpenCode stop thread' }).click()
   await control(appPage).then((item) => item.emit({
     type: 'session.status',
-    properties: { sessionID: 'thread-source', status: { type: 'busy' } }
+    properties: { sessionID: 'thread-opencode-stop', status: { type: 'busy' } }
   }))
   await expect(appPage.locator('.followup-text')).toHaveText('Redirect this opencode run instead.')
   await appPage.getByRole('button', { name: 'Stop & redirect' }).click()
 
   await control(appPage).then((item) => item.emit({
     type: 'session.error',
-    properties: { sessionID: 'thread-source', error: { name: 'Error', message: 'Connection refused' } }
+    properties: { sessionID: 'thread-opencode-stop', error: { name: 'Error', message: 'Connection refused' } }
   }))
 
   await expect(appPage.locator('.chat-error')).toContainText('Connection refused')

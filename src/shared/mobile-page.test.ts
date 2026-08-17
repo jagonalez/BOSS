@@ -38,6 +38,24 @@ test('the page registers a service worker and a manifest so it installs', () => 
   assert.match(MOBILE_PAGE, /apple-mobile-web-app-capable/)
 })
 
+test('the phone tracks event sequence and resumes after being away', () => {
+  const script = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ''
+  // Sequence survives the page being unloaded by a locked screen.
+  assert.match(script, /localStorage\.getItem\('boss\.seq'/)
+  assert.match(script, /localStorage\.setItem\('boss\.seq'/)
+  // Reconnecting asks for what was missed rather than silently carrying on.
+  assert.match(script, /kind: 'resume', since: lastSeq/)
+  // iOS often freezes a socket instead of closing it, so waking must re-check.
+  assert.match(script, /visibilitychange/)
+})
+
+test('a gap refetches instead of replaying a partial stream', () => {
+  const script = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ''
+  assert.match(script, /if \(message\.gap\)/)
+  // On a gap the phone reloads state; showing a stream with holes is worse.
+  assert.match(script, /message\.gap[\s\S]{0,200}refreshThreads\(\)/)
+})
+
 test('read-only access cannot mutate task or automation state', () => {
   for (const type of [
     'thread.send',

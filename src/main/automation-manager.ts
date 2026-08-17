@@ -13,6 +13,7 @@ import type {
 import { AUTOMATION_DEFAULTS } from '../shared/automation'
 import type { BackendRequest } from '../shared/backend'
 import type { FileDiff, MessageWithParts } from '../shared/opencode'
+import { extractSummary } from '../shared/thread-result'
 import type { WorktreeInfo } from '../shared/worktree'
 import { cronError, missedCronFires, nextCronTime } from './cron'
 import type { BackendManager } from './backend/manager'
@@ -60,18 +61,6 @@ function runHeader(automation: Automation): string {
     '',
     automation.prompt
   ].join('\n')
-}
-
-function extractSummary(messages: MessageWithParts[]): string | undefined {
-  const assistant = [...messages].reverse().find((message) => message.info.role === 'assistant')
-  if (!assistant) return undefined
-  const text = assistant.parts
-    .filter((part) => part.type === 'text')
-    .map((part) => part.text ?? '')
-    .join('\n')
-  const match = [...text.matchAll(/^SUMMARY:\s*(.+)$/gim)].pop()
-  const line = match?.[1] ?? text.trim().split('\n').filter(Boolean).pop()
-  return line ? line.trim().slice(0, 300) : undefined
 }
 
 export class AutomationManager {

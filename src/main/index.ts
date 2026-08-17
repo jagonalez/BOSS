@@ -1,4 +1,5 @@
-import { app, BrowserWindow, session, shell } from 'electron'
+import { app, BrowserWindow, protocol, session, shell } from 'electron'
+import { ImageStore, IMAGE_SCHEME } from './image-store'
 import { buildAppMenu } from './menu'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,7 +23,7 @@ import { AutomationManager } from './automation-manager'
 import { McpHub } from './mcp-hub'
 import { PluginManager } from './plugin-manager'
 import { StdioMcpClient } from './mcp-client'
-import { PLUGIN_PARTITION, installPluginViews, registerPluginScheme } from './plugin-views'
+import { PLUGIN_PARTITION, PLUGIN_SCHEME_PRIVILEGES, installPluginViews } from './plugin-views'
 import { WebAccess } from './web-access'
 import { RelayClient } from './relay-client'
 // `ws` rather than Node 22's global WebSocket: the client uses the Node-style
@@ -66,9 +67,20 @@ if (e2e && process.env.BOSS_E2E_USER_DATA) {
   app.setPath('userData', `${app.getPath('userData')}${suffix}`)
 }
 
-// Has to happen before app ready, or a plugin view gets an opaque origin and
-// loses fetch and localStorage inside its own page.
-registerPluginScheme()
+// Before whenReady, which is the only time a scheme can be given privileges.
+// One call for every scheme BOSS serves: Electron honours the first
+// registerSchemesAsPrivileged and ignores any later one, so a second call here
+// would leave its scheme opaque rather than adding to this list.
+//
+// Images a thread owns are served from disk rather than embedded in the
+// transcript, and the renderer runs with webSecurity on, so file: is refused.
+// A scheme of BOSS's own keeps the reach to one directory. A plugin view needs
+// the same treatment for a further reason: an opaque origin has no fetch and no
+// localStorage, which a plugin's own page depends on.
+protocol.registerSchemesAsPrivileged([
+  { scheme: IMAGE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } },
+  PLUGIN_SCHEME_PRIVILEGES
+])
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -99,6 +111,7 @@ const worktrees = new WorktreeManager({
   root: join(app.getPath('userData'), 'worktrees')
 })
 const transcripts = new TranscriptStore(join(app.getPath('userData'), 'transcripts.sqlite'))
+const images = new ImageStore(join(app.getPath('userData'), 'attachments'))
 const backendMgr = new BackendManager({
   opencode: openCodeBackend,
   pi: createBackend('pi', { server, api, events }),
@@ -107,6 +120,7 @@ const backendMgr = new BackendManager({
 }, worktrees, backendAuth, transcripts)
 backendMgr.attachBinaryOverrides(backendBins)
 const threadBus = new ThreadBus(backendMgr)
+backendMgr.attachImageStore(images)
 backendMgr.attachThreadBus(threadBus)
 const automations = new AutomationManager({
   stateFile: join(app.getPath('userData'), 'automations.json'),
@@ -280,9 +294,22 @@ app.whenReady().then(() => {
     app.dock.setIcon(join(app.getAppPath(), 'resources', 'icons', '512x512.png'))
   }
   const isDev = Boolean(process.env.ELECTRON_RENDERER_URL)
+  // Images a thread owns are served from disk under their own scheme, so
+  // img-src has to admit it. Named rather than widened to file:, which would
+  // let the renderer read anything on the machine.
+  const img = `img-src 'self' data: ${IMAGE_SCHEME}:;`
   const csp = isDev
-    ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; img-src 'self' data:; media-src 'self' data: blob:; font-src 'self' data:;"
-    : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; img-src 'self' data:; media-src 'self' data: blob:; font-src 'self' data:;"
+    ? `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; ${img} media-src 'self' data: blob:; font-src 'self' data:;`
+    : `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; ${img} media-src 'self' data: blob:; font-src 'self' data:;`
+  // Answers only with a file inside the image directory; anything else is a
+  // 404 rather than a read. The URL reaches here from the renderer, so the
+  // store re-checks the resolved path rather than trusting it.
+  protocol.handle(IMAGE_SCHEME, async (request) => {
+    const found = images.read(request.url)
+    if (!found) return new Response('Not found', { status: 404 })
+    return new Response(found.data, { status: 200, headers: { 'Content-Type': found.mime } })
+  })
+
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     if (details.responseHeaders) {
       details.responseHeaders['Content-Security-Policy'] = [csp]

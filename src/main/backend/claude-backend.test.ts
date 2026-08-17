@@ -2,7 +2,49 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { claudeExitError, claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeResultError, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol.ts'
+import { claudeExitError, claudeMessageContent, claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeResultError, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol.ts'
+
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+test('a message with no image is sent as plain text', () => {
+  assert.equal(claudeMessageContent([{ type: 'text', text: 'Hello' }]), 'Hello')
+})
+
+test('an attached image is sent as an image block', () => {
+  // Claude Code accepts the same image block the Anthropic API does. Flattening
+  // it to text described the picture rather than sending it, so the model
+  // answered as if it had seen nothing.
+  assert.deepEqual(
+    claudeMessageContent([
+      { type: 'file', mime: 'image/png', filename: 'shot.png', url: `data:image/png;base64,${PNG}` },
+      { type: 'text', text: 'What is this?' }
+    ]),
+    [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
+      { type: 'text', text: 'What is this?' }
+    ]
+  )
+})
+
+test('a file Claude cannot read is named rather than dropped', () => {
+  // A pdf, or an image behind a url whose bytes BOSS does not hold: the model
+  // should know something was attached even though it cannot see it.
+  assert.equal(
+    claudeMessageContent([{ type: 'file', mime: 'application/pdf', filename: 'report.pdf' }]),
+    '[Attached file: report.pdf]'
+  )
+  assert.equal(
+    claudeMessageContent([{ type: 'file', mime: 'image/png', filename: 'remote.png', url: 'https://example.com/remote.png' }]),
+    '[Attached file: remote.png]'
+  )
+})
+
+test('an image sent with no text is still a block array', () => {
+  assert.deepEqual(
+    claudeMessageContent([{ type: 'file', mime: 'image/png', url: `data:image/png;base64,${PNG}` }]),
+    [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } }]
+  )
+})
 
 test('maps BOSS modes to current Claude permission modes', () => {
   assert.equal(claudePermissionMode('ask'), 'manual')

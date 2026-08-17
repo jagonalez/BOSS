@@ -23,3 +23,13 @@ resources/cua-driver/*
 # .claude/ for the worktrees Claude Code makes with its own EnterWorktree.
 .boss/
 .claude/worktrees/
+
+# Throwaway scripts for poking a running relay or checking a QR render, and
+# PR text drafted in the tree rather than typed into GitHub.
+qrcheck.mjs
+qrdiff.mjs
+PR_DESCRIPTION.md
+
+# The Expo app's dependencies, not the app itself.
+mobile/node_modules/
+mobile/.expo/

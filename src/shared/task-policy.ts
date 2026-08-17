@@ -26,6 +26,68 @@ export interface TaskPolicy {
 
 export const EMPTY_TASK_POLICY: TaskPolicy = { goal: '', budget: {}, reviewers: [] }
 
+/** How a run ended. Reviewers run after a clean finish; fallback answers the
+ *  other two. A run the user stopped on purpose is neither. */
+export type RunOutcome = 'completed' | 'error' | 'interrupted'
+
+export type ReviewVerdict = 'pass' | 'changes-requested'
+
+export interface ReviewerRun {
+  backendId: BackendId
+  threadId: string
+  startedAt: number
+  finishedAt?: number
+  verdict?: ReviewVerdict
+  notes?: string[]
+}
+
+/** What the policy has actually done for a thread, as opposed to what the user
+ *  configured. Kept beside the policy so a surface can show review progress
+ *  without asking every reviewer thread for its state. */
+export interface TaskPolicyState {
+  reviewers: ReviewerRun[]
+  /** Index of the reviewer that should run next. */
+  cursor: number
+  fallbackThreadId?: string
+  fallbackAt?: number
+}
+
+export const EMPTY_TASK_POLICY_STATE: TaskPolicyState = { reviewers: [], cursor: 0 }
+
+/** Whether the fallback should fire for how this run ended. */
+export function fallbackApplies(policy: TaskPolicy | undefined, outcome: RunOutcome): boolean {
+  const trigger = policy?.fallback?.trigger
+  if (!trigger) return false
+  if (trigger === 'either') return outcome === 'error' || outcome === 'interrupted'
+  return trigger === outcome
+}
+
+/** Read a reviewer's verdict out of its closing message.
+ *
+ *  The contract asked of a reviewer is a final line of PASS or
+ *  CHANGES_REQUESTED. Anything else is treated as no verdict yet rather than a
+ *  pass, so a reviewer that rambles cannot silently approve the work. */
+export function parseReviewVerdict(text: string): { verdict: ReviewVerdict; notes: string[] } | undefined {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean)
+  // Scan from the end: the verdict is the reviewer's closing statement, and an
+  // earlier mention is usually the reviewer restating the instruction.
+  let index = -1
+  for (let position = lines.length - 1; position >= 0; position -= 1) {
+    if (/^(PASS|CHANGES_REQUESTED)\b/i.test(lines[position])) {
+      index = position
+      break
+    }
+  }
+  if (index === -1) return undefined
+  const verdict: ReviewVerdict = /^PASS\b/i.test(lines[index]) ? 'pass' : 'changes-requested'
+  const notes = lines.slice(index + 1)
+    .filter((line) => line.startsWith('-') || line.startsWith('*'))
+    .map((line) => line.replace(/^[-*]\s*/, ''))
+    .filter(Boolean)
+    .slice(0, 20)
+  return { verdict, notes }
+}
+
 function positiveInteger(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.floor(value)

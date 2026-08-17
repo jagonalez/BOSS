@@ -40,6 +40,30 @@ test('status reconciliation clears a submitted run when OpenCode reports it idle
   assert.deepEqual(received, [{ type: 'session.idle', sessionID: 'ses_worktree' }])
 })
 
+test('stopping the server forgets which sessions it was running', async () => {
+  // These record the server's state, not BOSS's. A restarted server is running
+  // nothing, so a session left marked busy would show Working against a server
+  // that had never heard of it.
+  const { backend } = harness({})
+  backend.setSessionDirectory('ses_worktree', '/tmp/worktree')
+  await backend.sendMessage('ses_worktree', [{ type: 'text', text: 'test' }])
+
+  const internal = backend as unknown as {
+    observedStatuses: Map<string, string>
+    submittedAt: Map<string, number>
+    sessionDirectories: Map<string, string>
+  }
+  assert.equal(internal.observedStatuses.get('ses_worktree'), 'busy')
+
+  await backend.stop()
+
+  assert.equal(internal.observedStatuses.size, 0)
+  assert.equal(internal.submittedAt.size, 0)
+  // Which checkout a session belongs to is BOSS's own knowledge, and a
+  // restarted server still needs telling.
+  assert.equal(internal.sessionDirectories.get('ses_worktree'), '/tmp/worktree')
+})
+
 test('status reconciliation preserves a run OpenCode still reports busy', async () => {
   const { backend } = harness({ ses_worktree: { type: 'busy' } })
   const received: unknown[] = []
