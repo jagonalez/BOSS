@@ -3,6 +3,8 @@ import test from 'node:test'
 import type { MessageWithParts } from '@shared/opencode'
 // @ts-expect-error Application code uses bundler resolution.
 import { cropHistory, openAiMessagesFromHistory, parseChatChunk } from './lab-openai.ts'
+// @ts-expect-error Application code uses bundler resolution.
+import { ToolCallAccumulator, parseToolArguments } from './lab-tool-call.ts'
 
 test('parseChatChunk extracts a streaming text delta', () => {
   const parsed = parseChatChunk('{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}')
@@ -187,4 +189,33 @@ test('cropHistory keeps whole messages from the tail and never splits a tool mes
     }
   }
   assert.ok(kept.some((message) => message.info.id === 'p4-a'))
+})
+test('parseChatChunk drops a null id and name so a later chunk cannot erase them', () => {
+  // The exact wire shape DeepSeek sends via OpenCode Zen: the opening chunk
+  // names the call, and every later chunk repeats id/name as explicit null.
+  const opening = parseChatChunk(
+    '{"choices":[{"index":0,"finish_reason":null,"delta":{"role":null,"content":"","tool_calls":[{"index":0,"id":"chatcmpl-tool-b303","type":"function","function":{"name":"read_file","arguments":""}}]}}]}'
+  )
+  assert.deepEqual(opening?.toolCalls, [{ index: 0, id: 'chatcmpl-tool-b303', name: 'read_file', arguments: '' }])
+
+  const continuation = parseChatChunk(
+    '{"choices":[{"index":0,"finish_reason":null,"delta":{"role":null,"content":"","tool_calls":[{"index":0,"id":null,"type":null,"function":{"name":null,"arguments":"{\\"path\\": \\"a.txt\\"}"}}]}}]}'
+  )
+  // No id and no name keys at all — a null must not travel as a value.
+  assert.deepEqual(continuation?.toolCalls, [{ index: 0, arguments: '{"path": "a.txt"}' }])
+})
+
+test('a null-repeating provider stream reassembles into one executable call', () => {
+  const acc = new ToolCallAccumulator()
+  for (const chunk of [
+    '{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"chatcmpl-tool-b303","type":"function","function":{"name":"read_file","arguments":""}}]}}]}',
+    '{"choices":[{"delta":{"tool_calls":[{"index":0,"id":null,"type":null,"function":{"name":null,"arguments":""}}]}}]}',
+    '{"choices":[{"delta":{"tool_calls":[{"index":0,"id":null,"type":null,"function":{"name":null,"arguments":"{\\"path\\": \\"requests/models.py\\"}"}}]}}]}'
+  ]) {
+    for (const delta of parseChatChunk(chunk)?.toolCalls ?? []) acc.push(delta)
+  }
+  const [call] = acc.calls()
+  assert.equal(call.name, 'read_file')
+  assert.equal(call.id, 'chatcmpl-tool-b303')
+  assert.deepEqual(parseToolArguments(call.arguments), { path: 'requests/models.py' })
 })

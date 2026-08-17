@@ -30,8 +30,12 @@ export class ToolCallAccumulator {
 
   push(delta: StreamedToolCallDelta): void {
     const current = this.byIndex.get(delta.index) ?? { arguments: '' }
-    if (delta.id !== undefined) current.id = delta.id
-    if (delta.name !== undefined) current.name = delta.name
+    // The id and name arrive once, in the chunk that opens the call; the rest of
+    // the chunks carry only argument fragments. Only ever fill these in — a
+    // later blank must not erase a name already seen, or the finished call has
+    // nothing to dispatch on.
+    if (delta.id) current.id = delta.id
+    if (delta.name) current.name = delta.name
     if (delta.arguments !== undefined) current.arguments += delta.arguments
     this.byIndex.set(delta.index, current)
   }

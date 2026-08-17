@@ -378,13 +378,13 @@ test('start() reconciles children left marked running after a crash', async () =
 
 test('the tool loop stops early when the model repeats the same call', async () => {
   // The mock always asks for the identical read_file call; the engine must
-  // bail out after a couple of repeats instead of grinding through all rounds.
+  // bail out on the third identical call instead of grinding through all rounds.
   const sameCall = (res: ServerResponse): void => {
     res.write(toolCallChunk({ id: 'read-1', name: 'read_file', arguments: '{"path":"x.txt"}' }))
     res.write(done())
     res.end()
   }
-  const fx = await fixture([sameCall, sameCall])
+  const fx = await fixture([sameCall, sameCall, sameCall])
   try {
     const events: string[] = []
     fx.backend.onEvent((event) => {
@@ -395,7 +395,7 @@ test('the tool loop stops early when the model repeats the same call', async () 
       events.some((error) => /repeated the same tool call/.test(error)),
       `expected a repeat-loop error, got: ${JSON.stringify(events)}`
     )
-    assert.equal(fx.readStore().messages(fx.sessionId).filter((message) => message.info.role === 'assistant').length, 2)
+    assert.equal(fx.readStore().messages(fx.sessionId).filter((message) => message.info.role === 'assistant').length, 3)
   } finally {
     fx.cleanup()
   }

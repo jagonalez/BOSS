@@ -66,3 +66,14 @@ test('parseToolArguments returns {} for JSON that parses to a primitive', () => 
 test('parseToolArguments throws for unrepairable garbage', () => {
   assert.throws(() => parseToolArguments('{{{ not json'), /Could not parse tool arguments/)
 })
+
+test('a blank name in a later delta does not erase the name already seen', () => {
+  const acc = new ToolCallAccumulator()
+  acc.push({ index: 0, id: 'call_1', name: 'read_file', arguments: '' })
+  acc.push({ index: 0, id: '', name: '', arguments: '{"path":' })
+  acc.push({ index: 0, id: '', name: '', arguments: '"a.txt"}' })
+  const [call] = acc.calls()
+  assert.equal(call.id, 'call_1')
+  assert.equal(call.name, 'read_file')
+  assert.equal(call.arguments, '{"path":"a.txt"}')
+})

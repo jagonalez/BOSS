@@ -500,8 +500,11 @@ export class LabEngine {
       if (hasRealCall) {
         if (signature === previousSignature) {
           repeatStreak += 1
-          if (repeatStreak >= 1) {
-            throw new Error(`The model repeated the same tool call ${turn.toolCalls[0].name} twice in a row; stopping.`)
+          // A model that repeats one call forever is stuck, but repeating a call
+          // once is ordinary — re-reading a file right after editing it is the
+          // common case. Only a third identical call in a row is a real loop.
+          if (repeatStreak >= 2) {
+            throw new Error(`The model repeated the same tool call ${turn.toolCalls[0].name} ${repeatStreak + 1} times in a row; stopping.`)
           }
         } else {
           repeatStreak = 0

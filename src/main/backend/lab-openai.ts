@@ -19,8 +19,8 @@ interface ChatChoiceDelta {
   content?: string | null
   tool_calls?: Array<{
     index: number
-    id?: string
-    function?: { name?: string; arguments?: string }
+    id?: string | null
+    function?: { name?: string | null; arguments?: string | null }
   }>
 }
 
@@ -55,11 +55,16 @@ export function parseChatChunk(json: string): ParsedChatChunk | undefined {
   if (typeof delta?.content === 'string') text = delta.content
   let toolCalls: StreamedToolCallDelta[] | undefined
   if (delta?.tool_calls) {
+    // Some providers (DeepSeek via OpenCode Zen among them) send the id and
+    // name only in the first chunk of a call, then an explicit `null` for both
+    // in every later chunk of the same index. `null` there means "unchanged",
+    // not "cleared", so it must be dropped rather than forwarded — forwarding
+    // it overwrites the real name and the call becomes unexecutable.
     toolCalls = delta.tool_calls.map((call) => ({
       index: call.index ?? 0,
-      ...(call.id !== undefined ? { id: call.id } : {}),
-      ...(call.function?.name !== undefined ? { name: call.function.name } : {}),
-      ...(call.function?.arguments !== undefined ? { arguments: call.function.arguments } : {})
+      ...(call.id != null ? { id: call.id } : {}),
+      ...(call.function?.name != null ? { name: call.function.name } : {}),
+      ...(call.function?.arguments != null ? { arguments: call.function.arguments } : {})
     }))
   } else if (delta && 'function_call' in delta) {
     // Some OpenAI-compatible proxies still stream the legacy function_call
