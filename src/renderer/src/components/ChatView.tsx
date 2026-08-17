@@ -370,7 +370,7 @@ function MessageView({
   )
 }
 
-function ModePicker({ backendId, sessionId }: { backendId: 'opencode' | 'pi' | 'codex' | 'claude'; sessionId?: string }): React.JSX.Element {
+function ModePicker({ backendId, sessionId }: { backendId: BackendId; sessionId?: string }): React.JSX.Element {
   // Main's copy first: it is what actually decides permissions.
   const mode = useStore(appStore, (s) =>
     (sessionId && s.sessions.find((item) => item.id === sessionId)?.mode)

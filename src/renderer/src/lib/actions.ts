@@ -1339,7 +1339,7 @@ export async function loadEngine(): Promise<void> {
   }
   try {
     const saved = localStorage.getItem('boss.engine') as BackendId | null
-    if (saved && ['opencode', 'pi', 'codex', 'claude'].includes(saved)) appStore.setState({ engine: saved })
+    if (saved && ['opencode', 'pi', 'codex', 'claude', 'lab'].includes(saved)) appStore.setState({ engine: saved })
   } catch {
     /* ignore */
   }
