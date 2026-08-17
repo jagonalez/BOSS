@@ -4639,6 +4639,23 @@ body.workspace-dragging .workspace-tab-slot {
   white-space: nowrap;
 }
 
+/* Names the file above its diff when one call changed several. */
+.tool-detail-file {
+  padding: 6px 10px 2px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-detail-file:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .tool-detail-chevron {
   color: var(--text-faint);
   display: flex;

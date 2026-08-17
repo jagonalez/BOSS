@@ -23,6 +23,29 @@ export interface PartRun {
   parts: Array<{ part: Part; index: number }>
 }
 
+/** One file a call changed, however the backend spelled it.
+ *
+ *  A diff rather than a before-and-after pair: this is what Codex reports, and
+ *  it is already the shape the renderer wants to show. */
+export interface FileChange {
+  path: string
+  diff: string
+}
+
+/** The files a Codex fileChange call touched.
+ *
+ *  Codex sends an array of {path, kind, diff} where other backends send one
+ *  object with a file_path. Without this a Codex edit reads as an untyped
+ *  "step": no file name, no diff stat, and no way through to Review. */
+export function fileChanges(part: Part): FileChange[] {
+  const input = part.state?.input
+  if (!Array.isArray(input)) return []
+  return input
+    .filter((entry): entry is { path?: string; diff?: string } => typeof entry === 'object' && entry !== null)
+    .map((entry) => ({ path: entry.path ?? '', diff: entry.diff ?? '' }))
+    .filter((change) => change.path)
+}
+
 /** Whether a call carrying a file path actually wrote to it.
  *
  *  A path alone does not say: Read, Edit and Write all take one. The write is
@@ -38,6 +61,7 @@ function writesToFile(input: Record<string, unknown>): boolean {
 }
 
 export function toolKind(part: Part): 'command' | 'page' | 'read' | 'edit' | 'other' {
+  if (fileChanges(part).length) return 'edit'
   const input = part.state?.input as Record<string, unknown> | undefined
   if (input && typeof input.command === 'string') return 'command'
   if (input && typeof input.url === 'string') return 'page'

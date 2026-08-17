@@ -4,7 +4,7 @@ import { unifiedDiff, type DiffLine } from '../lib/diff'
 import { openReviewFile, selectSession } from '../lib/actions'
 import { MessageText } from '../lib/text'
 import { ChevronIcon, ReviewIcon } from './icons'
-import { groupPartRuns, toolKind, type PartRun } from '../lib/part-runs'
+import { fileChanges, groupPartRuns, toolKind, type PartRun } from '../lib/part-runs'
 
 function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return ''
@@ -94,19 +94,53 @@ function editStrings(input: EditInput): { oldS: string; newS: string } {
   return { oldS, newS }
 }
 
+/** Read a unified diff into the lines the renderer draws.
+ *
+ *  Codex reports an edit as the diff itself rather than as the strings either
+ *  side of it, so there is nothing to diff — only something to parse. Hunk
+ *  headers carry the line numbers; the rest is counted off from them. */
+function parseUnifiedDiff(text: string): DiffLine[] {
+  const lines: DiffLine[] = []
+  let oldNo = 0
+  let newNo = 0
+  for (const raw of text.split('\n')) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw)
+    if (hunk) {
+      oldNo = Number(hunk[1])
+      newNo = Number(hunk[2])
+      continue
+    }
+    if (raw.startsWith('---') || raw.startsWith('+++') || raw.startsWith('diff ') || raw.startsWith('index ')) continue
+    if (raw.startsWith('+')) lines.push({ kind: 'add', oldNo: null, newNo: newNo++, text: raw.slice(1) })
+    else if (raw.startsWith('-')) lines.push({ kind: 'del', oldNo: oldNo++, newNo: null, text: raw.slice(1) })
+    else if (raw.startsWith(' ')) lines.push({ kind: 'ctx', oldNo: oldNo++, newNo: newNo++, text: raw.slice(1) })
+  }
+  return lines
+}
+
+/** Every file a part edited, with the diff for each. Covers both shapes: one
+ *  file described by its before and after, and Codex's list of diffs. */
+function partDiffs(part: Part): Array<{ path: string; lines: DiffLine[] }> {
+  const changes = fileChanges(part)
+  if (changes.length) {
+    return changes.map((change) => ({ path: change.path, lines: parseUnifiedDiff(change.diff) }))
+  }
+  const input = editInput(part)
+  if (!input) return []
+  const { oldS, newS } = editStrings(input)
+  if (!newS && !oldS) return []
+  return [{ path: editPath(input), lines: unifiedDiff(oldS, newS) }]
+}
+
 function editStats(parts: Part[]): Map<string, { adds: number; dels: number }> {
   const map = new Map<string, { adds: number; dels: number }>()
   for (const p of parts) {
-    const input = editInput(p)
-    if (!input) continue
-    const { oldS, newS } = editStrings(input)
-    if (!newS && !oldS) continue
-    const path = editPath(input)
-    const diff = unifiedDiff(oldS, newS)
-    const adds = diff.filter((l) => l.kind === 'add').length
-    const dels = diff.filter((l) => l.kind === 'del').length
-    const prev = map.get(path) ?? { adds: 0, dels: 0 }
-    map.set(path, { adds: prev.adds + adds, dels: prev.dels + dels })
+    for (const { path, lines } of partDiffs(p)) {
+      const adds = lines.filter((l) => l.kind === 'add').length
+      const dels = lines.filter((l) => l.kind === 'del').length
+      const prev = map.get(path) ?? { adds: 0, dels: 0 }
+      map.set(path, { adds: prev.adds + adds, dels: prev.dels + dels })
+    }
   }
   return map
 }
@@ -170,21 +204,19 @@ function MiniDiff({ lines }: { lines: DiffLine[] }): React.JSX.Element {
 
 function ToolDetail({ part }: { part: Part }): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  const input = editInput(part)
-  const isEdit = input !== null
+  const diffs = partDiffs(part)
+  const isEdit = diffs.length > 0
   const output = toolOutputText(part)
-  const title = isEdit ? editPath(input) : part.state?.title || part.state?.tool || 'tool'
+  // A Codex call can change several files at once, so it is named by the count
+  // rather than by whichever one happened to come first.
+  const title = isEdit
+    ? diffs.length === 1 ? diffs[0].path : `${diffs.length} files`
+    : part.state?.title || part.state?.tool || 'tool'
   const hasBody = Boolean(output && !isEdit) || isEdit
 
   const meta = (part.state?.metadata ?? {}) as { sessionId?: string; parentSessionId?: string }
   const subSessionId = part.state?.tool === 'task' ? meta.sessionId : undefined
   const isTask = part.state?.tool === 'task'
-
-  let diff: DiffLine[] | null = null
-  if (isEdit) {
-    const { oldS, newS } = editStrings(input)
-    if (newS || oldS) diff = unifiedDiff(oldS, newS)
-  }
 
   return (
     <div className="tool-detail">
@@ -193,13 +225,13 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
         <span className="tool-detail-title" title={title}>
           {title}
         </span>
-        {isEdit ? (
+        {diffs.length === 1 ? (
           <span
             className="tool-detail-review"
             title="Open diff in Review"
             onClick={(e) => {
               e.stopPropagation()
-              void openReviewFile(editPath(input))
+              void openReviewFile(diffs[0].path)
             }}
           >
             <ReviewIcon size={13} />
@@ -225,7 +257,15 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
       </button>
       {open && (
         <>
-          {diff ? <MiniDiff lines={diff} /> : null}
+          {/* Several files means several diffs, each under its own path. */}
+          {diffs.map(({ path, lines }) => (
+            <div key={path}>
+              {diffs.length > 1 ? (
+                <div className="tool-detail-file" onClick={() => void openReviewFile(path)}>{path}</div>
+              ) : null}
+              <MiniDiff lines={lines} />
+            </div>
+          ))}
           {output && !isEdit ? <pre className="tool-detail-output">{output}</pre> : null}
         </>
       )}

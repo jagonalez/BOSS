@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { groupPartRuns, segmentTurn, toolKind } from './part-runs.ts'
+import { fileChanges, groupPartRuns, segmentTurn, toolKind } from './part-runs.ts'
 import type { Part } from '../../../shared/opencode.ts'
 
 const tool = (id: string, input: Record<string, unknown>): Part => ({
@@ -35,6 +35,41 @@ test('neighbouring reads become a run', () => {
   assert.equal(runs.length, 1)
   assert.equal(runs[0].kind, 'read')
   assert.equal(runs[0].parts.length, 3)
+})
+
+test('a Codex fileChange is an edit, not an untyped step', () => {
+  // Codex sends an array of {path, kind, diff} where the others send one object
+  // with a file_path. Read as an object it has no path at all, so the card said
+  // "1 step" and offered no file name, no diff stat and no way into Review.
+  const part = {
+    id: 'f1',
+    type: 'tool',
+    sessionID: 's',
+    messageID: 'm',
+    state: {
+      status: 'completed',
+      tool: 'fileChange',
+      input: [
+        { path: '/src/a.ts', kind: 'modified', diff: '@@ -1,2 +1,2 @@\n-old\n+new\n' },
+        { path: '/src/b.ts', kind: 'added', diff: '@@ -0,0 +1 @@\n+added\n' }
+      ]
+    }
+  } as unknown as Part
+  assert.equal(toolKind(part), 'edit')
+  assert.deepEqual(fileChanges(part).map((c) => c.path), ['/src/a.ts', '/src/b.ts'])
+})
+
+test('a Codex edit never folds into a run', () => {
+  const one = (id: string): Part => ({
+    id, type: 'tool', sessionID: 's', messageID: 'm',
+    state: { status: 'completed', input: [{ path: '/a.ts', diff: '+x' }] }
+  }) as unknown as Part
+  assert.equal(groupPartRuns([one('1'), one('2')]).length, 2)
+})
+
+test('a non-Codex input is not mistaken for a change list', () => {
+  assert.deepEqual(fileChanges(read('r')), [])
+  assert.deepEqual(fileChanges(command('c')), [])
 })
 
 test('a path alone is a read; a payload makes it an edit', () => {
