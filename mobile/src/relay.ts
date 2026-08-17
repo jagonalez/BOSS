@@ -10,6 +10,7 @@
  * The relay only ever sees ciphertext. Nothing here sends a plaintext frame.
  */
 import * as SecureStore from 'expo-secure-store'
+import { deriveDeviceId, deriveJoinProof, deriveKey, fromBase64Url, open as openSealed, seal, toBase64Url } from './crypto'
 
 export interface RelayCredentials {
   relayUrl: string
@@ -18,6 +19,15 @@ export interface RelayCredentials {
   /** This device's own token, which the desktop can revoke alone. */
   token: string
   peerId: string
+  /**
+   * Set only while pairing. The desktop's room id and join proof come from the
+   * QR code, because they derive from the room secret the phone does not have
+   * yet — deriving them from the pairing secret instead puts the phone alone
+   * in a room the desktop never sees. Both are dropped once paired, when
+   * `secret` becomes the room secret and the phone derives them itself.
+   */
+  deviceId?: string
+  joinProof?: string
 }
 
 export type RelayMessage =
@@ -36,61 +46,8 @@ const SEQ_KEY = 'boss.relay.seq'
 /** A request waits this long before the UI reports the desktop unreachable. */
 const REQUEST_TIMEOUT_MS = 20_000
 
-function toBase64Url(bytes: Uint8Array): string {
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i])
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-/** Returns a view backed by a plain ArrayBuffer, which is what WebCrypto wants. */
-function fromBase64Url(value: string): Uint8Array<ArrayBuffer> {
-  const base64 = value.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
-  const binary = atob(padded)
-  const out = new Uint8Array(new ArrayBuffer(binary.length))
-  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i)
-  return out
-}
-
-async function digest(input: string): Promise<ArrayBuffer> {
-  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
-}
-
-async function deriveKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey('raw', await digest(`boss-relay-key:${secret}`), { name: 'AES-GCM' }, false, [
-    'encrypt',
-    'decrypt'
-  ])
-}
-
-async function deriveId(prefix: string, secret: string): Promise<string> {
-  return toBase64Url(new Uint8Array(await digest(`${prefix}${secret}`)).slice(0, 16))
-}
-
-async function seal(key: CryptoKey, message: RelayMessage): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const cipher = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    new TextEncoder().encode(JSON.stringify(message))
-  )
-  return `${toBase64Url(iv)}.${toBase64Url(new Uint8Array(cipher))}`
-}
-
-async function unseal(key: CryptoKey, sealed: string): Promise<RelayMessage | null> {
-  const [ivPart, bodyPart] = sealed.split('.')
-  if (!ivPart || !bodyPart) return null
-  try {
-    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64Url(ivPart) }, key, fromBase64Url(bodyPart))
-    return JSON.parse(new TextDecoder().decode(plain)) as RelayMessage
-  } catch {
-    // Not from our desktop, or tampered with. Drop it.
-    return null
-  }
-}
-
 /** Parse the payload a QR code carries, in either the fragment or query form. */
-export function decodePairing(input: string): { v: number; r: string; d: string; s: string } | null {
+export function decodePairing(input: string): { v: number; r: string; d: string; s: string; j?: string } | null {
   const match = /[#?&]p=([A-Za-z0-9_-]+)/.exec(input.trim())
   if (!match) return null
   try {
@@ -141,7 +98,7 @@ function reconnectDelay(attempt: number): number {
 
 export class RelayConnection {
   private socket: WebSocket | null = null
-  private key: CryptoKey | null = null
+  private key: Uint8Array | null = null
   private credentials: RelayCredentials | null = null
   private pendingClaim: string | null = null
   private attempt = 0
@@ -169,11 +126,13 @@ export class RelayConnection {
   }
 
   /** Begin pairing from a scanned QR payload. */
-  async pair(payload: { r: string; s: string }): Promise<void> {
+  async pair(payload: { r: string; s: string; d?: string; j?: string }): Promise<void> {
     this.credentials = {
       relayUrl: payload.r,
       secret: payload.s,
       token: '',
+      deviceId: payload.d,
+      joinProof: payload.j,
       peerId: toBase64Url(crypto.getRandomValues(new Uint8Array(8)))
     }
     this.pendingClaim = payload.s
@@ -198,14 +157,14 @@ export class RelayConnection {
     this.socket = socket
 
     socket.onopen = async () => {
-      this.key = await deriveKey(credentials.secret)
+      this.key = deriveKey(credentials.secret)
       socket.send(
         JSON.stringify({
           type: 'hello',
           side: 'phone',
-          deviceId: await deriveId('boss-relay-device:', credentials.secret),
+          deviceId: credentials.deviceId ?? deriveDeviceId(credentials.secret),
           peerId: credentials.peerId,
-          proof: await deriveId('boss-relay-join:', credentials.secret),
+          proof: credentials.joinProof ?? deriveJoinProof(credentials.secret),
           v: 1
         })
       )
@@ -250,7 +209,7 @@ export class RelayConnection {
     }
     if (typeof frame.sealed !== 'string' || !this.key) return
 
-    const message = await unseal(this.key, frame.sealed)
+    const message = openSealed<RelayMessage>(this.key, frame.sealed)
     if (!message) return
 
     if (message.kind === 'response') {
@@ -310,7 +269,7 @@ export class RelayConnection {
 
   private async send(message: RelayMessage): Promise<boolean> {
     if (!this.socket || !this.key || this.socket.readyState !== 1) return false
-    this.socket.send(JSON.stringify({ sealed: await seal(this.key, message) }))
+    this.socket.send(JSON.stringify({ sealed: seal(this.key, message) }))
     return true
   }
 

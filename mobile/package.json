@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
-    "@craftzdog/react-native-buffer": "^6.1.2",
+    "@noble/ciphers": "^2.3.0",
+    "@noble/hashes": "^2.3.0",
     "expo": "~57.0.13",
     "expo-audio": "~57.0.3",
     "expo-camera": "~57.0.3",
@@ -14,9 +15,7 @@
     "expo-standard-web-crypto": "^57.0.1",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
-    "react-native": "0.86.2",
-    "react-native-get-random-values": "~1.11.0",
-    "react-native-quick-crypto": "^1.1.7"
+    "react-native": "0.86.2"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

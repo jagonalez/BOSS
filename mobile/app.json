@@ -1,17 +1,25 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
-    "version": "1.0.0",
+    "name": "BOSS",
+    "slug": "boss",
+    "scheme": "boss",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0b0d10",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.boss.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "BOSS uses the camera once, to scan the pairing code shown on your desktop.",
+        "NSMicrophoneUsageDescription": "BOSS records your voice so your desktop can transcribe it. Audio is encrypted and only your own machine can read it."
+      }
     },
     "android": {
+      "package": "dev.boss.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0b0d10",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -23,7 +31,9 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-audio"
+      "expo-audio",
+      "expo-camera",
+      "expo-notifications"
     ]
   }
 }
