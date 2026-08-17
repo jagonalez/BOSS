@@ -33,6 +33,7 @@ import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findS
 import { tabContentNode } from '../lib/tab-content-nodes'
 import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
+import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 
 
 const TAB_TYPES: Array<{
@@ -138,8 +139,7 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   if (item.kind === 'thread') return sessionTitle || 'Untitled thread'
   if (item.kind === 'browser') return browserTitle || `Browser${suffix}`
   if (item.kind === 'terminal' && authBackendId) {
-    const label = { opencode: 'OpenCode', pi: 'Pi', codex: 'Codex', claude: 'Claude' }[authBackendId]
-    return `Connect ${label}`
+    return `Connect ${BACKEND_SHORT_LABELS[authBackendId]}`
   }
   // No checkout on the label. A resource inherits its thread's, so naming it
   // here repeated what the pane already said; when the resource sits away from
