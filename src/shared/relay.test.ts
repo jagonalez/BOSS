@@ -96,3 +96,31 @@ test('reconnect backoff grows and then stays bounded', () => {
   const late = Array.from({ length: 40 }, () => reconnectDelay(8))
   assert.ok(Math.max(...early) < Math.min(...late), 'later attempts must wait longer')
 })
+
+test('pairing crosses two different secrets, so one key cannot serve both', async () => {
+  // The bug this guards: the phone seals its claim with the ONE-TIME pairing
+  // secret from the QR code, while the desktop holds the LONG-LIVED room
+  // secret. Sealing and opening with the same secret — as every other test
+  // here does — hides that completely, and QR pairing silently never worked.
+  const roomSecret = 'the-long-lived-room-secret-abcdef'
+  const pairingSecret = 'a-one-time-pairing-secret'
+
+  const roomKey = await deriveKey(crypto, roomSecret)
+  const pairingKey = await deriveKey(crypto, pairingSecret)
+
+  // Phone → desktop: the claim is sealed with the pairing key.
+  const claim = await seal(crypto, pairingKey, { kind: 'claim', secret: pairingSecret, label: 'iPhone' })
+  assert.equal(await open(crypto, roomKey, claim), null, 'the room key must NOT open a claim')
+  assert.deepEqual(await open(crypto, pairingKey, claim), {
+    kind: 'claim', secret: pairingSecret, label: 'iPhone'
+  })
+
+  // Desktop → phone: the reply must also use the pairing key, because the
+  // phone does not have the room secret until this message delivers it.
+  const reply = await seal(crypto, pairingKey, {
+    kind: 'claimed', secret: roomSecret, token: 'device-token', role: 'control'
+  })
+  assert.equal(await open(crypto, roomKey, reply), null, 'the phone cannot use the room key yet')
+  const opened = await open(crypto, pairingKey, reply)
+  assert.equal(opened?.kind === 'claimed' ? opened.secret : null, roomSecret)
+})

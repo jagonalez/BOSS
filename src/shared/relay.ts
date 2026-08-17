@@ -103,6 +103,16 @@ export interface PairingPayload {
   d: string
   /** One-time pairing secret, base64url. */
   s: string
+  /**
+   * The desktop's join proof for its room.
+   *
+   * Both `d` and this are derived from the room secret, which a pairing phone
+   * does not have yet. Without them the phone derives a room of its own from
+   * the pairing secret, joins it alone, and its claim reaches nobody. Carrying
+   * them costs nothing: they are one-way hashes, and the relay already sees
+   * both on every connection.
+   */
+  j?: string
 }
 
 /**
