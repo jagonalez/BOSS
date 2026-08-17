@@ -20,6 +20,9 @@ import { ThreadBus } from './thread-bus'
 import { WorktreeManager } from './worktree-manager'
 import { AutomationManager } from './automation-manager'
 import { McpHub } from './mcp-hub'
+import { PluginManager } from './plugin-manager'
+import { StdioMcpClient } from './mcp-client'
+import { PLUGIN_PARTITION, installPluginViews, registerPluginScheme } from './plugin-views'
 import { WebAccess } from './web-access'
 import { RelayClient } from './relay-client'
 // `ws` rather than Node 22's global WebSocket: the client uses the Node-style
@@ -62,6 +65,10 @@ if (e2e && process.env.BOSS_E2E_USER_DATA) {
   const suffix = profile ? `-dev-${profile.replace(/[^A-Za-z0-9_-]/g, '-')}` : '-dev'
   app.setPath('userData', `${app.getPath('userData')}${suffix}`)
 }
+
+// Has to happen before app ready, or a plugin view gets an opaque origin and
+// loses fetch and localStorage inside its own page.
+registerPluginScheme()
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -111,6 +118,21 @@ backendMgr.attachMcpHub(mcpHub)
 threadBus.attachMcpHub(mcpHub)
 mcpHub.setOnChange(() => {
   void mcpHub.list().then((connections) => backendMgr.emit({ type: 'mcp.updated', properties: { connections } })).catch(() => {})
+})
+const plugins = new PluginManager(
+  join(app.getPath('userData'), 'plugins'),
+  join(app.getPath('userData'), 'plugins.json'),
+  // Same two candidates as the other bundled resources: packaged apps read
+  // resourcesPath, a checkout reads resources/ beside the app path.
+  app.isPackaged
+    ? join(process.resourcesPath ?? '', 'plugins')
+    : join(app.getAppPath(), 'resources', 'plugins'),
+  (command, args, env) => new StdioMcpClient(command, args, env)
+)
+backendMgr.attachPlugins(plugins)
+threadBus.attachPlugins(plugins)
+plugins.setOnChange(() => {
+  void plugins.list().then((installed) => backendMgr.emit({ type: 'plugin.updated', properties: { plugins: installed } })).catch(() => {})
 })
 const webAccess = new WebAccess(join(app.getPath('userData'), 'mobile-access.json'), backendMgr)
 backendMgr.attachMobile(webAccess)
@@ -184,15 +206,22 @@ function createWindow(): void {
   }
 
   // A guest page may only be what BOSS asks for: its own hardened partition,
-  // no preload of its own, sandboxed, with node off. The renderer sets these
-  // as attributes, so they are re-checked here where they cannot be forged.
+  // sandboxed, with node off. The renderer sets these as attributes, so they
+  // are re-checked here where they cannot be forged.
+  //
+  // A plugin view is the one guest allowed a preload, and only the plugin
+  // preload — its whole API is one call onto its own MCP server. The path is
+  // pinned here rather than taken from the attribute, so the renderer cannot
+  // name a different file.
   win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
-    delete webPreferences.preload
+    const isPlugin = params.partition === PLUGIN_PARTITION
+    if (isPlugin) webPreferences.preload = join(mainDir, '../preload/plugin.cjs')
+    else delete webPreferences.preload
     webPreferences.sandbox = true
     webPreferences.contextIsolation = true
     webPreferences.nodeIntegration = false
     webPreferences.webSecurity = true
-    if (params.partition !== BROWSE_PARTITION) event.preventDefault()
+    if (params.partition !== BROWSE_PARTITION && !isPlugin) event.preventDefault()
   })
 
   win.webContents.on('console-message', (event) => {
@@ -269,6 +298,10 @@ app.whenReady().then(() => {
     callback(false)
   })
 
+  // Serves boss-plugin:// and brokers the one call a plugin view can make. Set
+  // up before the window so a restored plugin tab has its scheme ready.
+  installPluginViews(plugins)
+
   buildAppMenu()
   createWindow()
   registerIpcOnce()
@@ -288,6 +321,7 @@ app.whenReady().then(() => {
     await backendMgr.start(saved.projectPath)
     sites.bind(openCodeBackend)
     await mcpHub.start()
+    await plugins.start()
     await automations.start()
     await webAccess.start()
     await relayClient.start()
@@ -319,6 +353,7 @@ app.on('before-quit', () => {
   void relayClient.stop()
   void automations.stop()
   void mcpHub.stop()
+  void plugins.stop()
   void backendMgr.stop()
   void computerUse.dispose()
   void sites.stop()

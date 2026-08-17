@@ -47,7 +47,8 @@ import {
   loadEngine,
   initializeWorkspaceState,
   loadProjectWorkspace,
-  setNativeViewsSuspended
+  setNativeViewsSuspended,
+  refreshPlugins
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -58,6 +59,9 @@ async function refreshAll(): Promise<void> {
   void refreshConfig()
   void refreshThreadBus()
   void refreshAutomations()
+  // Loaded up front, unlike MCP connections: a restored plugin tab needs its
+  // plugin's title and status to render at all.
+  void refreshPlugins()
   const id = appStore.getState().activeSessionId
   if (id) {
     void loadMessages(id)

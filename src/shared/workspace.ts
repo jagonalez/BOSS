@@ -1,6 +1,6 @@
 export type AppPage = 'command-center' | 'automations' | 'sites' | 'project' | 'chat'
 
-export type WorkspaceTabKind = 'thread' | 'browser' | 'terminal' | 'review' | 'files'
+export type WorkspaceTabKind = 'thread' | 'browser' | 'terminal' | 'review' | 'files' | 'plugin'
 export type SplitDirection = 'horizontal' | 'vertical'
 export type DropPosition = 'center' | 'left' | 'right' | 'top' | 'bottom'
 export type TerminalStartLocation = 'focused-checkout' | 'project-root'
@@ -23,6 +23,11 @@ export interface WorkspaceTab {
   contextPath?: string
   worktreeId?: string
   contextLabel?: string
+  /** Which plugin view a 'plugin' tab shows. Both are needed: one plugin can
+   *  contribute several views, and the pair is what the boss-plugin:// URL is
+   *  built from. */
+  pluginId?: string
+  viewId?: string
 }
 
 export interface WorkspaceGroup {

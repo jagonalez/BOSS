@@ -19,6 +19,9 @@ import { projectScope } from './project-identity'
 import type { QaTools } from './qa-tools'
 import { MCP_TOOL_PREFIX } from '@shared/mcp'
 import type { McpHub } from './mcp-hub'
+import type { PluginManifest } from '@shared/plugin'
+import { PLUGIN_TOOL_PREFIX } from './plugin-rules'
+import type { PluginManager } from './plugin-manager'
 
 interface LegacyThreadBusState {
   version: 1
@@ -90,6 +93,7 @@ export class ThreadBus {
   private readonly deliveryLocks = new Set<string>()
   private qaTools?: QaTools
   private mcpHub?: McpHub
+  private plugins?: PluginManager
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
@@ -101,6 +105,10 @@ export class ThreadBus {
 
   attachMcpHub(mcpHub: McpHub): void {
     this.mcpHub = mcpHub
+  }
+
+  attachPlugins(plugins: PluginManager): void {
+    this.plugins = plugins
   }
 
   qaStatus(threadId: string) {
@@ -221,6 +229,19 @@ export class ThreadBus {
         return this.mcpHub.callAgentTool(name, toolArgs)
       }
       return this.mcpHub.callAgentTool(tool, args)
+    }
+    if (tool.startsWith(PLUGIN_TOOL_PREFIX) || tool.startsWith('boss_plugin_')) {
+      if (!this.plugins) throw new Error('BOSS plugins are not ready.')
+      if (tool === 'boss_plugin_list') return this.plugins.agentListing()
+      if (tool === 'boss_plugin_reload') return this.plugins.reload()
+      if (tool === 'boss_plugin_create') {
+        const manifest = (args as Record<string, unknown> | undefined)?.manifest
+        if (!manifest || typeof manifest !== 'object') {
+          throw new Error('Pass the plugin manifest as an object under "manifest".')
+        }
+        return this.plugins.scaffold(manifest as PluginManifest)
+      }
+      return this.plugins.callAgentTool(tool, args)
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
@@ -525,7 +546,63 @@ export class ThreadBus {
         inputSchema: tool.inputSchema,
         annotations: { readOnlyHint: tool.readOnly }
       })),
-      ...(this.mcpHub?.agentToolDefinitions() ?? [])
+      {
+        name: 'boss_plugin_list',
+        description: THREAD_TOOL_DESCRIPTIONS.pluginList,
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      {
+        name: 'boss_plugin_create',
+        description: THREAD_TOOL_DESCRIPTIONS.pluginCreate,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            manifest: {
+              type: 'object',
+              description: 'The plugin.json contents.',
+              properties: {
+                id: { type: 'string', description: 'Lowercase id, also the directory name. Letters, digits and dashes.' },
+                name: { type: 'string', description: 'Name shown to the user.' },
+                version: { type: 'string', description: 'Semver, e.g. "1.0.0".' },
+                description: { type: 'string' },
+                server: {
+                  type: 'object',
+                  description: 'The stdio MCP server providing this plugin\'s tools. Use a relative command like "./server.js" for a file you are about to write.',
+                  properties: {
+                    command: { type: 'string' },
+                    args: { type: 'array', items: { type: 'string' } },
+                    env: { type: 'object', additionalProperties: { type: 'string' } }
+                  },
+                  required: ['command']
+                },
+                views: {
+                  type: 'array',
+                  description: 'Tabs this plugin contributes. Each entry is an HTML file inside the plugin directory.',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      title: { type: 'string' },
+                      entry: { type: 'string', description: 'Relative path, e.g. "view.html".' }
+                    },
+                    required: ['id', 'title', 'entry']
+                  }
+                }
+              },
+              required: ['id', 'name', 'version']
+            }
+          },
+          required: ['manifest'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_plugin_reload',
+        description: THREAD_TOOL_DESCRIPTIONS.pluginReload,
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      ...(this.mcpHub?.agentToolDefinitions() ?? []),
+      ...(this.plugins?.agentToolDefinitions() ?? [])
     ]
   }
 
@@ -567,12 +644,14 @@ export class ThreadBus {
     const reply = (result: unknown): void => this.json(response, 200, { jsonrpc: '2.0', id: input.id, result })
     if (input.method === 'initialize') {
       const requested = typeof input.params?.protocolVersion === 'string' ? input.params.protocolVersion : ''
-      const hubInstructions = this.mcpHub?.instructionsSummary()
+      const extra = [this.mcpHub?.instructionsSummary(), this.plugins?.instructionsSummary()]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join('\n\n')
       reply({
         protocolVersion: requested === '2025-03-26' ? requested : '2025-06-18',
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'boss-agent-tools', version: '1.0.0' },
-        instructions: hubInstructions ? `${QA_GUIDANCE}\n\n${hubInstructions}` : QA_GUIDANCE
+        instructions: extra ? `${QA_GUIDANCE}\n\n${extra}` : QA_GUIDANCE
       })
       return
     }
@@ -612,7 +691,10 @@ export class ThreadBus {
       url: `http://127.0.0.1:${this.port}`,
       token: this.token,
       tokenFor: (backendId, nativeThreadId) => this.callerToken(backendId, nativeThreadId),
-      agentToolNames: () => (this.mcpHub?.agentToolDefinitions() ?? []).map((definition) => definition.name)
+      agentToolNames: () => [
+        ...(this.mcpHub?.agentToolDefinitions() ?? []).map((definition) => definition.name),
+        ...(this.plugins?.agentToolDefinitions() ?? []).map((definition) => definition.name)
+      ]
     }
   }
 

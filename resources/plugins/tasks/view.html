@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tasks</title>
+    <style>
+      /* Standalone on purpose: a plugin view does not inherit BOSS's
+         stylesheet, so it names its own colours. These track BOSS's dark
+         palette closely enough to sit in a pane without jarring. */
+      :root {
+        color-scheme: dark;
+        --bg: #16171b;
+        --elevated: #1d1f24;
+        --border: #2c2f36;
+        --text: #e6e7ea;
+        --faint: #8b8f99;
+        --accent: #6aa2ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      form { display: flex; gap: 8px; margin-bottom: 14px; }
+      input {
+        flex: 1;
+        background: var(--elevated);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 10px;
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus { outline: none; border-color: var(--accent); }
+      button {
+        background: var(--elevated);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 7px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      ul { list-style: none; margin: 0; padding: 0; }
+      li {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 9px 2px;
+        border-bottom: 1px solid var(--border);
+      }
+      li:last-child { border-bottom: 0; }
+      .title { flex: 1; }
+      .done .title { color: var(--faint); text-decoration: line-through; }
+      .notes { display: block; color: var(--faint); font-size: 12px; }
+      .remove {
+        border: 0;
+        background: none;
+        color: var(--faint);
+        padding: 0 4px;
+        font-size: 15px;
+        line-height: 1;
+      }
+      .remove:hover { color: #ff6b6b; }
+      .empty { color: var(--faint); padding: 18px 2px; }
+      .error { color: #ff8080; padding: 8px 0; }
+      input[type='checkbox'] { margin-top: 3px; accent-color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <form id="add-form">
+      <input id="title" placeholder="Add a task" autocomplete="off" />
+      <button type="submit">Add</button>
+    </form>
+    <div id="error" class="error" hidden></div>
+    <ul id="list"></ul>
+
+    <script>
+      // window.bossPlugin is the whole API: one call onto this plugin's own MCP
+      // server. Nothing else is reachable from here, by design.
+      const api = window.bossPlugin
+      const list = document.getElementById('list')
+      const errorBox = document.getElementById('error')
+      const form = document.getElementById('add-form')
+      const titleInput = document.getElementById('title')
+
+      function showError(message) {
+        errorBox.textContent = message
+        errorBox.hidden = !message
+      }
+
+      function render(tasks) {
+        list.textContent = ''
+        if (tasks.length === 0) {
+          const empty = document.createElement('div')
+          empty.className = 'empty'
+          empty.textContent = 'No tasks yet. Add one above, or ask BOSS to.'
+          list.append(empty)
+          return
+        }
+        for (const task of tasks) {
+          const row = document.createElement('li')
+          if (task.done) row.className = 'done'
+
+          const check = document.createElement('input')
+          check.type = 'checkbox'
+          check.checked = Boolean(task.done)
+          check.addEventListener('change', () => {
+            void run(() => api.call('complete', { id: task.id, done: check.checked }))
+          })
+
+          const label = document.createElement('span')
+          label.className = 'title'
+          // textContent, never innerHTML: a task title is user text.
+          label.textContent = task.title
+          if (task.notes) {
+            const notes = document.createElement('span')
+            notes.className = 'notes'
+            notes.textContent = task.notes
+            label.append(notes)
+          }
+
+          const remove = document.createElement('button')
+          remove.className = 'remove'
+          remove.type = 'button'
+          remove.title = 'Delete this task'
+          remove.textContent = '×'
+          remove.addEventListener('click', () => {
+            void run(() => api.call('remove', { id: task.id }))
+          })
+
+          row.append(check, label, remove)
+          list.append(row)
+        }
+      }
+
+      /** Run a mutation, then reload the list so the view matches the server. */
+      async function run(action) {
+        try {
+          await action()
+          await refresh()
+        } catch (error) {
+          showError(String(error && error.message ? error.message : error))
+        }
+      }
+
+      async function refresh() {
+        try {
+          const result = await api.call('list', {})
+          showError('')
+          render(Array.isArray(result?.tasks) ? result.tasks : [])
+        } catch (error) {
+          showError(String(error && error.message ? error.message : error))
+        }
+      }
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault()
+        const title = titleInput.value.trim()
+        if (!title) return
+        titleInput.value = ''
+        void run(() => api.call('add', { title }))
+      })
+
+      void refresh()
+      // The agent changes tasks behind the view's back, so it polls. Cheap: the
+      // call is a local file read, and it stops while the tab is hidden.
+      setInterval(() => {
+        if (!document.hidden) void refresh()
+      }, 2000)
+    </script>
+  </body>
+</html>

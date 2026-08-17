@@ -220,6 +220,7 @@ export class BackendManager {
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
+  private plugins?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
   private remote?: { handle(request: BackendRequest): Promise<unknown> }
   private binaryOverrides?: BinaryOverrides
@@ -414,6 +415,10 @@ export class BackendManager {
 
   attachMcpHub(mcpHub: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.mcpHub = mcpHub
+  }
+
+  attachPlugins(plugins: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.plugins = plugins
   }
 
   attachMobile(mobile: { handle(request: BackendRequest): Promise<unknown> }): void {
@@ -1725,6 +1730,10 @@ export class BackendManager {
     if (request.type.startsWith('mcp.')) {
       if (!this.mcpHub) throw new Error('MCP connections are not available.')
       return this.mcpHub.handle(request)
+    }
+    if (request.type.startsWith('plugin.')) {
+      if (!this.plugins) throw new Error('Plugins are not available.')
+      return this.plugins.handle(request)
     }
     if (request.type.startsWith('mobile.')) {
       if (!this.mobile) throw new Error('Mobile access is not available.')

@@ -46,7 +46,10 @@ export interface ThreadBusConnection {
   url: string
   token: string
   tokenFor(backendId: BackendId, nativeThreadId: string): string
-  /** Names of MCP-hub tools currently available to agents, mcp_<slug>_<tool>. */
+  /** Names of the dynamic tools currently available to agents: MCP-hub tools
+   *  (mcp_<slug>_<tool>) and plugin tools (plugin_<id>_<tool>). Backends that
+   *  allowlist tools by name need both, or a defined tool is refused at call
+   *  time. */
   agentToolNames(): string[]
 }
 
@@ -60,7 +63,11 @@ export type ThreadBusAgentTool =
   | 'boss_threads_leave_worktree'
   | 'boss_mcp_list'
   | 'boss_mcp_call'
+  | 'boss_plugin_list'
+  | 'boss_plugin_create'
+  | 'boss_plugin_reload'
   | `mcp_${string}`
+  | `plugin_${string}`
   | QaAgentTool
 
 /** What the agent is told the thread tools are for.
@@ -81,7 +88,10 @@ export const THREAD_TOOL_DESCRIPTIONS = {
   spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.',
   spawnWorktreeAgent: 'Agent backend for the child thread. Omit to reuse the current thread\'s agent.',
   leaveWorktree: 'Come off this thread\'s worktree and back to the project directory, once its work is committed or merged. Git refuses while anything is uncommitted or untracked, so nothing is lost by trying; the branch is kept either way.',
-  useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. It returns the new path: your working directory changes from your next message, not during this one, so do not start editing files in the new checkout until then. Fails harmlessly if this thread already has a worktree.'
+  useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. It returns the new path: your working directory changes from your next message, not during this one, so do not start editing files in the new checkout until then. Fails harmlessly if this thread already has a worktree.',
+  pluginList: 'List the BOSS plugins installed, with each one\'s tools, views and status. Start here when the user asks what a plugin can do, or before calling a plugin tool.',
+  pluginCreate: 'Create the directory for a new BOSS plugin and write its plugin.json. Use it when the user asks for a capability BOSS does not have — a task board, a timer, a dashboard — that is worth keeping. It returns the directory to write into: put the MCP server and the view HTML there with your file tools, then call boss_plugin_reload. A plugin\'s view reaches its data only by calling that plugin\'s own tools, so put every piece of state behind a tool.',
+  pluginReload: 'Re-read the plugins directory so a plugin you just wrote or edited starts, without restarting BOSS. Call it after writing a plugin\'s files, and again after changing its server.'
 } as const
 
 export interface ThreadBusToolCall {

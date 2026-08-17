@@ -153,6 +153,15 @@ export const PanelIcon = (p: IconProps): React.JSX.Element => (
   </Svg>
 )
 
+/** A block with two pins: the shape every editor uses for an extension. */
+export const PluginIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="M9 4V2M15 4V2M9 22v-2M15 22v-2" />
+    <rect x="5" y="4" width="14" height="16" rx="2" />
+    <path d="M9 10h6" />
+  </Svg>
+)
+
 export const AttachmentIcon = (p: IconProps): React.JSX.Element => (
   <Svg {...p}>
     <path d="M21.4 11.05 12.25 20.2a4.5 4.5 0 0 1-6.36-6.36l9.19-9.19a2.75 2.75 0 0 1 3.89 3.89l-9.2 9.19a1 1 0 0 1-1.41-1.41l8.28-8.28" />

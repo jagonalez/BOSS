@@ -1,0 +1,17 @@
+{
+  "id": "tasks",
+  "name": "Tasks",
+  "version": "1.0.0",
+  "description": "A task board. Its tools let an agent add, list, complete and remove tasks; its view shows them.",
+  "server": {
+    "command": "node",
+    "args": ["./server.mjs"]
+  },
+  "views": [
+    {
+      "id": "board",
+      "title": "Tasks",
+      "entry": "view.html"
+    }
+  ]
+}

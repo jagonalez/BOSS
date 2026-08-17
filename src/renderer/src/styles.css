@@ -6566,6 +6566,73 @@ select:hover {
   display: none;
 }
 
+/* A plugin's own page in a pane. Same layout as .browse, with a thinner bar:
+   there is nothing to navigate, so the bar only names the view and reloads it. */
+.plugin-tab {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.plugin-tab[hidden] {
+  display: none;
+}
+
+.plugin-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.plugin-bar-title {
+  font-size: var(--type-control);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.plugin-bar-status {
+  flex: 1;
+  font-size: var(--type-meta);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-view {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  display: flex;
+}
+
+.plugin-guest {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+}
+
+/* Over the guest rather than instead of it, as in .browse-empty: a hidden
+   webview never attaches, so it has to stay laid out even when it failed. */
+.plugin-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+  text-align: center;
+  background: var(--surface-pane);
+  color: var(--text-faint);
+  font-size: var(--type-control);
+}
+
 .panel {
   width: 460px;
   min-width: 320px;

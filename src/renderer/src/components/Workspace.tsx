@@ -7,9 +7,11 @@ import { BrowseTab } from './BrowseTab'
 import { TerminalTab } from './TerminalTab'
 import { ReviewTab } from './ReviewTab'
 import { FilesTab } from './FilesTab'
+import { PluginTab } from './PluginTab'
 import {
   activateWorkspaceView,
   activateWorkspaceTab,
+  addPluginTab,
   addWorkspaceTab,
   applyLayout,
   closeWorkspaceView,
@@ -31,7 +33,7 @@ import {
 } from '../lib/actions'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { tabContentNode } from '../lib/tab-content-nodes'
-import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PluginIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 
 
@@ -48,6 +50,10 @@ const TAB_TYPES: Array<{
 ]
 
 function tabIcon(kind: WorkspaceTabKind): (props: { size?: number }) => React.JSX.Element {
+  // Plugin is not in TAB_TYPES: that list is also the add menu, and a plugin
+  // entry there would open a tab bound to no plugin. The menu lists one item
+  // per installed view instead, further down.
+  if (kind === 'plugin') return PluginIcon
   return TAB_TYPES.find((item) => item.kind === kind)?.icon ?? ChatIcon
 }
 
@@ -130,6 +136,11 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   const sessionTitle = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.title)
   const browserTitle = useStore(appStore, (state) => state.browse[`workspace-${item.id}`]?.title)
   const authBackendId = useStore(appStore, (state) => state.authTerminalBackends?.[item.id])
+  const pluginTitle = useStore(appStore, (state) => {
+    if (item.kind !== 'plugin') return undefined
+    const plugin = state.plugins.find((candidate) => candidate.manifest.id === item.pluginId)
+    return plugin?.manifest.views?.find((view) => view.id === item.viewId)?.title ?? plugin?.manifest.name
+  })
   const sameKindIndex = group.tabs.filter((candidate) => candidate.kind === item.kind).findIndex((candidate) => candidate.id === item.id)
   const suffix = sameKindIndex > 0 ? ` ${sameKindIndex + 1}` : ''
   // A name the user gave it wins over anything derived. Threads are named by
@@ -137,6 +148,9 @@ function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   if (item.title && item.kind !== 'thread') return item.title
   if (item.kind === 'thread') return sessionTitle || 'Untitled thread'
   if (item.kind === 'browser') return browserTitle || `Browser${suffix}`
+  // The plugin names its own view, so the label is the plugin's word rather
+  // than "Plugin 2".
+  if (item.kind === 'plugin') return pluginTitle || item.pluginId || 'Plugin'
   if (item.kind === 'terminal' && authBackendId) {
     const label = { opencode: 'OpenCode', pi: 'Pi', codex: 'Codex', claude: 'Claude' }[authBackendId]
     return `Connect ${label}`
@@ -280,7 +294,8 @@ function AddMenu({
   const hasThread = Boolean(owner)
 
   // Nothing to attach a resource to yet. A terminal needs a checkout and a
-  // diff needs something to diff, so an empty pane offers threads only.
+  // diff needs something to diff, so an empty pane offers threads only — plus
+  // plugin views, which belong to no thread and open anywhere.
   if (!hasThread) {
     return (
       <div className="workspace-add-menu">
@@ -290,6 +305,7 @@ function AddMenu({
           Or drag a thread here from the sidebar. Terminals, files and reviews
           are added to a thread once it has one.
         </div>
+        <PluginViewMenuItems groupId={groupId} close={close} />
       </div>
     )
   }
@@ -318,6 +334,7 @@ function AddMenu({
           </button>
         )
       })}
+      <PluginViewMenuItems groupId={groupId} close={close} />
       {!hasThread ? (
         <>
           <div className="workspace-menu-rule" />
@@ -327,6 +344,38 @@ function AddMenu({
         </>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * One entry per view of every ready plugin. Built from the plugin list rather
+ * than TAB_TYPES because what is on offer changes with what is installed, and a
+ * plugin tab has to carry which plugin and which view it shows.
+ */
+function PluginViewMenuItems({ groupId, close }: { groupId: string; close: () => void }): React.JSX.Element | null {
+  const plugins = useStore(appStore, (state) => state.plugins)
+  const entries = plugins
+    .filter((plugin) => plugin.enabled && plugin.status === 'ready')
+    .flatMap((plugin) => (plugin.manifest.views ?? []).map((view) => ({ plugin, view })))
+  if (entries.length === 0) return null
+  return (
+    <>
+      <div className="workspace-menu-rule" />
+      <div className="workspace-menu-title">Plugins</div>
+      {entries.map(({ plugin, view }) => (
+        <button
+          key={`${plugin.manifest.id}:${view.id}`}
+          className="workspace-add-menu-item"
+          onClick={() => {
+            addPluginTab(groupId, plugin.manifest.id, view.id)
+            close()
+          }}
+        >
+          <PluginIcon size={14} />
+          <span>{view.title}</span>
+        </button>
+      ))}
+    </>
   )
 }
 
@@ -376,6 +425,16 @@ function TabContent({
       break
     case 'files':
       content = <FilesTab contextPath={item.contextPath} />
+      break
+    case 'plugin':
+      content = (
+        <PluginTab
+          id={`workspace-${item.id}`}
+          pluginId={item.pluginId}
+          viewId={item.viewId}
+          visible={active && viewShowing}
+        />
+      )
       break
   }
   // Portalled into its pane rather than rendered inside it. React reconciles
