@@ -21,8 +21,9 @@ export interface ThreadContext {
  *
  *  Used by the backends that take a system prompt per message: claude through
  *  --append-system-prompt, codex through a turn's developerInstructions.
- *  OpenCode and pi have no such hook, and both are already told their working
- *  directory, so they are left alone rather than given an invented field. */
+ *  OpenCode's prompt endpoint has a system field that could take it too, but
+ *  it is not wired up yet; pi has no such hook. Both are already told their
+ *  working directory. */
 export function threadContextPrompt(context: ThreadContext): string {
   const lines: string[] = []
   if (context.projectName) lines.push(`You are working in the ${context.projectName} project.`)

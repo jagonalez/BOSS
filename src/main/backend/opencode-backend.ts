@@ -209,9 +209,11 @@ export class OpenCodeBackend implements Backend {
   }
 
   async sendMessage(sessionId: string, parts: unknown[], opts?: BackendMessageOptions): Promise<void> {
-    // context is BOSS's own field and not an OpenCode parameter, so it is
-    // dropped here. OpenCode is told the directory per session already, and
-    // inventing a prompt field to carry the rest is worse than leaving it.
+    // context is BOSS's own field, not an OpenCode parameter, so it is stripped
+    // rather than passed through into the body. promptAsync does take a system
+    // field that could carry it, the way claude and codex are given the same
+    // text; wiring that up changes what the agent is told, so it is its own
+    // change rather than a side effect of this one.
     const { context: _context, ...rest } = opts ?? {}
     const res = await this.sdk().session.promptAsync({
       path: { id: sessionId },
