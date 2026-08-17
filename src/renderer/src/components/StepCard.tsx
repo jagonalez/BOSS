@@ -35,6 +35,7 @@ const RUN_COLLAPSE_AT = 5
 const RUN_LABELS: Record<PartRun['kind'], [one: string, many: string]> = {
   command: ['command', 'commands'],
   page: ['page fetched', 'pages fetched'],
+  read: ['file read', 'files read'],
   edit: ['file edit', 'file edits'],
   other: ['step', 'steps'],
   reasoning: ['note', 'notes']
@@ -275,22 +276,53 @@ export function StepCard({ message }: { message: MessageWithParts }): React.JSX.
     return <ThoughtLine parts={message.parts} duration={duration} />
   }
 
-  const running = tools.some((p) => isRunning(p.state?.status))
+  const runningTool = tools.find((p) => isRunning(p.state?.status))
+  const running = runningTool !== undefined
   const failed = tools.some((p) => isError(p.state?.status))
   const commands = tools.filter((p) => toolKind(p) === 'command').length
   const pages = tools.filter((p) => toolKind(p) === 'page').length
+  const reads = tools.filter((p) => toolKind(p) === 'read').length
 
   const summary: string[] = []
   if (commands) summary.push(`${commands} ${commands === 1 ? 'command' : 'commands'}`)
   if (pages) summary.push(`${pages} ${pages === 1 ? 'page' : 'pages'} fetched`)
+  if (reads) summary.push(`read ${reads} ${reads === 1 ? 'file' : 'files'}`)
   if (files.size) summary.push(`edited ${files.size} ${files.size === 1 ? 'file' : 'files'}`)
   if (summary.length === 0 && tools.length) summary.push(`${tools.length} steps`)
+
+  // While the card runs its head reports the call in flight and how far in it
+  // is, so a closed card still says what is happening. Opening it to watch
+  // would cost the reader their place; the summary arrives when it is true.
+  const done = tools.filter((p) => !isRunning(p.state?.status)).length
+  const head = running
+    ? `${runningTool.state?.title || runningTool.state?.tool || 'working'} · ${done}/${tools.length}`
+    : summary.join(' · ') || 'worked'
+
+  const totals = [...files.values()].reduce(
+    (sum, stat) => ({ adds: sum.adds + stat.adds, dels: sum.dels + stat.dels }),
+    { adds: 0, dels: 0 }
+  )
 
   return (
     <div className={`step-card ${running ? 'running' : ''} ${failed ? 'failed' : ''}`}>
       <button className="step-card-head" onClick={() => setOpen((o) => !o)}>
         <StatusDot status={running ? 'running' : failed ? 'error' : undefined} />
-        <span className="step-summary">{summary.join(' · ') || 'worked'}</span>
+        <span className="step-summary">{head}</span>
+        {/* One file goes straight to Review. Several cannot — Review opens one
+            file — so the stat opens the card, where each is listed. */}
+        {files.size > 0 && !running ? (
+          <span
+            className="step-head-stats"
+            title={files.size === 1 ? `Review ${[...files.keys()][0]}` : `Show ${files.size} edited files`}
+            onClick={files.size === 1 ? (e) => {
+              e.stopPropagation()
+              void openReviewFile([...files.keys()][0], message.info.sessionID)
+            } : undefined}
+          >
+            <span className="add">+{totals.adds}</span>
+            <span className="del">−{totals.dels}</span>
+          </span>
+        ) : null}
         <span className="step-duration">{duration !== null ? formatDuration(duration) : ''}</span>
         <span className="step-chevron" style={{ transform: open ? 'rotate(90deg)' : undefined }}>
           <ChevronIcon size={13} />
