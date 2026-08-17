@@ -30,5 +30,6 @@ qrcheck.mjs
 qrdiff.mjs
 PR_DESCRIPTION.md
 
-# The Expo app is scaffolded but unfinished, and carries its own node_modules.
-mobile/
+# The Expo app's dependencies, not the app itself.
+mobile/node_modules/
+mobile/.expo/
