@@ -290,15 +290,19 @@ export class OpenCodeBackend implements Backend {
   /* Models */
   async modelsList(): Promise<ModelInfo[]> {
     const res = await this.sdk().config.providers({ query: { directory: this.directoryFor() } })
-    // adapt { all: Provider[] } -> ModelInfo[]
-    const body = unwrap(res, 'provider list') as { all?: Array<{ id: string; models?: Record<string, { id: string; name?: string }> | Array<{ id: string; name?: string }> }> }
-    return (body.all ?? []).flatMap((p) => {
-      // The generated type models `models` as a record keyed by model id, while
-      // the hand-written code read it as an array. Accept both so this keeps
-      // working across the shape it actually returns.
-      const models = Array.isArray(p.models) ? p.models : Object.values(p.models ?? {})
-      return models.map((m) => ({ id: m.id, name: m.name, provider: p.id }))
-    })
+    // { providers: Provider[] } -> ModelInfo[], where each provider's models is
+    // a record keyed by model id. The hand-written client read this as
+    // { all: [...] } with an array of models — neither key nor shape exists, so
+    // the cast turned the whole response into an empty list and BOSS offered no
+    // OpenCode models at all.
+    const body = unwrap(res, "provider list")
+    return body.providers.flatMap((provider) =>
+      Object.values(provider.models).map((model) => ({
+        id: model.id,
+        name: model.name,
+        provider: provider.id
+      }))
+    )
   }
 
   async modelSelect(_providerId: string, _modelId: string): Promise<void> {
