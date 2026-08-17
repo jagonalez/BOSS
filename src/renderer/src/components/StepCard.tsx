@@ -4,7 +4,7 @@ import { unifiedDiff, type DiffLine } from '../lib/diff'
 import { openReviewFile, selectSession } from '../lib/actions'
 import { MessageText } from '../lib/text'
 import { ChevronIcon, ReviewIcon } from './icons'
-import { groupPartRuns, toolKind, type PartRun } from '../lib/part-runs'
+import { fileChanges, groupPartRuns, toolKind, type PartRun } from '../lib/part-runs'
 
 function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return ''
@@ -35,6 +35,7 @@ const RUN_COLLAPSE_AT = 5
 const RUN_LABELS: Record<PartRun['kind'], [one: string, many: string]> = {
   command: ['command', 'commands'],
   page: ['page fetched', 'pages fetched'],
+  read: ['file read', 'files read'],
   edit: ['file edit', 'file edits'],
   other: ['step', 'steps'],
   reasoning: ['note', 'notes']
@@ -93,19 +94,53 @@ function editStrings(input: EditInput): { oldS: string; newS: string } {
   return { oldS, newS }
 }
 
+/** Read a unified diff into the lines the renderer draws.
+ *
+ *  Codex reports an edit as the diff itself rather than as the strings either
+ *  side of it, so there is nothing to diff — only something to parse. Hunk
+ *  headers carry the line numbers; the rest is counted off from them. */
+function parseUnifiedDiff(text: string): DiffLine[] {
+  const lines: DiffLine[] = []
+  let oldNo = 0
+  let newNo = 0
+  for (const raw of text.split('\n')) {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw)
+    if (hunk) {
+      oldNo = Number(hunk[1])
+      newNo = Number(hunk[2])
+      continue
+    }
+    if (raw.startsWith('---') || raw.startsWith('+++') || raw.startsWith('diff ') || raw.startsWith('index ')) continue
+    if (raw.startsWith('+')) lines.push({ kind: 'add', oldNo: null, newNo: newNo++, text: raw.slice(1) })
+    else if (raw.startsWith('-')) lines.push({ kind: 'del', oldNo: oldNo++, newNo: null, text: raw.slice(1) })
+    else if (raw.startsWith(' ')) lines.push({ kind: 'ctx', oldNo: oldNo++, newNo: newNo++, text: raw.slice(1) })
+  }
+  return lines
+}
+
+/** Every file a part edited, with the diff for each. Covers both shapes: one
+ *  file described by its before and after, and Codex's list of diffs. */
+function partDiffs(part: Part): Array<{ path: string; lines: DiffLine[] }> {
+  const changes = fileChanges(part)
+  if (changes.length) {
+    return changes.map((change) => ({ path: change.path, lines: parseUnifiedDiff(change.diff) }))
+  }
+  const input = editInput(part)
+  if (!input) return []
+  const { oldS, newS } = editStrings(input)
+  if (!newS && !oldS) return []
+  return [{ path: editPath(input), lines: unifiedDiff(oldS, newS) }]
+}
+
 function editStats(parts: Part[]): Map<string, { adds: number; dels: number }> {
   const map = new Map<string, { adds: number; dels: number }>()
   for (const p of parts) {
-    const input = editInput(p)
-    if (!input) continue
-    const { oldS, newS } = editStrings(input)
-    if (!newS && !oldS) continue
-    const path = editPath(input)
-    const diff = unifiedDiff(oldS, newS)
-    const adds = diff.filter((l) => l.kind === 'add').length
-    const dels = diff.filter((l) => l.kind === 'del').length
-    const prev = map.get(path) ?? { adds: 0, dels: 0 }
-    map.set(path, { adds: prev.adds + adds, dels: prev.dels + dels })
+    for (const { path, lines } of partDiffs(p)) {
+      const adds = lines.filter((l) => l.kind === 'add').length
+      const dels = lines.filter((l) => l.kind === 'del').length
+      const prev = map.get(path) ?? { adds: 0, dels: 0 }
+      map.set(path, { adds: prev.adds + adds, dels: prev.dels + dels })
+    }
   }
   return map
 }
@@ -169,21 +204,19 @@ function MiniDiff({ lines }: { lines: DiffLine[] }): React.JSX.Element {
 
 function ToolDetail({ part }: { part: Part }): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  const input = editInput(part)
-  const isEdit = input !== null
+  const diffs = partDiffs(part)
+  const isEdit = diffs.length > 0
   const output = toolOutputText(part)
-  const title = isEdit ? editPath(input) : part.state?.title || part.state?.tool || 'tool'
+  // A Codex call can change several files at once, so it is named by the count
+  // rather than by whichever one happened to come first.
+  const title = isEdit
+    ? diffs.length === 1 ? diffs[0].path : `${diffs.length} files`
+    : part.state?.title || part.state?.tool || 'tool'
   const hasBody = Boolean(output && !isEdit) || isEdit
 
   const meta = (part.state?.metadata ?? {}) as { sessionId?: string; parentSessionId?: string }
   const subSessionId = part.state?.tool === 'task' ? meta.sessionId : undefined
   const isTask = part.state?.tool === 'task'
-
-  let diff: DiffLine[] | null = null
-  if (isEdit) {
-    const { oldS, newS } = editStrings(input)
-    if (newS || oldS) diff = unifiedDiff(oldS, newS)
-  }
 
   return (
     <div className="tool-detail">
@@ -192,13 +225,13 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
         <span className="tool-detail-title" title={title}>
           {title}
         </span>
-        {isEdit ? (
+        {diffs.length === 1 ? (
           <span
             className="tool-detail-review"
             title="Open diff in Review"
             onClick={(e) => {
               e.stopPropagation()
-              void openReviewFile(editPath(input))
+              void openReviewFile(diffs[0].path)
             }}
           >
             <ReviewIcon size={13} />
@@ -224,7 +257,15 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
       </button>
       {open && (
         <>
-          {diff ? <MiniDiff lines={diff} /> : null}
+          {/* Several files means several diffs, each under its own path. */}
+          {diffs.map(({ path, lines }) => (
+            <div key={path}>
+              {diffs.length > 1 ? (
+                <div className="tool-detail-file" onClick={() => void openReviewFile(path)}>{path}</div>
+              ) : null}
+              <MiniDiff lines={lines} />
+            </div>
+          ))}
           {output && !isEdit ? <pre className="tool-detail-output">{output}</pre> : null}
         </>
       )}
@@ -275,22 +316,53 @@ export function StepCard({ message }: { message: MessageWithParts }): React.JSX.
     return <ThoughtLine parts={message.parts} duration={duration} />
   }
 
-  const running = tools.some((p) => isRunning(p.state?.status))
+  const runningTool = tools.find((p) => isRunning(p.state?.status))
+  const running = runningTool !== undefined
   const failed = tools.some((p) => isError(p.state?.status))
   const commands = tools.filter((p) => toolKind(p) === 'command').length
   const pages = tools.filter((p) => toolKind(p) === 'page').length
+  const reads = tools.filter((p) => toolKind(p) === 'read').length
 
   const summary: string[] = []
   if (commands) summary.push(`${commands} ${commands === 1 ? 'command' : 'commands'}`)
   if (pages) summary.push(`${pages} ${pages === 1 ? 'page' : 'pages'} fetched`)
+  if (reads) summary.push(`read ${reads} ${reads === 1 ? 'file' : 'files'}`)
   if (files.size) summary.push(`edited ${files.size} ${files.size === 1 ? 'file' : 'files'}`)
   if (summary.length === 0 && tools.length) summary.push(`${tools.length} steps`)
+
+  // While the card runs its head reports the call in flight and how far in it
+  // is, so a closed card still says what is happening. Opening it to watch
+  // would cost the reader their place; the summary arrives when it is true.
+  const done = tools.filter((p) => !isRunning(p.state?.status)).length
+  const head = running
+    ? `${runningTool.state?.title || runningTool.state?.tool || 'working'} · ${done}/${tools.length}`
+    : summary.join(' · ') || 'worked'
+
+  const totals = [...files.values()].reduce(
+    (sum, stat) => ({ adds: sum.adds + stat.adds, dels: sum.dels + stat.dels }),
+    { adds: 0, dels: 0 }
+  )
 
   return (
     <div className={`step-card ${running ? 'running' : ''} ${failed ? 'failed' : ''}`}>
       <button className="step-card-head" onClick={() => setOpen((o) => !o)}>
         <StatusDot status={running ? 'running' : failed ? 'error' : undefined} />
-        <span className="step-summary">{summary.join(' · ') || 'worked'}</span>
+        <span className="step-summary">{head}</span>
+        {/* One file goes straight to Review. Several cannot — Review opens one
+            file — so the stat opens the card, where each is listed. */}
+        {files.size > 0 && !running ? (
+          <span
+            className="step-head-stats"
+            title={files.size === 1 ? `Review ${[...files.keys()][0]}` : `Show ${files.size} edited files`}
+            onClick={files.size === 1 ? (e) => {
+              e.stopPropagation()
+              void openReviewFile([...files.keys()][0], message.info.sessionID)
+            } : undefined}
+          >
+            <span className="add">+{totals.adds}</span>
+            <span className="del">−{totals.dels}</span>
+          </span>
+        ) : null}
         <span className="step-duration">{duration !== null ? formatDuration(duration) : ''}</span>
         <span className="step-chevron" style={{ transform: open ? 'rotate(90deg)' : undefined }}>
           <ChevronIcon size={13} />

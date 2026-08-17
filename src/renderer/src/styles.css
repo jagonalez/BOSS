@@ -4639,6 +4639,23 @@ body.workspace-dragging .workspace-tab-slot {
   white-space: nowrap;
 }
 
+/* Names the file above its diff when one call changed several. */
+.tool-detail-file {
+  padding: 6px 10px 2px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-detail-file:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .tool-detail-chevron {
   color: var(--text-faint);
   display: flex;
@@ -4694,6 +4711,23 @@ body.workspace-dragging .workspace-tab-slot {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* On the card head, so a closed card still says what it changed. */
+.step-head-stats {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.step-head-stats .add {
+  color: var(--green);
+}
+
+.step-head-stats .del {
+  color: var(--red);
 }
 
 .step-file-stats {
@@ -5306,7 +5340,13 @@ body.workspace-dragging .workspace-tab-slot {
   border-color: #1a1400;
 }
 
+/* Pinned to the foot of the scroller, not to the end of the transcript. It
+   used to scroll away exactly when it was wanted: scrolling up to read a tool
+   call took the one line saying what was running now off the screen. */
 .thinking-indicator {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -5316,7 +5356,8 @@ body.workspace-dragging .workspace-tab-slot {
   color: var(--text-muted);
   font-size: 14px;
   font-weight: 500;
-  padding: 2px 0;
+  padding: 6px 0;
+  background: var(--bg);
   animation: thinking-pulse 1.6s ease-in-out infinite;
 }
 
