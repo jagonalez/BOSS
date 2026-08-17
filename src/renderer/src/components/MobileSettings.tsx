@@ -43,17 +43,20 @@ function RemoteAccessSection(): React.JSX.Element {
   }, [status?.pairing?.code])
 
   /**
-   * While a QR code is on screen, poll so the device list updates the moment
-   * the phone pairs. Polling stops as soon as the code is consumed, so this
-   * costs nothing in the common case.
+   * The socket connects, drops, and reconnects in the main process, so the
+   * card has to ask rather than wait to be told. Poll while it is on screen,
+   * faster while a QR code is up so a pairing lands promptly. Polling stops
+   * when the modal closes, and entirely when remote access is off.
    */
+  const pairing = Boolean(status?.pairing)
+  const enabled = Boolean(status?.enabled)
   useEffect(() => {
-    if (!status?.pairing) return
+    if (!enabled) return
     const timer = setInterval(() => {
       void OpenCode.remoteStatus().then(setStatus).catch(() => {})
-    }, 1500)
+    }, pairing ? 1500 : 4000)
     return () => clearInterval(timer)
-  }, [status?.pairing?.code])
+  }, [enabled, pairing])
 
   const run = async (action: () => Promise<RemoteAccessStatus>): Promise<void> => {
     setBusy(true)
