@@ -408,14 +408,32 @@ function render() {
       '<p style="color:var(--faint);margin-top:22px;font-size:13px">On the same network or a tailnet? Paste the access token from Settings → Mobile access instead.</p>' +
       '<input id="tok" type="password" placeholder="access token" autocomplete="off">' +
       '<button class="btn" style="width:100%" onclick="pair()">Connect on this network</button>' +
-      '<div class="err" id="pair-err">' + esc(pairError) + '</div></div>';
+      '<div class="err" id="pair-err">' + esc(pairError) + '</div>' +
+      // Pairing failures were repeatedly diagnosed by guesswork. This says
+      // what the phone actually has, so a failure can be read off the screen.
+      '<div class="sub" style="margin-top:18px;font-size:11px;text-align:left">' +
+      'code in URL: ' + (/[#?&]p=/.test(location.href) ? 'yes' : 'no') +
+      '<br>saved pairing: ' + (relay ? (relay.token ? 'complete' : 'incomplete') : 'none') +
+      '<br>relay: ' + esc(relay ? relay.relayUrl : '—') +
+      '<br>socket: ' + (relaySocket ? ['connecting','open','closing','closed'][relaySocket.readyState] : 'none') +
+      '<br>desktop: ' + (desktopOnline ? 'online' : 'offline') +
+      '<button class="btn" style="width:100%;margin-top:12px" onclick="unpairRelay()">Reset pairing</button>' +
+      '</div></div>';
     return;
   }
   // Paired to the relay but the desktop is asleep or offline.
   if (relay && !relay.token) {
     app.innerHTML = '<div class="pair"><h1>BOSS</h1>' +
       '<p style="color:var(--muted);margin-top:8px">Pairing…</p>' +
-      '<div class="err" id="pair-err"></div>' +
+      '<div class="err" id="pair-err">' + esc(pairError) + '</div>' +
+      // A stuck pairing sits on this screen, so the state has to be readable
+      // here rather than on the form the user has already left.
+      '<div class="sub" style="margin-top:18px;font-size:11px;text-align:left">' +
+      'relay: ' + esc(relay.relayUrl) +
+      '<br>socket: ' + (relaySocket ? ['connecting','open','closing','closed'][relaySocket.readyState] : 'none') +
+      '<br>hello sent: ' + (relayReady ? 'yes' : 'no') +
+      '<br>desktop: ' + (desktopOnline ? 'online' : 'offline') +
+      '<br>claim pending: ' + (pairingClaim ? 'yes' : 'no') + '</div>' +
       '<button class="btn" style="width:100%;margin-top:16px" onclick="unpairRelay()">Cancel</button></div>';
     return;
   }
@@ -524,6 +542,12 @@ function relayConnect() {
       // Already paired: ask for anything that happened while we were away.
       else if (relay.token) relaySend({ kind: 'resume', since: lastSeq, token: relay.token });
       render();
+    }).catch(function (e) {
+      // Without this the socket opens, the key derivation throws, and nothing
+      // is ever sent — a silent hang that looks identical to a network fault.
+      pairError = 'Encryption is unavailable: ' + (e && e.message ? e.message : String(e));
+      relayReady = false;
+      render();
     });
   };
 
@@ -558,7 +582,16 @@ function relayConnect() {
     render();
   };
 
-  socket.onerror = function () { /* onclose follows and schedules the retry. */ };
+  socket.onerror = function () {
+    // The browser knows why the socket failed and this is the only place it
+    // says so. Discarding it meant a socket stuck at "connecting" gave no
+    // reason at all, on either side.
+    if (relay && !relay.token) {
+      pairError = 'Could not open a connection to ' + relay.relayUrl + '. ' +
+        'A phone browser refuses ws:// from some contexts, and cannot reach a host it has no route to.';
+      render();
+    }
+  };
 }
 
 function scheduleRelayReconnect() {
@@ -645,6 +678,16 @@ function applyEvent(event) {
  * long-lived credentials.
  */
 window.pairWithCode = function (raw) {
+  // Safari exposes crypto.subtle only in a secure context, and unlike other
+  // browsers it does not exempt localhost or a LAN address. Over plain http
+  // every derivation throws, so say so here rather than opening a socket that
+  // can never send anything.
+  if (!window.crypto || !window.crypto.subtle) {
+    pairError = 'This page must be served over HTTPS. iOS hides the encryption API on plain http, ' +
+      'even on a local address, so pairing cannot work here. Deploy the relay with TLS and open it over https.';
+    render();
+    return;
+  }
   var payload = null;
   var match = /[#?&]p=([A-Za-z0-9_-]+)/.exec(String(raw).trim());
   if (match) {
@@ -681,6 +724,8 @@ window.pairWithCode = function (raw) {
     }
   }, 20000);
   relayConnect();
+  // Show the attempt, not the state that preceded it.
+  render();
 };
 
 window.unpairRelay = function () {
@@ -722,11 +767,17 @@ if ('serviceWorker' in navigator) {
  * immediately, then strip it from the URL so a screenshot or a back-button
  * revisit cannot replay a spent secret.
  */
-if (!relay && /[#?&]p=[A-Za-z0-9_-]+/.test(location.href)) {
+// A scanned code always wins. Requiring !relay here meant that once a failed
+// attempt had stored half-paired credentials, every later scan was ignored and
+// the phone kept retrying with a secret the desktop had already forgotten.
+if (/[#?&]p=[A-Za-z0-9_-]+/.test(location.href) && (!relay || !relay.token)) {
   // Keep the fragment until pairing succeeds. Stripping it up front destroyed
   // the only copy of the secret, so a failure left no way to retry and no way
   // to see what went wrong. handleRelayMessage clears it on 'claimed'.
-  render();
+  //
+  // pairWithCode renders once it has set state; rendering here first would
+  // only show the state from BEFORE the attempt, which reads as "nothing
+  // happened" even when pairing is under way.
   window.pairWithCode(location.href);
 } else if (relay) { relayConnect(); render(); }
 else if (token) boot();

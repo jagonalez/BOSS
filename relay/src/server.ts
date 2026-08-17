@@ -72,7 +72,10 @@ function notifyDesktopPresence(deviceId: string): void {
   }
 }
 
-wss.on('connection', (socket) => {
+wss.on('connection', (socket, request) => {
+  // A socket that never opens on the client looks identical to one that never
+  // arrives. Logging the attempt tells those apart.
+  process.stdout.write(`[relay] socket opened from ${request.socket.remoteAddress}\n`)
   socket.on('message', (raw) => {
     let frame: Record<string, unknown>
     try {

@@ -1,2 +1,4 @@
 node_modules/
 dist/
+# Throwaway scripts used to poke a running relay by hand.
+probe*.mjs
