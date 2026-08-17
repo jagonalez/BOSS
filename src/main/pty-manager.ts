@@ -3,9 +3,12 @@ import { app } from 'electron'
 import { existsSync } from 'node:fs'
 import type { BackendId } from '@shared/backend'
 import type { BackendAuth } from './backend-auth'
+import { TerminalThrottle } from './terminal-throttle'
 
 interface TermSession {
   pty: IPty
+  /** Paces this shell's output on its way to the renderer. */
+  throttle: TerminalThrottle
 }
 
 export class PTYManager {
@@ -28,15 +31,24 @@ export class PTYManager {
       cwd: dir,
       env: process.env as Record<string, string>
     })
-    pty.onData((data) => this.onData?.(id, data))
+    const throttle = new TerminalThrottle({
+      emit: (data) => this.onData?.(id, data),
+      pause: () => pty.pause(),
+      resume: () => pty.resume()
+    })
+    pty.onData((data) => throttle.push(data))
     pty.onExit(({ exitCode }) => {
+      // Send whatever the shell wrote on its way out before tearing the
+      // session down — a short command's entire output can still be sitting in
+      // the batch. flush() clears its own timer, so nothing is left armed.
+      throttle.flush()
       // A naturally exited shell is no longer a live resource. Remove it
       // before notifying the renderer so unmount disposal is an idempotent
       // no-op rather than trying to kill an already-dead PTY.
       this.sessions.delete(id)
       this.onExit?.(id, exitCode)
     })
-    this.sessions.set(id, { pty })
+    this.sessions.set(id, { pty, throttle })
     if (auth?.initialInput) {
       setTimeout(() => {
         const session = this.sessions.get(id)
@@ -52,6 +64,19 @@ export class PTYManager {
     return id
   }
 
+  /** The renderer is listening for this shell's output; release what the
+   *  shell has already written. Called once the create call has returned and
+   *  the terminal knows which id to match against. */
+  start(id: string): void {
+    this.sessions.get(id)?.throttle.start()
+  }
+
+  /** Report that the renderer has drawn `chars` characters of this shell's
+   *  output, which is what releases flow control. */
+  acknowledge(id: string, chars: number): void {
+    this.sessions.get(id)?.throttle.acknowledge(chars)
+  }
+
   write(id: string, data: string): void {
     this.sessions.get(id)?.pty.write(data)
   }
@@ -64,6 +89,9 @@ export class PTYManager {
   dispose(id: string): void {
     const session = this.sessions.get(id)
     if (session) {
+      // Drop any batch still waiting: the tab that would have drawn it is gone,
+      // and letting the timer fire would emit data for a dead terminal.
+      session.throttle.discard()
       try {
         session.pty.kill()
       } catch {

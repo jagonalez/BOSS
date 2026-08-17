@@ -63,6 +63,18 @@ const boss: BossApi = {
   terminalResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke(IpcChannels.TerminalResize, { id, cols, rows }),
   terminalDispose: (id: string) => ipcRenderer.invoke(IpcChannels.TerminalDispose, id),
+  // send, not invoke: this fires for every batch the terminal draws, and waiting
+  // for a reply each time would cost more than the flow control saves.
+  terminalAck: (id: string, chars: number) => ipcRenderer.send(IpcChannels.TerminalAck, { id, chars }),
+  terminalReady: (id: string) => ipcRenderer.send(IpcChannels.TerminalReady, id),
+
+  // The clipboard lives in the main process. navigator.clipboard is behind a
+  // permission the renderer is not granted, and Electron's own clipboard module
+  // is not available to a sandboxed preload, so this is the one route left.
+  // sendSync because the terminal reads the clipboard inside a keystroke
+  // handler and has to have the text before that handler returns.
+  clipboardRead: () => ipcRenderer.sendSync(IpcChannels.ClipboardRead) as string,
+  clipboardWrite: (text: string) => ipcRenderer.send(IpcChannels.ClipboardWrite, text),
   onTerminalData: (cb) => subscribe(IpcChannels.TerminalData, cb),
   onTerminalExit: (cb) => subscribe(IpcChannels.TerminalExit, cb),
   gitRun: (path: string, args: string[]) => ipcRenderer.invoke(IpcChannels.GitRun, { path, args }),

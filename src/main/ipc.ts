@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
+import { BrowserWindow, clipboard, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import {
@@ -242,6 +242,25 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.TerminalDispose, (_e, id: string) => {
     deps.pty.dispose(id)
     return true
+  })
+
+  ipcMain.on(IpcChannels.TerminalAck, (_e, body: { id: string; chars: number }) => {
+    deps.pty.acknowledge(body.id, body.chars)
+  })
+
+  ipcMain.on(IpcChannels.TerminalReady, (_e, id: string) => {
+    deps.pty.start(id)
+  })
+
+  // The renderer cannot reach the clipboard itself: the web API is behind a
+  // permission it is not granted, and the preload is sandboxed, so Electron's
+  // clipboard module is only available here.
+  ipcMain.on(IpcChannels.ClipboardRead, (event) => {
+    event.returnValue = clipboard.readText()
+  })
+
+  ipcMain.on(IpcChannels.ClipboardWrite, (_e, text: string) => {
+    clipboard.writeText(text)
   })
 
   ipcMain.handle(IpcChannels.GitRun, (_event, body: { path: string; args: string[] }) => {

@@ -245,7 +245,7 @@ export function MobileSettings(): React.JSX.Element {
                 <Button size="small" variant="ghost" onClick={() => setShowToken((value) => !value)}>
                   {showToken ? 'Hide' : 'Show'}
                 </Button>
-                <Button size="small" variant="ghost" onClick={() => void navigator.clipboard.writeText(status.token)}>
+                <Button size="small" variant="ghost" onClick={() => window.boss.clipboardWrite(status.token)}>
                   Copy
                 </Button>
                 <Button size="small" variant="ghost" disabled={busy} onClick={() => void apply({ regenerateToken: true })}>
@@ -262,7 +262,7 @@ export function MobileSettings(): React.JSX.Element {
                 <Button size="small" variant="ghost" onClick={() => setShowViewerToken((value) => !value)}>
                   {showViewerToken ? 'Hide' : 'Show'}
                 </Button>
-                <Button size="small" variant="ghost" onClick={() => void navigator.clipboard.writeText(status.viewerToken)}>
+                <Button size="small" variant="ghost" onClick={() => window.boss.clipboardWrite(status.viewerToken)}>
                   Copy
                 </Button>
                 <Button size="small" variant="ghost" disabled={busy} onClick={() => void apply({ regenerateViewerToken: true })}>

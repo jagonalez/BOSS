@@ -22,7 +22,7 @@ function timeAgo(ts: number): string {
 }
 
 function copy(text: string): void {
-  void navigator.clipboard.writeText(text)
+  window.boss.clipboardWrite(text)
 }
 
 function SiteRow({ site }: { site: SiteInfo }): React.JSX.Element {

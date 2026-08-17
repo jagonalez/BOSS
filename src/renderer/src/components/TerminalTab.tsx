@@ -2,10 +2,12 @@ import React, { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { useStore, appStore } from '../state/AppState'
 import type { BackendId } from '@shared/backend'
 import { getXtermTheme } from '../lib/themes'
 import { terminalSessions } from '../lib/terminal-sessions'
+import { attachClipboard } from '../lib/terminal-clipboard'
 
 export function TerminalTab({
   tabId,
@@ -39,7 +41,15 @@ export function TerminalTab({
         lineHeight: 1.35,
         cursorBlink: true,
         theme: getXtermTheme(),
-        scrollback: 5000
+        scrollback: 5000,
+        // Lifts theme colours that land too close to the background until they
+        // are legible. Without it a shell prompt using dim ANSI colours can be
+        // nearly invisible against some of our themes.
+        minimumContrastRatio: 4.5,
+        // Matches macOS terminals, where right-click selects the word under
+        // the pointer rather than leaving the selection untouched.
+        rightClickSelectsWord: true,
+        smoothScrollDuration: 125
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
@@ -50,6 +60,8 @@ export function TerminalTab({
         const current = terminalSessions.get(tabId)
         if (current?.ptyId) window.boss.terminalWrite(current.ptyId, data)
       })
+
+      attachClipboard(term)
     }
     const live = existing
 
@@ -60,6 +72,19 @@ export function TerminalTab({
       if (live.term.element.parentElement !== el) el.appendChild(live.term.element)
     } else {
       live.term.open(el)
+      // The default renderer builds a span per styled run per row, which is
+      // what makes a busy terminal feel slow. WebGL draws glyphs from a
+      // texture atlas instead. It has to load after open(), and only once.
+      try {
+        const webgl = new WebglAddon()
+        // The context is lost when the GPU resets or the window moves between
+        // displays. Disposing drops xterm back to the DOM renderer, which is
+        // slower but still correct — far better than a blank terminal.
+        webgl.onContextLoss(() => webgl.dispose())
+        live.term.loadAddon(webgl)
+      } catch {
+        /* No WebGL available; the DOM renderer stays in place. */
+      }
     }
 
     const fitNow = (): void => {
@@ -73,7 +98,11 @@ export function TerminalTab({
     }
 
     const offData = window.boss.onTerminalData((evt) => {
-      if (evt.id === live.ptyId) live.term.write(evt.data)
+      if (evt.id !== live.ptyId) return
+      // The callback fires once xterm has parsed this chunk. Reporting it is
+      // what lets the shell keep running when it is producing output faster
+      // than we can draw; without it the pty stays paused for good.
+      live.term.write(evt.data, () => window.boss.terminalAck(evt.id, evt.data.length))
     })
     const offExit = window.boss.onTerminalExit((evt) => {
       if (evt.id !== live.ptyId) return
@@ -94,6 +123,10 @@ export function TerminalTab({
           }
           live.ptyId = id
           fitNow()
+          // The shell has been writing since it spawned, but the data listener
+          // above could not match any of it until this id existed. Tell the
+          // main process it is safe to send now, or the prompt never arrives.
+          window.boss.terminalReady(id)
         })
     } else {
       // After layout: the element has just been moved into this container, so

@@ -16,14 +16,10 @@ export function CodeView({ text, path }: { text: string; path?: string }): React
     }
   }
 
-  const copy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1200)
-    } catch {
-      /* ignore */
-    }
+  const copy = (): void => {
+    window.boss.clipboardWrite(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1200)
   }
 
   return (

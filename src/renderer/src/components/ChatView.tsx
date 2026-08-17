@@ -1471,7 +1471,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
           <button
             className="ctx-item"
             onClick={() => {
-              void navigator.clipboard.writeText(menuText)
+              window.boss.clipboardWrite(menuText)
               setMsgCtx(null)
             }}
           >
