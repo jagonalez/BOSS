@@ -12,6 +12,8 @@
 import { createServer } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { Rooms } from './rooms.js'
+import { MOBILE_PAGE } from '../../src/shared/mobile-page.js'
+import { SERVICE_WORKER, WEB_MANIFEST } from '../../src/shared/pwa-assets.js'
 
 const PORT = Number(process.env.PORT ?? 8080)
 /** fly.io routes to the machine's internal address; override to bind narrowly. */
@@ -23,9 +25,26 @@ const HEARTBEAT_MS = 30_000
 const rooms = new Rooms<WebSocket>()
 
 const http = createServer((request, response) => {
-  if (request.url === '/health') {
+  const path = (request.url ?? '/').split('?')[0]
+  if (path === '/health') {
     response.writeHead(200, { 'content-type': 'application/json' })
     response.end(JSON.stringify({ ok: true, rooms: rooms.size }))
+    return
+  }
+  // The relay also serves the phone page, so a phone can reach BOSS from a
+  // cell network without loading anything off the user's machine. The page is
+  // static and identical for everyone; the pairing secret arrives in the URL
+  // fragment, which browsers never send to a server.
+  if (path === '/' && request.method === 'GET') {
+    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(MOBILE_PAGE)
+    return
+  }
+  if (path === '/manifest.webmanifest' && request.method === 'GET') {
+    response.writeHead(200, { 'content-type': 'application/manifest+json' }).end(WEB_MANIFEST)
+    return
+  }
+  if (path === '/sw.js' && request.method === 'GET') {
+    response.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-cache' }).end(SERVICE_WORKER)
     return
   }
   response.writeHead(404).end()

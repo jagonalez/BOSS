@@ -141,6 +141,9 @@ var nextRequestId = 1;
 // Set only while a QR-code claim is in flight.
 var pairingClaim = null;
 var pairingTimeout = null;
+// Highest event sequence applied, so a reconnect can ask for the rest.
+// Persisted: locking the phone can unload the page entirely.
+var lastSeq = Number(localStorage.getItem('boss.seq') || '0') || 0;
 var view = { name: 'threads' };
 var threads = [];
 var supervision = { threads: [], totals: {} };
@@ -207,6 +210,13 @@ function unseal(key, sealed) {
   return crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64u(parts[0]) }, key, unb64u(parts[1]))
     .then(function (plain) { return JSON.parse(new TextDecoder().decode(plain)); })
     .catch(function () { return null; });
+}
+
+/** Remember how far we have caught up, so a reconnect resumes from here. */
+function noteSeq(seq) {
+  if (typeof seq !== 'number' || seq <= lastSeq) return;
+  lastSeq = seq;
+  try { localStorage.setItem('boss.seq', String(seq)); } catch (e) { /* private mode */ }
 }
 
 function relaySend(message) {
@@ -504,6 +514,8 @@ function relayConnect() {
       relayReady = true;
       // A pending QR claim goes out as the first frame on the new socket.
       if (pairingClaim) relaySend({ kind: 'claim', secret: pairingClaim, label: navigator.platform || 'Phone' });
+      // Already paired: ask for anything that happened while we were away.
+      else if (relay.token) relaySend({ kind: 'resume', since: lastSeq, token: relay.token });
       render();
     });
   };
@@ -567,7 +579,19 @@ function handleRelayMessage(message) {
     boot();
     return;
   }
-  if (message.kind === 'event') applyEvent(message.event);
+  if (message.kind === 'resumed') {
+    // A gap means the desktop no longer had everything we missed. Refetch
+    // rather than replay a partial stream, and say so on screen.
+    if (message.gap) {
+      noteSeq(message.seq);
+      refreshThreads();
+      if (view.name === 'thread') refreshMessages(view.id);
+    } else {
+      message.events.forEach(function (entry) { noteSeq(entry.seq); applyEvent(entry.event); });
+    }
+    return;
+  }
+  if (message.kind === 'event') { noteSeq(message.seq); applyEvent(message.event); }
 }
 
 function listen() {
@@ -604,7 +628,7 @@ function applyEvent(event) {
  */
 window.pairWithCode = function (raw) {
   var payload = null;
-  var match = /[?&]p=([A-Za-z0-9_-]+)/.exec(String(raw).trim());
+  var match = /[#?&]p=([A-Za-z0-9_-]+)/.exec(String(raw).trim());
   if (match) {
     try { payload = JSON.parse(new TextDecoder().decode(unb64u(match[1]))); } catch (e) { payload = null; }
   }
@@ -649,6 +673,18 @@ function boot() {
   listen();
 }
 
+/**
+ * Coming back from a locked screen is the common case, and it does not always
+ * close the socket — iOS often freezes it instead, so no 'close' fires and the
+ * connection is silently dead. On becoming visible, reconnect if the socket
+ * went away, and otherwise resume, which is cheap when nothing was missed.
+ */
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState !== 'visible' || !relay || !relay.token) return;
+  if (!relaySocket || relaySocket.readyState > 1) relayConnect();
+  else if (relayReady) relaySend({ kind: 'resume', since: lastSeq, token: relay.token });
+});
+
 // An installed PWA needs the service worker for offline shell and push.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(function () {
@@ -656,7 +692,17 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-if (relay) { relayConnect(); render(); }
+/**
+ * Scanning the QR code lands here with the payload in the fragment. Pair
+ * immediately, then strip it from the URL so a screenshot or a back-button
+ * revisit cannot replay a spent secret.
+ */
+if (!relay && /[#?&]p=[A-Za-z0-9_-]+/.test(location.href)) {
+  var scanned = location.href;
+  history.replaceState(null, '', location.pathname + location.search);
+  render();
+  window.pairWithCode(scanned);
+} else if (relay) { relayConnect(); render(); }
 else if (token) boot();
 else render();
 </script>

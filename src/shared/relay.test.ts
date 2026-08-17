@@ -16,7 +16,7 @@ test('a sealed message round-trips for the holder of the secret', async () => {
 test('the relay cannot read a frame: a different secret decrypts to nothing', async () => {
   const mine = await deriveKey(crypto, 'secret-one')
   const theirs = await deriveKey(crypto, 'secret-two')
-  const sealed = await seal(crypto, mine, { kind: 'event', event: { type: 'message.updated' } })
+  const sealed = await seal(crypto, mine, { kind: 'event', event: { type: 'message.updated' }, seq: 1 })
   assert.equal(await open(crypto, theirs, sealed), null)
 })
 
@@ -53,6 +53,29 @@ test('a pairing code round-trips through the QR payload', () => {
   const payload = { v: RELAY_PROTOCOL_VERSION, r: 'https://boss-relay.fly.dev', d: 'device-1', s: 'secret-1' }
   const decoded = decodePairing(encodePairing(payload))
   assert.deepEqual(decoded, payload)
+})
+
+test('the pairing code is a web URL a phone camera will open', () => {
+  // A custom scheme such as boss:// makes iOS Camera report "no usable data
+  // found" and refuse to hand the code to anything, so the scheme matters.
+  const code = encodePairing({ v: RELAY_PROTOCOL_VERSION, r: 'wss://boss-relay.fly.dev', d: 'd1', s: 's1' })
+  assert.match(code, /^https:\/\/boss-relay\.fly\.dev\/#p=/)
+  assert.doesNotMatch(code, /^boss:/)
+})
+
+test('the secret rides in the fragment, which browsers never send to a server', () => {
+  const code = encodePairing({ v: RELAY_PROTOCOL_VERSION, r: 'wss://relay.example', d: 'd1', s: 'the-secret' })
+  const [beforeFragment, fragment] = code.split('#')
+  // Everything the relay could log lives before the '#'.
+  assert.doesNotMatch(beforeFragment, /p=/)
+  assert.match(fragment, /^p=/)
+  assert.deepEqual(decodePairing(code)?.s, 'the-secret')
+})
+
+test('a ws:// relay maps to http:// so a local test pairs too', () => {
+  const code = encodePairing({ v: RELAY_PROTOCOL_VERSION, r: 'ws://192.168.1.84:8080', d: 'd1', s: 's1' })
+  assert.match(code, /^http:\/\/192\.168\.1\.84:8080\/#p=/)
+  assert.equal(decodePairing(code)?.r, 'ws://192.168.1.84:8080')
 })
 
 test('a malformed or wrong-version pairing code is refused', () => {

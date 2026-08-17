@@ -60,7 +60,7 @@ test.before(async () => {
   if (!listenable) return
   // Run the compiled server, which is exactly what the Docker image starts.
   // Requires `npm run build` first; `npm test` in this package does that.
-  relay = spawn('node', ['dist/server.js'], {
+  relay = spawn('node', ['dist/relay/src/server.js'], {
     cwd: new URL('..', import.meta.url).pathname,
     env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1' },
     stdio: 'ignore'

@@ -6,8 +6,8 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { BackendRequest } from '../shared/backend'
 import { mobileRequestAllowed, type MobileAccessConfig, type MobileAccessRole, type MobileAccessStatus } from '../shared/mobile'
-import { MOBILE_PAGE } from './mobile-page'
-import { SERVICE_WORKER, WEB_MANIFEST } from './pwa-assets'
+import { MOBILE_PAGE } from '../shared/mobile-page'
+import { SERVICE_WORKER, WEB_MANIFEST } from '../shared/pwa-assets'
 
 /**
  * Serves the mobile site and a narrow API over loopback. Remote access is

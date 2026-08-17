@@ -4,12 +4,14 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "rootDir": "src",
+    // The phone page lives in ../src/shared so the desktop and the relay serve
+    // one copy. rootDir covers both trees; the relay entry is dist/relay/src/server.js.
+    "rootDir": "..",
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "../src/shared/mobile-page.ts", "../src/shared/pwa-assets.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

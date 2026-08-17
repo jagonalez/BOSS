@@ -2,6 +2,7 @@ import { webcrypto, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { BackendRequest } from '../shared/backend'
 import { mobileRequestAllowed, type MobileAccessRole } from '../shared/mobile'
+import { EventBuffer } from '../shared/event-buffer'
 import {
   deriveDeviceId,
   deriveJoinProof,
@@ -78,6 +79,15 @@ export const DEFAULT_RELAY_URL = 'wss://boss-relay.fly.dev'
 /** A pairing code is short-lived; an unused one must not stay valid. */
 const PAIRING_TTL_MS = 5 * 60_000
 
+/**
+ * How many recent events the desktop keeps so a phone that slept can catch up.
+ * A busy turn emits a few hundred small events, and a typical one measures
+ * ~320 bytes, so 1000 costs roughly 0.3 MB — cheap enough to hold, deep enough
+ * to cover a phone locking for a minute mid-turn. Beyond it the phone is told
+ * there is a gap and refetches instead of showing a stream with holes in it.
+ */
+const EVENT_BUFFER_SIZE = 1000
+
 interface RelayHost {
   handle(request: BackendRequest): Promise<unknown>
   onEvent(callback: (event: Record<string, unknown>) => void): () => void
@@ -119,6 +129,10 @@ export class RelayClient {
   private key?: AesKey
   private deviceId?: string
   private readonly peerId = randomBytes(8).toString('base64url')
+  /** Sequencing is monotonic per desktop run. A restart resets it, and the
+   *  buffer reports a gap, so a phone refetches rather than trusting stale
+   *  numbers. See event-buffer.ts for the replay rules. */
+  private readonly events = new EventBuffer(EVENT_BUFFER_SIZE)
   private pairing?: { secret: string; code: string; expiresAt: number; timer: NodeJS.Timeout }
   /** Stopping must not trigger the reconnect loop. */
   private closing = false
@@ -301,6 +315,10 @@ export class RelayClient {
       await this.completeClaim(peerId, message)
       return
     }
+    if (message.kind === 'resume') {
+      await this.resume(peerId, message)
+      return
+    }
     if (message.kind === 'request') {
       await this.serve(peerId, message)
     }
@@ -370,7 +388,21 @@ export class RelayClient {
 
   private async broadcast(event: Record<string, unknown>): Promise<void> {
     if (!FORWARDED_EVENTS.has(String(event.type ?? ''))) return
-    await this.sendTo(undefined, { kind: 'event', event })
+    // Number and retain before sending. A phone that is not connected right
+    // now still gets this on its next resume, which is the whole point.
+    const seq = this.events.push(event)
+    await this.sendTo(undefined, { kind: 'event', event, seq })
+  }
+
+  /**
+   * Answer a reconnecting phone. If the requested point has fallen out of the
+   * buffer we say so rather than sending a partial stream: a visible refetch
+   * beats a thread that is quietly missing messages.
+   */
+  private async resume(peerId: string, message: Extract<RelayMessage, { kind: 'resume' }>): Promise<void> {
+    if (!(await this.deviceFor(message.token))) return
+    const { events, gap, seq } = this.events.since(message.since)
+    await this.sendTo(peerId, { kind: 'resumed', events, gap, seq })
   }
 
   /** `to` undefined fans out to every paired phone; that is how events flow. */
