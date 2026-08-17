@@ -106,6 +106,7 @@ wss.on('connection', (socket) => {
         result.displaced.socket.close(1000, 'replaced')
       }
       attached.set(socket, { deviceId, peerId, side, alive: true })
+      process.stdout.write(`[relay] ${side} joined room ${deviceId.slice(0, 8)}… as ${peerId}\n`)
       send(socket, {
         type: 'welcome',
         deviceId,

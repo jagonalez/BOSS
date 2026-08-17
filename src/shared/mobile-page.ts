@@ -144,6 +144,9 @@ var pairingTimeout = null;
 // Highest event sequence applied, so a reconnect can ask for the rest.
 // Persisted: locking the phone can unload the page entirely.
 var lastSeq = Number(localStorage.getItem('boss.seq') || '0') || 0;
+// Survives the re-renders that pairing goes through, so a failure explains
+// itself instead of silently returning to an empty form.
+var pairError = '';
 var view = { name: 'threads' };
 var threads = [];
 var supervision = { threads: [], totals: {} };
@@ -405,7 +408,7 @@ function render() {
       '<p style="color:var(--faint);margin-top:22px;font-size:13px">On the same network or a tailnet? Paste the access token from Settings → Mobile access instead.</p>' +
       '<input id="tok" type="password" placeholder="access token" autocomplete="off">' +
       '<button class="btn" style="width:100%" onclick="pair()">Connect on this network</button>' +
-      '<div class="err" id="pair-err"></div></div>';
+      '<div class="err" id="pair-err">' + esc(pairError) + '</div></div>';
     return;
   }
   // Paired to the relay but the desktop is asleep or offline.
@@ -501,10 +504,14 @@ function relayConnect() {
   relaySocket = socket;
 
   socket.onopen = function () {
+    // Routing must use the DESKTOP's room, which the QR code carries as "d".
+    // Deriving it from the pairing secret instead puts the phone in a room of
+    // its own, where the desktop never sees the claim and pairing just times
+    // out. Once paired, relay.secret IS the room secret, so both agree.
     Promise.all([
       deriveKey(relay.secret),
-      deriveId('boss-relay-device:', relay.secret),
-      deriveId('boss-relay-join:', relay.secret)
+      relay.deviceId ? Promise.resolve(relay.deviceId) : deriveId('boss-relay-device:', relay.secret),
+      relay.joinProof ? Promise.resolve(relay.joinProof) : deriveId('boss-relay-join:', relay.secret)
     ]).then(function (parts) {
       relayKey = parts[0];
       socket.send(JSON.stringify({
@@ -529,7 +536,13 @@ function relayConnect() {
       if (desktopOnline && frame.type !== 'peer.offline') boot();
       return;
     }
-    if (frame.type === 'error') { render(); return; }
+    if (frame.type === 'error') {
+      // The relay refusing us is the likeliest pairing failure, and saying so
+      // beats returning to a blank form with no explanation.
+      pairError = 'Relay: ' + (frame.message || 'connection refused');
+      render();
+      return;
+    }
     if (!frame.sealed || !relayKey) return;
     unseal(relayKey, frame.sealed).then(function (message) {
       // A frame we cannot decrypt is not from our desktop. Ignore it.
@@ -569,6 +582,11 @@ function handleRelayMessage(message) {
     // one-time pairing secret.
     if (pairingTimeout) { clearTimeout(pairingTimeout); pairingTimeout = null; }
     pairingClaim = null;
+    // Paired: now the secret in the URL is spent, so drop it. Doing this any
+    // earlier removes the only means of retrying a failed pair.
+    if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+    // Now holding the room secret, the phone derives its own routing values
+    // again — the same ones the desktop uses — so the code's copies are dropped.
     relay = { relayUrl: relay.relayUrl, secret: message.secret, token: message.token, peerId: relay.peerId };
     localStorage.setItem('boss.relay', JSON.stringify(relay));
     // The room key changes with the secret, so reconnect into the real room.
@@ -634,16 +652,22 @@ window.pairWithCode = function (raw) {
   }
   var err = document.getElementById('pair-err');
   if (!payload || payload.v !== 1 || !payload.r || !payload.s) {
-    if (err) err.textContent = 'That is not a valid BOSS pairing code.';
+    pairError = 'That is not a valid BOSS pairing code.';
+    if (err) err.textContent = pairError;
     return;
   }
   // Pair using the one-time secret, then swap it for the long-lived one.
+  // deviceId and joinProof come from the code because they belong to the
+  // desktop's room, and the pairing secret cannot derive them.
   relay = {
     relayUrl: payload.r,
     secret: payload.s,
     token: '',
+    deviceId: payload.d,
+    joinProof: payload.j,
     peerId: b64u(crypto.getRandomValues(new Uint8Array(8)))
   };
+  pairError = '';
   if (err) err.textContent = 'Pairing…';
   // relayConnect sends the claim as soon as the socket is ready, and
   // handleRelayMessage boots the app when the desktop answers.
@@ -652,7 +676,8 @@ window.pairWithCode = function (raw) {
     if (relay && !relay.token) {
       unpairRelay();
       var late = document.getElementById('pair-err');
-      if (late) late.textContent = 'The desktop did not answer. Check that BOSS is open and the code is fresh.';
+      pairError = 'The desktop did not answer. Check that BOSS is open, remote access is on, and the code is fresh.';
+      render();
     }
   }, 20000);
   relayConnect();
@@ -698,10 +723,11 @@ if ('serviceWorker' in navigator) {
  * revisit cannot replay a spent secret.
  */
 if (!relay && /[#?&]p=[A-Za-z0-9_-]+/.test(location.href)) {
-  var scanned = location.href;
-  history.replaceState(null, '', location.pathname + location.search);
+  // Keep the fragment until pairing succeeds. Stripping it up front destroyed
+  // the only copy of the secret, so a failure left no way to retry and no way
+  // to see what went wrong. handleRelayMessage clears it on 'claimed'.
   render();
-  window.pairWithCode(scanned);
+  window.pairWithCode(location.href);
 } else if (relay) { relayConnect(); render(); }
 else if (token) boot();
 else render();
