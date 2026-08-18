@@ -10,6 +10,7 @@
  * The relay only ever sees ciphertext. Nothing here sends a plaintext frame.
  */
 import * as SecureStore from 'expo-secure-store'
+import { deriveDeviceId, deriveJoinProof, deriveKey, fromBase64Url, open as openSealed, seal, toBase64Url } from './crypto'
 
 export interface RelayCredentials {
   relayUrl: string
@@ -18,6 +19,15 @@ export interface RelayCredentials {
   /** This device's own token, which the desktop can revoke alone. */
   token: string
   peerId: string
+  /**
+   * Set only while pairing. The desktop's room id and join proof come from the
+   * QR code, because they derive from the room secret the phone does not have
+   * yet — deriving them from the pairing secret instead puts the phone alone
+   * in a room the desktop never sees. Both are dropped once paired, when
+   * `secret` becomes the room secret and the phone derives them itself.
+   */
+  deviceId?: string
+  joinProof?: string
 }
 
 export type RelayMessage =
@@ -36,61 +46,8 @@ const SEQ_KEY = 'boss.relay.seq'
 /** A request waits this long before the UI reports the desktop unreachable. */
 const REQUEST_TIMEOUT_MS = 20_000
 
-function toBase64Url(bytes: Uint8Array): string {
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i])
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-/** Returns a view backed by a plain ArrayBuffer, which is what WebCrypto wants. */
-function fromBase64Url(value: string): Uint8Array<ArrayBuffer> {
-  const base64 = value.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
-  const binary = atob(padded)
-  const out = new Uint8Array(new ArrayBuffer(binary.length))
-  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i)
-  return out
-}
-
-async function digest(input: string): Promise<ArrayBuffer> {
-  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
-}
-
-async function deriveKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey('raw', await digest(`boss-relay-key:${secret}`), { name: 'AES-GCM' }, false, [
-    'encrypt',
-    'decrypt'
-  ])
-}
-
-async function deriveId(prefix: string, secret: string): Promise<string> {
-  return toBase64Url(new Uint8Array(await digest(`${prefix}${secret}`)).slice(0, 16))
-}
-
-async function seal(key: CryptoKey, message: RelayMessage): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const cipher = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    new TextEncoder().encode(JSON.stringify(message))
-  )
-  return `${toBase64Url(iv)}.${toBase64Url(new Uint8Array(cipher))}`
-}
-
-async function unseal(key: CryptoKey, sealed: string): Promise<RelayMessage | null> {
-  const [ivPart, bodyPart] = sealed.split('.')
-  if (!ivPart || !bodyPart) return null
-  try {
-    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64Url(ivPart) }, key, fromBase64Url(bodyPart))
-    return JSON.parse(new TextDecoder().decode(plain)) as RelayMessage
-  } catch {
-    // Not from our desktop, or tampered with. Drop it.
-    return null
-  }
-}
-
 /** Parse the payload a QR code carries, in either the fragment or query form. */
-export function decodePairing(input: string): { v: number; r: string; d: string; s: string } | null {
+export function decodePairing(input: string): { v: number; r: string; d: string; s: string; j?: string } | null {
   const match = /[#?&]p=([A-Za-z0-9_-]+)/.exec(input.trim())
   if (!match) return null
   try {
@@ -125,6 +82,8 @@ export interface RelayHandlers {
   onGap(): void
   onStateChange(state: RelayState): void
   onPaired(credentials: RelayCredentials): void
+  /** The socket is open and the hello is sent: safe to issue requests. */
+  onReady(): void
 }
 
 export interface RelayState {
@@ -141,7 +100,7 @@ function reconnectDelay(attempt: number): number {
 
 export class RelayConnection {
   private socket: WebSocket | null = null
-  private key: CryptoKey | null = null
+  private key: Uint8Array | null = null
   private credentials: RelayCredentials | null = null
   private pendingClaim: string | null = null
   private attempt = 0
@@ -169,11 +128,13 @@ export class RelayConnection {
   }
 
   /** Begin pairing from a scanned QR payload. */
-  async pair(payload: { r: string; s: string }): Promise<void> {
+  async pair(payload: { r: string; s: string; d?: string; j?: string }): Promise<void> {
     this.credentials = {
       relayUrl: payload.r,
       secret: payload.s,
       token: '',
+      deviceId: payload.d,
+      joinProof: payload.j,
       peerId: toBase64Url(crypto.getRandomValues(new Uint8Array(8)))
     }
     this.pendingClaim = payload.s
@@ -193,19 +154,28 @@ export class RelayConnection {
     if (!credentials || this.closing) return
     if (this.socket && this.socket.readyState <= 1) return
 
+    // relayUrl is the one field pairing never replaces, so the checked local
+    // is safe here. Everything else must be read live — see onopen below.
     const url = credentials.relayUrl.replace(/^http/, 'ws')
     const socket = new WebSocket(url)
     this.socket = socket
 
     socket.onopen = async () => {
-      this.key = await deriveKey(credentials.secret)
+      // Read this.credentials rather than the value captured above: pairing
+      // replaces it with the room secret, and a reconnect scheduled before
+      // that would otherwise keep deriving keys from the spent pairing
+      // secret and seal every frame with a key the desktop cannot open.
+      const current = this.credentials
+      // A socket superseded during pairing must not send on the new one's behalf.
+      if (!current || this.socket !== socket) return
+      this.key = deriveKey(current.secret)
       socket.send(
         JSON.stringify({
           type: 'hello',
           side: 'phone',
-          deviceId: await deriveId('boss-relay-device:', credentials.secret),
-          peerId: credentials.peerId,
-          proof: await deriveId('boss-relay-join:', credentials.secret),
+          deviceId: current.deviceId ?? deriveDeviceId(current.secret),
+          peerId: current.peerId,
+          proof: current.joinProof ?? deriveJoinProof(current.secret),
           v: 1
         })
       )
@@ -213,15 +183,27 @@ export class RelayConnection {
       this.ready = true
       if (this.pendingClaim) {
         await this.send({ kind: 'claim', secret: this.pendingClaim, label: 'iPhone' })
-      } else if (credentials.token) {
-        await this.send({ kind: 'resume', since: this.lastSeq, token: credentials.token })
+      } else if (current.token) {
+        await this.send({ kind: 'resume', since: this.lastSeq, token: current.token })
       }
       this.handlers.onStateChange(this.state)
+      // Only now can a request be sent. onPaired fires while the replacement
+      // socket is still opening, so anything issued there would be rejected
+      // outright with "Connecting…" and never retried.
+      if (current.token) this.handlers.onReady()
     }
 
-    socket.onmessage = (raw) => void this.receive(String(raw.data))
+    socket.onmessage = (raw) => {
+      if (this.socket !== socket) return
+      void this.receive(String(raw.data))
+    }
 
     socket.onclose = () => {
+      // Pairing deliberately closes this socket and opens a fresh one on the
+      // room secret. close() is asynchronous, so this fires AFTER the
+      // replacement exists — clearing this.socket then would orphan the live
+      // connection and start a competing reconnect loop.
+      if (this.socket !== socket) return
       this.ready = false
       this.socket = null
       this.handlers.onStateChange(this.state)
@@ -250,7 +232,7 @@ export class RelayConnection {
     }
     if (typeof frame.sealed !== 'string' || !this.key) return
 
-    const message = await unseal(this.key, frame.sealed)
+    const message = openSealed<RelayMessage>(this.key, frame.sealed)
     if (!message) return
 
     if (message.kind === 'response') {
@@ -293,10 +275,14 @@ export class RelayConnection {
       await saveCredentials(credentials)
       this.credentials = credentials
       this.pendingClaim = null
+      // Detach before closing. The handlers are keyed on socket identity, so
+      // clearing this.socket first makes the old socket's onclose a no-op and
+      // stops it from tearing down the replacement opened on the next line.
+      const previous = this.socket
+      this.socket = null
       this.key = null
       this.ready = false
-      this.socket?.close()
-      this.socket = null
+      previous?.close()
       this.handlers.onPaired(credentials)
       this.connect()
     }
@@ -310,7 +296,7 @@ export class RelayConnection {
 
   private async send(message: RelayMessage): Promise<boolean> {
     if (!this.socket || !this.key || this.socket.readyState !== 1) return false
-    this.socket.send(JSON.stringify({ sealed: await seal(this.key, message) }))
+    this.socket.send(JSON.stringify({ sealed: seal(this.key, message) }))
     return true
   }
 
