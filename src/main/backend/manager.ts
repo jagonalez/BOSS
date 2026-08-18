@@ -135,7 +135,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
     label: 'OpenCode',
     description: 'OpenCode server with native sessions, permissions, tools, and providers.',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false, reportsSteeredMessages: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
       { id: 'auto', label: 'Auto', description: 'approve supported actions automatically' },
@@ -146,14 +146,14 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Pi',
     description: 'Pi coding agent over its native JSONL RPC protocol.',
     command: 'pi',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
     modes: [{ id: 'auto', label: 'Approved', description: 'Pi RPC runs with its approved tool policy' }]
   },
   codex: {
     label: 'Codex',
     description: 'Codex CLI through the supported app-server JSON-RPC protocol.',
     command: 'codex',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'request approval when Codex needs to leave its sandbox' },
       { id: 'auto', label: 'Auto', description: 'run inside the workspace sandbox without approval prompts' },
@@ -164,7 +164,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before tools that need approval' },
       { id: 'auto', label: 'Auto', description: 'let Claude decide which tool calls can run automatically' },
@@ -1644,7 +1644,12 @@ export class BackendManager {
     }
     if (DEFINITIONS[binding.backendId].capabilities.steering === 'native' && backend.steer) {
       await backend.steer(binding.nativeSessionId, this.followUpParts(item))
-      this.echoSteeredMessage(binding, item)
+      // Only for a backend that forgets it. Codex records the steered text as
+      // an item of the running turn and reports it on every reload, so echoing
+      // one here would leave the user looking at the same message twice.
+      if (!DEFINITIONS[binding.backendId].capabilities.reportsSteeredMessages) {
+        this.echoSteeredMessage(binding, item)
+      }
       return this.removeFollowUp(threadId, followUpId)
     }
     binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]

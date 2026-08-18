@@ -83,3 +83,22 @@ test('the sandbox setting arrives before the turn that uses it', () => {
     'setSandbox should store the settings the turn reads'
   )
 })
+
+test('a reloaded turn reports every message the user sent, not just the first', () => {
+  // Codex folds a steered message into the turn it is already running, so one
+  // turn carries one userMessage item per thing the user said. Reading only the
+  // first dropped the steered text from the reload, and because the reload
+  // prunes messages it does not report, the message the user watched appear
+  // mid-run was deleted the moment the run ended.
+  const start = source.indexOf('function turnMessages(')
+  assert.ok(start > 0, 'expected a turnMessages function')
+  const turn = source.slice(start, source.indexOf('\n}', source.indexOf('const assistantItems', start)))
+  assert.ok(
+    !/\.find\(\(item\) => item\.type === 'userMessage'\)/.test(turn),
+    'turnMessages must not take only the first userMessage'
+  )
+  assert.ok(
+    /filter\(\(item\) => item\.type === 'userMessage'\)/.test(turn),
+    'turnMessages should map every userMessage in the turn'
+  )
+})
