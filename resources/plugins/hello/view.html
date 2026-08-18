@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hello, plugin</title>
+    <style>
+      /* A plugin view does not inherit BOSS's stylesheet, so it names its own
+         colours. These track BOSS's dark palette closely enough to sit in a
+         pane without jarring. */
+      :root {
+        color-scheme: dark;
+        --bg: #16171b;
+        --elevated: #1d1f24;
+        --border: #2c2f36;
+        --text: #e6e7ea;
+        --faint: #8b8f99;
+        --accent: #6aa2ff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 18px;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      h1 { font-size: 15px; margin: 0 0 4px; }
+      p.lede { color: var(--faint); margin: 0 0 16px; }
+      .row { display: flex; gap: 8px; margin-bottom: 16px; }
+      input {
+        flex: 1;
+        background: var(--elevated);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 10px;
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus { outline: none; border-color: var(--accent); }
+      button {
+        background: var(--elevated);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+        padding: 7px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
+      .out {
+        background: var(--elevated);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        min-height: 40px;
+      }
+      .greeting { color: var(--accent); margin-bottom: 12px; min-height: 20px; }
+      .error { color: #ff8080; }
+      footer { color: var(--faint); margin-top: 16px; font-size: 12px; }
+      code { color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <h1>Hello, plugin</h1>
+    <p class="lede">This page is a plugin view. Everything below came from its own server.</p>
+
+    <div class="row">
+      <input id="name" placeholder="Your name" autocomplete="off" />
+      <button id="greet" type="button">Greet</button>
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+
+    <div id="greeting" class="greeting"></div>
+    <div id="out" class="out">Loading…</div>
+
+    <footer>
+      Copy <code>hello/</code> to start your own. The whole API this page has is
+      <code>window.bossPlugin.call(tool, args)</code>.
+    </footer>
+
+    <script>
+      // The one and only API a plugin view gets: call a tool on this plugin's
+      // own server. No filesystem, no network, no way to reach another plugin.
+      const api = window.bossPlugin
+      const out = document.getElementById('out')
+      const greeting = document.getElementById('greeting')
+      const nameInput = document.getElementById('name')
+
+      function show(value) {
+        out.classList.remove('error')
+        // textContent, never innerHTML: this is data, not markup.
+        out.textContent = JSON.stringify(value, null, 2)
+      }
+
+      function showError(error) {
+        out.classList.add('error')
+        out.textContent = String(error && error.message ? error.message : error)
+      }
+
+      async function refresh() {
+        try {
+          // No project argument here — BOSS adds it to every call, so the view
+          // and the agent always see the same one.
+          show(await api.call('info'))
+        } catch (error) {
+          showError(error)
+        }
+      }
+
+      document.getElementById('refresh').addEventListener('click', () => void refresh())
+
+      document.getElementById('greet').addEventListener('click', async () => {
+        const name = nameInput.value.trim()
+        if (!name) return
+        try {
+          const result = await api.call('greet', { name })
+          greeting.textContent = result.message
+          show(result)
+        } catch (error) {
+          showError(error)
+        }
+      })
+
+      nameInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') document.getElementById('greet').click()
+      })
+
+      void refresh()
+    </script>
+  </body>
+</html>

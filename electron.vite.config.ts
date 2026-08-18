@@ -22,6 +22,12 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
+        // Named explicitly: the plugin preload is a second entry, and it must
+        // build to its own file so a plugin view never loads the main bridge.
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          plugin: resolve(__dirname, 'src/preload/plugin.ts')
+        },
         output: {
           format: 'cjs',
           entryFileNames: '[name].cjs'

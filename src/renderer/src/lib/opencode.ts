@@ -19,6 +19,7 @@ import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
+import type { PluginView } from '@shared/plugin'
 import type { MobileAccessStatus } from '@shared/mobile'
 import type { RemoteAccessStatus } from '@shared/relay'
 import type { SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
@@ -209,6 +210,11 @@ export const OpenCode = {
     backendRequest<McpConnectionView>({ type: 'mcp.update', connectionId, patch }),
   mcpRemove: (connectionId: string) => backendRequest<void>({ type: 'mcp.remove', connectionId }),
   mcpImportScan: () => backendRequest<McpImportCandidate[]>({ type: 'mcp.import.scan' }),
+  pluginList: () => backendRequest<PluginView[]>({ type: 'plugin.list' }),
+  pluginReload: () => backendRequest<PluginView[]>({ type: 'plugin.reload' }),
+  pluginSetEnabled: (pluginId: string, enabled: boolean) =>
+    backendRequest<PluginView[]>({ type: 'plugin.setEnabled', pluginId, enabled }),
+  pluginRemove: (pluginId: string) => backendRequest<PluginView[]>({ type: 'plugin.remove', pluginId }),
   notifyWebhook: () => backendRequest<string>({ type: 'automation.webhook.get' }),
   setNotifyWebhook: (url: string) => backendRequest<string>({ type: 'automation.webhook.set', url }),
   remoteStatus: () => backendRequest<RemoteAccessStatus>({ type: 'remote.status' }),

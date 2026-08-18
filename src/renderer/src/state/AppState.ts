@@ -19,6 +19,7 @@ import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { McpConnectionView } from '@shared/mcp'
+import type { PluginView } from '@shared/plugin'
 import type {
   BrowseNavigationState,
   CloudflareSettings,
@@ -114,6 +115,7 @@ export interface AppState {
   qaDefault: QaPolicy
   automations: AutomationsSnapshot | null
   mcpConnections: McpConnectionView[]
+  plugins: PluginView[]
   projectPath: string
   selectedCheckoutPath: string
   projectCheckouts: ProjectInfo['checkouts']
@@ -214,6 +216,7 @@ export const initialState: AppState = {
   qaDefault: 'suggest',
   automations: null,
   mcpConnections: [],
+  plugins: [],
   projectPath: '',
   selectedCheckoutPath: '',
   projectCheckouts: [],
@@ -380,6 +383,10 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
     case 'mcp.updated': {
       const connections = props.connections as McpConnectionView[] | undefined
       return connections ? { mcpConnections: connections } : {}
+    }
+    case 'plugin.updated': {
+      const installed = props.plugins as PluginView[] | undefined
+      return installed ? { plugins: installed } : {}
     }
     default:
       return {}

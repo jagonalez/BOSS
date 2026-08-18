@@ -226,6 +226,13 @@ export type BackendRequest =
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }
   | { type: 'mcp.remove'; connectionId: string }
   | { type: 'mcp.import.scan' }
+  | { type: 'plugin.list' }
+  | { type: 'plugin.reload' }
+  | { type: 'plugin.setEnabled'; pluginId: string; enabled: boolean }
+  | { type: 'plugin.remove'; pluginId: string }
+  /** A plugin view calling a tool on its own server. The renderer supplies the
+   *  plugin id from the tab it is rendering, so a view cannot name another. */
+  | { type: 'plugin.call'; pluginId: string; tool: string; args: unknown }
   | { type: 'mobile.status' }
   | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean } }
   | { type: 'remote.status' }

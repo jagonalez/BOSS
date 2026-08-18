@@ -1,0 +1,17 @@
+{
+  "id": "hello",
+  "name": "Hello, plugin",
+  "version": "1.0.0",
+  "description": "The smallest working plugin. One tool, one view, no stored state — copy it to start your own.",
+  "server": {
+    "command": "node",
+    "args": ["./server.mjs"]
+  },
+  "views": [
+    {
+      "id": "demo",
+      "title": "Hello, plugin",
+      "entry": "view.html"
+    }
+  ]
+}

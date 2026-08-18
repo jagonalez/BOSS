@@ -376,6 +376,11 @@ export function installE2EApi(boss: BossApi): void {
       case 'worktree.settings.get': return { autoCleanupEnabled: true, cleanupAfterDays: 30, location: 'app-data' }
       case 'worktree.settings.set': return { autoCleanupEnabled: true, cleanupAfterDays: 30, location: 'app-data', ...request }
       case 'mcp.list': return []
+      // No plugins in the fixture: the tests exercise BOSS itself, not a
+      // plugin. An unhandled type here returns undefined, which the
+      // renderer would store in place of the empty list.
+      case 'plugin.list':
+      case 'plugin.reload': return []
       case 'mcp.import.scan': return []
       case 'automation.list': return { automations: [], runs: [], webhookUrl: '' }
       case 'automation.webhook.get': return ''

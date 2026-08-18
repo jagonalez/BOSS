@@ -22,6 +22,10 @@ import { WorktreeManager } from './worktree-manager'
 import { NotificationRouter } from './notification-router'
 import { AutomationManager } from './automation-manager'
 import { McpHub } from './mcp-hub'
+import { PluginManager } from './plugin-manager'
+import { StdioMcpClient } from './mcp-client'
+import { projectScope } from './project-identity'
+import { PLUGIN_PARTITION, PLUGIN_SCHEME_PRIVILEGES, installPluginViews } from './plugin-views'
 import { WebAccess } from './web-access'
 import { RelayClient } from './relay-client'
 // `ws` rather than Node 22's global WebSocket: the client uses the Node-style
@@ -66,11 +70,18 @@ if (e2e && process.env.BOSS_E2E_USER_DATA) {
 }
 
 // Before whenReady, which is the only time a scheme can be given privileges.
+// One call for every scheme BOSS serves: Electron honours the first
+// registerSchemesAsPrivileged and ignores any later one, so a second call here
+// would leave its scheme opaque rather than adding to this list.
+//
 // Images a thread owns are served from disk rather than embedded in the
 // transcript, and the renderer runs with webSecurity on, so file: is refused.
-// A scheme of BOSS's own keeps the reach to one directory.
+// A scheme of BOSS's own keeps the reach to one directory. A plugin view needs
+// the same treatment for a further reason: an opaque origin has no fetch and no
+// localStorage, which a plugin's own page depends on.
 protocol.registerSchemesAsPrivileged([
-  { scheme: IMAGE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } }
+  { scheme: IMAGE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } },
+  PLUGIN_SCHEME_PRIVILEGES
 ])
 
 const gotLock = app.requestSingleInstanceLock()
@@ -129,6 +140,27 @@ backendMgr.attachMcpHub(mcpHub)
 threadBus.attachMcpHub(mcpHub)
 mcpHub.setOnChange(() => {
   void mcpHub.list().then((connections) => backendMgr.emit({ type: 'mcp.updated', properties: { connections } })).catch(() => {})
+})
+const plugins = new PluginManager(
+  join(app.getPath('userData'), 'plugins'),
+  join(app.getPath('userData'), 'plugins.json'),
+  // Same two candidates as the other bundled resources: packaged apps read
+  // resourcesPath, a checkout reads resources/ beside the app path.
+  app.isPackaged
+    ? join(process.resourcesPath ?? '', 'plugins')
+    : join(app.getAppPath(), 'resources', 'plugins'),
+  (command, args, env) => new StdioMcpClient(command, args, env),
+  // Read per call rather than captured: the focused project changes while BOSS
+  // runs, and a plugin should follow it.
+  () => {
+    const path = backendMgr.currentProject
+    return path ? { projectId: projectScope(path).projectId, projectPath: path } : { projectId: 'global', projectPath: '' }
+  }
+)
+backendMgr.attachPlugins(plugins)
+threadBus.attachPlugins(plugins)
+plugins.setOnChange(() => {
+  void plugins.list().then((installed) => backendMgr.emit({ type: 'plugin.updated', properties: { plugins: installed } })).catch(() => {})
 })
 const webAccess = new WebAccess(join(app.getPath('userData'), 'mobile-access.json'), backendMgr)
 backendMgr.attachMobile(webAccess)
@@ -202,15 +234,22 @@ function createWindow(): void {
   }
 
   // A guest page may only be what BOSS asks for: its own hardened partition,
-  // no preload of its own, sandboxed, with node off. The renderer sets these
-  // as attributes, so they are re-checked here where they cannot be forged.
+  // sandboxed, with node off. The renderer sets these as attributes, so they
+  // are re-checked here where they cannot be forged.
+  //
+  // A plugin view is the one guest allowed a preload, and only the plugin
+  // preload — its whole API is one call onto its own MCP server. The path is
+  // pinned here rather than taken from the attribute, so the renderer cannot
+  // name a different file.
   win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
-    delete webPreferences.preload
+    const isPlugin = params.partition === PLUGIN_PARTITION
+    if (isPlugin) webPreferences.preload = join(mainDir, '../preload/plugin.cjs')
+    else delete webPreferences.preload
     webPreferences.sandbox = true
     webPreferences.contextIsolation = true
     webPreferences.nodeIntegration = false
     webPreferences.webSecurity = true
-    if (params.partition !== BROWSE_PARTITION) event.preventDefault()
+    if (params.partition !== BROWSE_PARTITION && !isPlugin) event.preventDefault()
   })
 
   win.webContents.on('console-message', (event) => {
@@ -300,6 +339,10 @@ app.whenReady().then(() => {
     callback(false)
   })
 
+  // Serves boss-plugin:// and brokers the one call a plugin view can make. Set
+  // up before the window so a restored plugin tab has its scheme ready.
+  installPluginViews(plugins)
+
   buildAppMenu()
   createWindow()
   registerIpcOnce()
@@ -319,6 +362,7 @@ app.whenReady().then(() => {
     await backendMgr.start(saved.projectPath)
     sites.bind(openCodeBackend)
     await mcpHub.start()
+    await plugins.start()
     await automations.start()
     await webAccess.start()
     await relayClient.start()
@@ -350,6 +394,7 @@ app.on('before-quit', () => {
   void relayClient.stop()
   void automations.stop()
   void mcpHub.stop()
+  void plugins.stop()
   void backendMgr.stop()
   void computerUse.dispose()
   void sites.stop()

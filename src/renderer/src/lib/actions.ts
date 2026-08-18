@@ -5,6 +5,7 @@ import type { MenuCommand } from '@shared/ipc'
 import { disposeTerminalSession } from './terminal-sessions'
 import { disposeTabContentNode } from './tab-content-nodes'
 import { disposeBrowseGuest } from './browse-guests'
+import { disposePluginGuest } from './plugin-guests'
 import { resolveMode, resolveModel, resolveVariant } from './thread-defaults'
 import { pruneDeletedThreadCaches } from './thread-caches'
 import { startMicCapture } from './mic'
@@ -17,7 +18,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
+import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTab, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
 import {
   activeWorkspaceView,
   activateTab,
@@ -271,6 +272,33 @@ export function addWorkspaceTab(
   if (kind === 'thread' && sessionId) selectSession(sessionId, false)
 }
 
+/**
+ * Open a plugin's view in a pane. Separate from addWorkspaceTab because a
+ * plugin tab is bound by (pluginId, viewId) rather than by a session or a
+ * checkout, and it dedupes on that pair: asking twice for one plugin's board
+ * should focus the tab already showing it.
+ */
+export function addPluginTab(groupId: string, pluginId: string, viewId: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  const view = activeWorkspaceView(workspace)
+  for (const candidate of walkGroups(view.root)) {
+    const existing = candidate.tabs.find(
+      (item) => item.kind === 'plugin' && item.pluginId === pluginId && item.viewId === viewId
+    )
+    if (existing) {
+      activateWorkspaceTab(candidate.id, existing.id)
+      return
+    }
+  }
+  const created: WorkspaceTab = { ...tab('plugin'), pluginId, viewId }
+  updateWorkspaceView((item) => ({
+    ...item,
+    root: addTab(item.root, groupId, created),
+    focusedGroupId: groupId
+  }))
+}
+
 export function openBackendLogin(backendId: BackendId): void {
   let workspace = currentWorkspace()
   if (!workspace) {
@@ -464,6 +492,7 @@ export function closeWorkspaceTab(groupId: string, tabId: string): void {
   // everything once on purpose, so tying disposal to unmounting destroyed
   // pages and shells that were only being re-parented.
   if (closing?.kind === 'browser') disposeBrowseGuest(`workspace-${tabId}`)
+  if (closing?.kind === 'plugin') disposePluginGuest(`workspace-${tabId}`)
   if (closing?.kind === 'terminal') disposeTerminalSession(tabId)
   disposeTabContentNode(tabId)
   const next = updateWorkspaceView((item) => {
@@ -485,6 +514,7 @@ export function closeWorkspaceGroup(groupId: string): void {
   const pane = view ? findGroup(view.root, groupId) : undefined
   for (const item of pane?.tabs ?? []) {
     if (item.kind === 'browser') disposeBrowseGuest(`workspace-${item.id}`)
+    if (item.kind === 'plugin') disposePluginGuest(`workspace-${item.id}`)
     if (item.kind === 'terminal') disposeTerminalSession(item.id)
     disposeTabContentNode(item.id)
   }
@@ -885,6 +915,18 @@ export async function refreshMcpConnections(): Promise<void> {
     appStore.setState({ mcpConnections: await OpenCode.mcpList() })
   } catch {
     /* MCP connections may still be starting during the first renderer refresh. */
+  }
+}
+
+export async function refreshPlugins(): Promise<void> {
+  try {
+    // Kept an array whatever comes back. A backend that does not answer this
+    // request yet resolves undefined, and storing that in place of the empty
+    // list took down every component that reads it.
+    const installed = await OpenCode.pluginList()
+    appStore.setState({ plugins: Array.isArray(installed) ? installed : [] })
+  } catch {
+    /* Plugins may still be starting during the first renderer refresh. */
   }
 }
 
