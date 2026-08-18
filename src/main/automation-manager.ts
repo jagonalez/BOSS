@@ -1,4 +1,3 @@
-import { Notification } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -14,6 +13,7 @@ import { AUTOMATION_DEFAULTS } from '../shared/automation'
 import type { BackendRequest } from '../shared/backend'
 import type { FileDiff, MessageWithParts } from '../shared/opencode'
 import { extractSummary } from '../shared/thread-result'
+import type { NotificationRouter } from './notification-router'
 import type { WorktreeInfo } from '../shared/worktree'
 import { cronError, missedCronFires, nextCronTime } from './cron'
 import type { BackendManager } from './backend/manager'
@@ -67,6 +67,7 @@ export class AutomationManager {
   private loaded = false
   private automations: Automation[] = []
   private notifyWebhookUrl = ''
+  private notifications?: NotificationRouter
   private runs: AutomationRun[] = []
   private readonly active = new Map<string, ActiveRun>()
   private tickTimer?: NodeJS.Timeout
@@ -86,6 +87,8 @@ export class AutomationManager {
       if (parsed.version === 1 && Array.isArray(parsed.automations)) {
         this.automations = parsed.automations
         this.notifyWebhookUrl = typeof parsed.notifyWebhookUrl === 'string' ? parsed.notifyWebhookUrl : ''
+        // Load may finish after the router is attached, so re-apply here.
+        this.applyWebhook()
       }
       for (const automation of this.automations) {
         // Migrate the pre-notify-mode boolean field.
@@ -112,6 +115,24 @@ export class AutomationManager {
       }
     }
     if (changed) await this.save()
+  }
+
+  attachNotifications(router: NotificationRouter): void {
+    this.notifications = router
+    this.applyWebhook()
+  }
+
+  /** Mirror the saved webhook into the router.
+   *
+   *  The URL is still stored with the automation settings, because that is
+   *  where users already configured it and moving it would silently drop what
+   *  they had. Enabling it for 'attention' matches the old behaviour, where any
+   *  automation notification reached the webhook. */
+  private applyWebhook(): void {
+    this.notifications?.configure({
+      webhookUrl: this.notifyWebhookUrl,
+      webhook: this.notifyWebhookUrl ? 'attention' : 'off'
+    })
   }
 
   private async save(): Promise<void> {
@@ -314,6 +335,7 @@ export class AutomationManager {
         if (url && !/^https?:\/\//.test(url)) throw new Error('The webhook must be an http(s) URL, e.g. https://ntfy.sh/your-topic.')
         this.notifyWebhookUrl = url
         await this.save()
+        this.applyWebhook()
         return this.notifyWebhookUrl
       }
       default: throw new Error(`Unsupported automation request: ${request.type}`)
@@ -457,7 +479,7 @@ export class AutomationManager {
       }
       case 'question.asked':
         active.run.needsAttention = true
-        this.notify(active.automation, `"${active.automation.name}" is waiting on a question. Open the run to answer it.`)
+        this.notify(active.automation, `"${active.automation.name}" is waiting on a question. Open the run to answer it.`, true)
         void this.persistAndEmit()
         break
       default:
@@ -471,7 +493,7 @@ export class AutomationManager {
     if (active.automation.mode === 'ask') {
       if (!active.run.needsAttention) {
         active.run.needsAttention = true
-        this.notify(active.automation, `"${active.automation.name}" is waiting on a permission prompt.`)
+        this.notify(active.automation, `"${active.automation.name}" is waiting on a permission prompt.`, true)
         await this.persistAndEmit()
       }
       return
@@ -532,7 +554,7 @@ export class AutomationManager {
     }
 
     if (status === 'failure' || status === 'timeout') {
-      this.notify(automation, `"${automation.name}" ${status === 'timeout' ? 'timed out' : 'failed'}${run.error ? `: ${run.error}` : '.'}`)
+      this.notify(automation, `"${automation.name}" ${status === 'timeout' ? 'timed out' : 'failed'}${run.error ? `: ${run.error}` : '.'}`, true)
     } else if (status === 'success' && run.changedFiles > 0) {
       this.notify(automation, `"${automation.name}" finished with ${run.changedFiles} changed file${run.changedFiles === 1 ? '' : 's'}.`)
     } else if (status === 'success' && automation.notify === 'always') {
@@ -567,23 +589,16 @@ export class AutomationManager {
     this.runs = this.runs.filter((run) => !drop.has(run.id))
   }
 
-  private notify(automation: Automation, body: string): void {
+  private notify(automation: Automation, body: string, failed = false): void {
     if (automation.notify === 'off') return
-    try {
-      new Notification({ title: 'BOSS automation', body }).show()
-    } catch {
-      /* Notifications are best-effort. */
-    }
-    if (this.notifyWebhookUrl) {
-      // ntfy-compatible: plain-text body, title in a header. Any webhook that
-      // accepts a text POST works.
-      void fetch(this.notifyWebhookUrl, {
-        method: 'POST',
-        headers: { title: `BOSS · ${automation.name}`, 'content-type': 'text/plain' },
-        body
-      }).catch(() => {
-        /* Push is best-effort; the run record is the source of truth. */
-      })
-    }
+    // The router owns delivery. This used to post to the webhook itself, which
+    // is why a thread that needed attention could reach the desktop but never a
+    // phone: there were two senders and only one of them knew about webhooks.
+    this.notifications?.publish({
+      type: failed ? 'automation.failed' : 'automation.completed',
+      title: `BOSS · ${automation.name}`,
+      body,
+      createdAt: Date.now()
+    })
   }
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Notification } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -29,6 +29,7 @@ import type { WorktreeManager } from '../worktree-manager'
 import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
 import type { ImageStore } from '../image-store'
+import type { NotificationRouter } from '../notification-router'
 import type { AgentToolImage } from '@shared/qa'
 import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadResult, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 import { extractSummary, lastAssistantText } from '@shared/thread-result'
@@ -236,6 +237,7 @@ export class BackendManager {
   private readonly intentionalAborts = new Set<string>()
   private threadBus?: ThreadBus
   private images?: ImageStore
+  private notifications?: NotificationRouter
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
@@ -255,6 +257,10 @@ export class BackendManager {
 
   attachImageStore(images: ImageStore): void {
     this.images = images
+  }
+
+  attachNotifications(router: NotificationRouter): void {
+    this.notifications = router
   }
 
   /** Put an image a tool returned into the thread's transcript.
@@ -335,7 +341,11 @@ export class BackendManager {
     const changed = binding.attention?.kind !== kind || binding.attention?.detail !== detail
     binding.attention = { kind, detail, createdAt: now() }
     this.save()
-    if (!changed || BrowserWindow.getAllWindows().some((window) => window.isFocused())) return
+    // Only a repeat is dropped here. Whether a focused BOSS should suppress a
+    // notification is the router's call, and it applies that to the desktop
+    // alone: a webhook exists to reach someone away from this machine, and a
+    // focused window says nothing about where they are.
+    if (!changed) return
     const body = detail ?? ({
       permission: 'Waiting for permission.',
       question: 'Waiting for an answer.',
@@ -343,9 +353,19 @@ export class BackendManager {
       error: 'The run failed.',
       interrupted: 'The run was interrupted.'
     } satisfies Record<AttentionKind, string>)[kind]
-    if (Notification.isSupported()) {
-      new Notification({ title: binding.title ?? 'BOSS task', body }).show()
-    }
+    // Through the router rather than straight to the desktop: a thread that
+    // needs permission is exactly what someone away from the machine wants to
+    // hear about, and only the router knows about the other channels.
+    this.notifications?.publish({
+      type: kind === 'error' || kind === 'interrupted'
+        ? 'task.failed'
+        : kind === 'completed' ? 'task.completed' : 'task.needs_attention',
+      title: binding.title ?? 'BOSS task',
+      body,
+      threadId: binding.id,
+      projectPath: binding.projectPath,
+      createdAt: now()
+    })
   }
 
   private clearThreadAttention(binding: ThreadBinding): void {
@@ -510,6 +530,20 @@ export class BackendManager {
       type: 'thread.policy.reviewer.finished',
       properties: { threadId: ownerId, reviewerThreadId: binding.id, verdict: record.verdict ?? null },
       backendId: owner.backendId
+    })
+    // A verdict is the answer the user was waiting on, so it goes out on every
+    // channel rather than only appearing in the thread they would have to open.
+    this.notifications?.publish({
+      type: 'review.completed',
+      title: owner.title ?? 'BOSS task',
+      body: record.verdict === 'pass'
+        ? 'A reviewer passed the work.'
+        : record.verdict === 'changes-requested'
+          ? `A reviewer requested changes${record.notes?.length ? `: ${record.notes[0]}` : '.'}`
+          : 'A reviewer finished without a verdict.',
+      threadId: ownerId,
+      projectPath: owner.projectPath,
+      createdAt: now()
     })
     // Only a clear pass advances. No verdict means the reviewer did not follow
     // the contract, and treating that as a pass would approve unreviewed work.

@@ -83,3 +83,20 @@ test('read-only access can inspect supervision and transcripts', () => {
     assert.equal(mobileRequestAllowed(type, 'read-only'), true, type)
   }
 })
+
+test('the page sorts what needs the user above everything else', () => {
+  const script = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ''
+  // The phone exists to answer these, so they cannot be buried in a list
+  // sorted only by time.
+  assert.match(script, /function attentionReason/)
+  assert.match(script, /Needs permission/)
+  assert.match(script, /Needs an answer/)
+  assert.match(script, /need' \+ \(needsMe\.length === 1 \? 's' : ''\) \+ ' you/)
+})
+
+test('the page shows a worker the thread it came from', () => {
+  const script = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ''
+  // A narrow screen cannot indent a tree, so lineage is named instead.
+  assert.match(script, /t\.lineage && t\.lineage\.sourceThreadId/)
+  assert.match(script, /from ' \+ esc\(origin\)/)
+})
