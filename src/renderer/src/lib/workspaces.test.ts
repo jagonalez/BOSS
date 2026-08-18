@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('a resource opened from a thread looks at that thread’s checkout', () => {
   // A review opened from a worktree thread fell back to the main project
@@ -346,3 +346,30 @@ test('a files tab and a review on one checkout stay separate', () => {
   assert.equal(findOwnedResource(view.root, 'files', 'thread-1', '/src/ralf'), undefined)
   assert.equal(findOwnedResource(view.root, 'review', 'thread-1', '/src/ralf')?.id, review.id)
 })
+
+/** Moving a tab to a view of its own was two steps: make the view, then drag
+ *  into the empty room it left. The empty room is the part that stopped people
+ *  splitting a crowded pane up, so the tab now lands in one action. */
+test('a tab moved to a fresh view lands in that view’s only pane', () => {
+  const thread = tab('thread', 'session-1')
+  const terminal = tab('terminal', 'session-1')
+  const main = workspaceView('Main', group([thread, terminal]))
+  const created = workspaceView(nextWorkspaceViewName([main]))
+  const landing = walkGroups(created.root)[0]
+
+  const moved = moveTabAcrossViews([main, created], terminal.id, created.id, landing.id, 'center')
+
+  const source = moved.find((view) => view.id === main.id)!
+  const target = moved.find((view) => view.id === created.id)!
+  assert.deepEqual(walkTabs(source.root).map((item) => item.id), [thread.id])
+  assert.deepEqual(walkTabs(target.root).map((item) => item.id), [terminal.id])
+})
+
+test('a fresh view is named apart from the ones already open', () => {
+  const first = workspaceView('Workspace')
+  const second = workspaceView(nextWorkspaceViewName([first]))
+
+  assert.notEqual(second.name, first.name)
+  assert.notEqual(nextWorkspaceViewName([first, second]), second.name)
+})
+

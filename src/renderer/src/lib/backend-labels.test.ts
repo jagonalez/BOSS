@@ -46,3 +46,39 @@ test('no component inlines its own backend label map', () => {
     )
   }
 })
+
+/** Threads used to carry their backend as a text pill beside the title. It was
+ *  flex: 0 0 auto, so on a narrow tab it kept its full width while the title
+ *  collapsed to an ellipsis: every tab read "Claude" or "OpenCode" and none of
+ *  them said which thread it was. The pill is a mark now, and every backend
+ *  needs one or its tabs fall back to a generic bubble. */
+test('every backend has a mark for its tab', () => {
+  // Read as source rather than imported: the test runner strips types but
+  // cannot load .tsx, and the neighbouring tests already assert this way.
+  const source = readFileSync(join(import.meta.dirname, '..', 'components', 'icons.tsx'), 'utf8')
+  const marks = source.slice(source.indexOf('export const BACKEND_MARKS'))
+
+  for (const id of BACKEND_IDS) {
+    assert.match(marks, new RegExp(`\\b${id}:`), `${id} needs a mark`)
+  }
+})
+
+/** The marks are the real brand paths, taken from published icon sets rather
+ *  than drawn by hand. A first attempt approximated them and every mark read
+ *  as a smudge at tab size: Claude came out as a plain letter A and OpenCode
+ *  as a generic terminal box that collided with the terminal tabs. */
+test('the backend marks credit where their paths came from', () => {
+  const source = readFileSync(join(import.meta.dirname, '..', 'components', 'icons.tsx'), 'utf8')
+  const marks = source.slice(source.indexOf('/** Backend marks.'))
+
+  assert.match(marks, /simple-icons/, 'the Anthropic path is credited')
+  assert.match(marks, /lobe-icons/, 'the OpenAI and OpenCode paths are credited')
+})
+
+test('the tab strip does not put the backend name beside the title', () => {
+  const source = readFileSync(join(import.meta.dirname, '..', 'components', 'Workspace.tsx'), 'utf8')
+  const label = source.slice(source.indexOf('function TabLabel'), source.indexOf('function NewThreadButtons'))
+
+  assert.ok(!label.includes('<BackendBadge'), 'the tab shows the backend as a mark, not as a text badge')
+  assert.ok(label.includes('tabMark('), 'the tab icon is the backend mark')
+})

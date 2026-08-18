@@ -618,6 +618,21 @@ export function addResourceToSession(sessionId: string, kind: WorkspaceTabKind):
 
 /** Name a resource. Blank clears it, so the tab falls back to its kind.
  *  Two terminals on one thread are otherwise both called "Terminal". */
+/** Move a tab into a view of its own, in one action.
+ *
+ *  Making a view and then dragging tabs into it was two steps with an empty
+ *  room in between, which is the part that put people off splitting a crowded
+ *  pane up at all. */
+export function moveWorkspaceTabToNewView(tabId: string): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  const created = workspaceView(nextWorkspaceViewName(workspace.views))
+  updateWorkspace((item) => ({ ...item, views: [...item.views, created] }))
+  const target = walkGroups(created.root)[0]
+  if (!target) return
+  sendWorkspaceTabToView(tabId, created.id, target.id)
+}
+
 export function renameWorkspaceTab(tabId: string, title: string): void {
   const clean = title.trim()
   updateWorkspace((workspace) => ({
