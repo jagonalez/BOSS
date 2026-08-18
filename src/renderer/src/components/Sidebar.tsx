@@ -5,7 +5,7 @@ import type { SessionInfo } from '@shared/opencode'
 import type { ChangeRequestSummary } from '@shared/review'
 import type { Workspace, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import type { OwnedResource } from '../lib/workspaces'
-import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, findGroup, resourcesByThread, walkGroups } from '../lib/workspaces'
+import { PROJECT_DRAG_TYPE, SESSION_DRAG_TYPE, TAB_DRAG_TYPE, findGroup, reorderPaths, resourcesByThread, walkGroups } from '../lib/workspaces'
 import { ThreadCard } from './ThreadCard'
 import { useHoverCard } from '../lib/use-hover-card'
 import {
@@ -19,6 +19,8 @@ import {
   openCommitDialog,
   openProject,
   openProjectFolder,
+  removeProject,
+  reorderProjects,
   addResourceToSession,
   removeSessionWorktree,
   renameWorkspaceTab,
@@ -341,6 +343,11 @@ export function Sidebar(): React.JSX.Element {
     setMenuTop(overflow > 0 ? Math.max(8, ctx.y - overflow) : ctx.y)
   }, [ctx])
   const projectsRef = useRef<HTMLDivElement>(null)
+  /** The project being dragged, and where it would land. Held here rather than
+   *  read back from the drag event: dragover fires constantly, and Chromium
+   *  hides the payload until the drop, so the line has nothing else to follow. */
+  const [dragProject, setDragProject] = useState<string | null>(null)
+  const [dropAt, setDropAt] = useState<{ path: string; before: boolean } | null>(null)
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     try { return localStorage.getItem('boss.sidebarHidden') === 'true' } catch { return false }
   })
@@ -597,6 +604,11 @@ export function Sidebar(): React.JSX.Element {
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault()
+            // A project dropped on the gaps between rows lands here rather than
+            // on a row. There is no row to order it against, so the drag is
+            // abandoned — but the indicator still has to go.
+            setDragProject(null)
+            setDropAt(null)
             const dropped = e.dataTransfer?.files?.[0] as File & { path?: string } | undefined
             const path = dropped?.path
             if (path) void openProject(path)
@@ -614,7 +626,46 @@ export function Sidebar(): React.JSX.Element {
           return (
             <div key={path}>
               <div
-                className="item dir project-row"
+                className={`item dir project-row${dragProject === path ? ' dragging' : ''}${
+                  dropAt?.path === path ? (dropAt.before ? ' drop-before' : ' drop-after') : ''
+                }`}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData(PROJECT_DRAG_TYPE, path)
+                  setDragProject(path)
+                }}
+                onDragEnd={() => {
+                  setDragProject(null)
+                  setDropAt(null)
+                }}
+                onDragOver={(event) => {
+                  if (!event.dataTransfer.types.includes(PROJECT_DRAG_TYPE)) return
+                  // Claim the event before the list's own handler, which opens
+                  // a folder dropped from Finder and would swallow this one.
+                  event.preventDefault()
+                  event.stopPropagation()
+                  event.dataTransfer.dropEffect = 'move'
+                  const box = event.currentTarget.getBoundingClientRect()
+                  setDropAt({ path, before: event.clientY < box.top + box.height / 2 })
+                }}
+                onDragLeave={(event) => {
+                  // Moving onto a child still counts as being on the row, so
+                  // only clear when the pointer leaves the row itself.
+                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+                  setDropAt((prev) => (prev?.path === path ? null : prev))
+                }}
+                onDrop={(event) => {
+                  const moved = event.dataTransfer.getData(PROJECT_DRAG_TYPE)
+                  if (!moved) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  const before = dropAt?.path === path ? dropAt.before : true
+                  setDragProject(null)
+                  setDropAt(null)
+                  const next = reorderPaths(projectPaths, moved, path, before)
+                  if (next !== projectPaths) void reorderProjects(next)
+                }}
                 onClick={() =>
                   setCollapsed((prev) => {
                     const next = new Set(prev)
@@ -715,6 +766,23 @@ export function Sidebar(): React.JSX.Element {
                 })
               )}
               {menuItem('Open in Finder', () => void window.boss.openPath(ctx.project!))}
+              {menuItem('Remove project…', () => {
+                const path = ctx.project!
+                const threads = sessions.filter(
+                  (session) => (session.projectPath ?? session.directory ?? session.path) === path
+                ).length
+                appStore.setState({
+                  confirm: {
+                    title: 'Remove project?',
+                    message: threads
+                      ? `Remove ${projectName(path)} from BOSS, along with ${threads} thread${threads === 1 ? '' : 's'}? The folder itself is left on disk.`
+                      : `Remove ${projectName(path)} from BOSS? The folder itself is left on disk.`,
+                    confirmLabel: 'Remove',
+                    destructive: true,
+                    action: () => void removeProject(path)
+                  }
+                })
+              })}
             </>
           ) : ctx.session ? (
             <>

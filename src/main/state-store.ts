@@ -34,3 +34,4 @@ export function saveState(patch: Partial<BossState>): void {
     /* ignore */
   }
 }
+
