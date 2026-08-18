@@ -127,10 +127,11 @@ test('a running agent is told when the mode changes', () => {
   assert.ok(setter.includes('this.busyThreads.has(threadId)'), 'an idle thread has nothing to tell')
   assert.ok(setter.includes('permissionModeSet'), 'a running agent must be told directly')
 
-  // claude takes the change on its control channel, so its own Auto keeps
-  // deciding rather than BOSS overriding it.
+  // claude takes the change on its own control call, so its Auto keeps
+  // deciding rather than BOSS overriding it. The Agent SDK sends the
+  // set_permission_mode request that BOSS used to write down the pipe.
   const claude = readFileSync(join(import.meta.dirname, '..', 'main', 'backend', 'claude-backend.ts'), 'utf8')
-  assert.ok(claude.includes("subtype: 'set_permission_mode'"), 'claude must be sent set_permission_mode')
+  assert.ok(claude.includes('query.setPermissionMode('), 'claude must be told through the run\'s own control call')
 
   // codex fixes its approval policy per turn, so it must report honestly that
   // the change waits rather than silently doing nothing.
