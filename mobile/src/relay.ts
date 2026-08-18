@@ -164,7 +164,8 @@ export class RelayConnection {
       // that would otherwise keep deriving keys from the spent pairing
       // secret and seal every frame with a key the desktop cannot open.
       const current = this.credentials
-      if (!current) return
+      // A socket superseded during pairing must not send on the new one's behalf.
+      if (!current || this.socket !== socket) return
       this.key = deriveKey(current.secret)
       socket.send(
         JSON.stringify({
@@ -186,9 +187,17 @@ export class RelayConnection {
       this.handlers.onStateChange(this.state)
     }
 
-    socket.onmessage = (raw) => void this.receive(String(raw.data))
+    socket.onmessage = (raw) => {
+      if (this.socket !== socket) return
+      void this.receive(String(raw.data))
+    }
 
     socket.onclose = () => {
+      // Pairing deliberately closes this socket and opens a fresh one on the
+      // room secret. close() is asynchronous, so this fires AFTER the
+      // replacement exists — clearing this.socket then would orphan the live
+      // connection and start a competing reconnect loop.
+      if (this.socket !== socket) return
       this.ready = false
       this.socket = null
       this.handlers.onStateChange(this.state)
@@ -260,10 +269,14 @@ export class RelayConnection {
       await saveCredentials(credentials)
       this.credentials = credentials
       this.pendingClaim = null
+      // Detach before closing. The handlers are keyed on socket identity, so
+      // clearing this.socket first makes the old socket's onclose a no-op and
+      // stops it from tearing down the replacement opened on the next line.
+      const previous = this.socket
+      this.socket = null
       this.key = null
       this.ready = false
-      this.socket?.close()
-      this.socket = null
+      previous?.close()
       this.handlers.onPaired(credentials)
       this.connect()
     }
