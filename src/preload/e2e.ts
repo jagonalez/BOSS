@@ -11,7 +11,7 @@ import type {
   QueuedFollowUp
 } from '../shared/backend'
 import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
-import type { SessionInfo } from '../shared/opencode'
+import type { MessageWithParts, SessionInfo } from '../shared/opencode'
 
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
@@ -19,6 +19,30 @@ type RecordedCall =
 
 const PROJECT = '/tmp/boss-e2e/project'
 const CHECKOUT = `${PROJECT}/checkout`
+const THREAD_TITLE_SETTINGS_KEY = 'boss-e2e-thread-title-settings'
+
+interface E2EStorage {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+}
+
+function e2eStorage(): E2EStorage | undefined {
+  return (globalThis as unknown as { sessionStorage?: E2EStorage }).sessionStorage
+}
+
+function savedThreadTitleSettings(): { autoNameFromFirstPrompt: boolean } {
+  try {
+    const stored = e2eStorage()?.getItem(THREAD_TITLE_SETTINGS_KEY)
+    if (!stored) return { autoNameFromFirstPrompt: false }
+    const parsed: unknown = JSON.parse(stored)
+    return typeof parsed === 'object' && parsed !== null && 'autoNameFromFirstPrompt' in parsed
+      && typeof parsed.autoNameFromFirstPrompt === 'boolean'
+      ? { autoNameFromFirstPrompt: parsed.autoNameFromFirstPrompt }
+      : { autoNameFromFirstPrompt: false }
+  } catch {
+    return { autoNameFromFirstPrompt: false }
+  }
+}
 
 const capabilities = {
   streaming: true,
@@ -153,11 +177,26 @@ function initialOpenCodeStopSession(): SessionInfo {
   }
 }
 
+function sourceMessages(): MessageWithParts[] {
+  const sessionID = 'thread-source'
+  return [
+    {
+      info: { id: 'source-search-user', sessionID, role: 'user', time: { created: Date.now() - 50_000 } },
+      parts: [{ id: 'source-search-user-text', type: 'text', sessionID, messageID: 'source-search-user', text: 'Search marker: first result.' }]
+    },
+    {
+      info: { id: 'source-search-agent', sessionID, role: 'assistant', time: { created: Date.now() - 49_000, completed: Date.now() - 48_000 } },
+      parts: [{ id: 'source-search-agent-text', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Search marker: second result.' }]
+    }
+  ]
+}
+
 /** Replace external I/O while preserving the real Electron window, preload
  * boundary, React tree, localStorage, and user interactions. This module is
  * reachable only when the main process explicitly starts with BOSS_E2E=1. */
 export function installE2EApi(boss: BossApi): void {
   let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
+  const messages: Record<string, MessageWithParts[]> = { 'thread-source': sourceMessages() }
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
   let modesBySession: Record<string, BackendModeId> = {}
   let followUps: Record<string, QueuedFollowUp[]> = {
@@ -179,6 +218,10 @@ export function installE2EApi(boss: BossApi): void {
     }]
   }
   let calls: RecordedCall[] = []
+  // The real manager persists this in BOSS's data store. Keep the fixture's
+  // equivalent in session storage so a renderer reload exercises that contract.
+  let threadTitleSettings = savedThreadTitleSettings()
+  let sandboxSettings = { networkAccess: true }
   let nextThread = 1
   let nextFollowUp = 1
   const eventListeners = new Set<(data: string) => void>()
@@ -228,6 +271,15 @@ export function installE2EApi(boss: BossApi): void {
       case 'backend.defaults.set':
         defaults = structuredClone(request.defaults)
         return undefined
+      case 'thread.title.settings.get': return threadTitleSettings
+      case 'thread.title.settings.set':
+        threadTitleSettings = { autoNameFromFirstPrompt: request.autoNameFromFirstPrompt }
+        e2eStorage()?.setItem(THREAD_TITLE_SETTINGS_KEY, JSON.stringify(threadTitleSettings))
+        return threadTitleSettings
+      case 'sandbox.settings.get': return sandboxSettings
+      case 'sandbox.settings.set':
+        sandboxSettings = { networkAccess: request.networkAccess }
+        return sandboxSettings
       case 'backend.bin.get': return {}
       case 'backend.bin.set': return request.path ? { [request.backendId]: request.path } : {}
       // Main stops the server and returns the descriptors; nothing about a
@@ -253,7 +305,7 @@ export function installE2EApi(boss: BossApi): void {
         sessions = sessions.map((session) => session.id === request.threadId ? changed : session)
         return changed
       }
-      case 'thread.messages': return []
+      case 'thread.messages': return messages[request.threadId] ?? []
       // Main allows one run per thread and refuses the rest, because only it
       // knows without a race. The renderer is expected to queue what it refuses
       // rather than drop it.

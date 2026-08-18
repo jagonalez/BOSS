@@ -16,9 +16,13 @@ import type {
   DelegatePlacement,
   QueuedFollowUp,
   QueuedFollowUpAttachment,
-  ThreadCreationScope
+  ThreadCreationScope,
+  ThreadTitleSettings
 } from '@shared/backend'
 import { isAbortError, withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
+import { DEFAULT_THREAD_TITLE_SETTINGS, titleFromFirstPrompt } from '@shared/thread-title'
+import { DEFAULT_SANDBOX_SETTINGS } from '@shared/sandbox'
+import type { SandboxSettings } from '@shared/sandbox'
 import type { EventMessage, FileDiff, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
@@ -115,6 +119,8 @@ interface PreviousBackendState {
 interface StoredBackendState {
   version: 3
   threads: ThreadBinding[]
+  threadTitleSettings?: ThreadTitleSettings
+  sandboxSettings?: SandboxSettings
 }
 
 interface BackendDefinition {
@@ -245,6 +251,8 @@ export class BackendManager {
   private remote?: { handle(request: BackendRequest): Promise<unknown> }
   private binaryOverrides?: BinaryOverrides
   private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
+  private threadTitleSettings: ThreadTitleSettings = { ...DEFAULT_THREAD_TITLE_SETTINGS }
+  private sandboxSettings: SandboxSettings = { ...DEFAULT_SANDBOX_SETTINGS }
   private loaded = false
   private worktreeCleanupTimer?: NodeJS.Timeout
 
@@ -706,6 +714,27 @@ export class BackendManager {
     return preference ? { ...preference } : undefined
   }
 
+  titleSettings(patch?: Partial<ThreadTitleSettings>): ThreadTitleSettings {
+    this.load()
+    if (patch) {
+      this.threadTitleSettings = { ...this.threadTitleSettings, ...patch }
+      this.save()
+    }
+    return { ...this.threadTitleSettings }
+  }
+
+  sandbox(patch?: Partial<SandboxSettings>): SandboxSettings {
+    this.load()
+    if (patch) {
+      this.sandboxSettings = { ...this.sandboxSettings, ...patch }
+      this.save()
+      // Backends read the sandbox per turn, so the next message picks this up.
+      // Codex is the only backend that sandboxes today.
+      this.applySandboxSettings()
+    }
+    return { ...this.sandboxSettings }
+  }
+
   isThreadBusy(threadId: string): boolean {
     return this.busyThreads.has(threadId)
   }
@@ -806,6 +835,12 @@ export class BackendManager {
       const parsed = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredBackendState | PreviousBackendState | LegacyBackendState
       if ((parsed.version === 2 || parsed.version === 3) && Array.isArray(parsed.threads)) {
         for (const binding of parsed.threads) this.bindings.set(binding.id, binding)
+        if (parsed.version === 3 && parsed.threadTitleSettings) {
+          this.threadTitleSettings = { ...DEFAULT_THREAD_TITLE_SETTINGS, ...parsed.threadTitleSettings }
+        }
+        if (parsed.version === 3 && parsed.sandboxSettings) {
+          this.sandboxSettings = { ...DEFAULT_SANDBOX_SETTINGS, ...parsed.sandboxSettings }
+        }
       } else if (parsed.version === 1 && Array.isArray(parsed.threads)) {
         for (const legacy of parsed.threads) {
           const scope = projectScope(legacy.projectPath)
@@ -853,7 +888,9 @@ export class BackendManager {
   private save(): void {
     const state: StoredBackendState = {
       version: 3,
-      threads: [...this.bindings.values()]
+      threads: [...this.bindings.values()],
+      threadTitleSettings: this.threadTitleSettings,
+      sandboxSettings: this.sandboxSettings
     }
     try {
       writeFileSync(stateFile(), JSON.stringify(state, null, 2))
@@ -862,9 +899,19 @@ export class BackendManager {
     }
   }
 
+  /** Push the sandbox preference to every backend that sandboxes. */
+  private applySandboxSettings(): void {
+    for (const backend of Object.values(this.backends)) {
+      backend?.setSandbox?.(this.sandboxSettings)
+    }
+  }
+
   private async ensureStarted(id: BackendId): Promise<Backend> {
     const backend = this.backends[id]
     if (!backend) throw new Error(`Unknown backend: ${id}`)
+    // A backend built after the state file loaded starts on the default, so
+    // set it here rather than only when the setting changes.
+    backend.setSandbox?.(this.sandbox())
     if (!this.unsubscribers.has(id)) {
       this.unsubscribers.set(id, backend.onEvent((event) => this.forwardEvent(id, event)))
     }
@@ -1378,6 +1425,23 @@ export class BackendManager {
     const violation = budgetViolation(binding.policy, usage)
     if (violation) throw new Error(`${violation} Increase or remove the task budget before continuing.`)
     const backend = await this.ensureStarted(binding.backendId)
+    const generatedTitle = this.threadTitleSettings.autoNameFromFirstPrompt
+      ? titleFromFirstPrompt(binding.title, parts)
+      : undefined
+    if (generatedTitle) {
+      // Persist BOSS's own title first. A backend-native title may later replace
+      // it through session.updated, but backends without title generation now
+      // have a useful name without a second model turn.
+      binding.title = generatedTitle
+      binding.updatedAt = now()
+      this.save()
+      this.emit({
+        type: 'session.updated',
+        properties: { info: this.session(binding) },
+        backendId: binding.backendId
+      })
+      await backend.sessionRename(binding.nativeSessionId, generatedTitle).catch(() => {})
+    }
     // A caller that names a mode is setting the thread's mode, not passing a
     // one-off. Recording it here keeps the stored mode and the mode the backend
     // launches under from drifting apart.
@@ -2240,6 +2304,10 @@ export class BackendManager {
       case 'backend.list': return this.descriptors()
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
+      case 'thread.title.settings.get': return this.titleSettings()
+      case 'thread.title.settings.set': return this.titleSettings({ autoNameFromFirstPrompt: request.autoNameFromFirstPrompt })
+      case 'sandbox.settings.get': return this.sandbox()
+      case 'sandbox.settings.set': return this.sandbox({ networkAccess: request.networkAccess })
       case 'backend.bin.get': return this.binaryPaths()
       case 'backend.bin.set': return this.setBinaryPath(request.backendId, request.path)
       case 'backend.restart': return this.restartBackend(request.backendId)

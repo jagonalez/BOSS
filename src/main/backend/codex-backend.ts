@@ -8,6 +8,7 @@ import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
+import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from '@shared/sandbox'
 
 type RpcId = string | number
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
@@ -337,6 +338,7 @@ export class CodexBackend implements Backend {
   private healthy = false
   private buffer = ''
   private threadBusHandler?: (call: ThreadBusToolCall) => Promise<unknown>
+  private sandboxSettings: SandboxSettings = { ...DEFAULT_SANDBOX_SETTINGS }
 
   constructor(cwd?: string) {
     this.projectPath = cwd ?? ''
@@ -602,6 +604,12 @@ export class CodexBackend implements Backend {
     this.sessionDirectories.set(id, directory)
   }
 
+  /** The sandbox goes out with each turn, so this lands on the next message
+   *  rather than on a turn already in flight. */
+  setSandbox(settings: SandboxSettings): void {
+    this.sandboxSettings = { ...settings }
+  }
+
   private directoryFor(sessionId: string): string | undefined {
     return this.sessionDirectories.resolve(sessionId, this.projectPath)
   }
@@ -671,13 +679,18 @@ export class CodexBackend implements Backend {
       cwd: this.directoryFor(sessionId),
       approvalPolicy: mode === 'auto' ? 'never' : 'on-request',
       sandboxPolicy: mode === 'plan'
+        // Plan mode is offline whatever the setting says: a read-only thread
+        // has no reason to reach the network.
         ? { type: 'readOnly', networkAccess: false }
         : {
             type: 'workspaceWrite',
             // Scoped to this thread's checkout. The global path would hand a
             // thread write access to a project it has nothing to do with.
             writableRoots: (() => { const dir = this.directoryFor(sessionId); return dir ? [dir] : [] })(),
-            networkAccess: false,
+            // Off blocks `gh pr create`, `npm install`, and every other
+            // outbound call, while leaving `git push` — which needs no
+            // sandbox network — untouched. Default on for that reason.
+            networkAccess: this.sandboxSettings.networkAccess,
             excludeTmpdirEnvVar: false,
             excludeSlashTmp: false
           }
