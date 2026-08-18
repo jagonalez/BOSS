@@ -295,8 +295,12 @@ function itemPart(sessionId: string, messageId: string, item: CodexItem): Part |
 
 function turnMessages(sessionId: string, turn: CodexTurn): MessageWithParts[] {
   const messages: MessageWithParts[] = []
-  const user = (turn.items ?? []).find((item) => item.type === 'userMessage')
-  if (user) {
+  // Every userMessage, not just the first. Codex folds a steered message into
+  // the turn it is already running, so a turn holds one item per thing the user
+  // said. Reading only the first dropped every steered message from the reload,
+  // and the reload prunes what it does not report — so the message the user
+  // watched appear during the run was deleted the moment the run ended.
+  for (const user of (turn.items ?? []).filter((item) => item.type === 'userMessage')) {
     const id = user.id
     messages.push({
       info: { id, sessionID: sessionId, role: 'user', time: { created: turn.startedAt ? turn.startedAt * 1000 : undefined } },

@@ -111,9 +111,16 @@ export default function App(): React.JSX.Element {
         setDesktopOnline(state.desktopOnline)
       },
       onPaired: (next) => {
+        // Do not load here: the replacement socket is still opening, so a
+        // request would be rejected before it could be sent. onReady fires
+        // once the hello is out.
         setCredentials(next)
         setError(undefined)
+      },
+      onReady: () => {
+        setError(undefined)
         void refreshThreads()
+        if (openRef.current) void refreshMessages(openRef.current)
       }
     })
     relay.current = connection
@@ -122,7 +129,9 @@ export default function App(): React.JSX.Element {
       setLoaded(true)
       if (!saved) return
       setCredentials(saved)
-      void connection.start(saved).then(() => refreshThreads())
+      // onReady drives the load for both paths — startup and pairing — so the
+      // request is never issued against a socket that is still opening.
+      void connection.start(saved)
     })
 
     // Coming back from the background often leaves a frozen socket that never
@@ -208,6 +217,11 @@ export default function App(): React.JSX.Element {
         </Pressable>
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      {/* Connection state, so a stall says which half is missing rather than
+          surfacing only as a request timeout. */}
+      <Text style={styles.status}>
+        {`socket ${connected ? 'open' : 'connecting'} · desktop ${desktopOnline ? 'online' : 'offline'}`}
+      </Text>
       <ThreadsScreen
         threads={threads}
         offline={!desktopOnline}
@@ -240,5 +254,6 @@ const styles = StyleSheet.create({
   back: { color: theme.accent, fontSize: 15 },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.faint },
   statusOk: { backgroundColor: theme.green },
-  error: { color: theme.red, fontSize: 13, paddingHorizontal: 14, paddingTop: 8 }
+  error: { color: theme.red, fontSize: 13, paddingHorizontal: 14, paddingTop: 8 },
+  status: { color: theme.faint, fontSize: 11, paddingHorizontal: 14, paddingTop: 6 }
 })

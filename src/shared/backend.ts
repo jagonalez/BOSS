@@ -20,6 +20,9 @@ export interface BackendCapabilities {
   permissions: boolean
   nativeFork: boolean
   steering: 'native' | 'stop-and-redirect'
+  /** The backend records a steered message in its own transcript and reports it
+   *  on reload. BOSS must not echo one itself, or the message appears twice. */
+  reportsSteeredMessages: boolean
   branching: 'message' | 'thread' | 'context-copy'
   images: boolean
   mcp: boolean

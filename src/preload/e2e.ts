@@ -54,7 +54,8 @@ const capabilities = {
   images: true,
   mcp: true,
   interactiveQuestions: true,
-  nativeAutoMode: true
+  nativeAutoMode: true,
+  reportsSteeredMessages: true
 }
 
 const backends: BackendDescriptor[] = [
@@ -81,7 +82,7 @@ const backends: BackendDescriptor[] = [
     available: true,
     healthy: true,
     version: 'e2e',
-    capabilities: { ...capabilities, permissions: false },
+    capabilities: { ...capabilities, permissions: false, reportsSteeredMessages: false },
     modes: [{ id: 'auto', label: 'Approved', description: 'Pi policy.' }]
   },
   {
