@@ -19,6 +19,30 @@ type RecordedCall =
 
 const PROJECT = '/tmp/boss-e2e/project'
 const CHECKOUT = `${PROJECT}/checkout`
+const THREAD_TITLE_SETTINGS_KEY = 'boss-e2e-thread-title-settings'
+
+interface E2EStorage {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+}
+
+function e2eStorage(): E2EStorage | undefined {
+  return (globalThis as unknown as { sessionStorage?: E2EStorage }).sessionStorage
+}
+
+function savedThreadTitleSettings(): { autoNameFromFirstPrompt: boolean } {
+  try {
+    const stored = e2eStorage()?.getItem(THREAD_TITLE_SETTINGS_KEY)
+    if (!stored) return { autoNameFromFirstPrompt: false }
+    const parsed: unknown = JSON.parse(stored)
+    return typeof parsed === 'object' && parsed !== null && 'autoNameFromFirstPrompt' in parsed
+      && typeof parsed.autoNameFromFirstPrompt === 'boolean'
+      ? { autoNameFromFirstPrompt: parsed.autoNameFromFirstPrompt }
+      : { autoNameFromFirstPrompt: false }
+  } catch {
+    return { autoNameFromFirstPrompt: false }
+  }
+}
 
 const capabilities = {
   streaming: true,
@@ -179,7 +203,9 @@ export function installE2EApi(boss: BossApi): void {
     }]
   }
   let calls: RecordedCall[] = []
-  let threadTitleSettings = { autoNameFromFirstPrompt: false }
+  // The real manager persists this in BOSS's data store. Keep the fixture's
+  // equivalent in session storage so a renderer reload exercises that contract.
+  let threadTitleSettings = savedThreadTitleSettings()
   let sandboxSettings = { networkAccess: true }
   let nextThread = 1
   let nextFollowUp = 1
@@ -233,6 +259,7 @@ export function installE2EApi(boss: BossApi): void {
       case 'thread.title.settings.get': return threadTitleSettings
       case 'thread.title.settings.set':
         threadTitleSettings = { autoNameFromFirstPrompt: request.autoNameFromFirstPrompt }
+        e2eStorage()?.setItem(THREAD_TITLE_SETTINGS_KEY, JSON.stringify(threadTitleSettings))
         return threadTitleSettings
       case 'sandbox.settings.get': return sandboxSettings
       case 'sandbox.settings.set':
