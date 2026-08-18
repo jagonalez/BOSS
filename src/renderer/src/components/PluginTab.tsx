@@ -40,8 +40,15 @@ export function PluginTab({
       guest.setAttribute('src', pluginViewUrl(pluginId, viewId))
       guest.className = 'plugin-guest'
       pluginGuests.set(id, guest)
-      guest.addEventListener('did-fail-load', () => setFailed(true))
-      guest.addEventListener('did-finish-load', () => setFailed(false))
+      // A webview has no web contents until dom-ready, and reload() throws
+      // before that. The src attribute above already loads the page, so
+      // nothing needs to drive it until the guest says it is live.
+      const created = guest
+      created.addEventListener('dom-ready', () => {
+        created.bossReady = true
+      })
+      created.addEventListener('did-fail-load', () => setFailed(true))
+      created.addEventListener('did-finish-load', () => setFailed(false))
     }
 
     if (guest.parentElement !== host) host.appendChild(guest)
@@ -53,10 +60,26 @@ export function PluginTab({
 
   // A plugin that reloaded on disk, or was turned off and on, serves different
   // files under the same URL. Reloading the guest is what picks that up.
+  //
+  // Only on a later change, and only once the guest is live: on the first
+  // render the page is already loading from src, and reload() throws while the
+  // webview still has no web contents.
   const status = plugin?.status
+  const lastStatus = useRef(status)
   useEffect(() => {
-    if (status === 'ready') pluginGuests.get(id)?.reload()
+    const changed = lastStatus.current !== status
+    lastStatus.current = status
+    if (!changed || status !== 'ready') return
+    const guest = pluginGuests.get(id)
+    if (guest?.bossReady) guest.reload()
   }, [id, status])
+
+  // Guarded for the same reason as the effect above: the button is clickable
+  // while the page is still coming up.
+  const reloadGuest = (): void => {
+    const guest = pluginGuests.get(id)
+    if (guest?.bossReady) guest.reload()
+  }
 
   if (!pluginId || !viewId) {
     return <div className="workspace-unbound">This tab is not bound to a plugin view.</div>
@@ -73,7 +96,7 @@ export function PluginTab({
             {plugin.status === 'error' ? plugin.error || 'This plugin failed to start.' : plugin.status}
           </span>
         ) : null}
-        <button className="btn-ghost" onClick={() => pluginGuests.get(id)?.reload()} title="Reload this view">
+        <button className="btn-ghost" onClick={() => reloadGuest()} title="Reload this view">
           <ReloadIcon size={14} />
         </button>
       </div>

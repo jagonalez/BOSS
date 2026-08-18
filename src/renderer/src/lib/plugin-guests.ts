@@ -8,6 +8,9 @@ export interface PluginGuest extends HTMLElement {
   loadURL(url: string): Promise<void>
   reload(): void
   getURL(): string
+  /** Set by PluginTab once dom-ready has fired. A webview has no web contents
+   *  before then, so reload() and loadURL() throw if called earlier. */
+  bossReady?: boolean
 }
 
 /** A plugin view's address. One origin per plugin, so two plugins' pages cannot
