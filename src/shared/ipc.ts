@@ -20,8 +20,15 @@ export interface ServerInfo {
   healthy: boolean
 }
 
+/** Which releases this copy offers to install.
+ *
+ *  Beta exists because BOSS is built with BOSS: without it the only way to try
+ *  a change in the real app is to cut a full signed release by hand. */
+export type UpdateChannel = 'stable' | 'beta'
+
 export interface UpdateStatus {
   currentVersion: string
+  channel: UpdateChannel
   checking: boolean
   available: boolean
   latestVersion?: string
@@ -216,6 +223,7 @@ export const IpcChannels = {
   UpdateStatusGet: 'update:status',
   UpdateCheck: 'update:check',
   UpdateRestart: 'update:restart',
+  UpdateChannelSet: 'update:channel-set',
   UpdateChanged: 'update:changed'
 } as const
 

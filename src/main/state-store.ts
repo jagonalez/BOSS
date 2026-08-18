@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { UpdateChannel } from '@shared/ipc'
 
 interface BossState {
   projectPath?: string
@@ -8,6 +9,9 @@ interface BossState {
    *  directory once it has served a session there, so sourcing it from opencode
    *  hid freshly added projects and emptied the list when opencode was absent. */
   projects?: string[]
+  /** Which releases to offer. Absent means stable: someone who never chose a
+   *  channel should not be moved onto prereleases by an update. */
+  updateChannel?: UpdateChannel
 }
 
 function stateFile(): string {
