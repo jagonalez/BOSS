@@ -149,3 +149,49 @@ export function blocks(markdown: string): Block[] {
   else flushText()
   return out
 }
+
+export type AttentionKind = 'permission' | 'question' | 'completed' | 'error' | 'interrupted'
+
+export interface ThreadRow {
+  threadId: string
+  title?: string
+  backendId?: string
+  projectPath?: string
+  worktreeBranch?: string
+  running?: boolean
+  updatedAt?: number
+  attention?: { kind: AttentionKind; detail?: string }
+  lastRun?: { status?: string; toolCalls?: number }
+}
+
+/** What a row needs you to know, in the order a glance should find it. */
+export function attentionLabel(kind: AttentionKind): string {
+  switch (kind) {
+    case 'permission': return 'Needs approval'
+    case 'question': return 'Asked a question'
+    case 'error': return 'Failed'
+    case 'interrupted': return 'Stopped'
+    case 'completed': return 'Finished'
+  }
+}
+
+/** Attention first, then running, then most recent. A phone list is read from
+ *  the top and rarely scrolled, so what needs a decision has to be up there. */
+export function sortThreads(threads: ThreadRow[]): ThreadRow[] {
+  const rank = (t: ThreadRow): number => {
+    if (t.attention?.kind === 'permission' || t.attention?.kind === 'question') return 0
+    if (t.attention?.kind === 'error') return 1
+    if (t.running) return 2
+    if (t.attention) return 3
+    return 4
+  }
+  return [...threads].sort((a, b) => rank(a) - rank(b) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+}
+
+/** The project a thread works in, short enough for a phone row. */
+export function projectLabel(thread: ThreadRow): string {
+  const branch = thread.worktreeBranch
+  const project = thread.projectPath?.split('/').filter(Boolean).pop()
+  if (project && branch) return `${project} · ${branch}`
+  return project ?? branch ?? ''
+}

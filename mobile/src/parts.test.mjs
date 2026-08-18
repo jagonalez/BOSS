@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { blocks, summarise, textOf, toolKind, toolSummary } from './parts.ts'
+import { attentionLabel, blocks, projectLabel, sortThreads, summarise, textOf, toolKind, toolSummary } from './parts.ts'
 
 test('a tool is classified the way the desktop classifies it', () => {
   assert.equal(toolKind({ state: { input: { command: 'ls -la' } } }), 'command')
@@ -69,4 +69,43 @@ test('prose with no code is one block', () => {
 test('a fence with no language is still code', () => {
   const result = blocks('```\nplain\n```')
   assert.deepEqual(result, [{ kind: 'code', content: 'plain', language: undefined }])
+})
+
+test('threads needing a decision sort above everything else', () => {
+  const rows = [
+    { threadId: 'idle', updatedAt: 500 },
+    { threadId: 'running', running: true, updatedAt: 100 },
+    { threadId: 'asks', attention: { kind: 'permission' }, updatedAt: 1 },
+    { threadId: 'failed', attention: { kind: 'error' }, updatedAt: 400 },
+    { threadId: 'done', attention: { kind: 'completed' }, updatedAt: 300 }
+  ]
+  // A permission prompt outranks a thread that updated far more recently,
+  // because the phone list is read from the top and rarely scrolled.
+  assert.deepEqual(sortThreads(rows).map((t) => t.threadId), ['asks', 'failed', 'running', 'done', 'idle'])
+})
+
+test('threads of equal rank fall back to most recent', () => {
+  const rows = [
+    { threadId: 'older', updatedAt: 100 },
+    { threadId: 'newer', updatedAt: 900 }
+  ]
+  assert.deepEqual(sortThreads(rows).map((t) => t.threadId), ['newer', 'older'])
+})
+
+test('sorting does not mutate the array it was given', () => {
+  const rows = [{ threadId: 'a', updatedAt: 1 }, { threadId: 'b', attention: { kind: 'error' } }]
+  sortThreads(rows)
+  assert.equal(rows[0].threadId, 'a')
+})
+
+test('a row says which project and branch it works in', () => {
+  assert.equal(projectLabel({ threadId: '1', projectPath: '/Users/j/dev/BOSS', worktreeBranch: 'fix-x' }), 'BOSS · fix-x')
+  assert.equal(projectLabel({ threadId: '1', projectPath: '/Users/j/dev/BOSS' }), 'BOSS')
+  assert.equal(projectLabel({ threadId: '1' }), '')
+})
+
+test('every attention kind has wording a glance can read', () => {
+  for (const kind of ['permission', 'question', 'completed', 'error', 'interrupted']) {
+    assert.match(attentionLabel(kind), /^[A-Z]/)
+  }
 })
