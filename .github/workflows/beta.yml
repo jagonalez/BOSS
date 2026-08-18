@@ -1,0 +1,142 @@
+name: Beta release
+
+# Signed prereleases from main, so a change can be tried in the real app
+# without cutting a release by hand. Stable releases stay manual: scripts/release.sh.
+on:
+  workflow_dispatch:
+  schedule:
+    # 09:00 UTC — early morning US, so a night's merges are installable by the
+    # start of the day.
+    - cron: '0 9 * * *'
+
+concurrency:
+  group: beta
+  cancel-in-progress: false
+
+jobs:
+  beta:
+    runs-on: macos-latest
+    # Notarization waits on Apple's queue, which has run long.
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # A nightly with no new commits would publish a build identical to
+      # yesterday's, and every installed beta would download it again.
+      - name: Check for new commits
+        id: changed
+        run: |
+          last=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+            --json tagName,isPrerelease \
+            --jq 'map(select(.isPrerelease)) | .[0].tagName // ""')
+          if [ -z "$last" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A tag that no longer resolves (deleted release) should not stop a build.
+          if ! git rev-parse -q --verify "refs/tags/$last" >/dev/null; then
+            echo "run=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$(git log --oneline "$last"..HEAD)" ]; then
+            echo "No commits since $last; skipping."
+            echo "run=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=1" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        if: steps.changed.outputs.run == '1'
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+        if: steps.changed.outputs.run == '1'
+
+      # The same gates the stable release runs. A beta that fails them is not
+      # worth signing, and notarization is the slow part.
+      - run: npm run typecheck
+        if: steps.changed.outputs.run == '1'
+
+      - run: npm test
+        if: steps.changed.outputs.run == '1'
+
+      # Bundled binaries are gitignored, so the runner fetches them.
+      - run: npm run fetch:opencode
+        if: steps.changed.outputs.run == '1'
+
+      - run: npm run fetch:cua-driver
+        if: steps.changed.outputs.run == '1'
+
+      # Signing needs the Developer ID certificate in a keychain. A dedicated
+      # one is unlocked without a password prompt and dies with the runner.
+      - name: Import the signing certificate
+        if: steps.changed.outputs.run == '1'
+        env:
+          CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/build.keychain
+          PASS=$(uuidgen)
+          security create-keychain -p "$PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASS" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          # Without this, codesign blocks on a GUI prompt no one can answer.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$PASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN" | grep "Developer ID Application"
+
+      # A prerelease version is what makes this a beta: electron-builder reads
+      # the `-beta.N` suffix and writes beta-mac.yml instead of latest-mac.yml,
+      # and only a copy set to the beta channel asks for that file. run_number
+      # rises monotonically, so betas order correctly against each other.
+      - name: Set the beta version
+        if: steps.changed.outputs.run == '1'
+        id: version
+        run: |
+          base=$(node -p "require('./package.json').version.split('-')[0]")
+          version="${base}-beta.${{ github.run_number }}"
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "==> $version"
+
+      - name: Build, sign, notarize, and publish
+        if: steps.changed.outputs.run == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Marks the GitHub release as a prerelease, so it stays off the
+          # "latest release" the website links to and only a copy on the beta
+          # channel installs it. There is no CLI flag for this.
+          EP_PRE_RELEASE: true
+        # Publishes the dmg, the zip auto-update installs from, and the
+        # beta-mac.yml that tells an installed copy what exists.
+        run: npx electron-builder --mac --publish always
+
+      # An update only appears if the manifest shipped. Failing here rather
+      # than leaving a release the updater silently ignores.
+      - name: Check the release carries its update manifest
+        if: steps.changed.outputs.run == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          echo "$assets"
+          for want in beta-mac.yml .zip .dmg; do
+            echo "$assets" | grep -q -- "$want" || { echo "missing $want in $tag" >&2; exit 1; }
+          done

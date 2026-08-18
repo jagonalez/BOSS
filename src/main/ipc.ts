@@ -19,7 +19,7 @@ import type { SitesManager } from './sites'
 import type { UpdateChecker } from './updates'
 import type { BackendManager } from './backend/manager'
 import type { BackendRequest } from '@shared/backend'
-import type { AsrTranscribeRequest, TtsSpeakRequest } from '@shared/ipc'
+import type { AsrTranscribeRequest, TtsSpeakRequest, UpdateChannel } from '@shared/ipc'
 import type { ReviewManager } from './review-manager'
 import { projectCheckouts } from './project-identity'
 import { loadState, saveState } from './state-store'
@@ -330,6 +330,11 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.handle(IpcChannels.UpdateStatusGet, () => deps.updates.status())
   ipcMain.handle(IpcChannels.UpdateRestart, () => deps.updates.restart())
+  ipcMain.handle(IpcChannels.UpdateChannelSet, async (_e, channel: UpdateChannel) => {
+    const status = await deps.updates.setChannel(channel)
+    broadcast(IpcChannels.UpdateChanged, status)
+    return status
+  })
   ipcMain.handle(IpcChannels.UpdateCheck, async () => {
     const status = await deps.updates.check()
     broadcast(IpcChannels.UpdateChanged, status)

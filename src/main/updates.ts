@@ -2,7 +2,8 @@ import { app } from 'electron'
 import electronUpdater from 'electron-updater'
 
 const { autoUpdater } = electronUpdater
-import type { UpdateStatus } from '@shared/ipc'
+import type { UpdateChannel, UpdateStatus } from '@shared/ipc'
+import { loadState, saveState } from './state-store'
 
 const REPO = 'jagonalez/BOSS'
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
@@ -13,11 +14,29 @@ export class UpdateChecker {
   private wired = false
 
   constructor() {
-    this.cached = { currentVersion: app.getVersion(), checking: false, available: false, url: RELEASES_PAGE }
+    this.cached = {
+      currentVersion: app.getVersion(),
+      channel: loadState().updateChannel ?? 'stable',
+      checking: false,
+      available: false,
+      url: RELEASES_PAGE
+    }
   }
 
   status(): UpdateStatus {
     return this.cached
+  }
+
+  /** Move this copy between stable and beta.
+   *
+   *  Re-checks rather than waiting for the next launch: someone who just asked
+   *  for betas means now, and on the way back to stable the beta they are
+   *  running is newer than anything stable, so the banner must clear. */
+  async setChannel(channel: UpdateChannel): Promise<UpdateStatus> {
+    if (channel === this.cached.channel) return this.cached
+    saveState({ updateChannel: channel })
+    this.publish({ channel, available: false, ready: false, latestVersion: undefined, downloadPercent: undefined })
+    return this.check()
   }
 
   /** Told when a download progresses or finishes, since those arrive on their
@@ -79,6 +98,13 @@ export class UpdateChecker {
       return this.cached
     }
     this.wire()
+    // Set per check, not once at wiring: the channel can change while the app
+    // runs, and electron-updater reads these when the check is made.
+    const beta = this.cached.channel === 'beta'
+    autoUpdater.allowPrerelease = beta
+    // Picks beta-mac.yml over latest-mac.yml. A beta build's own channel would
+    // otherwise pin it to betas forever, leaving no way back to stable.
+    autoUpdater.channel = beta ? 'beta' : 'latest'
     try {
       await autoUpdater.checkForUpdates()
     } catch (error) {

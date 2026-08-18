@@ -16,6 +16,7 @@ import type {
   TerminalDataEvent,
   TerminalExitEvent,
   TtsSpeakRequest,
+  UpdateChannel,
   UpdateStatus
 } from './ipc'
 import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
@@ -119,6 +120,8 @@ export interface BossApi {
   onUpdateChanged(cb: (status: UpdateStatus) => void): () => void
   /** Apply a staged update now instead of at the next quit. */
   updateRestart(): Promise<void>
+  /** Switch between stable and beta releases, and re-check straight away. */
+  updateChannelSet(channel: UpdateChannel): Promise<UpdateStatus>
   /** A menu item was chosen. The menu names the action; the renderer runs it. */
   onMenuCommand(cb: (command: import('./ipc').MenuCommand) => void): () => void
 }

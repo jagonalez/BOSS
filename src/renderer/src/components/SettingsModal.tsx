@@ -8,12 +8,13 @@ import { OpenCode } from '../lib/opencode'
 import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
 import type { WorktreeLocation, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
+import type { UpdateChannel, UpdateStatus } from '@shared/ipc'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 import { McpSettings } from './McpSettings'
 import { MobileSettings } from './MobileSettings'
 import { ModelSelect, modelIsLocal } from './ModelSelect'
 
-type SettingsSection = 'agents' | 'connections' | 'mcp' | 'mobile' | 'collaboration' | 'worktrees' | 'appearance' | 'voice'
+type SettingsSection = 'agents' | 'connections' | 'mcp' | 'mobile' | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
 const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
   {
@@ -36,7 +37,8 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
     label: 'Personalize',
     items: [
       { id: 'appearance', label: 'Appearance' },
-      { id: 'voice', label: 'Voice' }
+      { id: 'voice', label: 'Voice' },
+      { id: 'updates', label: 'Updates' }
     ]
   }
 ]
@@ -73,10 +75,74 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   voice: {
     title: 'Voice',
     description: 'Configure spoken responses and preview the available voices.'
+  },
+  updates: {
+    title: 'Updates',
+    description: 'Choose which BOSS releases this copy installs.'
   }
 }
 
 const THEME_CATEGORIES = ['BOSS', 'Community', 'Accessibility'] as const
+
+/** Which releases this copy installs.
+ *
+ *  Beta is for people who build BOSS with BOSS: it carries whatever landed on
+ *  main last night, so a change can be tried in the real app without cutting a
+ *  release by hand. Its cost is that a bad night ships a bad build. */
+function UpdateSettings(): React.JSX.Element {
+  const [status, setStatus] = useState<UpdateStatus | null>(null)
+
+  useEffect(() => {
+    void window.boss.updateStatus().then(setStatus).catch(() => {})
+    return window.boss.onUpdateChanged(setStatus)
+  }, [])
+
+  const channel = status?.channel ?? 'stable'
+  return (
+    <div className="settings-group-stack">
+      <section className="settings-card">
+        <SettingsRow
+          title="Release channel"
+          description={
+            channel === 'beta'
+              ? 'Nightly builds from main. Signed and notarized, but less tested than a release.'
+              : 'Released versions only. This is the right choice unless you are working on BOSS itself.'
+          }
+        >
+          <Select
+            value={channel}
+            onChange={(event) => {
+              void window.boss.updateChannelSet(event.target.value as UpdateChannel).then(setStatus)
+            }}
+          >
+            <option value="stable">Stable</option>
+            <option value="beta">Beta</option>
+          </Select>
+        </SettingsRow>
+        <SettingsRow
+          title="This copy"
+          description={
+            status?.error
+              ? status.error
+              : status?.ready
+                ? `BOSS ${status.latestVersion} is staged and applies at the next quit.`
+                : status?.available
+                  ? `BOSS ${status.latestVersion} is available.`
+                  : 'Up to date.'
+          }
+        >
+          <span className="settings-row-hint">{status?.currentVersion ?? '—'}</span>
+          <Button
+            onClick={() => void window.boss.updateCheck().then(setStatus)}
+            disabled={status?.checking}
+          >
+            {status?.checking ? 'Checking…' : 'Check now'}
+          </Button>
+        </SettingsRow>
+      </section>
+    </div>
+  )
+}
 
 function providerIsLocal(provider: string, models: BackendModelDescriptor[], backendId: BackendId): boolean {
   return models.some((model) => (model.provider || backendId) === provider && modelIsLocal(model, backendId))
@@ -704,6 +770,8 @@ export function SettingsModal(): React.JSX.Element | null {
                 </section>
               </div>
             ) : null}
+
+            {section === 'updates' ? <UpdateSettings /> : null}
           </div>
         </main>
       </div>

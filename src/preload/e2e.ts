@@ -394,8 +394,8 @@ export function installE2EApi(boss: BossApi): void {
     sitesList: async () => [],
     onSitesChanged: () => () => {},
     sitesCfGet: async () => ({ configured: false }),
-    updateStatus: async () => ({ currentVersion: 'e2e', checking: false, available: false, url: '' }),
-    updateCheck: async () => ({ currentVersion: 'e2e', checking: false, available: false, url: '' }),
+    updateStatus: async () => ({ currentVersion: 'e2e', channel: 'stable', checking: false, available: false, url: '' }),
+    updateCheck: async () => ({ currentVersion: 'e2e', channel: 'stable', checking: false, available: false, url: '' }),
     onUpdateChanged: () => () => {},
     onMenuCommand: () => () => {}
   } satisfies Partial<BossApi>)
