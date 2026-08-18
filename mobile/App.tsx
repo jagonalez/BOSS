@@ -217,11 +217,6 @@ export default function App(): React.JSX.Element {
         </Pressable>
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      {/* Connection state, so a stall says which half is missing rather than
-          surfacing only as a request timeout. */}
-      <Text style={styles.status}>
-        {`socket ${connected ? 'open' : 'connecting'} · desktop ${desktopOnline ? 'online' : 'offline'}`}
-      </Text>
       <ThreadsScreen
         threads={threads}
         offline={!desktopOnline}
@@ -254,6 +249,5 @@ const styles = StyleSheet.create({
   back: { color: theme.accent, fontSize: 15 },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.faint },
   statusOk: { backgroundColor: theme.green },
-  error: { color: theme.red, fontSize: 13, paddingHorizontal: 14, paddingTop: 8 },
-  status: { color: theme.faint, fontSize: 11, paddingHorizontal: 14, paddingTop: 6 }
+  error: { color: theme.red, fontSize: 13, paddingHorizontal: 14, paddingTop: 8 }
 })

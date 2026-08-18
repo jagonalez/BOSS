@@ -3,6 +3,14 @@ app = "boss-relay"
 primary_region = "sjc"
 
 [build]
+  # Deploy from the REPOSITORY ROOT, not from this directory:
+  #
+  #   fly deploy . --config relay/fly.toml --dockerfile relay/Dockerfile
+  #
+  # fly takes the build context from deploy's first argument, and there is no
+  # fly.toml key for it. The image needs both relay/ and src/shared, because
+  # the relay serves the same phone page the desktop does, so a context of
+  # relay/ alone fails on "/relay/tsconfig.json": not found.
   dockerfile = "Dockerfile"
 
 [env]
