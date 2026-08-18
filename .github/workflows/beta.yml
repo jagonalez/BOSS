@@ -107,10 +107,11 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
           security find-identity -v -p codesigning "$KEYCHAIN" | grep "Developer ID Application"
 
-      # A prerelease version is what makes this a beta: electron-builder reads
-      # the `-beta.N` suffix and writes beta-mac.yml instead of latest-mac.yml,
-      # and only a copy set to the beta channel asks for that file. run_number
-      # rises monotonically, so betas order correctly against each other.
+      # The `-beta.N` suffix is what marks this a beta. The updater reads it
+      # from the release tag — for GitHub, electron-builder publishes one
+      # latest-mac.yml per release rather than a file per channel, and a copy
+      # only accepts a `-beta.N` tag when it is set to the beta channel.
+      # run_number rises monotonically, so betas order correctly.
       - name: Set the beta version
         if: steps.changed.outputs.run == '1'
         id: version
@@ -135,7 +136,7 @@ jobs:
         # `npm run dist` rather than electron-builder alone: it compiles first,
         # and it is the same script the stable release runs, so the two paths
         # cannot drift. Publishes the dmg, the zip auto-update installs from,
-        # and the beta-mac.yml that tells an installed copy what exists.
+        # and the latest-mac.yml that tells an installed copy what exists.
         run: npm run dist -- --mac --publish always
 
       # An update only appears if the manifest shipped. Failing here rather
@@ -148,6 +149,6 @@ jobs:
           tag="v${{ steps.version.outputs.version }}"
           assets=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
           echo "$assets"
-          for want in beta-mac.yml .zip .dmg; do
+          for want in latest-mac.yml .zip .dmg; do
             echo "$assets" | grep -q -- "$want" || { echo "missing $want in $tag" >&2; exit 1; }
           done

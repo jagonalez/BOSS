@@ -101,10 +101,15 @@ export class UpdateChecker {
     // Set per check, not once at wiring: the channel can change while the app
     // runs, and electron-updater reads these when the check is made.
     const beta = this.cached.channel === 'beta'
+    // For GitHub this is the whole mechanism. electron-builder writes one
+    // latest-mac.yml per release rather than a file per channel, and the
+    // updater walks the releases feed picking a tag: allowPrerelease decides
+    // whether a `-beta.N` tag is eligible. Setting `channel` here would send it
+    // looking for a beta-mac.yml that is never published.
     autoUpdater.allowPrerelease = beta
-    // Picks beta-mac.yml over latest-mac.yml. A beta build's own channel would
-    // otherwise pin it to betas forever, leaving no way back to stable.
-    autoUpdater.channel = beta ? 'beta' : 'latest'
+    // Leaving beta means going back to a version below the beta in hand, and
+    // the updater refuses a lower version unless told otherwise.
+    autoUpdater.allowDowngrade = !beta
     try {
       await autoUpdater.checkForUpdates()
     } catch (error) {
