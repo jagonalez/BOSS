@@ -13,6 +13,7 @@ import type {
   Todo
 } from '@shared/opencode'
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
+import type { FanOutWorker } from '@shared/fan-out'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
@@ -184,6 +185,8 @@ export const OpenCode = {
     backendRequest<SessionInfo>({ type: 'thread.clone', threadId, backendId, instruction, options }),
   delegate: (threadId: string, backendId: BackendId, instruction: string, placement: DelegatePlacement, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.delegate', threadId, backendId, instruction, placement, options }),
+  fanOut: (threadId: string, task: string, workers: FanOutWorker[], options?: BackendMessageOptions) =>
+    backendRequest<SessionInfo[]>({ type: 'thread.fanOut', threadId, task, workers, options }),
   forkIntoWorktree: (threadId: string, instruction?: string, options?: BackendMessageOptions) =>
     backendRequest<SessionInfo>({ type: 'thread.worktree.create', threadId, instruction, options }),
   listWorktrees: (threadId?: string) =>

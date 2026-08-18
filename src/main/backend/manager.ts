@@ -32,6 +32,7 @@ import type { ImageStore } from '../image-store'
 import type { AgentToolImage } from '@shared/qa'
 import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadResult, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 import { extractSummary, lastAssistantText } from '@shared/thread-result'
+import { fanOutTitle, fanOutViolation, type FanOutWorker } from '@shared/fan-out'
 import {
   budgetViolation,
   EMPTY_TASK_POLICY_STATE,
@@ -1823,6 +1824,97 @@ export class BackendManager {
     return this.sessionGet(created.id)
   }
 
+  /** Run one task as several competing attempts, each in its own worktree.
+   *
+   *  Every attempt gets the same prompt and an isolated branch, so their diffs
+   *  can be compared and one kept. Isolation is not optional here: attempts
+   *  edit the same files by design, and sharing a checkout would leave them
+   *  overwriting each other rather than competing.
+   *
+   *  Workers start one at a time. `git worktree add` takes the repository index
+   *  lock, so creating several at once fails on lock contention rather than
+   *  running faster. The agents themselves still run concurrently once started.
+   */
+  async fanOut(
+    threadId: string,
+    task: string,
+    workers: FanOutWorker[],
+    options?: BackendMessageOptions
+  ): Promise<SessionInfo[]> {
+    const instruction = task.trim()
+    if (!instruction) throw new Error('Describe the task to fan out.')
+    const violation = fanOutViolation(workers)
+    if (violation) throw new Error(violation)
+    const source = this.binding(threadId)
+    if (!this.worktrees) throw new Error('Git worktrees are not available.')
+    if (source.projectId === 'global' || !source.projectPath) {
+      throw new Error('Projectless chats cannot fan out, because each attempt needs its own worktree.')
+    }
+
+    const packet = await this.contextPacket(threadId, [
+      'You are one of several workers attempting the same task independently.',
+      'Other workers are solving it in their own branches. Do not coordinate with them.',
+      'Complete the task on your own and report what you changed and how you verified it.',
+      `Task: ${instruction}`
+    ].join('\n'))
+
+    const created: SessionInfo[] = []
+    // Prompts go out only once every worktree that is going to exist does, so a
+    // slow first agent cannot hold up the rest of the fan-out.
+    const dispatch = (): Promise<unknown> => Promise.all(created.map((session, index) => {
+      const backendId = workers[index].backendId
+      const mode = DEFINITIONS[backendId].modes.find((entry) => entry.id === 'auto')?.id
+        ?? DEFINITIONS[backendId].modes[0]?.id
+      return this.sendMessage(
+        session.id,
+        [{ type: 'text', text: packet }],
+        withBackendDefaults(this.defaultModel(backendId), options, mode)
+      ).catch((error) => {
+        // One agent failing to start does not invalidate the others.
+        this.setThreadAttention(this.binding(session.id), 'error', this.errorDetail(error))
+      })
+    }))
+
+    for (const [index, worker] of workers.entries()) {
+      const title = fanOutTitle(instruction, worker, index)
+      const worktree = await this.worktrees.create({
+        projectId: source.projectId,
+        projectPath: source.projectPath,
+        sourcePath: source.executionPath || source.projectPath,
+        title,
+        ownerThreadId: undefined
+      })
+      try {
+        const session = await this.sessionCreateInScope(
+          worker.backendId,
+          { projectId: source.projectId, projectPath: source.projectPath, executionPath: worktree.path },
+          title,
+          { kind: 'delegate', sourceThreadId: threadId, sourceBackendId: source.backendId },
+          worktree
+        )
+        await this.worktrees.setOwner(worktree.id, session.id)
+        const binding = this.binding(session.id)
+        binding.worktree = { ...worktree, ownerThreadId: session.id }
+        this.save()
+        this.reportSetupFailure(session.id, worktree.setupError, worker.backendId)
+        created.push(this.session(binding))
+      } catch (error) {
+        await this.worktrees.remove(worktree.id).catch(() => {})
+        // Give the attempts that did start their task before reporting the
+        // failure. They are real work in real worktrees, and leaving them idle
+        // and prompt-less would be worse than the partial failure itself.
+        if (!created.length) throw error
+        await dispatch()
+        throw new Error(
+          `Started ${created.length} of ${workers.length} attempts, then failed: ${this.errorDetail(error) ?? 'unknown error'}`
+        )
+      }
+    }
+
+    await dispatch()
+    return Promise.all(created.map((session) => this.sessionGet(session.id)))
+  }
+
   /** Give a thread its own checkout, keeping the conversation.
    *
    *  Forking makes a new thread and hands it a summary; this moves the one you
@@ -2182,6 +2274,7 @@ export class BackendManager {
       case 'thread.policy.set': return this.setTaskPolicy(request.threadId, request.policy)
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction, request.options)
       case 'thread.delegate': return this.delegate(request.threadId, request.backendId, request.instruction, request.placement, request.options)
+      case 'thread.fanOut': return this.fanOut(request.threadId, request.task, request.workers, request.options)
       case 'thread.worktree.create': return this.forkIntoWorktree(request.threadId, request.instruction, request.options)
       case 'worktree.list': {
         if (!this.worktrees) return []

@@ -8,6 +8,7 @@ import { disposeBrowseGuest } from './browse-guests'
 import { resolveMode, resolveModel, resolveVariant } from './thread-defaults'
 import { pruneDeletedThreadCaches } from './thread-caches'
 import { startMicCapture } from './mic'
+import type { FanOutWorker } from '@shared/fan-out'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
@@ -1243,6 +1244,35 @@ export async function cloneThreadToBackend(threadId: string, backendId: BackendI
     if (!openSessionInWorkspace(session.id)) selectSession(session.id)
   } catch (error) {
     setSessionError(threadId, errorSummary(error))
+  }
+}
+
+/** Start several attempts at one task, each in its own worktree.
+ *
+ *  Returns how many started. A partial result is still useful — the attempts
+ *  that ran are real work — so this reports the count rather than a boolean.
+ */
+export async function fanOutThread(
+  threadId: string,
+  task: string,
+  workers: FanOutWorker[]
+): Promise<number> {
+  try {
+    const sessions = await OpenCode.fanOut(threadId, task, workers)
+    for (const [index, session] of sessions.entries()) {
+      const backendId = workers[index]?.backendId ?? session.backendId
+      if (backendId) applyBackendDefaults(session.id, backendId)
+      upsertSessionMeta(session.id, {
+        kind: 'delegate',
+        projectPath: session.projectPath ?? appStore.getState().projectPath,
+        forkedFrom: { sessionId: threadId }
+      })
+    }
+    await refreshSessions()
+    return sessions.length
+  } catch (error) {
+    setSessionError(threadId, errorSummary(error))
+    return 0
   }
 }
 
