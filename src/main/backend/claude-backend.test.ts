@@ -156,11 +156,75 @@ test('a question with no options still reaches the user', () => {
   assert.deepEqual(questions?.[0].options, [])
 })
 
+/** The request BOSS answers in the tests below, as Claude Code sends it. */
+const askRequest = (questions: unknown[]) => parseClaudePermission({
+  type: 'control_request',
+  request_id: 'ask-1',
+  request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions } }
+})!
+
+const twoQuestions = [
+  {
+    question: 'Which repository?',
+    header: 'Repo',
+    options: [{ label: 'ralf', description: 'the page in your browser' }, { label: 'autofix' }],
+    multiSelect: false
+  },
+  {
+    question: 'Which checks should run?',
+    header: 'Checks',
+    options: [{ label: 'a' }, { label: 'b' }, { label: 'c' }],
+    multiSelect: true
+  }
+]
+
+const answered = (questions: unknown[], answers: string[][]) =>
+  ((claudeQuestionResponse('ask-1', askRequest(questions), answers).response as Record<string, unknown>)
+    .response as Record<string, unknown>)
+
 test('answers go back as the tool result Claude is waiting for', () => {
-  const response = claudeQuestionResponse('ask-1', [['ralf'], ['a', 'b']])
-  const inner = (response.response as Record<string, unknown>).response as Record<string, unknown>
+  const inner = answered(twoQuestions, [['ralf'], ['a', 'b']])
   assert.equal(inner.behavior, 'allow', 'a question is answered, not denied')
-  assert.deepEqual(inner.updatedInput, { questions: [{ answers: ['ralf'] }, { answers: ['a', 'b'] }] })
+  assert.deepEqual(inner.updatedInput, {
+    questions: twoQuestions,
+    // Keyed by question text, and one string per question: several selections
+    // join with a comma rather than staying a list.
+    answers: { 'Which repository?': 'ralf', 'Which checks should run?': 'a, b' }
+  })
+})
+
+test('an answered question keeps the fields its schema requires', () => {
+  // Claude Code validates the returned input against the AskUserQuestion
+  // schema. Rebuilding the array from the answers alone dropped question,
+  // header, and options, and the user's choice came back as a validation
+  // error instead of an answer.
+  const inner = answered(twoQuestions, [['ralf'], ['a', 'b']])
+  const questions = (inner.updatedInput as { questions: Array<Record<string, unknown>> }).questions
+  assert.equal(questions.length, 2)
+  for (const question of questions) {
+    assert.equal(typeof question.question, 'string')
+    assert.ok((question.question as string).length > 0, 'the question text survives')
+    assert.equal(typeof question.header, 'string')
+    assert.ok((question.header as string).length > 0, 'the header survives')
+    assert.ok(Array.isArray(question.options) && question.options.length > 0, 'the options survive')
+  }
+})
+
+test('a question the user skipped is left unanswered', () => {
+  // Fewer answers than questions, and an empty selection, both mean no choice
+  // was made. An empty string would read to Claude as a real answer.
+  const inner = answered(twoQuestions, [[]])
+  assert.deepEqual((inner.updatedInput as { answers: unknown }).answers, {})
+  const first = answered(twoQuestions, [['ralf']])
+  assert.deepEqual((first.updatedInput as { answers: unknown }).answers, { 'Which repository?': 'ralf' })
+})
+
+test('extra answers cannot invent a question', () => {
+  // The pairing is by index into the questions Claude sent, so a stray answer
+  // has nothing to attach to and is dropped.
+  const inner = answered([twoQuestions[0]], [['ralf'], ['a']])
+  assert.deepEqual((inner.updatedInput as { answers: unknown }).answers, { 'Which repository?': 'ralf' })
+  assert.equal((inner.updatedInput as { questions: unknown[] }).questions.length, 1)
 })
 
 test('a streamed block keeps its id when the finished message lands', () => {
