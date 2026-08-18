@@ -12,12 +12,8 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-<<<<<<< Updated upstream
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
-import type { FanOutWorker } from '@shared/fan-out'
-=======
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, SandboxSettings, ThreadCreationScope, ThreadTitleSettings } from '@shared/backend'
->>>>>>> Stashed changes
+import type { FanOutWorker } from '@shared/fan-out'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
