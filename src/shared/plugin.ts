@@ -54,6 +54,22 @@ export interface PluginView {
   tools: string[]
 }
 
+/**
+ * The project a tool call is being made for. BOSS supplies this on every call —
+ * from the agent and from a view alike — so a plugin that stores per project
+ * cannot end up with the two disagreeing about which project they are in.
+ *
+ * A plugin is free to ignore it, and stays global if it does. `projectId` is
+ * "global" when no project is open, so it is always safe to use as a directory
+ * name.
+ */
+export interface PluginProject {
+  /** Stable id derived from the git common directory, or "global". */
+  projectId: string
+  /** Absolute path of the project's main worktree. Empty when global. */
+  projectPath: string
+}
+
 /** Result of the agent scaffolding a plugin. */
 export interface PluginScaffold {
   id: string

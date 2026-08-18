@@ -216,7 +216,69 @@ test('namespaces a served plugin\'s tools and calls them', async () => {
 
   const result = await manager.callAgentTool('plugin_tasks_add', { title: 'x' })
   assert.equal(result, JSON.stringify({ ok: 'add' }))
-  assert.deepEqual(calls, ['add:{"title":"x"}'])
+  // BOSS adds the project to every call. With no project source it is global.
+  assert.deepEqual(calls, ['add:{"title":"x","project":{"projectId":"global","projectPath":""}}'])
+})
+
+test('supplies the current project on every call', async () => {
+  const { root, stateFile } = await fixture()
+  await writePlugin(root, 'tasks', { ...manifestFor('tasks'), server: { command: './server.mjs' } })
+  const calls: string[] = []
+  let current = { projectId: 'project_one', projectPath: '/repos/one' }
+  const manager = new PluginManager(
+    root,
+    stateFile,
+    undefined,
+    () => fakeClient(['add'], calls) as never,
+    () => current
+  )
+  await manager.start()
+
+  await manager.callTool('tasks', 'add', { title: 'a' })
+  assert.match(calls[0], /"projectId":"project_one"/)
+
+  // Read per call, not captured: switching project has to follow.
+  current = { projectId: 'project_two', projectPath: '/repos/two' }
+  await manager.callTool('tasks', 'add', { title: 'b' })
+  assert.match(calls[1], /"projectId":"project_two"/)
+})
+
+test('a caller cannot spoof the project', async () => {
+  const { root, stateFile } = await fixture()
+  await writePlugin(root, 'tasks', { ...manifestFor('tasks'), server: { command: './server.mjs' } })
+  const calls: string[] = []
+  const manager = new PluginManager(
+    root,
+    stateFile,
+    undefined,
+    () => fakeClient(['add'], calls) as never,
+    () => ({ projectId: 'project_real', projectPath: '/repos/real' })
+  )
+  await manager.start()
+
+  // BOSS sets project last, so a passed one is overwritten rather than honoured.
+  await manager.callTool('tasks', 'add', { project: { projectId: 'attacker', projectPath: '/tmp' } })
+  assert.match(calls[0], /"projectId":"project_real"/)
+  assert.doesNotMatch(calls[0], /attacker/)
+})
+
+test('falls back to global when the project source throws', async () => {
+  const { root, stateFile } = await fixture()
+  await writePlugin(root, 'tasks', { ...manifestFor('tasks'), server: { command: './server.mjs' } })
+  const calls: string[] = []
+  const manager = new PluginManager(
+    root,
+    stateFile,
+    undefined,
+    () => fakeClient(['add'], calls) as never,
+    () => {
+      throw new Error('no project yet')
+    }
+  )
+  await manager.start()
+
+  await manager.callTool('tasks', 'add', {})
+  assert.match(calls[0], /"projectId":"global"/)
 })
 
 test('callTool refuses a tool the plugin does not declare', async () => {

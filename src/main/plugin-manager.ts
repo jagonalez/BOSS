@@ -1,7 +1,7 @@
 import { cp, mkdir, readFile, readdir, writeFile, rm } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { BackendRequest } from '../shared/backend'
-import type { PluginManifest, PluginScaffold, PluginStatus, PluginView } from '../shared/plugin'
+import type { PluginManifest, PluginProject, PluginScaffold, PluginStatus, PluginView } from '../shared/plugin'
 // The explicit extension keeps the source executable under Node's type-stripping test runner.
 // @ts-expect-error Application builds use bundler resolution.
 import { PLUGIN_TOOL_PREFIX, manifestProblem, pluginToolName, validPluginId } from './plugin-rules.ts'
@@ -15,6 +15,11 @@ export type PluginClientFactory = (
   args: string[],
   env: Record<string, string>
 ) => McpClient
+
+/** Where the current project comes from. Injected rather than reaching into
+ *  BackendManager, which would couple this class to the backend and make it
+ *  untestable. */
+export type PluginProjectSource = () => PluginProject
 
 interface LivePlugin {
   client: McpClient
@@ -61,14 +66,33 @@ export class PluginManager {
   /** Bundled example plugins, copied in on first run only. */
   private readonly bundledRoot?: string
   private readonly createClient?: PluginClientFactory
+  private readonly projectSource?: PluginProjectSource
 
   // Assigned in the body rather than declared as parameter properties: Node's
   // type-stripping test runner cannot parse those, and this class has tests.
-  constructor(root: string, stateFile: string, bundledRoot?: string, createClient?: PluginClientFactory) {
+  constructor(
+    root: string,
+    stateFile: string,
+    bundledRoot?: string,
+    createClient?: PluginClientFactory,
+    projectSource?: PluginProjectSource
+  ) {
     this.root = root
     this.stateFile = stateFile
     this.bundledRoot = bundledRoot
     this.createClient = createClient
+    this.projectSource = projectSource
+  }
+
+  /** The project a call is being made for. Falls back to global, which is also
+   *  what BOSS reports when no project is open, so a plugin never has to handle
+   *  a missing value. */
+  private project(): PluginProject {
+    try {
+      return this.projectSource?.() ?? { projectId: 'global', projectPath: '' }
+    } catch {
+      return { projectId: 'global', projectPath: '' }
+    }
   }
 
   /**
@@ -405,6 +429,9 @@ export class PluginManager {
         definitions.push({
           name: pluginToolName(plugin.manifest.id, tool.name),
           description: `[${plugin.manifest.name}] ${tool.description ?? tool.name}`.slice(0, 1_000),
+          // The agent is not told about "project": BOSS sets it on every call,
+          // so advertising it would invite the model to pass a project of its
+          // own choosing and defeat the point.
           inputSchema: tool.inputSchema ?? { type: 'object', additionalProperties: true }
         })
       }
@@ -427,7 +454,15 @@ export class PluginManager {
     if (!live.tools.some((tool) => tool.name === toolName)) {
       throw new Error(`The "${pluginId}" plugin has no tool "${toolName}".`)
     }
-    const result = await live.client.callTool(toolName, args)
+    // BOSS supplies the project, on every call, from the agent and from a view
+    // alike. Neither caller has to know or agree — which is the point: a plugin
+    // storing per project cannot end up with its two halves in different ones.
+    // Set last so a caller cannot spoof it by passing its own "project".
+    const withProject = {
+      ...(args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {}),
+      project: this.project()
+    }
+    const result = await live.client.callTool(toolName, withProject)
     const text = result.content
       .map((item) => (typeof item.text === 'string' ? item.text : JSON.stringify(item)))
       .filter(Boolean)

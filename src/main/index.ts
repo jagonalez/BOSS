@@ -23,6 +23,7 @@ import { AutomationManager } from './automation-manager'
 import { McpHub } from './mcp-hub'
 import { PluginManager } from './plugin-manager'
 import { StdioMcpClient } from './mcp-client'
+import { projectScope } from './project-identity'
 import { PLUGIN_PARTITION, PLUGIN_SCHEME_PRIVILEGES, installPluginViews } from './plugin-views'
 import { WebAccess } from './web-access'
 import { RelayClient } from './relay-client'
@@ -141,7 +142,13 @@ const plugins = new PluginManager(
   app.isPackaged
     ? join(process.resourcesPath ?? '', 'plugins')
     : join(app.getAppPath(), 'resources', 'plugins'),
-  (command, args, env) => new StdioMcpClient(command, args, env)
+  (command, args, env) => new StdioMcpClient(command, args, env),
+  // Read per call rather than captured: the focused project changes while BOSS
+  // runs, and a plugin should follow it.
+  () => {
+    const path = backendMgr.currentProject
+    return path ? { projectId: projectScope(path).projectId, projectPath: path } : { projectId: 'global', projectPath: '' }
+  }
 )
 backendMgr.attachPlugins(plugins)
 threadBus.attachPlugins(plugins)
