@@ -7985,6 +7985,12 @@ select:hover {
   color: var(--yellow);
 }
 
+/* A backend that runs but is older than BOSS was checked against. Yellow, not
+   red: the backend still works, so this is advice rather than a failure. */
+.backend-version-warning {
+  color: var(--yellow);
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
