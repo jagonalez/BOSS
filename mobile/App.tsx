@@ -111,9 +111,16 @@ export default function App(): React.JSX.Element {
         setDesktopOnline(state.desktopOnline)
       },
       onPaired: (next) => {
+        // Do not load here: the replacement socket is still opening, so a
+        // request would be rejected before it could be sent. onReady fires
+        // once the hello is out.
         setCredentials(next)
         setError(undefined)
+      },
+      onReady: () => {
+        setError(undefined)
         void refreshThreads()
+        if (openRef.current) void refreshMessages(openRef.current)
       }
     })
     relay.current = connection
@@ -122,7 +129,9 @@ export default function App(): React.JSX.Element {
       setLoaded(true)
       if (!saved) return
       setCredentials(saved)
-      void connection.start(saved).then(() => refreshThreads())
+      // onReady drives the load for both paths — startup and pairing — so the
+      // request is never issued against a socket that is still opening.
+      void connection.start(saved)
     })
 
     // Coming back from the background often leaves a frozen socket that never

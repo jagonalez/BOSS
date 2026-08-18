@@ -82,6 +82,8 @@ export interface RelayHandlers {
   onGap(): void
   onStateChange(state: RelayState): void
   onPaired(credentials: RelayCredentials): void
+  /** The socket is open and the hello is sent: safe to issue requests. */
+  onReady(): void
 }
 
 export interface RelayState {
@@ -185,6 +187,10 @@ export class RelayConnection {
         await this.send({ kind: 'resume', since: this.lastSeq, token: current.token })
       }
       this.handlers.onStateChange(this.state)
+      // Only now can a request be sent. onPaired fires while the replacement
+      // socket is still opening, so anything issued there would be rejected
+      // outright with "Connecting…" and never retried.
+      if (current.token) this.handlers.onReady()
     }
 
     socket.onmessage = (raw) => {
