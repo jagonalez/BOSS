@@ -919,7 +919,11 @@ export async function refreshMcpConnections(): Promise<void> {
 
 export async function refreshPlugins(): Promise<void> {
   try {
-    appStore.setState({ plugins: await OpenCode.pluginList() })
+    // Kept an array whatever comes back. A backend that does not answer this
+    // request yet resolves undefined, and storing that in place of the empty
+    // list took down every component that reads it.
+    const installed = await OpenCode.pluginList()
+    appStore.setState({ plugins: Array.isArray(installed) ? installed : [] })
   } catch {
     /* Plugins may still be starting during the first renderer refresh. */
   }
