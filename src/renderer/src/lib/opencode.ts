@@ -12,8 +12,12 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
+<<<<<<< Updated upstream
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, ThreadCreationScope } from '@shared/backend'
 import type { FanOutWorker } from '@shared/fan-out'
+=======
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, SandboxSettings, ThreadCreationScope, ThreadTitleSettings } from '@shared/backend'
+>>>>>>> Stashed changes
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
@@ -172,6 +176,12 @@ export const OpenCode = {
     backendRequest<void>({ type: 'thread.compact', threadId: id, model }),
   backendModels: (threadId?: string, backendId?: BackendId) =>
     backendRequest<BackendModelDescriptor[]>({ type: 'thread.models', threadId, backendId }),
+  threadTitleSettings: () => backendRequest<ThreadTitleSettings>({ type: 'thread.title.settings.get' }),
+  setThreadTitleSettings: (autoNameFromFirstPrompt: boolean) =>
+    backendRequest<ThreadTitleSettings>({ type: 'thread.title.settings.set', autoNameFromFirstPrompt }),
+  sandboxSettings: () => backendRequest<SandboxSettings>({ type: 'sandbox.settings.get' }),
+  setSandboxSettings: (networkAccess: boolean) =>
+    backendRequest<SandboxSettings>({ type: 'sandbox.settings.set', networkAccess }),
   supervision: () => backendRequest<SupervisionSnapshot>({ type: 'supervision.snapshot' }),
   searchTranscripts: (query: string, limit = 40) =>
     backendRequest<TranscriptSearchResult[]>({ type: 'supervision.search', query, limit }),

@@ -54,3 +54,32 @@ test('the global project path is only a fallback', () => {
     'a request for one thread should not read the global path'
   )
 })
+
+test('network access follows the setting, and plan mode stays offline', () => {
+  // Hardcoding networkAccess: false blocked `gh pr create` for every Codex
+  // thread. The write sandbox now reads the setting; read-only does not.
+  const send = source.slice(source.indexOf('async sendMessage('), source.indexOf('async steer('))
+  assert.ok(
+    send.includes('networkAccess: this.sandboxSettings.networkAccess'),
+    'the workspace-write sandbox should read the setting'
+  )
+  assert.ok(
+    /readOnly',\s*networkAccess: false/.test(send),
+    'plan mode should stay offline regardless of the setting'
+  )
+  assert.ok(
+    !/type: 'workspaceWrite'[\s\S]*?networkAccess: false/.test(send),
+    'the write sandbox must not hardcode networkAccess: false'
+  )
+})
+
+test('the sandbox setting arrives before the turn that uses it', () => {
+  // The policy goes out with each turn, so a setter that never stored the
+  // value would silently leave every thread on the default.
+  assert.ok(source.includes('setSandbox(settings: SandboxSettings): void'), 'expected a setSandbox method')
+  const setter = source.slice(source.indexOf('setSandbox(settings: SandboxSettings)'))
+  assert.ok(
+    setter.includes('this.sandboxSettings = { ...settings }'),
+    'setSandbox should store the settings the turn reads'
+  )
+})

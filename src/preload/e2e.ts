@@ -179,6 +179,8 @@ export function installE2EApi(boss: BossApi): void {
     }]
   }
   let calls: RecordedCall[] = []
+  let threadTitleSettings = { autoNameFromFirstPrompt: false }
+  let sandboxSettings = { networkAccess: true }
   let nextThread = 1
   let nextFollowUp = 1
   const eventListeners = new Set<(data: string) => void>()
@@ -228,6 +230,14 @@ export function installE2EApi(boss: BossApi): void {
       case 'backend.defaults.set':
         defaults = structuredClone(request.defaults)
         return undefined
+      case 'thread.title.settings.get': return threadTitleSettings
+      case 'thread.title.settings.set':
+        threadTitleSettings = { autoNameFromFirstPrompt: request.autoNameFromFirstPrompt }
+        return threadTitleSettings
+      case 'sandbox.settings.get': return sandboxSettings
+      case 'sandbox.settings.set':
+        sandboxSettings = { networkAccess: request.networkAccess }
+        return sandboxSettings
       case 'backend.bin.get': return {}
       case 'backend.bin.set': return request.path ? { [request.backendId]: request.path } : {}
       // Main stops the server and returns the descriptors; nothing about a

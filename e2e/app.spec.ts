@@ -64,6 +64,24 @@ test('persists backend, model, permission, and thinking defaults through the UI'
   await expect(row.locator('label').filter({ hasText: 'Thinking' }).getByRole('combobox')).toHaveValue('high')
 })
 
+test('keeps local thread auto-naming opt-in through settings', async ({ appPage }) => {
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Agent defaults' }).click()
+  const autoName = appPage.getByRole('checkbox', { name: 'Auto-name threads' })
+  await expect(autoName).not.toBeChecked()
+  await autoName.check()
+  expect((await lastBackendCall(appPage, 'thread.title.settings.set')).request).toEqual({
+    type: 'thread.title.settings.set',
+    autoNameFromFirstPrompt: true
+  })
+
+  await appPage.getByRole('button', { name: 'Done' }).click()
+  await appPage.reload()
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Agent defaults' }).click()
+  await expect(appPage.getByRole('checkbox', { name: 'Auto-name threads' })).toBeChecked()
+})
+
 test('a backend server can be restarted from settings', async ({ appPage }) => {
   // A server reads its credentials once, at startup. Signing in to another
   // account leaves it using the account that signed out, and this is the way

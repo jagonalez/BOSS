@@ -1,4 +1,5 @@
 import type { BackendId, BackendMessageOptions, BackendModeId } from '@shared/backend'
+import type { SandboxSettings } from '@shared/sandbox'
 import type { ThreadBusConnection, ThreadBusToolCall } from '@shared/thread-bus'
 
 export interface BackendInfo {
@@ -65,6 +66,9 @@ export interface Backend {
   sessionsList(): Promise<SessionInfo[]>
   sessionCreate(title?: string, directory?: string): Promise<SessionInfo>
   setSessionDirectory?(id: string, directory: string): void
+  /** Tell a sandboxing backend what the sandbox may do. Optional: only
+   *  backends that run the agent in a sandbox implement it. */
+  setSandbox?(settings: SandboxSettings): void
   sessionDelete(id: string): Promise<void>
   sessionRename(id: string, title: string): Promise<SessionInfo>
   sessionGet(id: string): Promise<SessionInfo>
