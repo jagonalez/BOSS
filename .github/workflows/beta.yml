@@ -51,6 +51,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # electron-builder rebuilds node-pty through node-gyp, and @electron/rebuild
+      # pins node-gyp to 9.x, which still imports distutils. Python removed that
+      # in 3.12, and the runner ships a newer one — so pin an interpreter that
+      # still has it rather than fight the dependency.
+      - uses: actions/setup-python@v5
+        if: steps.changed.outputs.run == '1'
+        with:
+          python-version: '3.11'
+
       - uses: actions/setup-node@v4
         if: steps.changed.outputs.run == '1'
         with:
