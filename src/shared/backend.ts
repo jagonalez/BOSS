@@ -193,6 +193,7 @@ export type BackendRequest =
   | { type: 'thread.policy.set'; threadId: string; policy: import('./task-policy').TaskPolicy }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }
   | { type: 'thread.delegate'; threadId: string; backendId: BackendId; instruction: string; placement: DelegatePlacement; options?: BackendMessageOptions }
+  | { type: 'thread.fanOut'; threadId: string; task: string; workers: import('./fan-out').FanOutWorker[]; options?: BackendMessageOptions }
   | { type: 'thread.worktree.create'; threadId: string; messageId?: string; instruction?: string; options?: BackendMessageOptions }
   | { type: 'worktree.list'; threadId?: string }
   | { type: 'worktree.settings.get' }

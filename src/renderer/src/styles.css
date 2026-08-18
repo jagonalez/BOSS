@@ -2519,6 +2519,12 @@ body.workspace-dragging .workspace-tab-slot {
   border-bottom-left-radius: 0;
 }
 
+.delegate-attempt-fixed {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .command-session-result {
   overflow: hidden;
   margin-top: 2px;

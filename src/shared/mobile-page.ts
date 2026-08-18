@@ -117,6 +117,8 @@ input, textarea { font-size: 16px !important; }
   width: 100%; margin: 14px 0; padding: 12px; font: inherit; text-align: center;
   background: var(--inset); color: var(--text); border: 1px solid var(--line); border-radius: 10px;
 }
+.card .sub.attention { color: var(--warn, #d98324); font-weight: 600; }
+.section { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin: 16px 4px 6px; }
 .empty { color: var(--faint); text-align: center; padding: 40px 0; }
 .err { color: var(--red); font-size: 13px; margin-top: 8px; }
 .back { color: var(--accent); background: none; border: none; font-size: 15px; padding: 4px 8px 4px 0; }
@@ -150,6 +152,7 @@ var pairError = '';
 var view = { name: 'threads' };
 var threads = [];
 var supervision = { threads: [], totals: {} };
+var threadTitles = {};
 var automations = { automations: [], runs: [] };
 var messages = {};
 var permissions = {};
@@ -319,26 +322,75 @@ function stepsOf(message) {
   return tools;
 }
 
+// Why a thread wants the user, or '' when it does not. The phone is for
+// answering these, so they sort above everything else.
+function attentionReason(t) {
+  var a = t.attention || {};
+  if (a.kind === 'permission') return 'Needs permission';
+  if (a.kind === 'question') return 'Needs an answer';
+  if (a.kind === 'error') return a.detail || 'Run failed';
+  if (a.kind === 'interrupted') return 'Run was interrupted';
+  if (a.kind === 'completed') return a.detail || 'Finished while you were away';
+  var last = t.lastRun || {};
+  if (last.status === 'error') return 'Last run failed';
+  return '';
+}
+
+function threadCard(t, reason) {
+  var running = Boolean(t.running || busy[t.threadId]);
+  var last = t.lastRun || {};
+  var state = last.status === 'error' ? 'failed' : last.status === 'interrupted' ? 'interrupted' : running ? 'working' : 'idle';
+  var result = t.result || {};
+  var meta = esc(t.backendId || '');
+  if (result.changedFiles) meta += ' · ' + result.changedFiles + ' file' + (result.changedFiles === 1 ? '' : 's');
+  else if (last.toolCalls) meta += ' · ' + last.toolCalls + ' tools';
+  // A worker names the thread it came from, so a nested attempt is not read as
+  // unrelated work on a screen too narrow to indent.
+  var origin = t.lineage && t.lineage.sourceThreadId ? threadTitles[t.lineage.sourceThreadId] : '';
+  return '<button class="card" onclick="openThread(\\'' + t.threadId + '\\')">' +
+    '<div class="row"><span class="dot ' + (running ? 'busy' : '') + '"></span>' +
+    '<div style="flex:1;min-width:0"><div class="title">' + esc(t.title || 'Untitled') + '</div>' +
+    '<div class="sub">' + meta + '</div>' +
+    (origin ? '<div class="sub">from ' + esc(origin) + '</div>' : '') +
+    (reason ? '<div class="sub attention">' + esc(reason) + '</div>' : '') +
+    (result.summary ? '<div class="sub">' + esc(result.summary) + '</div>' : '') +
+    '</div>' +
+    '<span class="badge ' + esc(last.status || '') + '">' + esc(state) + '</span>' +
+    '<span class="sub">' + timeAgo(t.updatedAt) + '</span></div></button>';
+}
+
 function renderThreads() {
-  var sorted = (supervision.threads || []).slice().sort(function (a, b) {
+  var all = (supervision.threads || []).slice().sort(function (a, b) {
     return (b.updatedAt || 0) - (a.updatedAt || 0);
   });
+  threadTitles = {};
+  all.forEach(function (t) { threadTitles[t.threadId] = t.title || 'Untitled'; });
+
+  var needsMe = [];
+  var rest = [];
+  all.forEach(function (t) {
+    var reason = attentionReason(t);
+    if (reason) needsMe.push({ thread: t, reason: reason });
+    else rest.push(t);
+  });
+
+  if (!all.length) return '<div class="empty">No threads yet.</div>';
+
   var totals = supervision.totals || {};
-  var html = '<div class="card"><div class="title">Task activity</div><div class="sub">' +
+  var html = '';
+  // What needs you comes first and says how many, because that is the question
+  // the phone exists to answer.
+  if (needsMe.length) {
+    html += '<div class="section">' + needsMe.length + ' need' + (needsMe.length === 1 ? 's' : '') + ' you</div>';
+    needsMe.forEach(function (item) { html += threadCard(item.thread, item.reason); });
+  }
+  html += '<div class="card"><div class="title">Task activity</div><div class="sub">' +
     (totals.runs || 0) + ' runs · ' + (totals.toolCalls || 0) + ' tools' +
     (typeof totals.tokens === 'number' ? ' · ' + totals.tokens.toLocaleString() + ' reported tokens' : '') + '</div></div>';
-  if (!sorted.length) html = '<div class="empty">No threads yet.</div>';
-  sorted.forEach(function (t) {
-    var running = Boolean(t.running || busy[t.threadId]);
-    var last = t.lastRun || {};
-    var state = last.status === 'error' ? 'failed' : last.status === 'interrupted' ? 'interrupted' : running ? 'working' : 'idle';
-    html += '<button class="card" onclick="openThread(\\'' + t.threadId + '\\')">' +
-      '<div class="row"><span class="dot ' + (running ? 'busy' : '') + '"></span>' +
-      '<div style="flex:1;min-width:0"><div class="title">' + esc(t.title || 'Untitled') + '</div>' +
-      '<div class="sub">' + esc(t.backendId || '') + (last.toolCalls ? ' · ' + last.toolCalls + ' tools' : '') + '</div></div>' +
-      '<span class="badge ' + esc(last.status || '') + '">' + esc(state) + '</span>' +
-      '<span class="sub">' + timeAgo(t.updatedAt) + '</span></div></button>';
-  });
+  if (rest.length) {
+    if (needsMe.length) html += '<div class="section">Everything else</div>';
+    rest.forEach(function (t) { html += threadCard(t, ''); });
+  }
   return html;
 }
 

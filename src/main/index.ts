@@ -19,6 +19,7 @@ import { BackendManager } from './backend/manager'
 import { createBackend } from './backend/factory'
 import { ThreadBus } from './thread-bus'
 import { WorktreeManager } from './worktree-manager'
+import { NotificationRouter } from './notification-router'
 import { AutomationManager } from './automation-manager'
 import { McpHub } from './mcp-hub'
 import { WebAccess } from './web-access'
@@ -112,11 +113,17 @@ backendMgr.attachBinaryOverrides(backendBins)
 const threadBus = new ThreadBus(backendMgr)
 backendMgr.attachImageStore(images)
 backendMgr.attachThreadBus(threadBus)
+// One router for every channel. Both the backend manager and automations feed
+// it, so a thread event and an automation event reach the same places.
+const notifications = new NotificationRouter()
+notifications.onForeground(() => BrowserWindow.getAllWindows().some((window) => window.isFocused()))
+backendMgr.attachNotifications(notifications)
 const automations = new AutomationManager({
   stateFile: join(app.getPath('userData'), 'automations.json'),
   runsFile: join(app.getPath('userData'), 'automation-runs.json')
 }, backendMgr, worktrees)
 backendMgr.attachAutomations(automations)
+automations.attachNotifications(notifications)
 const mcpHub = new McpHub(join(app.getPath('userData'), 'mcp-connections.json'))
 backendMgr.attachMcpHub(mcpHub)
 threadBus.attachMcpHub(mcpHub)
