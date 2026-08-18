@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
+import type { BackendId } from '@shared/backend'
 import { abortRun, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, steerFollowUp, toggleAsr, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
@@ -238,7 +239,7 @@ function PermissionCard({ permission }: { permission: PermissionRequest }): Reac
   )
 }
 
-function QuestionCard({ question }: { question: QuestionRequest }): React.JSX.Element | null {
+function QuestionCard({ question, backendId }: { question: QuestionRequest; backendId: BackendId }): React.JSX.Element | null {
   if (!question) return null
   const [selections, setSelections] = useState<string[][]>(() => question.questions.map(() => []))
   const [custom, setCustom] = useState<string[]>(() => question.questions.map(() => ''))
@@ -270,7 +271,7 @@ function QuestionCard({ question }: { question: QuestionRequest }): React.JSX.El
     <div className="question-card">
       <div className="question-card-head">
         <span className="question-card-dot" />
-        <span className="question-card-title">opencode is asking you</span>
+        <span className="question-card-title">{BACKEND_SHORT_LABELS[backendId]} is asking you</span>
         <span className="question-card-waiting">waiting for your answer</span>
       </div>
       {question.questions.map((q, i) => (
@@ -1467,7 +1468,7 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
             </div>
           ) : null}
           {permission ? <PermissionCard permission={permission} /> : null}
-          {question ? <QuestionCard question={question} /> : null}
+          {question ? <QuestionCard question={question} backendId={backendId} /> : null}
         </div>
       </div>
       {msgCtx && (

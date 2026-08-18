@@ -357,7 +357,8 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
     }
     case 'session.error': {
       const sid = props.sessionID as string | undefined
-      const msg = errorSummary(props.error ?? props.message ?? 'opencode error')
+      // Every backend raises session.error, so the fallback must not name one.
+      const msg = errorSummary(props.error ?? props.message ?? 'The agent reported an error')
       if (!sid) return { lastError: msg }
       return { lastErrorBySession: { ...(state as { lastErrorBySession?: Record<string, string> }).lastErrorBySession, [sid]: msg } }
     }
