@@ -79,3 +79,29 @@ test('base64url round-trips the way the wire format needs', () => {
   assert.deepEqual(Array.from(unb64u(b64u(bytes))), Array.from(bytes))
   assert.doesNotMatch(b64u(bytes), /[+/=]/, 'base64url must not contain +, / or =')
 })
+
+test('a reconnect after pairing must use the ROOM secret, not the pairing one', async () => {
+  // The bug this guards: connect() captured `credentials` in a local, so a
+  // reconnect scheduled before pairing completed kept deriving keys from the
+  // spent pairing secret. The phone rejoined the right room — the id comes
+  // from the QR code — and then sealed every frame with a key the desktop
+  // could not open. It looked exactly like "Connecting…" forever.
+  const pairingSecret = 'one-time-pairing-secret'
+  const roomSecret = 'the-long-lived-room-secret'
+
+  const pairingKey = sha256(new TextEncoder().encode('boss-relay-key:' + pairingSecret))
+  const roomKey = sha256(new TextEncoder().encode('boss-relay-key:' + roomSecret))
+  assert.notDeepEqual(Array.from(pairingKey), Array.from(roomKey), 'the two keys must differ')
+
+  // What the desktop sends after pairing is sealed with the ROOM key.
+  const iv = webcrypto.getRandomValues(new Uint8Array(12))
+  const fromDesktop = gcm(roomKey, iv).encrypt(new TextEncoder().encode('{"kind":"ping"}'))
+
+  // A phone still holding the pairing key sees nothing at all.
+  assert.throws(() => gcm(pairingKey, iv).decrypt(fromDesktop),
+    'a stale pairing key must fail loudly here rather than silently in the app')
+  assert.deepEqual(
+    JSON.parse(new TextDecoder().decode(gcm(roomKey, iv).decrypt(fromDesktop))),
+    { kind: 'ping' }
+  )
+})

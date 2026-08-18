@@ -152,19 +152,27 @@ export class RelayConnection {
     if (!credentials || this.closing) return
     if (this.socket && this.socket.readyState <= 1) return
 
+    // relayUrl is the one field pairing never replaces, so the checked local
+    // is safe here. Everything else must be read live — see onopen below.
     const url = credentials.relayUrl.replace(/^http/, 'ws')
     const socket = new WebSocket(url)
     this.socket = socket
 
     socket.onopen = async () => {
-      this.key = deriveKey(credentials.secret)
+      // Read this.credentials rather than the value captured above: pairing
+      // replaces it with the room secret, and a reconnect scheduled before
+      // that would otherwise keep deriving keys from the spent pairing
+      // secret and seal every frame with a key the desktop cannot open.
+      const current = this.credentials
+      if (!current) return
+      this.key = deriveKey(current.secret)
       socket.send(
         JSON.stringify({
           type: 'hello',
           side: 'phone',
-          deviceId: credentials.deviceId ?? deriveDeviceId(credentials.secret),
-          peerId: credentials.peerId,
-          proof: credentials.joinProof ?? deriveJoinProof(credentials.secret),
+          deviceId: current.deviceId ?? deriveDeviceId(current.secret),
+          peerId: current.peerId,
+          proof: current.joinProof ?? deriveJoinProof(current.secret),
           v: 1
         })
       )
@@ -172,8 +180,8 @@ export class RelayConnection {
       this.ready = true
       if (this.pendingClaim) {
         await this.send({ kind: 'claim', secret: this.pendingClaim, label: 'iPhone' })
-      } else if (credentials.token) {
-        await this.send({ kind: 'resume', since: this.lastSeq, token: credentials.token })
+      } else if (current.token) {
+        await this.send({ kind: 'resume', since: this.lastSeq, token: current.token })
       }
       this.handlers.onStateChange(this.state)
     }
