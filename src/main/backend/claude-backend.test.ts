@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
 import { claudeExitError, claudeMessageContent, claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeResultError, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol.ts'
@@ -190,4 +192,39 @@ test('a message with no thinking still ids its text', () => {
   // findIndex returns -1 when there is none, which must not match a real index.
   assert.equal(claudeStreamedPartId('msg-1', 'text', 0, 0, -1), 'msg-1-text')
   assert.equal(claudeStreamedPartId('msg-1', 'tool_use', 1, 0, -1), 'msg-1-tool_use-1')
+})
+
+/** Claude imports @shared as a value, an alias only the bundler resolves, so
+ *  the class cannot be constructed here. Reading the source holds the wiring in
+ *  place: the risk is the refusal going back to a prose string, and that is
+ *  visible in the text. */
+const backendSource = readFileSync(join(import.meta.dirname, 'claude-backend.ts'), 'utf8')
+
+test('a send that arrives while Claude still holds its turn is refused as busy', () => {
+  // Claude frees its turn slot at the result, a moment after main clears its
+  // own busy flag on idle. A message sent in that gap passes main's check and
+  // reaches the backend. Described in prose, the refusal looked like an
+  // unrelated failure: the renderer queues only what it recognises as busy, so
+  // it dropped the message and the text the user had typed was gone.
+  const start = backendSource.indexOf('async sendMessage(')
+  assert.ok(start > 0, 'expected a sendMessage method')
+  const guard = backendSource.slice(start, backendSource.indexOf('const record =', start))
+  assert.ok(
+    /this\.processes\.has\(sessionId\)\)\s*throw new Error\(THREAD_BUSY_ERROR\)/.test(guard),
+    'the busy refusal must throw THREAD_BUSY_ERROR so the renderer queues the message'
+  )
+  assert.ok(
+    !/already working on this thread/.test(backendSource.slice(start, start + 400)),
+    'the refusal must not be a prose string the renderer cannot classify'
+  )
+})
+
+test('a refused message is never half-recorded', () => {
+  // The guard runs before the transcript echo, so a message the backend would
+  // not accept leaves no user bubble behind for a later reload to keep.
+  const start = backendSource.indexOf('async sendMessage(')
+  assert.ok(
+    backendSource.indexOf('THREAD_BUSY_ERROR', start) < backendSource.indexOf('this.upsert(sessionId', start),
+    'the busy guard must precede the transcript record'
+  )
 })
