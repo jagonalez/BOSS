@@ -4,14 +4,22 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
-    // The phone page lives in ../src/shared so the desktop and the relay serve
-    // one copy. rootDir covers both trees; the relay entry is dist/relay/src/server.js.
-    "rootDir": "..",
+    // One tree. The phone page is copied into src/shared by `npm run sync`
+    // rather than imported from ../src/shared: spanning two roots made the
+    // emitted layout depend on where the build ran, so the container produced
+    // a different one from the local build and the deploy died on startup.
+    "rootDir": "src",
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "../src/shared/mobile-page.ts", "../src/shared/pwa-assets.ts"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "src/**/*.test.ts",
+    // Superseded by src/shared/identity.ts, which the desktop, the relay and
+    // the phone all share. Two copies of verification logic is how the last
+    // deploy broke; one copy is the point.
+    "src/verify.ts"
+  ]
 }
