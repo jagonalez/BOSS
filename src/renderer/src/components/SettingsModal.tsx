@@ -467,12 +467,19 @@ export function SettingsModal(): React.JSX.Element | null {
                         className={`settings-backend ${defaultBackend === backend.id ? 'active' : ''}`}
                         disabled={!backend.available}
                         onClick={() => void setEngine(backend.id)}
-                        title={backend.available ? backend.description : backend.unavailableReason}
+                        title={backend.available ? backend.versionWarning || backend.description : backend.unavailableReason}
                       >
                         <BackendBadge backendId={backend.id} />
                         <span>
                           <strong>{backend.label}</strong>
-                          <small>{backend.available ? backend.version || 'Available' : backend.unavailableReason}</small>
+                          {/* The warning replaces the version here rather than
+                              sitting beside it: it already names the version,
+                              and this line only has room for one of them. */}
+                          <small className={backend.available && backend.versionWarning ? 'backend-version-warning' : undefined}>
+                            {backend.available
+                              ? backend.versionWarning || backend.version || 'Available'
+                              : backend.unavailableReason}
+                          </small>
                         </span>
                         {defaultBackend === backend.id ? <em>Default</em> : null}
                       </button>
@@ -594,6 +601,12 @@ export function SettingsModal(): React.JSX.Element | null {
                           <div className="settings-runtime-copy">
                             <h2>{backend.label}</h2>
                             <small>{backend.available ? backend.version || 'CLI available' : backend.unavailableReason}</small>
+                            {/* This row is where someone comes to repoint a
+                                binary, so the warning sits under the version
+                                rather than replacing it. */}
+                            {backend.available && backend.versionWarning ? (
+                              <small className="backend-version-warning">{backend.versionWarning}</small>
+                            ) : null}
                             {backend.command ? (
                               <BackendBinaryPath
                                 backend={{ ...backend, command: backend.command }}

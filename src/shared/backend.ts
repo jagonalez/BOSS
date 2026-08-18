@@ -56,6 +56,9 @@ export interface BackendDescriptor {
   version?: string
   command?: string
   unavailableReason?: string
+  /** Set when the backend runs but its version is older than the one BOSS was
+   *  checked against. Advisory: the backend is still available. */
+  versionWarning?: string
   capabilities: BackendCapabilities
   modes: BackendModeDescriptor[]
 }

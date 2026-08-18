@@ -49,6 +49,7 @@ import {
   type TaskPolicyState
 } from '@shared/task-policy'
 import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
+import { backendVersionWarning } from '@shared/backend-version'
 
 interface ThreadBinding {
   id: string
@@ -1241,6 +1242,12 @@ export class BackendManager {
         healthy: this.started.has(id) ? info.healthy : probe.available,
         version: info.version || probe.version,
         unavailableReason: probe.reason,
+        // Only worth asking once the CLI actually ran: an absent binary is
+        // already reported through unavailableReason, and saying both would
+        // blame the version for a missing install.
+        versionWarning: probe.available
+          ? backendVersionWarning(id, info.version || probe.version)
+          : undefined,
         capabilities: definition.capabilities,
         modes: definition.modes
       }
