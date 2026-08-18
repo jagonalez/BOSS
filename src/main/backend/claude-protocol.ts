@@ -157,8 +157,20 @@ export function parseClaudeQuestions(request: ClaudePermissionRequest): ClaudeQu
   return questions.length ? questions : undefined
 }
 
-/** Give Claude the user's answers, as the result of the tool it called. */
-export function claudeQuestionResponse(requestId: string, answers: string[][]): Record<string, unknown> {
+/** Give Claude the user's answers, as the result of the tool it called.
+ *
+ *  Claude Code validates the returned input against the AskUserQuestion
+ *  schema, which still requires every question to carry its question, header,
+ *  and options. So the questions travel back exactly as they arrived and the
+ *  answers ride beside them, keyed by question text. Replacing the array with
+ *  bare answer objects failed that check, and the user's choice was reported
+ *  to the model as a configuration error instead of an answer. */
+export function claudeQuestionResponse(
+  requestId: string,
+  pending: Pick<ClaudePermissionRequest, 'input'>,
+  answers: string[][]
+): Record<string, unknown> {
+  const questions = Array.isArray(pending.input.questions) ? pending.input.questions : []
   return {
     type: 'control_response',
     response: {
@@ -168,10 +180,28 @@ export function claudeQuestionResponse(requestId: string, answers: string[][]): 
         behavior: 'allow',
         // Claude reads the tool result, so the answers go back as the input it
         // will see rather than as a permission decision.
-        updatedInput: { questions: answers.map((choices) => ({ answers: choices })) }
+        updatedInput: { ...pending.input, questions, answers: claudeQuestionAnswers(questions, answers) }
       }
     }
   }
+}
+
+/** Pair each answer with the question it answers, by that question's text.
+ *
+ *  Position is what BOSS collects and question text is what Claude reads, so
+ *  the two are matched by index here. A question with no answer is left out
+ *  rather than sent as an empty string, which would read as a real choice.
+ *  Several selections join with a comma: the field holds one string per
+ *  question, not a list. */
+export function claudeQuestionAnswers(questions: unknown[], answers: string[][]): Record<string, string> {
+  const paired: Record<string, string> = {}
+  questions.forEach((entry, index) => {
+    const text = entry && typeof entry === 'object' ? (entry as { question?: unknown }).question : undefined
+    const choices = answers[index]
+    if (typeof text !== 'string' || !text || !choices?.length) return
+    paired[text] = choices.join(', ')
+  })
+  return paired
 }
 
 export function claudePermissionResponse(

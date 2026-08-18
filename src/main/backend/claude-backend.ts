@@ -592,7 +592,7 @@ export class ClaudeBackend implements Backend {
     const process = this.awaiting(sessionId, requestId)
     const pending = process?.permissions.get(requestId)
     if (!process || !pending) throw new Error('Claude Code is no longer waiting for this answer.')
-    writeControl(process.child, claudeQuestionResponse(requestId, answers))
+    writeControl(process.child, claudeQuestionResponse(requestId, pending, answers))
     process.permissions.delete(requestId)
     this.emit({ type: 'question.replied', sessionID: sessionId, requestID: requestId, answers })
   }
