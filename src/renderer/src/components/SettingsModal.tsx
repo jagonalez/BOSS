@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { projectName } from './CommandCenter'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, SandboxSettings, ThreadTitleSettings } from '@shared/backend'
 import type { WorktreeLocation, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
+import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { UpdateChannel, UpdateStatus } from '@shared/ipc'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 import { McpSettings } from './McpSettings'
@@ -658,16 +660,35 @@ export function SettingsModal(): React.JSX.Element | null {
             {section === 'collaboration' ? (
               <div className="settings-group-stack">
                 <section className="settings-card settings-card-list">
-                  <SettingsRow title="Agent access" description="Scoped to this project. OpenCode, Pi, Codex CLI, and Claude Code threads can use the thread tools.">
+                  <SettingsRow title="Agent access" description="Applies to every project without its own setting below. OpenCode, Pi, Codex CLI, and Claude Code threads can use the thread tools.">
                   <Select
-                    value={threadBus?.policy ?? 'off'}
-                    onChange={(event) => void setThreadBusPolicy(event.target.value as 'off' | 'read' | 'collaborate')}
+                    value={threadBus?.defaultPolicy ?? 'off'}
+                    onChange={(event) => void setThreadBusDefaultPolicy(event.target.value as CollaborationPolicy)}
                   >
                     <option value="off">Off</option>
                     <option value="read">Read-only</option>
                     <option value="collaborate">Read and send</option>
                   </Select>
                   </SettingsRow>
+                  {threadBus?.projectId && threadBus.projectId !== 'global' ? (
+                    <SettingsRow
+                      title={`This project: ${projectName(threadBus.projectPath)}`}
+                      description={threadBus.source === 'default' ? 'Following the setting above.' : 'Set for this project only.'}
+                    >
+                    <Select
+                      value={threadBus.source === 'default' ? 'default' : threadBus.policy}
+                      onChange={(event) => void setThreadBusPolicy(
+                        event.target.value === 'default' ? null : event.target.value as CollaborationPolicy,
+                        threadBus.projectId
+                      )}
+                    >
+                      <option value="default">Use default</option>
+                      <option value="off">Off</option>
+                      <option value="read">Read-only</option>
+                      <option value="collaborate">Read and send</option>
+                    </Select>
+                    </SettingsRow>
+                  ) : null}
                   <SettingsRow title="Recent agent messages" description={
                     <>
                       {threadBus?.messages.length
@@ -680,6 +701,31 @@ export function SettingsModal(): React.JSX.Element | null {
                   ) : null}
                   </SettingsRow>
                 </section>
+                {threadBus?.overrides.length ? (
+                  <section className="settings-card settings-card-list">
+                    <div className="settings-section-title">Projects with their own setting</div>
+                    {threadBus.overrides.map((override) => (
+                      <SettingsRow
+                        key={override.projectId}
+                        title={projectName(override.projectPath)}
+                        description={override.projectPath || 'Path not known until this project is opened again.'}
+                      >
+                      <Select
+                        value={override.policy}
+                        onChange={(event) => void setThreadBusPolicy(
+                          event.target.value === 'default' ? null : event.target.value as CollaborationPolicy,
+                          override.projectId
+                        )}
+                      >
+                        <option value="default">Use default</option>
+                        <option value="off">Off</option>
+                        <option value="read">Read-only</option>
+                        <option value="collaborate">Read and send</option>
+                      </Select>
+                      </SettingsRow>
+                    ))}
+                  </section>
+                ) : null}
               </div>
             ) : null}
 

@@ -15,6 +15,7 @@ import type {
   ThreadBusThread
 } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { policyOverrides, policySource, resolvePolicy } from '@shared/collaboration-policy'
 import { projectScope } from './project-identity'
 import type { QaTools } from './qa-tools'
 import { MCP_TOOL_PREFIX } from '@shared/mcp'
@@ -26,9 +27,18 @@ interface LegacyThreadBusState {
   messages: Array<Omit<ThreadBusMessage, 'projectId'>>
 }
 
-interface StoredThreadBusState {
+interface LegacyProjectPolicyState {
   version: 2
   policies: Record<string, CollaborationPolicy>
+  messages: ThreadBusMessage[]
+}
+
+interface StoredThreadBusState {
+  version: 3
+  /** Applied to every project without an entry in `policies`. */
+  defaultPolicy: CollaborationPolicy
+  policies: Record<string, CollaborationPolicy>
+  projectPaths: Record<string, string>
   messages: ThreadBusMessage[]
 }
 
@@ -87,6 +97,10 @@ function booleanArg(value: unknown, key: string, fallback: boolean): boolean {
 
 export class ThreadBus {
   private readonly policies: Record<string, CollaborationPolicy> = {}
+  /** Last known path per overridden project, so settings can name a project
+   *  the user has not opened in this session. */
+  private readonly projectPaths: Record<string, string> = {}
+  private defaultPolicy: CollaborationPolicy = 'off'
   private messages: ThreadBusMessage[] = []
   private server: Server | null = null
   private token = ''
@@ -129,15 +143,34 @@ export class ThreadBus {
 
   private load(): void {
     try {
-      const state = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredThreadBusState | LegacyThreadBusState
+      const state = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredThreadBusState | LegacyProjectPolicyState | LegacyThreadBusState
+      if (state.version === 3) {
+        this.defaultPolicy = state.defaultPolicy ?? 'off'
+        Object.assign(this.policies, state.policies)
+        Object.assign(this.projectPaths, state.projectPaths)
+        this.messages = Array.isArray(state.messages) ? state.messages.slice(-MAX_MESSAGES) : []
+        return
+      }
       if (state.version === 2) {
+        // Version 2 had no default, so every project fell back to 'off'.
+        // Keeping the default at 'off' preserves each project's effective
+        // policy across the upgrade.
         Object.assign(this.policies, state.policies)
         this.messages = Array.isArray(state.messages) ? state.messages.slice(-MAX_MESSAGES) : []
+        // Version 2 kept no paths, so recover what the messages remember. An
+        // overridden project with no message stays unnamed until it is next
+        // set, which the settings list handles.
+        for (const message of this.messages) {
+          if (message.projectId && message.projectPath) this.projectPaths[message.projectId] = message.projectPath
+        }
+        this.save()
         return
       }
       if (state.version === 1) {
         for (const [path, policy] of Object.entries(state.policies)) {
-          this.policies[projectScope(path).projectId] = policy
+          const scope = projectScope(path)
+          this.policies[scope.projectId] = policy
+          if (scope.projectPath) this.projectPaths[scope.projectId] = scope.projectPath
         }
         this.messages = Array.isArray(state.messages)
           ? state.messages.slice(-MAX_MESSAGES).map((message) => {
@@ -154,8 +187,10 @@ export class ThreadBus {
 
   private save(): void {
     const state: StoredThreadBusState = {
-      version: 2,
+      version: 3,
+      defaultPolicy: this.defaultPolicy,
       policies: this.policies,
+      projectPaths: this.projectPaths,
       messages: this.messages.slice(-MAX_MESSAGES)
     }
     try {
@@ -166,11 +201,27 @@ export class ThreadBus {
   }
 
   policy(projectId: string): CollaborationPolicy {
-    return this.policies[projectId] ?? 'off'
+    return resolvePolicy(this.policies, this.defaultPolicy, projectId)
   }
 
-  setPolicy(projectId: string, projectPath: string, policy: CollaborationPolicy): ThreadBusSnapshot {
-    this.policies[projectId] = policy
+  /** Set the policy for one project. Passing null drops the override, so the
+   *  project follows the default again. */
+  setPolicy(projectId: string, projectPath: string, policy: CollaborationPolicy | null): ThreadBusSnapshot {
+    if (policy === null) {
+      delete this.policies[projectId]
+      delete this.projectPaths[projectId]
+    } else {
+      this.policies[projectId] = policy
+      // Recorded so the settings list can name an overridden project the user
+      // has not opened in this session.
+      if (projectPath) this.projectPaths[projectId] = projectPath
+    }
+    this.save()
+    return this.publish(projectId, projectPath || this.projectPaths[projectId] || '')
+  }
+
+  setDefaultPolicy(projectId: string, projectPath: string, policy: CollaborationPolicy): ThreadBusSnapshot {
+    this.defaultPolicy = policy
     this.save()
     return this.publish(projectId, projectPath)
   }
@@ -187,6 +238,9 @@ export class ThreadBus {
       projectId,
       projectPath,
       policy: this.policy(projectId),
+      defaultPolicy: this.defaultPolicy,
+      source: policySource(this.policies, projectId),
+      overrides: policyOverrides(this.policies, this.projectPaths),
       threads: this.host.threadList(projectId),
       messages,
       toolBackends: ['opencode', 'pi', 'codex', 'claude']

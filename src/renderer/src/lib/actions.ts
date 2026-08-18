@@ -918,9 +918,17 @@ export async function refreshAutomations(): Promise<void> {
   }
 }
 
-export async function setThreadBusPolicy(policy: CollaborationPolicy): Promise<void> {
+export async function setThreadBusPolicy(policy: CollaborationPolicy | null, projectId: string): Promise<void> {
   try {
-    appStore.setState({ threadBus: await OpenCode.setThreadBusPolicy(policy) })
+    appStore.setState({ threadBus: await OpenCode.setThreadBusPolicy(policy, projectId) })
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+  }
+}
+
+export async function setThreadBusDefaultPolicy(policy: CollaborationPolicy): Promise<void> {
+  try {
+    appStore.setState({ threadBus: await OpenCode.setThreadBusDefaultPolicy(policy) })
   } catch (error) {
     appStore.setState({ lastError: errorSummary(error) })
   }

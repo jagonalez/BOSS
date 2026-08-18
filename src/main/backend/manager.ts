@@ -1710,6 +1710,16 @@ export class BackendManager {
     return binding ? this.threadBusInfo(binding) : undefined
   }
 
+  /** Readable path for a project id, so a policy row can name its project.
+   *  Empty when no open thread belongs to it; the thread bus then keeps the
+   *  path it already recorded. */
+  private projectPathFor(projectId: string): string {
+    for (const binding of this.bindings.values()) {
+      if (binding.projectId === projectId && binding.projectPath) return binding.projectPath
+    }
+    return ''
+  }
+
   threadInfo(threadId: string): ThreadBusThread | undefined {
     const binding = this.bindings.get(threadId)
     return binding ? this.threadBusInfo(binding) : undefined
@@ -2426,11 +2436,24 @@ export class BackendManager {
       }
       case 'thread.bus.policy': {
         if (!this.threadBus) throw new Error('Thread collaboration is not available.')
+        // A project id names its target outright. Threads run in many projects
+        // at once, so the app's current project is not a safe stand-in: it
+        // silently wrote the policy onto whichever project was opened last.
+        if (request.projectId) {
+          const known = this.projectPathFor(request.projectId)
+          return this.threadBus.setPolicy(request.projectId, known, request.policy)
+        }
+        const binding = request.threadId ? this.binding(request.threadId) : undefined
+        if (!binding) throw new Error('Choose which project this policy applies to.')
+        return this.threadBus.setPolicy(binding.projectId, binding.projectPath, request.policy)
+      }
+      case 'thread.bus.default-policy': {
+        if (!this.threadBus) throw new Error('Thread collaboration is not available.')
         const binding = request.threadId ? this.binding(request.threadId) : undefined
         const scope = binding
           ? { projectId: binding.projectId, projectPath: binding.projectPath }
           : this.currentScope
-        return this.threadBus.setPolicy(scope.projectId, scope.projectPath, request.policy)
+        return this.threadBus.setDefaultPolicy(scope.projectId, scope.projectPath, request.policy)
       }
       case 'thread.bus.clear-failures': {
         if (!this.threadBus) throw new Error('Thread collaboration is not available.')
