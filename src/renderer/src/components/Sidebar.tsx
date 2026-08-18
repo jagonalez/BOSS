@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { createPortal } from 'react-dom'
 import { useStore, appStore } from '../state/AppState'
 import type { SessionInfo } from '@shared/opencode'
+import type { ChangeRequestSummary } from '@shared/review'
 import type { Workspace, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import type { OwnedResource } from '../lib/workspaces'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, findGroup, resourcesByThread, walkGroups } from '../lib/workspaces'
@@ -28,7 +29,7 @@ import {
   showPage,
   toggleArchive
 } from '../lib/actions'
-import { ChatIcon, ChevronIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+import { ChatIcon, ChevronIcon, ExternalIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -40,6 +41,10 @@ interface CtxMenu {
   y: number
   project?: string
   session?: SessionInfo
+  /** The pull request open on the session's worktree branch, if its checkout
+   *  resolves one. Null once looked up and found absent; undefined while the
+   *  lookup is in flight or the thread has no worktree branch at all. */
+  changeRequest?: ChangeRequestSummary | null
   /** Set by the + on a thread row: the same popup, listing resources to add
    *  rather than the thread's own actions. */
   addTo?: SessionInfo
@@ -449,6 +454,28 @@ export function Sidebar(): React.JSX.Element {
     e.preventDefault()
     e.stopPropagation()
     setCtx({ x: e.clientX, y: e.clientY, session })
+    // Surface the pull request the thread's worktree branch has open, the same
+    // lookup the hover card does, so the menu can remind the user what the
+    // thread produced. Only worktree threads get one: a thread on the main
+    // checkout is usually on the default branch, where a pull request would be
+    // surprising. Resolved asynchronously and merged back by thread id so a
+    // fetch for one thread never paints a later menu.
+    const path = session.executionPath ?? session.projectPath ?? session.directory ?? session.path
+    const branch = session.worktree?.branch
+    if (!path || !branch) return
+    void window.boss
+      .reviewSnapshot(path)
+      .then((snapshot) => {
+        setCtx((prev) =>
+          prev?.session?.id === session.id
+            ? { ...prev, changeRequest: snapshot.changeRequest ?? null }
+            : prev
+        )
+      })
+      .catch(() => {
+        // A checkout that has gone is not worth erroring the menu over.
+        setCtx((prev) => (prev?.session?.id === session.id ? { ...prev, changeRequest: null } : prev))
+      })
   }
 
   // A thread and the resources it owns. Filtering opens every thread, for the
@@ -669,7 +696,9 @@ export function Sidebar(): React.JSX.Element {
         <div
           ref={menuRef}
           className="ctx-menu"
-          style={{ left: Math.min(ctx.x, window.innerWidth - 220), top: menuTop ?? ctx.y }}
+          // 328px is the menu's own max-width plus the 8px gutter the top and
+          // bottom edges get, so the widest menu still lands fully on screen.
+          style={{ left: Math.max(8, Math.min(ctx.x, window.innerWidth - 328)), top: menuTop ?? ctx.y }}
         >
           {ctx.project ? (
             <>
@@ -690,6 +719,22 @@ export function Sidebar(): React.JSX.Element {
           ) : ctx.session ? (
             <>
               {menuItem('Open', () => selectSession(ctx.session!.id))}
+              {ctx.changeRequest ? (
+                <button
+                  className="ctx-item ctx-pr"
+                  onClick={() => {
+                    if (!ctx.changeRequest) return
+                    const url = ctx.changeRequest.url
+                    setCtx(null)
+                    void window.boss.openExternal(url)
+                  }}
+                >
+                  <ReviewIcon size={13} />
+                  <span className="ctx-pr-id">{ctx.changeRequest.displayId}</span>
+                  <span className="ctx-pr-title">{ctx.changeRequest.title}</span>
+                  <ExternalIcon size={12} />
+                </button>
+              ) : null}
               {/* A chat has no checkout, so a terminal or diff has nowhere to
                   point and Add is left out entirely. */}
               {(ctx.session.projectPath ?? ctx.session.directory ?? ctx.session.path) ? (
