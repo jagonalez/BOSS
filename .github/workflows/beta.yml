@@ -132,9 +132,11 @@ jobs:
           # "latest release" the website links to and only a copy on the beta
           # channel installs it. There is no CLI flag for this.
           EP_PRE_RELEASE: true
-        # Publishes the dmg, the zip auto-update installs from, and the
-        # beta-mac.yml that tells an installed copy what exists.
-        run: npx electron-builder --mac --publish always
+        # `npm run dist` rather than electron-builder alone: it compiles first,
+        # and it is the same script the stable release runs, so the two paths
+        # cannot drift. Publishes the dmg, the zip auto-update installs from,
+        # and the beta-mac.yml that tells an installed copy what exists.
+        run: npm run dist -- --mac --publish always
 
       # An update only appears if the manifest shipped. Failing here rather
       # than leaving a release the updater silently ignores.
