@@ -34,7 +34,7 @@ function findLocal() {
   return null
 }
 
-async function latestAssetName() {
+async function latestRelease() {
   const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
     headers: { Accept: 'application/vnd.github+json' }
   })
@@ -46,11 +46,13 @@ async function latestAssetName() {
   if (!asset) {
     throw new Error(`no asset matching ${wanted} in ${release.tag_name}`)
   }
-  return asset.name
+  // The tag travels with the name: the download URL needs the release it
+  // actually came from, and opencode publishes under a version tag.
+  return { asset: asset.name, tag: release.tag_name }
 }
 
-async function downloadAndExtract(asset) {
-  const url = `https://github.com/${repo}/releases/download/latest/${asset}`
+async function downloadAndExtract(asset, tag) {
+  const url = `https://github.com/${repo}/releases/download/${tag}/${asset}`
   const tmpZip = join(tmpdir(), `opencode-${asset}`)
   const tmpDir = join(tmpdir(), `opencode-x-${Date.now()}`)
   console.log(`downloading ${url}`)
@@ -99,8 +101,8 @@ async function main() {
     copyFileSync(local, dest)
     chmodSync(dest, 0o755)
   } else {
-    const asset = await latestAssetName()
-    await downloadAndExtract(asset)
+    const { asset, tag } = await latestRelease()
+    await downloadAndExtract(asset, tag)
   }
   try {
     const version = execFileSync(dest, ['--version']).toString().trim()
