@@ -1205,7 +1205,7 @@ function TurnView({
 
 const TurnViewMemo = React.memo(TurnView)
 
-export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Element {
+export function ChatView({ sessionId, active = true }: { sessionId?: string; active?: boolean }): React.JSX.Element {
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
@@ -1213,6 +1213,8 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const historyCapabilities = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId)?.capabilities)
   const projects = useStore(appStore, (s) => s.projects)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchRestoreFocusRef = useRef<HTMLElement | null>(null)
   /** Whether to keep the view pinned to the newest output. A ref, not state:
    *  the follow observer must not be torn down every time this flips, and it
    *  is decided by the user scrolling rather than by a render. */
@@ -1228,12 +1230,22 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   const WINDOW = 100
   const PAGE = 200
   const [visibleCount, setVisibleCount] = useState(WINDOW)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchMatchCount, setSearchMatchCount] = useState(0)
+  const [activeSearchMatch, setActiveSearchMatch] = useState(0)
 
   useEffect(() => {
     setVisibleCount(WINDOW)
   }, [effectiveId])
 
-  const windowed = useMemo(() => visible.slice(-visibleCount), [visible, visibleCount])
+  // Find is deliberately scoped to a thread, including history outside the
+  // ordinary rolling transcript window. Rendering that extra history only
+  // while there is a query keeps normal long-running threads lightweight.
+  const windowed = useMemo(
+    () => searchOpen && searchQuery.trim() ? visible : visible.slice(-visibleCount),
+    [visible, visibleCount, searchOpen, searchQuery]
+  )
   const turns = useMemo(() => groupTurns(windowed), [windowed])
   const lastTurnAssistants = turns[turns.length - 1]?.assistants ?? []
   const allParts = lastTurnAssistants.flatMap((m) => m.parts)
@@ -1244,6 +1256,75 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   // active, 'Thinking' before any reply text, 'Working' between text and tools.
   const activity = streaming ? (runningPart ? runningLabel(runningPart) : waitingForReply || !liveText ? 'Thinking' : 'Working') : null
   const expandingRef = useRef(false)
+
+  const closeSearch = useCallback((): void => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchMatchCount(0)
+    setActiveSearchMatch(0)
+    requestAnimationFrame(() => searchRestoreFocusRef.current?.focus({ preventScroll: true }))
+  }, [])
+
+  const moveSearchMatch = useCallback((step: number): void => {
+    if (searchMatchCount === 0) return
+    setActiveSearchMatch((current) => (current + step + searchMatchCount) % searchMatchCount)
+  }, [searchMatchCount])
+
+  useEffect(() => {
+    if (!searchOpen) return
+    searchInputRef.current?.focus()
+    searchInputRef.current?.select()
+  }, [searchOpen])
+
+  useLayoutEffect(() => {
+    const query = searchQuery.trim().toLocaleLowerCase()
+    const messageElements = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('.msg') ?? [])
+    const matches = query
+      ? messageElements.filter((element) => element.textContent?.toLocaleLowerCase().includes(query))
+      : []
+    const next = matches.length ? Math.min(activeSearchMatch, matches.length - 1) : 0
+
+    for (const element of messageElements) element.classList.remove('thread-search-match', 'thread-search-current')
+    for (const element of matches) element.classList.add('thread-search-match')
+    if (matches[next]) {
+      matches[next].classList.add('thread-search-current')
+      matches[next].scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+    if (next !== activeSearchMatch) setActiveSearchMatch(next)
+    if (matches.length !== searchMatchCount) setSearchMatchCount(matches.length)
+  }, [searchQuery, activeSearchMatch, searchMatchCount, windowed])
+
+  useEffect(() => {
+    if (!active) return
+    const onKey = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'f') {
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+        if (!searchOpen) {
+          searchRestoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        }
+        setSearchOpen(true)
+        return
+      }
+      if (!searchOpen) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+        closeSearch()
+      } else if (event.key === 'Enter') {
+        event.preventDefault()
+        event.stopPropagation()
+        event.stopImmediatePropagation()
+        moveSearchMatch(event.shiftKey ? -1 : 1)
+      }
+    }
+    // Capture lets Find close before the app-level Escape handler can abort a
+    // working thread, matching the expectation that Escape dismisses Find.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [active, searchOpen, closeSearch, moveSearchMatch])
 
   const speakAloud = useStore(appStore, (s) => s.speakAloud)
   const spokenRef = useRef<Set<string>>(new Set())
@@ -1447,6 +1528,28 @@ export function ChatView({ sessionId }: { sessionId?: string }): React.JSX.Eleme
   return (
     <div className="chat">
       <div className="chat-messages-area">
+        {searchOpen ? (
+          <div className="thread-search" role="search" aria-label="Search this thread">
+            <input
+              ref={searchInputRef}
+              className="thread-search-input"
+              type="search"
+              placeholder="Find in thread"
+              aria-label="Find in thread"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value)
+                setActiveSearchMatch(0)
+              }}
+            />
+            <span className="thread-search-count" aria-live="polite">
+              {searchQuery.trim() ? (searchMatchCount ? `${activeSearchMatch + 1} of ${searchMatchCount}` : 'No matches') : 'Find text'}
+            </span>
+            <button className="thread-search-button" type="button" onClick={() => moveSearchMatch(-1)} disabled={searchMatchCount === 0} aria-label="Previous match" title="Previous match (Shift+Enter)">↑</button>
+            <button className="thread-search-button" type="button" onClick={() => moveSearchMatch(1)} disabled={searchMatchCount === 0} aria-label="Next match" title="Next match (Enter)">↓</button>
+            <button className="thread-search-button close" type="button" onClick={closeSearch} aria-label="Close thread search" title="Close (Escape)">×</button>
+          </div>
+        ) : null}
         <div className="messages" ref={scrollRef} onScroll={onScroll}>
           {(() => {
             let lastModel: string | undefined

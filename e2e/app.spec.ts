@@ -43,6 +43,29 @@ test('a deleted checkout returns a review snapshot without rejecting the IPC han
   expect(snapshot.syncError).toMatch(/git rev-parse/i)
 })
 
+test('Ctrl+F searches the active thread and moves between its matches', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.getByText('Search marker: first result.')).toBeVisible()
+
+  await appPage.keyboard.press('Control+f')
+  const search = appPage.getByRole('search', { name: 'Search this thread' })
+  await expect(search).toBeVisible()
+  const input = search.getByRole('searchbox', { name: 'Find in thread' })
+  await expect(input).toBeFocused()
+  await input.fill('search marker')
+
+  await expect(search).toContainText('1 of 2')
+  await expect(appPage.locator('.msg.thread-search-current')).toContainText('first result')
+  await appPage.keyboard.press('Enter')
+  await expect(search).toContainText('2 of 2')
+  await expect(appPage.locator('.msg.thread-search-current')).toContainText('second result')
+  await appPage.keyboard.press('Shift+Enter')
+  await expect(search).toContainText('1 of 2')
+
+  await appPage.keyboard.press('Escape')
+  await expect(search).toHaveCount(0)
+})
+
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
 
