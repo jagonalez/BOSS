@@ -11,7 +11,7 @@ import type {
   QueuedFollowUp
 } from '../shared/backend'
 import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
-import type { SessionInfo } from '../shared/opencode'
+import type { MessageWithParts, SessionInfo } from '../shared/opencode'
 
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
@@ -177,11 +177,26 @@ function initialOpenCodeStopSession(): SessionInfo {
   }
 }
 
+function sourceMessages(): MessageWithParts[] {
+  const sessionID = 'thread-source'
+  return [
+    {
+      info: { id: 'source-search-user', sessionID, role: 'user', time: { created: Date.now() - 50_000 } },
+      parts: [{ id: 'source-search-user-text', type: 'text', sessionID, messageID: 'source-search-user', text: 'Search marker: first result.' }]
+    },
+    {
+      info: { id: 'source-search-agent', sessionID, role: 'assistant', time: { created: Date.now() - 49_000, completed: Date.now() - 48_000 } },
+      parts: [{ id: 'source-search-agent-text', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Search marker: second result.' }]
+    }
+  ]
+}
+
 /** Replace external I/O while preserving the real Electron window, preload
  * boundary, React tree, localStorage, and user interactions. This module is
  * reachable only when the main process explicitly starts with BOSS_E2E=1. */
 export function installE2EApi(boss: BossApi): void {
   let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
+  const messages: Record<string, MessageWithParts[]> = { 'thread-source': sourceMessages() }
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
   let modesBySession: Record<string, BackendModeId> = {}
   let followUps: Record<string, QueuedFollowUp[]> = {
@@ -290,7 +305,7 @@ export function installE2EApi(boss: BossApi): void {
         sessions = sessions.map((session) => session.id === request.threadId ? changed : session)
         return changed
       }
-      case 'thread.messages': return []
+      case 'thread.messages': return messages[request.threadId] ?? []
       // Main allows one run per thread and refuses the rest, because only it
       // knows without a race. The renderer is expected to queue what it refuses
       // rather than drop it.

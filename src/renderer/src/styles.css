@@ -4010,7 +4010,60 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative;
 }
+
+.thread-search {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-lg);
+}
+
+.thread-search-input {
+  width: min(230px, 30vw);
+  min-width: 120px;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--type-control);
+}
+
+.thread-search-input::-webkit-search-cancel-button { cursor: pointer; }
+.thread-search-count { min-width: 68px; color: var(--text-faint); font-size: var(--type-meta); text-align: right; white-space: nowrap; }
+
+.thread-search-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.thread-search-button:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.thread-search-button:disabled { cursor: default; opacity: 0.38; }
+.thread-search-button.close { margin-left: 2px; font-size: 19px; line-height: 1; }
+
+.msg.thread-search-match { outline: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent); outline-offset: 3px; border-radius: var(--radius-sm); }
+.msg.thread-search-current { outline: 2px solid color-mix(in srgb, var(--yellow) 78%, transparent); background: color-mix(in srgb, var(--yellow) 9%, transparent); }
 
 .messages {
   flex: 1;

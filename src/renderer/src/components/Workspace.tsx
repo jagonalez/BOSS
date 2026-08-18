@@ -344,7 +344,7 @@ function TabContent({
   let content: React.JSX.Element
   switch (item.kind) {
     case 'thread':
-      content = item.sessionId ? <ChatView sessionId={item.sessionId} /> : <div className="workspace-unbound">Choose a thread for this tab.</div>
+      content = item.sessionId ? <ChatView sessionId={item.sessionId} active={active && viewShowing} /> : <div className="workspace-unbound">Choose a thread for this tab.</div>
       break
     case 'browser':
       content = <BrowseTab id={`workspace-${item.id}`} visible={active && viewShowing} />
