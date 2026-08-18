@@ -3185,6 +3185,10 @@ body.workspace-dragging .workspace-tab-slot {
 .ctx-menu {
   position: fixed;
   min-width: 180px;
+  /* The pull request row carries a title of any length. Without a ceiling the
+     menu would stretch to fit it and run off the right edge; the placement in
+     Sidebar.tsx reserves this width plus a gutter. */
+  max-width: 320px;
   /* A menu taller than the window scrolls rather than running off the bottom.
      Nudging it up is enough in an ordinary window; this is the short one. */
   max-height: calc(100vh - 16px);
@@ -3218,6 +3222,37 @@ body.workspace-dragging .workspace-tab-slot {
 .ctx-item:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* The pull request a thread's worktree opened, shown at the head of its menu.
+   A plain action row with the id and both icons pinned: the title is the one
+   part that gives way, so the row stays one line however long the title is. */
+.ctx-pr .ctx-pr-id {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: none;
+}
+
+.ctx-pr .ctx-pr-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The one item that gives way. A flex item will not shrink below its
+     content without this, so the ellipsis never appears. */
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+/* Both icons hold their size; only the title gives way. */
+.ctx-pr > svg {
+  flex: none;
+}
+
+.ctx-pr > svg:last-child {
+  margin-left: auto;
+  color: var(--text-faint);
 }
 
 /* One Add rather than four entries. The thread menu already runs to ten
