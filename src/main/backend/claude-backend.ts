@@ -5,6 +5,7 @@ import { resolveBackendBin } from '../backend-bin'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
+import { THREAD_BUSY_ERROR } from '@shared/backend'
 import type { BackendMessageOptions, BackendModeId } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
@@ -256,7 +257,13 @@ export class ClaudeBackend implements Backend {
   }
 
   async sendMessage(sessionId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
-    if (this.processes.has(sessionId)) throw new Error('Claude Code is already working on this thread.')
+    // The same refusal main makes, named the same way. Claude holds its turn
+    // slot until the result arrives, which is a moment later than main clearing
+    // busyThreads on idle. A message sent inside that gap passes main's check
+    // and lands here, so this has to be a busy signal the renderer recognises:
+    // described in prose it looked like an unrelated failure, and the renderer
+    // dropped the message instead of queueing it.
+    if (this.processes.has(sessionId)) throw new Error(THREAD_BUSY_ERROR)
     const record = this.record(sessionId)
     // What Claude is sent, which carries an attached image as a block rather
     // than describing it. The transcript echo below stays text: main records
@@ -351,8 +358,8 @@ export class ClaudeBackend implements Backend {
       // Free the slot before announcing idle, not when the child exits. Claude
       // outlives its own result, and whatever acts on idle — a queued follow-up
       // above all — sends the next message from inside these emits. Holding the
-      // slot until exit failed that send with "already working on this thread"
-      // and left the follow-up sitting in the queue.
+      // slot until exit failed that send as busy and left the follow-up
+      // sitting in the queue.
       if (this.processes.get(sessionId) === process) this.processes.delete(sessionId)
       this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'idle' } })
       this.emit({ type: 'session.idle', sessionID: sessionId })

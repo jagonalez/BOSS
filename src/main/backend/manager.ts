@@ -1487,6 +1487,13 @@ export class BackendManager {
         })
       })
     } catch (error) {
+      // A backend that refuses because it is still running has not started a
+      // run to settle. Its own turn slot outlives main's busy flag, so a
+      // message sent in that gap gets here — and settling it marked the live
+      // run's parts interrupted, announced idle over a thread that was still
+      // streaming, and let the next reload prune as if the thread were done.
+      // That reload is what deleted the message the user had just sent.
+      if (error instanceof Error && error.message.includes(THREAD_BUSY_ERROR)) throw error
       this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
       this.busyThreads.delete(threadId)
       this.emit({
@@ -1675,6 +1682,12 @@ export class BackendManager {
         queueMicrotask(() => void this.deliverNextFollowUp(threadId))
       }
     } catch (error) {
+      // Busy is not a failure of the follow-up, and the item is still queued
+      // because only a delivered one is filtered out above. The run that
+      // refused it will announce idle, and that handler delivers the queue
+      // again — so stay quiet rather than showing the user "boss:thread-busy"
+      // for a message that is about to be sent.
+      if (error instanceof Error && error.message.includes(THREAD_BUSY_ERROR)) return
       this.emit({
         type: 'session.error',
         properties: { sessionID: threadId, error: error instanceof Error ? error.message : String(error) },
