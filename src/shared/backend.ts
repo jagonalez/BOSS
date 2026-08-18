@@ -86,6 +86,9 @@ export interface BackendModelPreference {
   mode?: BackendModeId
 }
 
+export type { ThreadTitleSettings } from './thread-title'
+export type { SandboxSettings } from './sandbox'
+
 export interface BackendMessageOptions {
   model?: { providerID: string; modelID: string; variant?: string }
   agent?: string
@@ -154,6 +157,10 @@ export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'backend.auth.status' }
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
+  | { type: 'thread.title.settings.get' }
+  | { type: 'thread.title.settings.set'; autoNameFromFirstPrompt: boolean }
+  | { type: 'sandbox.settings.get' }
+  | { type: 'sandbox.settings.set'; networkAccess: boolean }
   | { type: 'backend.bin.get' }
   /** An empty or omitted path clears the override, returning the backend to PATH. */
   | { type: 'backend.bin.set'; backendId: BackendId; path?: string }

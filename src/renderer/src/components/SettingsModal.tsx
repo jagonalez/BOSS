@@ -5,7 +5,7 @@ import { KOKORO_VOICES } from '@shared/speech'
 import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
-import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference } from '@shared/backend'
+import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, SandboxSettings, ThreadTitleSettings } from '@shared/backend'
 import type { WorktreeLocation, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
 import type { UpdateChannel, UpdateStatus } from '@shared/ipc'
@@ -374,11 +374,15 @@ export function SettingsModal(): React.JSX.Element | null {
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
+  const [threadTitleSettings, setThreadTitleSettings] = useState<ThreadTitleSettings | null>(null)
+  const [sandboxSettings, setSandboxSettings] = useState<SandboxSettings | null>(null)
   const [backendBins, setBackendBins] = useState<Partial<Record<BackendId, string>>>({})
 
   useEffect(() => {
     if (!open) return
     void OpenCode.worktreeSettings().then(setWorktreeSettings).catch(() => {})
+    void OpenCode.threadTitleSettings().then(setThreadTitleSettings).catch(() => {})
+    void OpenCode.sandboxSettings().then(setSandboxSettings).catch(() => {})
     void OpenCode.backendBinaries().then(setBackendBins).catch(() => {})
     void refreshBackendAuth()
     void refreshBackendModels()
@@ -477,6 +481,46 @@ export function SettingsModal(): React.JSX.Element | null {
                 </section>
 
                 <section className="settings-card settings-card-list">
+                  <SettingsRow
+                    title="Auto-name threads"
+                    description="Use the first prompt to give new, untitled threads a compact name. This happens locally and never sends an extra model request or uses tokens."
+                  >
+                    <label className="settings-computer-toggle">
+                      <input
+                        type="checkbox"
+                        aria-label="Auto-name threads"
+                        checked={threadTitleSettings?.autoNameFromFirstPrompt ?? false}
+                        onChange={(event) => {
+                          const autoNameFromFirstPrompt = event.target.checked
+                          setThreadTitleSettings({ autoNameFromFirstPrompt })
+                          void OpenCode.setThreadTitleSettings(autoNameFromFirstPrompt)
+                            .then(setThreadTitleSettings)
+                            .catch(() => setThreadTitleSettings((current) => current ? { ...current, autoNameFromFirstPrompt: !autoNameFromFirstPrompt } : current))
+                        }}
+                      />
+                      <span>{threadTitleSettings?.autoNameFromFirstPrompt ? 'On' : 'Off'}</span>
+                    </label>
+                  </SettingsRow>
+                  <SettingsRow
+                    title="Agent network access"
+                    description="Let a sandboxed agent reach the network. Off blocks gh, npm, and curl, so an agent cannot open a pull request. Plan mode stays offline either way. This applies to Codex, the only backend that sandboxes today."
+                  >
+                    <label className="settings-computer-toggle">
+                      <input
+                        type="checkbox"
+                        aria-label="Agent network access"
+                        checked={sandboxSettings?.networkAccess ?? true}
+                        onChange={(event) => {
+                          const networkAccess = event.target.checked
+                          setSandboxSettings({ networkAccess })
+                          void OpenCode.setSandboxSettings(networkAccess)
+                            .then(setSandboxSettings)
+                            .catch(() => setSandboxSettings((current) => current ? { ...current, networkAccess: !networkAccess } : current))
+                        }}
+                      />
+                      <span>{sandboxSettings?.networkAccess ?? true ? 'On' : 'Off'}</span>
+                    </label>
+                  </SettingsRow>
                   <SettingsRow
                     title="Agent QA"
                     description="Default for threads without an override. Suggest allows browser inspection; native inspection also uses the Computer use switch. Use /qa auto, /qa suggest, /qa off, or /qa default inside a thread to change only that thread."
