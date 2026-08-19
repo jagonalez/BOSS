@@ -319,7 +319,17 @@ export class OpenCodeBackend implements Backend {
       path: { id: sessionId },
       query: { directory: this.directoryFor(sessionId) }
     })
-    return unwrap(res, 'todo list') as unknown as Todo[]
+    const todos = unwrap(res, 'todo list') as unknown as Todo[]
+    // A session that has never had a todo written can answer with something
+    // that is not a list, and the todo list is a display: it should show
+    // nothing rather than fail the read it was fetched alongside.
+    if (!Array.isArray(todos)) return []
+    // The SDK types say every todo carries an id, but the server sends only
+    // content, status and priority. The list is rendered keyed by id, so
+    // without this every row keys on undefined and React reuses one row for
+    // the whole list. Position is a stable key here: the agent rewrites the
+    // whole list on each todowrite, so the nth entry stays the nth entry.
+    return todos.map((todo, index) => (todo.id ? todo : { ...todo, id: `${sessionId}:${index}` }))
   }
 
   async permissionRespond(sessionId: string, permissionId: string, response: 'once'|'always'|'reject'): Promise<void> {

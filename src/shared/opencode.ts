@@ -58,6 +58,12 @@ export interface Part {
   type: PartType
   sessionID: string
   messageID: string
+  /** The tool a tool part called, as opencode sends it.
+   *
+   *  Opencode puts the name here, beside the state rather than inside it. The
+   *  other backends build their parts by hand and put it in `state.tool`, so
+   *  both spellings are real and code that needs the name has to read both. */
+  tool?: string
   text?: string
   auto?: boolean
   overflow?: boolean
@@ -255,3 +261,23 @@ export type EventMessage =
   | { type: 'config.updated' }
   | { type: 'agent.updated' }
   | { type: 'unknown'; raw: string }
+
+/** The tool a part called, wherever the backend put the name.
+ *
+ *  Opencode sends it as the part's own `tool` field. The backends that build
+ *  parts by hand — claude, codex, pi — put it in `state.tool` instead. Code
+ *  that matches on the name has to read both, or it silently matches nothing
+ *  for half the backends. */
+export function partToolName(part: Pick<Part, 'tool' | 'state'>): string {
+  return String(part.tool ?? part.state?.tool ?? '').toLowerCase()
+}
+
+/** Whether a part is a finished write to the todo list.
+ *
+ *  Opencode publishes no todo event, so this is what tells BOSS the list has
+ *  changed and is worth re-reading. It matches on the tool name because
+ *  `todowrite` is an ordinary tool call like any other. */
+export function isCompletedTodoToolCall(part: Pick<Part, 'type' | 'tool' | 'state'>): boolean {
+  if (part.type !== 'tool' || part.state?.status !== 'completed') return false
+  return partToolName(part).includes('todo')
+}

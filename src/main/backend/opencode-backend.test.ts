@@ -11,7 +11,11 @@ import { createOpencodeClient } from '@opencode-ai/sdk'
  *  fetch, so the stub is a fetch rather than an ApiClient. Requests are
  *  recorded as { path, directory } — the same shape the assertions used when
  *  this went through ApiClient — by reading them back off the URL. */
-function harness(statuses: Record<string, { type: string }>, bodies: unknown[] = []) {
+function harness(
+  statuses: Record<string, { type: string }>,
+  bodies: unknown[] = [],
+  responses: Record<string, unknown> = {}
+) {
   const requests: Array<{ path: string; directory?: string }> = []
   // The generated client calls fetch with a single Request and no init, so the
   // body is read off the Request rather than from an init argument.
@@ -23,7 +27,9 @@ function harness(statuses: Record<string, { type: string }>, bodies: unknown[] =
       const text = await input.clone().text()
       if (text) bodies.push(JSON.parse(text))
     }
-    const body = url.pathname === '/session/status' ? statuses : {}
+    const body = url.pathname === '/session/status'
+      ? statuses
+      : responses[url.pathname] ?? {}
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
@@ -46,6 +52,36 @@ function harness(statuses: Record<string, { type: string }>, bodies: unknown[] =
   })
   return { backend, requests }
 }
+
+test('every todo gets an id, even though the server sends none', async () => {
+  // The SDK types declare Todo.id as required, but a real opencode server
+  // returns only content, status and priority — verified with
+  // scripts/probe-opencode-todos.mjs. The renderer keys the list by id, so
+  // without a backfill every row keyed on undefined.
+  const { backend } = harness({}, [], {
+    '/session/ses_todo/todo': [
+      { content: 'first', status: 'completed', priority: 'high' },
+      { content: 'second', status: 'in_progress', priority: 'medium' }
+    ]
+  })
+
+  const todos = await backend.todosGet('ses_todo')
+
+  assert.equal(todos.length, 2)
+  assert.ok(todos.every((todo) => Boolean(todo.id)), 'every todo needs a key of its own')
+  assert.notEqual(todos[0].id, todos[1].id, 'two todos must not share a key')
+  assert.deepEqual(todos.map((todo) => todo.status), ['completed', 'in_progress'])
+})
+
+test('a todo that arrives with an id keeps it', async () => {
+  const { backend } = harness({}, [], {
+    '/session/ses_todo/todo': [{ id: 'todo_real', content: 'first', status: 'pending' }]
+  })
+
+  const todos = await backend.todosGet('ses_todo')
+
+  assert.equal(todos[0].id, 'todo_real')
+})
 
 test('status reconciliation clears a submitted run when OpenCode reports it idle', async () => {
   const { backend, requests } = harness({})

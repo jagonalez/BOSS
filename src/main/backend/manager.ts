@@ -24,6 +24,7 @@ import { DEFAULT_THREAD_TITLE_SETTINGS, titleFromFirstPrompt } from '@shared/thr
 import { DEFAULT_SANDBOX_SETTINGS } from '@shared/sandbox'
 import type { SandboxSettings } from '@shared/sandbox'
 import type { EventMessage, FileDiff, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
+import { isCompletedTodoToolCall } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
 import { projectScope, type ProjectScope } from '../project-identity'
@@ -2162,11 +2163,14 @@ export class BackendManager {
    *  what makes the list fill in during a run — before this it was fetched only
    *  when the thread went idle, so it stayed empty for exactly as long as it
    *  was worth watching. Backends without todos return an empty list, and the
-   *  tool name never matches, so this costs them nothing. */
+   *  tool name never matches, so this costs them nothing.
+   *
+   *  The name is read from both places it can be. Opencode sends it as the
+   *  part's own `tool` field; the backends that build parts by hand put it in
+   *  `state.tool`. Reading only the latter meant this never once matched a real
+   *  opencode run, which is what pinned the list at its opening count. */
   private publishTodosAfterToolCall(binding: ThreadBinding, part: MessageWithParts['parts'][number]): void {
-    if (part.type !== 'tool' || part.state?.status !== 'completed') return
-    const tool = String(part.state?.tool ?? '').toLowerCase()
-    if (!tool.includes('todo')) return
+    if (!isCompletedTodoToolCall(part)) return
     const backend = this.backends[binding.backendId]
     if (!backend?.todosGet) return
     void backend.todosGet(binding.nativeSessionId)
