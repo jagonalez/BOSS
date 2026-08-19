@@ -711,7 +711,7 @@ export function upsertSessionMeta(sessionId: string, patch: Partial<SessionMeta>
   })
 }
 
-export function setAttention(kind: 'permission' | 'done' | 'error'): void {
+export function setAttention(kind: 'permission' | 'question' | 'done' | 'error'): void {
   appStore.setState({ attention: { kind, ts: Date.now() } })
 }
 

@@ -6,12 +6,20 @@ export interface NotificationSettings {
   desktop: NotifyLevel
   webhook: NotifyLevel
   webhookUrl: string
+  /** Hold back the webhook while a BOSS window is focused.
+   *
+   *  On by default. A push exists to reach you where BOSS is not, so sending
+   *  one to your phone while you are reading the same event on screen is pure
+   *  noise. Turn it off if you keep BOSS open on a machine you walk away from
+   *  and want the phone to stay authoritative. */
+  webhookOnlyWhenAway: boolean
 }
 
 export const NOTIFICATION_DEFAULTS: NotificationSettings = {
   desktop: 'attention',
   webhook: 'off',
-  webhookUrl: ''
+  webhookUrl: '',
+  webhookOnlyWhenAway: true
 }
 
 /** One place every BOSS event passes through on its way to a person.
@@ -48,7 +56,8 @@ export class NotificationRouter {
     if (shouldNotify(this.settings.desktop, event.type) && !this.isForeground()) {
       this.desktop(event)
     }
-    if (this.settings.webhookUrl && shouldNotify(this.settings.webhook, event.type)) {
+    const heldBack = this.settings.webhookOnlyWhenAway && this.isForeground()
+    if (this.settings.webhookUrl && shouldNotify(this.settings.webhook, event.type) && !heldBack) {
       this.webhook(event)
     }
   }

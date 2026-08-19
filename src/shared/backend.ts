@@ -220,7 +220,7 @@ export type BackendRequest =
   | { type: 'automation.run'; automationId: string }
   | { type: 'automation.stop'; automationId: string }
   | { type: 'automation.webhook.get' }
-  | { type: 'automation.webhook.set'; url: string }
+  | { type: 'automation.webhook.set'; url?: string; onlyWhenAway?: boolean }
   | { type: 'mcp.list' }
   | { type: 'mcp.add'; input: import('./mcp').McpConnectionInput }
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }

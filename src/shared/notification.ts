@@ -42,3 +42,13 @@ export function shouldNotify(level: NotifyLevel, type: BossEventType): boolean {
   if (level === 'all') return true
   return ATTENTION_EVENTS.has(type)
 }
+
+/** The webhook settings a surface can read and change.
+ *
+ *  Returned by both webhook IPC calls so a client always sees the settled
+ *  state, rather than inferring it from what it just sent. */
+export interface WebhookSettings {
+  url: string
+  /** Hold the push back while a BOSS window is focused. */
+  onlyWhenAway: boolean
+}

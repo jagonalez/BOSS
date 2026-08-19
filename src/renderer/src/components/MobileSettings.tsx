@@ -169,18 +169,26 @@ export function MobileSettings(): React.JSX.Element {
   const [showViewerToken, setShowViewerToken] = useState(false)
   const [busy, setBusy] = useState(false)
   const [webhook, setWebhook] = useState('')
+  const [onlyWhenAway, setOnlyWhenAway] = useState(true)
   const [webhookSaved, setWebhookSaved] = useState(false)
   const [webhookError, setWebhookError] = useState<string | null>(null)
 
   useEffect(() => {
     void OpenCode.mobileStatus().then(setStatus).catch(() => {})
-    void OpenCode.notifyWebhook().then(setWebhook).catch(() => {})
+    void OpenCode.notifyWebhook()
+      .then((settings) => {
+        setWebhook(settings.url)
+        setOnlyWhenAway(settings.onlyWhenAway)
+      })
+      .catch(() => {})
   }, [])
 
   const saveWebhook = async (): Promise<void> => {
     setWebhookError(null)
     try {
-      setWebhook(await OpenCode.setNotifyWebhook(webhook))
+      const settings = await OpenCode.setNotifyWebhook(webhook)
+      setWebhook(settings.url)
+      setOnlyWhenAway(settings.onlyWhenAway)
       setWebhookSaved(true)
       setTimeout(() => setWebhookSaved(false), 1500)
     } catch (err) {
@@ -292,6 +300,26 @@ export function MobileSettings(): React.JSX.Element {
           </div>
         </SettingsRow>
         {webhookError ? <div className="automation-error">{webhookError}</div> : null}
+        <SettingsRow
+          title="Only push when I'm away"
+          description="Skip the phone push while a BOSS window is focused, so you are not told twice about something already on screen. Turn this off if you leave BOSS open on a machine you walk away from."
+        >
+          <label className="settings-computer-toggle">
+            <input
+              type="checkbox"
+              aria-label="Only push when I'm away"
+              checked={onlyWhenAway}
+              onChange={(event) => {
+                const next = event.target.checked
+                setOnlyWhenAway(next)
+                void OpenCode.setNotifyWebhookOnlyWhenAway(next)
+                  .then((settings) => setOnlyWhenAway(settings.onlyWhenAway))
+                  .catch(() => setOnlyWhenAway(!next))
+              }}
+            />
+            <span>{onlyWhenAway ? 'On' : 'Off'}</span>
+          </label>
+        </SettingsRow>
       </section>
     </div>
   )

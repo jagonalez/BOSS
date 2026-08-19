@@ -195,7 +195,10 @@ export function App(): React.JSX.Element {
         case 'question.asked': {
           const patch = applyEvent(appStore.getState(), ev)
           if (Object.keys(patch).length > 0) appStore.setState(patch)
-          setAttention('permission')
+          // A question wants an answer, not a yes/no on a tool call. Saying
+          // "Permission needed" here sent people looking for an approval
+          // prompt that was never coming.
+          setAttention('question')
           break
         }
         case 'session.error': {
@@ -333,7 +336,7 @@ export function App(): React.JSX.Element {
   const attention = useStore(appStore, (s) => s.attention)
   useEffect(() => {
     document.title = attention
-      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'error' ? '✕ ' : '✓ '}BOSS`
+      ? `${attention.kind === 'permission' ? '⚠ ' : attention.kind === 'question' ? '? ' : attention.kind === 'error' ? '✕ ' : '✓ '}BOSS`
       : 'BOSS'
   }, [attention])
 

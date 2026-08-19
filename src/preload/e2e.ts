@@ -378,7 +378,7 @@ export function installE2EApi(boss: BossApi): void {
       case 'mcp.list': return []
       case 'mcp.import.scan': return []
       case 'automation.list': return { automations: [], runs: [], webhookUrl: '' }
-      case 'automation.webhook.get': return ''
+      case 'automation.webhook.get': return { url: '', onlyWhenAway: true }
       case 'mobile.status': return { enabled: false, running: false, port: 0, tailscale: false }
       case 'thread.bus.get':
       case 'thread.bus.clear-failures':

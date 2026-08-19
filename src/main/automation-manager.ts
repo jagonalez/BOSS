@@ -14,6 +14,7 @@ import type { BackendRequest } from '../shared/backend'
 import type { FileDiff, MessageWithParts } from '../shared/opencode'
 import { extractSummary } from '../shared/thread-result'
 import type { NotificationRouter } from './notification-router'
+import type { WebhookSettings } from '../shared/notification'
 import type { WorktreeInfo } from '../shared/worktree'
 import { cronError, missedCronFires, nextCronTime } from './cron'
 import type { BackendManager } from './backend/manager'
@@ -24,6 +25,8 @@ interface AutomationState {
   automations: Automation[]
   /** POST target for phone push (an ntfy topic URL or any webhook). */
   notifyWebhookUrl?: string
+  /** Absent means on: a push is for reaching you away from BOSS. */
+  notifyWebhookOnlyWhenAway?: boolean
 }
 
 interface RunState {
@@ -67,6 +70,7 @@ export class AutomationManager {
   private loaded = false
   private automations: Automation[] = []
   private notifyWebhookUrl = ''
+  private notifyWebhookOnlyWhenAway = true
   private notifications?: NotificationRouter
   private runs: AutomationRun[] = []
   private readonly active = new Map<string, ActiveRun>()
@@ -87,6 +91,7 @@ export class AutomationManager {
       if (parsed.version === 1 && Array.isArray(parsed.automations)) {
         this.automations = parsed.automations
         this.notifyWebhookUrl = typeof parsed.notifyWebhookUrl === 'string' ? parsed.notifyWebhookUrl : ''
+        this.notifyWebhookOnlyWhenAway = parsed.notifyWebhookOnlyWhenAway !== false
         // Load may finish after the router is attached, so re-apply here.
         this.applyWebhook()
       }
@@ -128,10 +133,15 @@ export class AutomationManager {
    *  where users already configured it and moving it would silently drop what
    *  they had. Enabling it for 'attention' matches the old behaviour, where any
    *  automation notification reached the webhook. */
+  private webhookSettings(): WebhookSettings {
+    return { url: this.notifyWebhookUrl, onlyWhenAway: this.notifyWebhookOnlyWhenAway }
+  }
+
   private applyWebhook(): void {
     this.notifications?.configure({
       webhookUrl: this.notifyWebhookUrl,
-      webhook: this.notifyWebhookUrl ? 'attention' : 'off'
+      webhook: this.notifyWebhookUrl ? 'attention' : 'off',
+      webhookOnlyWhenAway: this.notifyWebhookOnlyWhenAway
     })
   }
 
@@ -140,7 +150,8 @@ export class AutomationManager {
     const state: AutomationState = {
       version: 1,
       automations: this.automations,
-      ...(this.notifyWebhookUrl ? { notifyWebhookUrl: this.notifyWebhookUrl } : {})
+      ...(this.notifyWebhookUrl ? { notifyWebhookUrl: this.notifyWebhookUrl } : {}),
+      ...(this.notifyWebhookOnlyWhenAway ? {} : { notifyWebhookOnlyWhenAway: false })
     }
     const runState: RunState = { version: 1, runs: this.runs }
     await writeFile(this.options.stateFile, JSON.stringify(state, null, 2))
@@ -328,15 +339,18 @@ export class AutomationManager {
       case 'automation.stop': return this.stopRun(request.automationId)
       case 'automation.webhook.get':
         await this.load()
-        return this.notifyWebhookUrl
+        return this.webhookSettings()
       case 'automation.webhook.set': {
         await this.load()
-        const url = request.url.trim()
-        if (url && !/^https?:\/\//.test(url)) throw new Error('The webhook must be an http(s) URL, e.g. https://ntfy.sh/your-topic.')
-        this.notifyWebhookUrl = url
+        if (request.url !== undefined) {
+          const url = request.url.trim()
+          if (url && !/^https?:\/\//.test(url)) throw new Error('The webhook must be an http(s) URL, e.g. https://ntfy.sh/your-topic.')
+          this.notifyWebhookUrl = url
+        }
+        if (request.onlyWhenAway !== undefined) this.notifyWebhookOnlyWhenAway = request.onlyWhenAway
         await this.save()
         this.applyWebhook()
-        return this.notifyWebhookUrl
+        return this.webhookSettings()
       }
       default: throw new Error(`Unsupported automation request: ${request.type}`)
     }
