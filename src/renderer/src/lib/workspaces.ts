@@ -23,6 +23,11 @@ export const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
  *  not exist. A thread already on screen drags as a TAB_DRAG_TYPE instead. */
 export const SESSION_DRAG_TYPE = 'application/x-boss-session'
 
+/** A project row dragged within the sidebar to reorder the list. Distinct from
+ *  the thread and tab types so a project never drops into a view, where it has
+ *  nothing to open. */
+export const PROJECT_DRAG_TYPE = 'application/x-boss-project'
+
 /** A new id for a tab, pane or view.
  *
  *  Random, not a counter. The counter reset to zero on every reload while the
@@ -606,4 +611,24 @@ export function layoutFromView(workspace: WorkspaceView, name: string): Layout {
     name: name.trim() || 'Untitled layout',
     root: cloneLayout(workspace.root, true)
   }
+}
+
+/**
+ * The list after a project row is dropped on another one.
+ *
+ * `before` decides which side of the target the row lands on, so a drag onto
+ * the top half of a row puts the project above it and the bottom half below.
+ * Returns the input untouched when the move changes nothing, which lets the
+ * caller skip a write and a repaint.
+ */
+export function reorderPaths(paths: string[], moved: string, target: string, before: boolean): string[] {
+  if (moved === target) return paths
+  const from = paths.indexOf(moved)
+  const at = paths.indexOf(target)
+  if (from < 0 || at < 0) return paths
+  const without = paths.filter((path) => path !== moved)
+  // Locate the target again: removing the moved row shifts everything after it.
+  const insert = without.indexOf(target) + (before ? 0 : 1)
+  const next = [...without.slice(0, insert), moved, ...without.slice(insert)]
+  return next.every((path, index) => path === paths[index]) ? paths : next
 }

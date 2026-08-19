@@ -1812,6 +1812,64 @@ export function toggleArchive(id: string): void {
   })
 }
 
+/**
+ * Take a project off the sidebar: BOSS forgets the folder and drops the threads
+ * that lived in it.
+ *
+ * Both halves are needed. The sidebar lists a project for a stored path or for
+ * a thread pointing at one, so forgetting the folder alone leaves the row on
+ * screen and the command looks like it failed. Nothing on disk is touched —
+ * the folder, its Git history, and its worktrees all stay.
+ */
+export async function removeProject(path: string): Promise<void> {
+  const doomed = appStore
+    .getState()
+    .sessions.filter((session) => (session.projectPath ?? session.directory ?? session.path) === path)
+  for (const session of doomed) await deleteSession(session.id)
+  try {
+    await window.boss.projectForget(path)
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+  }
+  // A project that was open leaves the page pointing at a folder BOSS no
+  // longer lists, so fall back to the command center.
+  if (appStore.getState().projectPath === path) {
+    appStore.setState({
+      projectPath: undefined,
+      selectedCheckoutPath: undefined,
+      projectCheckouts: [],
+      activePage: 'command-center',
+      activeSessionId: null,
+      diffs: null,
+      fileContent: null,
+      files: null
+    })
+  }
+  await refreshProjects()
+}
+
+/**
+ * Move a project to where the user dropped it. `paths` is the whole list in its
+ * new order, so a drag that crosses several rows is one write rather than a
+ * run of swaps.
+ */
+export async function reorderProjects(paths: string[]): Promise<void> {
+  // Paint the new order first. The list is the thing being dragged, so waiting
+  // for the write would snap the row back under the pointer.
+  appStore.setState((state) => {
+    const rank = new Map(paths.map((path, index) => [path, index]))
+    const at = (project: Project): number =>
+      rank.get(project.worktree ?? project.directory ?? project.path ?? '') ?? Number.MAX_SAFE_INTEGER
+    return { projects: [...state.projects].sort((a, b) => at(a) - at(b)) }
+  })
+  try {
+    await window.boss.projectReorder(paths)
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+    await refreshProjects()
+  }
+}
+
 export function archiveAllInPath(path: string): void {
   appStore.setState((s) => {
     const ids = s.sessions.filter((x) => (x.projectPath ?? x.directory ?? x.path) === path).map((x) => x.id)

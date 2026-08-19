@@ -3740,7 +3740,22 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .project-row {
+  position: relative;
   min-height: 35px;
+}
+
+.project-row.dragging {
+  opacity: 0.45;
+}
+
+/* Drawn as an inset shadow rather than a border, so the row does not grow by a
+   pixel and nudge the rest of the list while a drag passes over it. */
+.project-row.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.project-row.drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
 }
 
 .project-row-copy {

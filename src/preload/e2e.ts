@@ -440,6 +440,8 @@ export function installE2EApi(boss: BossApi): void {
     computerUseStatus: async () => ({ supported: false, enabled: false, running: false }),
     computerUsePermissions: async () => ({ available: false, accessibility: false, screenRecording: false }),
     projectList: async () => [PROJECT],
+    projectForget: async () => [],
+    projectReorder: async (paths: string[]) => paths,
     projectCurrent: async () => projectInfo,
     projectSet: async () => projectInfo,
     projectChoose: async () => PROJECT,

@@ -53,6 +53,7 @@ const boss: BossApi = {
 
   projectList: () => ipcRenderer.invoke(IpcChannels.ProjectList),
   projectForget: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectForget, path),
+  projectReorder: (paths: string[]) => ipcRenderer.invoke(IpcChannels.ProjectReorder, paths),
   projectCurrent: () => ipcRenderer.invoke(IpcChannels.ProjectCurrent),
   projectSet: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectSet, path),
   projectChoose: () => ipcRenderer.invoke(IpcChannels.ProjectChoose),

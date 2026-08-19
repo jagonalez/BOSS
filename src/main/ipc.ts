@@ -23,6 +23,7 @@ import type { AsrTranscribeRequest, TtsSpeakRequest, UpdateChannel } from '@shar
 import type { ReviewManager } from './review-manager'
 import { projectCheckouts } from './project-identity'
 import { loadState, saveState } from './state-store'
+import { orderedProjects } from '@shared/projects'
 
 export interface IpcDeps {
   server: OpenCodeServer
@@ -212,6 +213,12 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.ProjectForget, (_e, path: string) => {
     const known = loadState().projects ?? []
     const next = known.filter((candidate) => candidate !== path)
+    saveState({ projects: next })
+    return next
+  })
+
+  ipcMain.handle(IpcChannels.ProjectReorder, (_e, paths: string[]) => {
+    const next = orderedProjects(paths, loadState().projects ?? [])
     saveState({ projects: next })
     return next
   })

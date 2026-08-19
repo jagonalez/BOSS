@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('a resource opened from a thread looks at that thread’s checkout', () => {
   // A review opened from a worktree thread fell back to the main project
@@ -373,3 +373,29 @@ test('a fresh view is named apart from the ones already open', () => {
   assert.notEqual(nextWorkspaceViewName([first, second]), second.name)
 })
 
+test('a project dropped on the top half of a row lands above it', () => {
+  assert.deepEqual(reorderPaths(['/a', '/b', '/c'], '/c', '/a', true), ['/c', '/a', '/b'])
+})
+
+test('a project dropped on the bottom half of a row lands below it', () => {
+  assert.deepEqual(reorderPaths(['/a', '/b', '/c'], '/a', '/c', false), ['/b', '/c', '/a'])
+})
+
+test('dragging a project down accounts for the gap it leaves behind', () => {
+  // Inserting at the target's original index would have put /a before /b,
+  // because removing /a shifted every later row up by one.
+  assert.deepEqual(reorderPaths(['/a', '/b', '/c'], '/a', '/b', false), ['/b', '/a', '/c'])
+})
+
+test('a drop that changes nothing returns the same list', () => {
+  const paths = ['/a', '/b', '/c']
+  assert.equal(reorderPaths(paths, '/a', '/a', true), paths)
+  assert.equal(reorderPaths(paths, '/b', '/a', false), paths)
+  assert.equal(reorderPaths(paths, '/a', '/b', true), paths)
+})
+
+test('a drop involving a path the list does not hold is ignored', () => {
+  const paths = ['/a', '/b']
+  assert.equal(reorderPaths(paths, '/gone', '/a', true), paths)
+  assert.equal(reorderPaths(paths, '/a', '/gone', true), paths)
+})

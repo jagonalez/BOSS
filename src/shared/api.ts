@@ -65,6 +65,9 @@ export interface BossApi {
   /** Projects BOSS itself has opened. Independent of any backend. */
   projectList(): Promise<string[]>
   projectForget(path: string): Promise<string[]>
+  /** Persist the order the user dragged the projects into. Returns the stored
+   *  list, which keeps only paths BOSS already knows. */
+  projectReorder(paths: string[]): Promise<string[]>
   projectCurrent(): Promise<ProjectInfo>
   projectSet(path: string): Promise<ProjectInfo>
   projectChoose(): Promise<string | null>
