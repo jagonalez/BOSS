@@ -26,6 +26,7 @@
     "test:e2e": "npm run build && playwright test",
     "test:e2e:headed": "npm run build && BOSS_E2E_SHOW=1 playwright test --headed",
     "probe:opencode": "esbuild ./src/main/backend/opencode-backend.ts --bundle --platform=node --format=esm --outfile=./out/probe/opencode-backend.js --external:electron --external:@opencode-ai/sdk --alias:@shared=./src/shared && node scripts/probe-opencode-sdk.mjs",
+    "probe:claude": "node scripts/probe-claude-sdk.mjs",
     "fetch:opencode": "node scripts/fetch-opencode.mjs",
     "fetch:cua-driver": "bash scripts/fetch-cua-driver.sh",
     "pack": "electron-vite build && electron-builder --dir",
@@ -33,6 +34,7 @@
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.234",
     "@huggingface/transformers": "^3.8.1",
     "@opencode-ai/sdk": "^1.18.15",
     "@tanstack/react-virtual": "^3.14.9",

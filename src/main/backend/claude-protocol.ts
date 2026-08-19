@@ -1,4 +1,9 @@
-export type ClaudePermissionMode = 'manual' | 'auto' | 'acceptEdits' | 'plan'
+/** The mode names the Claude Agent SDK takes.
+ *
+ *  'default' is what the SDK types call the mode the CLI spells 'manual' — the
+ *  CLI still accepts 'manual' as an alias, so this is a rename rather than a
+ *  behaviour change. */
+export type ClaudePermissionMode = 'default' | 'auto' | 'acceptEdits' | 'plan'
 export type BossClaudeMode = 'ask' | 'auto' | 'plan' | 'accept-edits' | undefined
 
 export interface ClaudePermissionRequest {
@@ -55,12 +60,6 @@ export function claudeResultError(value: Record<string, unknown>, intentionallyS
   return String(value.error ?? value.result ?? 'Claude Code failed.')
 }
 
-/** A non-zero process exit is only an error when BOSS did not request it. */
-export function claudeExitError(code: number | null, stderr: string, intentionallyStopped = false): string | undefined {
-  if (intentionallyStopped || !code) return undefined
-  return stderr.trim() || `Claude Code exited with ${code}.`
-}
-
 /** The id a streamed part keeps once the finished message replaces it.
  *
  *  A live text or thinking part is published under a fixed id as the deltas
@@ -85,24 +84,7 @@ export function claudePermissionMode(mode?: BossClaudeMode): ClaudePermissionMod
   if (mode === 'plan') return 'plan'
   if (mode === 'auto') return 'auto'
   if (mode === 'accept-edits') return 'acceptEdits'
-  return 'manual'
-}
-
-export function parseClaudePermission(value: Record<string, unknown>): ClaudePermissionRequest | undefined {
-  if (value.type !== 'control_request') return undefined
-  const requestId = typeof value.request_id === 'string' ? value.request_id : ''
-  const request = value.request as Record<string, unknown> | undefined
-  if (!requestId || request?.subtype !== 'can_use_tool') return undefined
-  return {
-    requestId,
-    toolName: String(request.tool_name ?? 'tool'),
-    input: request.input && typeof request.input === 'object' ? request.input as Record<string, unknown> : {},
-    suggestions: Array.isArray(request.permission_suggestions) ? request.permission_suggestions : [],
-    title: typeof request.title === 'string' ? request.title : undefined,
-    description: typeof request.description === 'string' ? request.description : undefined,
-    displayName: typeof request.display_name === 'string' ? request.display_name : undefined,
-    toolUseId: typeof request.tool_use_id === 'string' ? request.tool_use_id : undefined
-  }
+  return 'default'
 }
 
 /** The tool Claude calls to put a question to the user.
@@ -157,35 +139,6 @@ export function parseClaudeQuestions(request: ClaudePermissionRequest): ClaudeQu
   return questions.length ? questions : undefined
 }
 
-/** Give Claude the user's answers, as the result of the tool it called.
- *
- *  Claude Code validates the returned input against the AskUserQuestion
- *  schema, which still requires every question to carry its question, header,
- *  and options. So the questions travel back exactly as they arrived and the
- *  answers ride beside them, keyed by question text. Replacing the array with
- *  bare answer objects failed that check, and the user's choice was reported
- *  to the model as a configuration error instead of an answer. */
-export function claudeQuestionResponse(
-  requestId: string,
-  pending: Pick<ClaudePermissionRequest, 'input'>,
-  answers: string[][]
-): Record<string, unknown> {
-  const questions = Array.isArray(pending.input.questions) ? pending.input.questions : []
-  return {
-    type: 'control_response',
-    response: {
-      subtype: 'success',
-      request_id: requestId,
-      response: {
-        behavior: 'allow',
-        // Claude reads the tool result, so the answers go back as the input it
-        // will see rather than as a permission decision.
-        updatedInput: { ...pending.input, questions, answers: claudeQuestionAnswers(questions, answers) }
-      }
-    }
-  }
-}
-
 /** Pair each answer with the question it answers, by that question's text.
  *
  *  Position is what BOSS collects and question text is what Claude reads, so
@@ -204,20 +157,41 @@ export function claudeQuestionAnswers(questions: unknown[], answers: string[][])
   return paired
 }
 
-export function claudePermissionResponse(
-  requestId: string,
+/** The tool input Claude should see once the user has answered.
+ *
+ *  Claude Code validates this against the AskUserQuestion schema, which still
+ *  requires every question to carry its question, header, and options. So the
+ *  questions travel back exactly as they arrived and the answers ride beside
+ *  them, keyed by question text. Replacing the array with bare answer objects
+ *  failed that check, and the user's choice was reported to the model as a
+ *  configuration error instead of an answer.
+ *
+ *  Returns the input alone rather than a control_response envelope: the SDK
+ *  wraps it in the allow decision that canUseTool returns. */
+export function claudeQuestionInput(
+  pending: Pick<ClaudePermissionRequest, 'input'>,
+  answers: string[][]
+): Record<string, unknown> {
+  const questions = Array.isArray(pending.input.questions) ? pending.input.questions : []
+  return { ...pending.input, questions, answers: claudeQuestionAnswers(questions, answers) }
+}
+
+/** What canUseTool returns for the user's decision.
+ *
+ *  The SDK awaits a PermissionResult rather than taking a control_response, so
+ *  this is the decision alone. "always" carries the SDK's own permission
+ *  suggestions back as updatedPermissions, which is what stops Claude asking
+ *  again for the same tool this session. */
+export function claudePermissionDecision(
   pending: Pick<ClaudePermissionRequest, 'input' | 'suggestions'>,
   response: 'once' | 'always' | 'reject'
-): Record<string, unknown> {
-  const decision = response === 'reject'
-    ? { behavior: 'deny', message: 'The user denied this tool request.', interrupt: false }
-    : {
-        behavior: 'allow',
-        updatedInput: pending.input,
-        ...(response === 'always' && pending.suggestions.length > 0 ? { updatedPermissions: pending.suggestions } : {})
-      }
+): { behavior: 'allow'; updatedInput: Record<string, unknown>; updatedPermissions?: unknown[] } | { behavior: 'deny'; message: string; interrupt: boolean } {
+  if (response === 'reject') {
+    return { behavior: 'deny', message: 'The user denied this tool request.', interrupt: false }
+  }
   return {
-    type: 'control_response',
-    response: { subtype: 'success', request_id: requestId, response: decision }
+    behavior: 'allow',
+    updatedInput: pending.input,
+    ...(response === 'always' && pending.suggestions.length > 0 ? { updatedPermissions: pending.suggestions } : {})
   }
 }

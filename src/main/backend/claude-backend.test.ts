@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { claudeExitError, claudeMessageContent, claudePermissionMode, claudePermissionResponse, claudeQuestionResponse, claudeResultError, claudeStreamedPartId, parseClaudePermission, parseClaudeQuestions } from './claude-protocol.ts'
+import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, parseClaudeQuestions } from './claude-protocol.ts'
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -49,7 +49,7 @@ test('an image sent with no text is still a block array', () => {
 })
 
 test('maps BOSS modes to current Claude permission modes', () => {
-  assert.equal(claudePermissionMode('ask'), 'manual')
+  assert.equal(claudePermissionMode('ask'), 'default')
   assert.equal(claudePermissionMode('accept-edits'), 'acceptEdits')
   assert.equal(claudePermissionMode('auto'), 'auto')
   assert.equal(claudePermissionMode('plan'), 'plan')
@@ -61,62 +61,48 @@ test('an intentionally stopped Claude turn is not reported as a failure', () => 
   assert.equal(claudeResultError({ ...failed, error: 'Actual failure' }), 'Actual failure')
   assert.equal(claudeResultError(failed, true), undefined)
   assert.equal(claudeResultError({ type: 'result', subtype: 'success' }), undefined)
-  assert.equal(claudeExitError(1, 'Process failure'), 'Process failure')
-  assert.equal(claudeExitError(1, '', false), 'Claude Code exited with 1.')
-  assert.equal(claudeExitError(1, 'Expected interrupt', true), undefined)
-  assert.equal(claudeExitError(0, ''), undefined)
 })
 
-test('parses Claude tool requests and builds once, always, and deny responses', () => {
+test('builds once, always, and deny decisions for canUseTool', () => {
   const suggestion = { type: 'addRules', behavior: 'allow', destination: 'session', rules: [{ toolName: 'WebSearch' }] }
-  const permission = parseClaudePermission({
-    type: 'control_request',
-    request_id: 'permission-1',
-    request: {
-      subtype: 'can_use_tool',
-      tool_name: 'WebSearch',
-      input: { query: 'current pricing' },
-      title: 'Search the web',
-      tool_use_id: 'tool-1',
-      permission_suggestions: [suggestion]
-    }
-  })
-  assert.deepEqual(permission, {
-    requestId: 'permission-1',
-    toolName: 'WebSearch',
-    input: { query: 'current pricing' },
-    suggestions: [suggestion],
-    title: 'Search the web',
-    description: undefined,
-    displayName: undefined,
-    toolUseId: 'tool-1'
-  })
-  assert.equal((claudePermissionResponse('permission-1', permission!, 'once').response as { response: { behavior: string } }).response.behavior, 'allow')
-  const always = claudePermissionResponse('permission-1', permission!, 'always')
-  assert.deepEqual((always.response as { response: { updatedPermissions: unknown[] } }).response.updatedPermissions, [suggestion])
-  assert.equal((claudePermissionResponse('permission-1', permission!, 'reject').response as { response: { behavior: string } }).response.behavior, 'deny')
+  // The shape canUseTool hands back, which the SDK awaits in place of the
+  // control_response BOSS used to write down the pipe.
+  const pending = { input: { query: 'current pricing' }, suggestions: [suggestion] }
+
+  assert.equal(claudePermissionDecision(pending, 'once').behavior, 'allow')
+  const once = claudePermissionDecision(pending, 'once')
+  assert.deepEqual((once as { updatedInput: unknown }).updatedInput, { query: 'current pricing' })
+  // Only "always" carries the suggestions, which is what stops Claude asking
+  // again for the same tool this session.
+  assert.equal((once as { updatedPermissions?: unknown[] }).updatedPermissions, undefined)
+
+  const always = claudePermissionDecision(pending, 'always')
+  assert.deepEqual((always as { updatedPermissions: unknown[] }).updatedPermissions, [suggestion])
+
+  assert.equal(claudePermissionDecision(pending, 'reject').behavior, 'deny')
+})
+
+/** What canUseTool hands parseClaudeQuestions. The SDK parses the control
+ *  request itself and passes these fields, so tests build them directly. */
+const toolRequest = (toolName: string, input: Record<string, unknown>, requestId = 'req-1') => ({
+  requestId,
+  toolName,
+  input,
+  suggestions: []
 })
 
 test('an AskUserQuestion request is read as questions, not a tool approval', () => {
   // It arrives as an ordinary permission request. Shown as one, the question
   // was invisible and denying it reported a dismissal the user never made.
-  const request = parseClaudePermission({
-    type: 'control_request',
-    request_id: 'ask-1',
-    request: {
-      subtype: 'can_use_tool',
-      tool_name: 'AskUserQuestion',
-      input: {
-        questions: [{
-          question: 'Which repository?',
-          header: 'Repo',
-          options: [{ label: 'ralf', description: 'the page in your browser' }, { label: 'autofix' }],
-          multiSelect: false
-        }]
-      }
-    }
-  })
-  const questions = parseClaudeQuestions(request!)
+  const request = toolRequest('AskUserQuestion', {
+    questions: [{
+      question: 'Which repository?',
+      header: 'Repo',
+      options: [{ label: 'ralf', description: 'the page in your browser' }, { label: 'autofix' }],
+      multiSelect: false
+    }]
+  }, 'ask-1')
+  const questions = parseClaudeQuestions(request)
   assert.equal(questions?.length, 1)
   assert.equal(questions?.[0].question, 'Which repository?')
   assert.equal(questions?.[0].header, 'Repo')
@@ -126,21 +112,14 @@ test('an AskUserQuestion request is read as questions, not a tool approval', () 
 })
 
 test('any other tool is left as a permission request', () => {
-  const request = parseClaudePermission({
-    type: 'control_request',
-    request_id: 'perm-1',
-    request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' } }
-  })
-  assert.equal(parseClaudeQuestions(request!), undefined)
+  const request = toolRequest('Bash', { command: 'ls' }, 'perm-1')
+  assert.equal(parseClaudeQuestions(request), undefined)
 })
 
 test('a malformed question falls back to the permission prompt', () => {
   // Better an "allow this tool?" prompt than an empty dialog with no way out.
-  const ask = (input: unknown) => parseClaudeQuestions(parseClaudePermission({
-    type: 'control_request',
-    request_id: 'ask-2',
-    request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input }
-  })!)
+  const ask = (input: Record<string, unknown>) =>
+    parseClaudeQuestions(toolRequest('AskUserQuestion', input, 'ask-2'))
   assert.equal(ask({}), undefined)
   assert.equal(ask({ questions: 'why' }), undefined)
   assert.equal(ask({ questions: [] }), undefined)
@@ -149,21 +128,20 @@ test('a malformed question falls back to the permission prompt', () => {
 
 test('a question with no options still reaches the user', () => {
   // An open question is a question. Dropping it would hang the thread.
-  const questions = parseClaudeQuestions(parseClaudePermission({
-    type: 'control_request',
-    request_id: 'ask-3',
-    request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions: [{ question: 'What should I name it?' }] } }
-  })!)
+  const questions = parseClaudeQuestions(toolRequest('AskUserQuestion', {
+    questions: [{ question: 'What should I name it?' }]
+  }, 'ask-3'))
   assert.equal(questions?.length, 1)
   assert.deepEqual(questions?.[0].options, [])
 })
 
 /** The request BOSS answers in the tests below, as Claude Code sends it. */
-const askRequest = (questions: unknown[]) => parseClaudePermission({
-  type: 'control_request',
-  request_id: 'ask-1',
-  request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions } }
-})!
+const askRequest = (questions: unknown[]) => ({
+  requestId: 'ask-1',
+  toolName: 'AskUserQuestion',
+  input: { questions },
+  suggestions: []
+})
 
 const twoQuestions = [
   {
@@ -180,9 +158,10 @@ const twoQuestions = [
   }
 ]
 
+// What questionRespond resolves canUseTool with: an allow whose updatedInput
+// is the tool input Claude will read.
 const answered = (questions: unknown[], answers: string[][]) =>
-  ((claudeQuestionResponse('ask-1', askRequest(questions), answers).response as Record<string, unknown>)
-    .response as Record<string, unknown>)
+  ({ behavior: 'allow', updatedInput: claudeQuestionInput(askRequest(questions), answers) }) as Record<string, unknown>
 
 test('answers go back as the tool result Claude is waiting for', () => {
   const inner = answered(twoQuestions, [['ralf'], ['a', 'b']])
@@ -264,6 +243,23 @@ test('a message with no thinking still ids its text', () => {
  *  visible in the text. */
 const backendSource = readFileSync(join(import.meta.dirname, 'claude-backend.ts'), 'utf8')
 
+test('a message is sent through streaming input, not as a bare prompt', () => {
+  // Anthropic documents single-message input as the limited mode: no image
+  // blocks, no queued messages, no interruption. A content-block array sent
+  // that way ends the turn silently — no assistant message, no result, no
+  // error — so an attached image reached the model as nothing at all.
+  const start = backendSource.indexOf('async sendMessage(')
+  const send = backendSource.slice(start, backendSource.indexOf('private async consume(', start))
+  assert.ok(
+    /prompt:\s*input\(\)/.test(send),
+    'the prompt must be an async generator so images, queueing and interrupt work'
+  )
+  assert.ok(
+    !/prompt:\s*content/.test(send),
+    'passing content straight to query() is single-message mode, which drops image blocks'
+  )
+})
+
 test('a send that arrives while Claude still holds its turn is refused as busy', () => {
   // Claude frees its turn slot at the result, a moment after main clears its
   // own busy flag on idle. A message sent in that gap passes main's check and
@@ -274,7 +270,7 @@ test('a send that arrives while Claude still holds its turn is refused as busy',
   assert.ok(start > 0, 'expected a sendMessage method')
   const guard = backendSource.slice(start, backendSource.indexOf('const record =', start))
   assert.ok(
-    /this\.processes\.has\(sessionId\)\)\s*throw new Error\(THREAD_BUSY_ERROR\)/.test(guard),
+    /this\.runs\.has\(sessionId\)\)\s*throw new Error\(THREAD_BUSY_ERROR\)/.test(guard),
     'the busy refusal must throw THREAD_BUSY_ERROR so the renderer queues the message'
   )
   assert.ok(
