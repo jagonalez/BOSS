@@ -3975,6 +3975,11 @@ body.workspace-dragging .workspace-tab-slot {
   border-color: rgba(245, 184, 61, 0.45);
 }
 
+.attention-pill.question {
+  color: #6fb3f5;
+  border-color: rgba(111, 179, 245, 0.45);
+}
+
 .attention-pill.error {
   color: #f0656f;
   border-color: rgba(240, 101, 111, 0.45);
@@ -3994,6 +3999,10 @@ body.workspace-dragging .workspace-tab-slot {
 
 .attention-dot.permission {
   background: #f5b83d;
+}
+
+.attention-dot.question {
+  background: #6fb3f5;
 }
 
 .attention-dot.error {

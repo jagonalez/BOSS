@@ -18,6 +18,7 @@ import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
+import type { WebhookSettings } from '@shared/notification'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
 import type { RemoteAccessStatus } from '@shared/relay'
@@ -209,8 +210,10 @@ export const OpenCode = {
     backendRequest<McpConnectionView>({ type: 'mcp.update', connectionId, patch }),
   mcpRemove: (connectionId: string) => backendRequest<void>({ type: 'mcp.remove', connectionId }),
   mcpImportScan: () => backendRequest<McpImportCandidate[]>({ type: 'mcp.import.scan' }),
-  notifyWebhook: () => backendRequest<string>({ type: 'automation.webhook.get' }),
-  setNotifyWebhook: (url: string) => backendRequest<string>({ type: 'automation.webhook.set', url }),
+  notifyWebhook: () => backendRequest<WebhookSettings>({ type: 'automation.webhook.get' }),
+  setNotifyWebhook: (url: string) => backendRequest<WebhookSettings>({ type: 'automation.webhook.set', url }),
+  setNotifyWebhookOnlyWhenAway: (onlyWhenAway: boolean) =>
+    backendRequest<WebhookSettings>({ type: 'automation.webhook.set', onlyWhenAway }),
   remoteStatus: () => backendRequest<RemoteAccessStatus>({ type: 'remote.status' }),
   remoteSet: (patch: { enabled?: boolean; relayUrl?: string; forgetDeviceId?: string; revokeAll?: boolean }) =>
     backendRequest<RemoteAccessStatus>({ type: 'remote.set', patch }),

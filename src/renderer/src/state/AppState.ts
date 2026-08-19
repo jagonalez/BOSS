@@ -132,7 +132,7 @@ export interface AppState {
   sessionMeta: Record<string, SessionMeta>
   chatOrder: string[]
   launcherProject: string | null
-  attention: { kind: 'permission' | 'done' | 'error'; ts: number } | null
+  attention: { kind: 'permission' | 'question' | 'done' | 'error'; ts: number } | null
   tts: TtsStatus
   asr: AsrStatus
   asrTargetId: string | null
