@@ -1,0 +1,34 @@
+#!/bin/sh
+# Give a new worktree its node_modules without paying for a second copy.
+#
+# A full install here costs minutes and about 1.1G, most of it native binaries —
+# onnxruntime, the huggingface models, electron-builder — that are identical in
+# every worktree. Nine worktrees had filled 11G with near-identical copies, and
+# then the disk ran out, which fails the install rather than slowing it.
+#
+# APFS clones the directory instead: the copy shares its blocks with the source
+# until something writes to them, so it takes seconds and almost no disk. It is
+# still a private copy, not a link, so installing a dependency on one branch
+# cannot reach any other worktree — only the files that actually differ start
+# taking space.
+#
+# The install afterwards is what makes the clone correct rather than merely
+# fast: it reconciles the clone against this branch's package.json. A branch
+# that added a dependency gets it, a branch that changed nothing does no work.
+# Measured on this repo: 3.6s to clone, 3s to reconcile 85 new packages, against
+# minutes for the full install it replaces.
+set -e
+
+if [ -d "$BOSS_PROJECT_PATH/node_modules" ] && [ ! -d node_modules ]; then
+  # -c asks for a clone and fails outright rather than falling back to a real
+  # copy, so a filesystem without copy-on-write takes the npm ci path below
+  # instead of silently duplicating a gigabyte.
+  cp -c -R "$BOSS_PROJECT_PATH/node_modules" node_modules 2>/dev/null || true
+fi
+
+if [ -d node_modules ]; then
+  npm install --prefer-offline --no-audit --no-fund
+else
+  # No clone to build on: nothing to reconcile, so install from the lockfile.
+  npm ci
+fi
