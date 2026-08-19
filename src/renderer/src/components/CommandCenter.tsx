@@ -26,7 +26,7 @@ function compactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 }
 
-function projectName(path: string): string {
+export function projectName(path: string): string {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || 'Chat'
 }
 

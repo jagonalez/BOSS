@@ -382,9 +382,11 @@ export function installE2EApi(boss: BossApi): void {
       case 'mobile.status': return { enabled: false, running: false, port: 0, tailscale: false }
       case 'thread.bus.get':
       case 'thread.bus.clear-failures':
-        return { projectId: 'boss-e2e', projectPath: PROJECT, policy: 'collaborate', threads: [], messages: [], toolBackends: [] }
+        return { projectId: 'boss-e2e', projectPath: PROJECT, policy: 'collaborate', defaultPolicy: 'off', source: 'project', overrides: [], threads: [], messages: [], toolBackends: [] }
       case 'thread.bus.policy':
-        return { projectId: 'boss-e2e', projectPath: PROJECT, policy: request.policy, threads: [], messages: [], toolBackends: [] }
+        return { projectId: 'boss-e2e', projectPath: PROJECT, policy: request.policy ?? 'off', defaultPolicy: 'off', source: request.policy ? 'project' : 'default', overrides: [], threads: [], messages: [], toolBackends: [] }
+      case 'thread.bus.default-policy':
+        return { projectId: 'boss-e2e', projectPath: PROJECT, policy: request.policy, defaultPolicy: request.policy, source: 'default', overrides: [], threads: [], messages: [], toolBackends: [] }
       case 'thread.qa.get': return { policy: 'suggest', source: 'default' }
       case 'thread.qa.policy': return { policy: request.policy ?? 'suggest', source: request.policy ? 'thread' : 'default' }
       case 'qa.default.get': return 'suggest'

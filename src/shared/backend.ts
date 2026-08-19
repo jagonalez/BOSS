@@ -233,7 +233,8 @@ export type BackendRequest =
   | { type: 'remote.pair' }
   | { type: 'remote.pair.cancel' }
   | { type: 'thread.bus.get'; threadId?: string }
-  | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
+  | { type: 'thread.bus.policy'; policy: import('./thread-bus').CollaborationPolicy | null; threadId?: string; projectId?: string }
+  | { type: 'thread.bus.default-policy'; policy: import('./thread-bus').CollaborationPolicy; threadId?: string }
   | { type: 'thread.bus.clear-failures'; threadId?: string }
   | { type: 'thread.qa.get'; threadId: string }
   | { type: 'thread.qa.policy'; threadId: string; policy: import('./qa').QaPolicy | null }

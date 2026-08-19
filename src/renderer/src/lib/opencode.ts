@@ -230,8 +230,10 @@ export const OpenCode = {
     backendRequest<SessionInfo>({ type: 'thread.relay', sourceThreadId, targetThreadId, instruction }),
   threadBus: (threadId?: string) =>
     backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.get', threadId }),
-  setThreadBusPolicy: (policy: CollaborationPolicy, threadId?: string) =>
-    backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.policy', policy, threadId }),
+  setThreadBusPolicy: (policy: CollaborationPolicy | null, projectId: string) =>
+    backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.policy', policy, projectId }),
+  setThreadBusDefaultPolicy: (policy: CollaborationPolicy, threadId?: string) =>
+    backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.default-policy', policy, threadId }),
   clearThreadBusFailures: (threadId?: string) =>
     backendRequest<ThreadBusSnapshot>({ type: 'thread.bus.clear-failures', threadId }),
   qaPolicy: (threadId: string) =>

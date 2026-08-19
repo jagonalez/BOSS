@@ -33,10 +33,24 @@ export interface ThreadBusMessage {
   maxTurns: number
 }
 
+/** A project whose policy differs from the default, so the settings list can
+ *  show only what the user actually chose rather than every project ever
+ *  opened. */
+export interface CollaborationOverride {
+  projectId: string
+  projectPath: string
+  policy: CollaborationPolicy
+}
+
 export interface ThreadBusSnapshot {
   projectId: string
   projectPath: string
   policy: CollaborationPolicy
+  /** Applied to any project without an explicit override. */
+  defaultPolicy: CollaborationPolicy
+  /** Whether this project's policy is its own or inherited from the default. */
+  source: 'project' | 'default'
+  overrides: CollaborationOverride[]
   threads: ThreadBusThread[]
   messages: ThreadBusMessage[]
   toolBackends: BackendId[]
