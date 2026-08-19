@@ -23,6 +23,8 @@ import {
   loadTodos,
   renameWorkspaceView,
   reorderWorkspaceTab,
+  moveWorkspaceTabToNewView,
+  renameWorkspaceTab,
   sendWorkspaceTabToView,
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
@@ -31,7 +33,7 @@ import {
 } from '../lib/actions'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { tabContentNode } from '../lib/tab-content-nodes'
-import { BackIcon, ChatIcon, FilesIcon, GlobeIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+import { BACKEND_MARKS, BackIcon, ChatIcon, ChevronIcon, FilesIcon, GlobeIcon, PanelIcon, PlusIcon, RenameIcon, ReviewIcon, TerminalIcon, TrashIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 
@@ -50,6 +52,16 @@ const TAB_TYPES: Array<{
 
 function tabIcon(kind: WorkspaceTabKind): (props: { size?: number }) => React.JSX.Element {
   return TAB_TYPES.find((item) => item.kind === kind)?.icon ?? ChatIcon
+}
+
+/** The mark for a thread's own tab: its backend rather than the generic chat
+ *  bubble. Every thread drew the same bubble, so the slot said nothing while
+ *  the backend rode beside the title as a text pill that never shrank. The
+ *  pill cost about 55px of a 92px tab, which is why the titles were unreadable.
+ *  A resource keeps its kind icon — it has no backend of its own. */
+function tabMark(item: WorkspaceTab, backendId?: string): (props: { size?: number }) => React.JSX.Element {
+  if (item.kind === 'thread' && backendId && BACKEND_MARKS[backendId]) return BACKEND_MARKS[backendId]
+  return tabIcon(item.kind)
 }
 
 function isLiveSurface(item: WorkspaceTab): boolean {
@@ -127,6 +139,21 @@ function requestCloseWorkspaceGroup(group: WorkspaceGroup): void {
   })
 }
 
+/** The same name useTabLabel derives, for places that cannot call a hook —
+ *  chiefly filtering a list of tabs. Reads the store directly instead. */
+function tabSearchLabel(item: WorkspaceTab): string {
+  const state = appStore.getState()
+  if (item.title && item.kind !== 'thread') return item.title
+  if (item.kind === 'thread') {
+    return state.sessions.find((session) => session.id === item.sessionId)?.title || 'Untitled thread'
+  }
+  if (item.kind === 'browser') {
+    const title = state.browse[`workspace-${item.id}`]?.title
+    if (title) return title
+  }
+  return TAB_TYPES.find((candidate) => candidate.kind === item.kind)?.label ?? item.kind
+}
+
 function useTabLabel(item: WorkspaceTab, group: WorkspaceGroup): string {
   const sessionTitle = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.title)
   const browserTitle = useStore(appStore, (state) => state.browse[`workspace-${item.id}`]?.title)
@@ -180,7 +207,7 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
     return Boolean(session) && !(session?.projectPath ?? session?.directory ?? session?.path)
   })
   const backendId = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.backendId)
-  const Icon = tabIcon(item.kind)
+  const Icon = tabMark(item, backendId)
   const busy = useStore(appStore, (state) => Boolean(item.sessionId && state.streaming[item.sessionId]))
   const permission = useStore(appStore, (state) => Boolean(item.sessionId && state.permissions[item.sessionId]))
   const failed = useStore(appStore, (state) => Boolean(item.sessionId && state.lastErrorBySession[item.sessionId]))
@@ -195,16 +222,55 @@ function TabLabel({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }
 
   return (
     <>
-      <span className={`workspace-tab-icon ${busy || agentDrove ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}>
-        <Icon size={12} />
+      <span
+        className={`workspace-tab-icon ${item.kind === 'thread' && backendId ? `backend-${backendId}` : ''} ${busy || agentDrove ? 'working' : ''} ${permission ? 'attention' : ''} ${failed ? 'failed' : ''}`}
+      >
+        <Icon size={16} />
       </span>
       <span className={`workspace-tab-label ${isChat ? 'chat' : ''}`} title={isChat ? `${label} — a chat, with no project or checkout` : label}>
         {label}
       </span>
       {isChat ? <span className="workspace-tab-chat">Chat</span> : null}
-      {item.kind === 'thread' ? <BackendBadge backendId={backendId} /> : null}
       {busActivity ? <span className="workspace-tab-bus" title="Thread message queued or failed" /> : null}
     </>
+  )
+}
+
+/** Says which tab this menu belongs to.
+ *
+ *  The tab strip cannot: at its narrowest a title is an ellipsis, and the
+ *  backend is a 13px mark. Four threads on one backend were indistinguishable,
+ *  which is the reason the menu exists at all, so the full title, the spelled
+ *  out backend and the checkout all go here. */
+function TabMenuHeader({ item, group }: { item: WorkspaceTab; group: WorkspaceGroup }): React.JSX.Element {
+  const label = useTabLabel(item, group)
+  const backendId = useStore(appStore, (state) => state.sessions.find((session) => session.id === item.sessionId)?.backendId)
+  const checkout = useStore(appStore, (state) => {
+    if (item.contextLabel) return item.contextLabel
+    const session = state.sessions.find((candidate) => candidate.id === item.sessionId)
+    return session ? threadCheckout(session)?.contextLabel : undefined
+  })
+  const project = useStore(appStore, (state) => {
+    const session = state.sessions.find((candidate) => candidate.id === item.sessionId)
+    const path = session?.projectPath ?? session?.directory ?? session?.path
+    return path ? path.split('/').filter(Boolean).pop() : undefined
+  })
+  const kind = TAB_TYPES.find((candidate) => candidate.kind === item.kind)?.label ?? item.kind
+  const Icon = tabMark(item, backendId)
+  return (
+    <div className="workspace-tab-menu-header">
+      <div className="workspace-tab-menu-title">
+        <span className={`workspace-tab-icon ${item.kind === 'thread' && backendId ? `backend-${backendId}` : ''}`}>
+          <Icon size={16} />
+        </span>
+        <strong>{label}</strong>
+      </div>
+      <div className="workspace-tab-menu-meta">
+        <span>{item.kind === 'thread' && backendId ? BACKEND_SHORT_LABELS[backendId] : kind}</span>
+        {project ? <span>{project}</span> : null}
+        {checkout ? <span>{checkout}</span> : null}
+      </div>
+    </div>
   )
 }
 
@@ -496,6 +562,10 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
   const [menuOwnerId, setMenuOwnerId] = useState<string | undefined>(undefined)
   const [dropTarget, setDropTarget] = useState<DropPosition | null>(null)
   const [tabMenu, setTabMenu] = useState<{ tabId: string; x: number; y: number } | null>(null)
+  const [overflowOpen, setOverflowOpen] = useState(false)
+  const [overflow, setOverflow] = useState(0)
+  const [filter, setFilter] = useState('')
+  const tabsRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const activeId = group.tabs.some((item) => item.id === group.activeTabId) ? group.activeTabId : group.tabs[0]?.id ?? null
@@ -520,10 +590,13 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
 
   useEffect(() => {
     if (!tabMenu) return
-    const close = (): void => setTabMenu(null)
-    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') close() }
-    // Any click dismisses it: the only item navigates away, so there is
-    // nothing in it worth keeping open through a stray click.
+    // Only a click outside. It used to dismiss on any click, which was safe
+    // when the one item navigated away; it now closes tabs, so a click landing
+    // on the menu has to reach the button under it.
+    const close = (event: MouseEvent): void => {
+      if (!(event.target as HTMLElement)?.closest('.workspace-tab-menu')) setTabMenu(null)
+    }
+    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') setTabMenu(null) }
     document.addEventListener('mousedown', close)
     document.addEventListener('keydown', key)
     return () => {
@@ -532,15 +605,55 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
     }
   }, [tabMenu])
 
+  // How many tabs the strip cannot show. Measured rather than counted: the
+  // pane's width decides it, and splitting a pane changes that without
+  // changing the tabs.
+  useEffect(() => {
+    const strip = tabsRef.current
+    if (!strip) return
+    const measure = (): void => {
+      const bounds = strip.getBoundingClientRect()
+      const hidden = Array.from(strip.querySelectorAll<HTMLElement>('.workspace-tab')).filter((node: HTMLElement) => {
+        const rect = node.getBoundingClientRect()
+        return rect.right > bounds.right + 1 || rect.left < bounds.left - 1
+      })
+      setOverflow(hidden.length)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(strip)
+    strip.addEventListener('scroll', measure)
+    return () => {
+      observer.disconnect()
+      strip.removeEventListener('scroll', measure)
+    }
+  }, [group.tabs.length])
+
+  useEffect(() => {
+    if (!overflowOpen) { setFilter(''); return }
+    const close = (event: MouseEvent): void => {
+      if (!(event.target as HTMLElement)?.closest('.workspace-tab-overflow-menu, .workspace-tab-overflow')) {
+        setOverflowOpen(false)
+      }
+    }
+    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') setOverflowOpen(false) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', key)
+    }
+  }, [overflowOpen])
+
   // Browsers are native views composited over the page, so any menu drawn
   // while one is showing would sit underneath it and take no clicks. Detach
   // them for as long as a menu is open.
   useEffect(() => {
     const reason = `workspace-group-${group.id}`
-    const suspended = menuOpen || Boolean(dropTarget) || Boolean(tabMenu)
+    const suspended = menuOpen || Boolean(dropTarget) || Boolean(tabMenu) || overflowOpen
     setNativeViewsSuspended(reason, suspended)
     return () => setNativeViewsSuspended(reason, false)
-  }, [group.id, menuOpen, dropTarget, tabMenu])
+  }, [group.id, menuOpen, dropTarget, tabMenu, overflowOpen])
 
   // A drag can end anywhere, including over a native view or outside the
   // window, so dragleave is not guaranteed. Clearing on the global dragend
@@ -593,7 +706,7 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
       onDrop={onDrop}
     >
       <header className="workspace-group-tabs">
-        <div className="workspace-tabs" role="tablist">
+        <div className="workspace-tabs" role="tablist" ref={tabsRef}>
           {group.tabs.map((item) => (
             <button
               key={item.id}
@@ -624,6 +737,15 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
                 }
               }}
               onClick={() => activateWorkspaceTab(group.id, item.id)}
+              // Every kind, not just resources. Once tabs are narrow the label
+              // is an ellipsis and the hover controls are a few pixels wide, so
+              // this is the one target that does not shrink: it says what the
+              // tab is and closes it without a precise click.
+              onContextMenu={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setTabMenu({ tabId: item.id, x: event.clientX, y: event.clientY })
+              }}
             >
               <TabLabel item={item} group={group} />
               {/* On the thread's own tab, so "add to this thread" needs no
@@ -697,6 +819,21 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
             </button>
           ) : null}
         </div>
+        {/* Reaches the tabs the strip had to scroll away. Without it a crowded
+            pane hid tabs behind a scrollbar that is deliberately invisible. */}
+        {overflow > 0 ? (
+          <button
+            className="workspace-tab-overflow"
+            title={`${overflow} more ${overflow === 1 ? 'tab' : 'tabs'}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              setOverflowOpen((open) => !open)
+            }}
+          >
+            <ChevronIcon size={11} className="workspace-bar-caret" />
+            <span>{overflow}</span>
+          </button>
+        ) : null}
         <div className="workspace-group-actions">
           <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>
           <button onClick={() => splitWorkspaceGroup(group.id, 'vertical')} title="Split top and bottom">↕</button>
@@ -730,6 +867,7 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
         if (!item) return null
         const title = sessions.find((session) => session.id === item.sessionId)?.title
         const origin = originOf(item, group, workspace ?? null, title)
+        const otherViews = (workspace?.views ?? []).filter((candidate) => candidate.id !== viewId)
         return (
           <div
             className="workspace-tab-menu"
@@ -738,6 +876,10 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
             // so without this the menu closed before its own buttons ran.
             onMouseDown={(event) => event.stopPropagation()}
           >
+            {/* What the tab itself can no longer say. A narrow tab shows an
+                ellipsis and four threads on one backend look alike, so the
+                full title, the backend and the checkout go here. */}
+            <TabMenuHeader item={item} group={group} />
             {origin ? (
               <button
                 className="workspace-add-menu-item"
@@ -749,12 +891,102 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
                 <BackIcon size={13} />
                 <span>Send back to {origin.title}</span>
               </button>
-            ) : (
-              <div className="workspace-menu-note">Its thread is in this pane.</div>
-            )}
+            ) : null}
+            <button
+              className="workspace-add-menu-item"
+              onClick={() => {
+                setTabMenu(null)
+                moveWorkspaceTabToNewView(item.id)
+              }}
+            >
+              <PanelIcon size={13} />
+              <span>Move to a new view</span>
+            </button>
+            {otherViews.length ? (
+              <div className="workspace-tab-menu-section">
+                <div className="workspace-tab-menu-heading">Move to view</div>
+                {otherViews.map((target) => (
+                  <button
+                    key={target.id}
+                    className="workspace-add-menu-item"
+                    onClick={() => {
+                      setTabMenu(null)
+                      const landing = walkGroups(target.root)[0]
+                      if (landing) sendWorkspaceTabToView(item.id, target.id, landing.id)
+                    }}
+                  >
+                    <PanelIcon size={13} />
+                    <span>{target.name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {/* Threads take their name from the session, so renaming one here
+                would be overwritten the moment the session is renamed. */}
+            {item.kind !== 'thread' ? (
+              <button
+                className="workspace-add-menu-item"
+                onClick={() => {
+                  const current = item.title ?? ''
+                  const next = window.prompt('Name this tab', current)
+                  setTabMenu(null)
+                  if (next !== null) renameWorkspaceTab(item.id, next)
+                }}
+              >
+                <RenameIcon size={13} />
+                <span>Rename</span>
+              </button>
+            ) : null}
+            <button
+              className="workspace-add-menu-item destructive"
+              onClick={() => {
+                setTabMenu(null)
+                requestCloseWorkspaceTab(group.id, item)
+              }}
+            >
+              <TrashIcon size={13} />
+              <span>{isLiveSurface(item) ? `Close ${item.kind}` : 'Hide this surface'}</span>
+            </button>
           </div>
         )
       })() : null}
+      {overflowOpen ? (
+        <div className="workspace-tab-overflow-menu" onMouseDown={(event) => event.stopPropagation()}>
+          <input
+            className="workspace-tab-overflow-filter"
+            placeholder="Filter tabs"
+            value={filter}
+            autoFocus
+            onChange={(event) => setFilter(event.target.value)}
+          />
+          <div className="workspace-tab-overflow-list">
+            {group.tabs.map((item) => ({ item, label: tabSearchLabel(item) }))
+              .filter(({ label }) => label.toLowerCase().includes(filter.trim().toLowerCase()))
+              .map(({ item }) => (
+                <div key={item.id} className={`workspace-tab-overflow-row ${item.id === activeId ? 'active' : ''}`}>
+                  <button
+                    className="workspace-tab-overflow-pick"
+                    onClick={() => {
+                      setOverflowOpen(false)
+                      activateWorkspaceTab(group.id, item.id)
+                    }}
+                  >
+                    <TabLabel item={item} group={group} />
+                  </button>
+                  <span
+                    className={`workspace-tab-close ${isLiveSurface(item) ? 'destructive' : ''}`}
+                    role="button"
+                    title={isLiveSurface(item) ? `Close ${item.kind}` : 'Hide this surface'}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      requestCloseWorkspaceTab(group.id, item)
+                    }}
+                  >{isLiveSurface(item) ? '×' : '−'}</span>
+                </div>
+              ))}
+          </div>
+        </div>
+      ) : null}
       {dropTarget ? <div className={`workspace-drop-target ${dropTarget}`}><span>{dropTarget === 'center' ? 'Move into pane' : `Split ${dropTarget}`}</span></div> : null}
     </section>
   )
@@ -807,6 +1039,7 @@ function WorkspaceBar(): React.JSX.Element {
   const layouts = useStore(appStore, (state) => state.layouts)
   const undo = useStore(appStore, (state) => state.workspaceUndo)
   const [layoutsOpen, setLayoutsOpen] = useState(false)
+  const [addHot, setAddHot] = useState(false)
   const [editingViewId, setEditingViewId] = useState<string | null>(null)
   const [viewNameDraft, setViewNameDraft] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
@@ -906,7 +1139,26 @@ function WorkspaceBar(): React.JSX.Element {
             ) : null}
           </div>
         ))}
-        <button className="workspace-view-add" title="New view" onClick={createWorkspaceView}>
+        {/* Dropping a tab here makes the view and puts the tab in it. Making
+            the view first left an empty room to drag into, which is the step
+            that stopped people splitting a crowded pane up. */}
+        <button
+          className={`workspace-view-add ${addHot ? 'drop' : ''}`}
+          title="New view, or drop a tab here to start one"
+          onClick={createWorkspaceView}
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes(TAB_DRAG_TYPE)) return
+            event.preventDefault()
+            setAddHot(true)
+          }}
+          onDragLeave={() => setAddHot(false)}
+          onDrop={(event) => {
+            event.preventDefault()
+            setAddHot(false)
+            const tabId = event.dataTransfer.getData(TAB_DRAG_TYPE)
+            if (tabId) moveWorkspaceTabToNewView(tabId)
+          }}
+        >
           <PlusIcon size={13} />
         </button>
       </div>
@@ -917,7 +1169,12 @@ function WorkspaceBar(): React.JSX.Element {
         </button>
       ) : null}
       <div className="workspace-layout-control" ref={menuRef}>
-        <button className="workspace-bar-button" onClick={() => setLayoutsOpen((open) => !open)}>Layouts <span>⌄</span></button>
+        <button className="workspace-bar-button" onClick={() => setLayoutsOpen((open) => !open)}>
+          <span>Layouts</span>
+          {/* Drawn, not the ⌄ glyph it replaces: that character sits on the
+              text baseline, so it hung below the middle of the button. */}
+          <ChevronIcon size={12} className={`workspace-bar-caret ${layoutsOpen ? 'open' : ''}`} />
+        </button>
         {layoutsOpen ? (
           <div className="workspace-layout-menu">
             {layouts.map((layout) => (
