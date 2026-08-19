@@ -12,8 +12,12 @@
 import { createServer } from 'node:http'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { Rooms } from './rooms.js'
-import { MOBILE_PAGE } from '../../src/shared/mobile-page.js'
-import { SERVICE_WORKER, WEB_MANIFEST } from '../../src/shared/pwa-assets.js'
+// Copied in from src/shared by `npm run sync`, which build and test both run.
+// Importing across trees made tsc's rootDir span two roots, and the emitted
+// layout then differed between a local build and the container — the deploy
+// started and died on a module that resolved but exported nothing.
+import { MOBILE_PAGE } from './shared/mobile-page.js'
+import { SERVICE_WORKER, WEB_MANIFEST } from './shared/pwa-assets.js'
 
 const PORT = Number(process.env.PORT ?? 8080)
 /** fly.io routes to the machine's internal address; override to bind narrowly. */

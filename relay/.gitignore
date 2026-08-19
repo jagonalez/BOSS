@@ -2,3 +2,11 @@ node_modules/
 dist/
 # Throwaway scripts used to poke a running relay by hand.
 probe*.mjs
+
+# Copied from ../src/shared by `npm run sync`. Generated, so committing them
+# would let the two copies drift — which is the failure this replaced.
+src/shared/
+
+# Superseded by src/shared/identity.ts before it was ever committed. The
+# tsconfig excludes it too; this keeps it out of the repository.
+src/verify.ts

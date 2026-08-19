@@ -4,12 +4,13 @@
   "private": true,
   "description": "Stateless WebSocket relay that pairs a BOSS desktop with its phones",
   "type": "module",
-  "main": "dist/relay/src/server.js",
+  "main": "dist/server.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/relay/src/server.js",
-    "dev": "npm run build && node dist/relay/src/server.js",
-    "// pretest": "The pairing test drives the real desktop RelayClient. That is app code and uses bundler-style imports Node's runner cannot resolve, so bundle it into dist/ first.",
+    "// sync": "The relay serves the same phone page the desktop does. Copying it in beats importing across trees, which made the compiled layout depend on where the build ran.",
+    "sync": "mkdir -p src/shared && cp ../src/shared/mobile-page.ts ../src/shared/pwa-assets.ts ../src/shared/identity.ts src/shared/",
+    "build": "npm run sync && tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "npm run build && node dist/server.js",
     "pretest": "npx esbuild ../src/main/relay-client.ts --bundle --platform=node --format=esm --outfile=dist/test/relay-client.mjs --external:ws --external:electron",
     "test": "npm run build && node --experimental-strip-types --test \"src/**/*.test.ts\""
   },
