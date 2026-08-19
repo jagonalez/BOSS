@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { resolveBackendBin } from '../backend-bin'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { query, type Query, type SDKMessage, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import { THREAD_BUSY_ERROR } from '@shared/backend'
 import type { BackendMessageOptions, BackendModeId } from '@shared/backend'
@@ -353,8 +353,21 @@ export class ClaudeBackend implements Backend {
       return new Promise<PermissionResult>((resolve) => { waiting.set(pending.requestId, resolve) })
     }
 
+    // Streaming input, not a bare prompt. Anthropic documents single-message
+    // input as the limited mode: it takes no image blocks, no queued messages
+    // and no interruption, and a content-block array sent that way ends the
+    // turn silently — no assistant message, no result, no error. BOSS attaches
+    // images and interrupts runs, so the message goes through a generator.
+    async function* input(): AsyncGenerator<SDKUserMessage> {
+      yield {
+        type: 'user',
+        message: { role: 'user', content },
+        parent_tool_use_id: null
+      } as SDKUserMessage
+    }
+
     const session = query({
-      prompt: content as never,
+      prompt: input(),
       options: {
         cwd,
         // The user's own binary when one is configured, so a BOSS_CLAUDE_BIN or

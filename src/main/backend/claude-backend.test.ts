@@ -243,6 +243,23 @@ test('a message with no thinking still ids its text', () => {
  *  visible in the text. */
 const backendSource = readFileSync(join(import.meta.dirname, 'claude-backend.ts'), 'utf8')
 
+test('a message is sent through streaming input, not as a bare prompt', () => {
+  // Anthropic documents single-message input as the limited mode: no image
+  // blocks, no queued messages, no interruption. A content-block array sent
+  // that way ends the turn silently — no assistant message, no result, no
+  // error — so an attached image reached the model as nothing at all.
+  const start = backendSource.indexOf('async sendMessage(')
+  const send = backendSource.slice(start, backendSource.indexOf('private async consume(', start))
+  assert.ok(
+    /prompt:\s*input\(\)/.test(send),
+    'the prompt must be an async generator so images, queueing and interrupt work'
+  )
+  assert.ok(
+    !/prompt:\s*content/.test(send),
+    'passing content straight to query() is single-message mode, which drops image blocks'
+  )
+})
+
 test('a send that arrives while Claude still holds its turn is refused as busy', () => {
   // Claude frees its turn slot at the result, a moment after main clears its
   // own busy flag on idle. A message sent in that gap passes main's check and
