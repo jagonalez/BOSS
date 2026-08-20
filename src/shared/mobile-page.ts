@@ -204,6 +204,32 @@ function deriveId(prefix, secret) {
   });
 }
 
+// This phone's relay identity. The private key is generated here, kept in
+// localStorage beside the rest of the relay credentials, and never sent. The
+// relay only ever sees the public half and signatures over its own nonces.
+// Ed25519 in crypto.subtle needs Safari 17, Firefox 130 or Chrome 137.
+function newIdentity() {
+  return crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']).then(function (pair) {
+    return Promise.all([
+      crypto.subtle.exportKey('raw', pair.publicKey),
+      crypto.subtle.exportKey('pkcs8', pair.privateKey)
+    ]).then(function (parts) {
+      return { publicKey: b64u(new Uint8Array(parts[0])), secretKey: b64u(new Uint8Array(parts[1])) };
+    });
+  });
+}
+
+// Signs nonce, room and side together, so a captured signature is worthless on
+// another connection, in another room, or as the desktop.
+function signChallenge(secretKey, nonce, roomId, side) {
+  return crypto.subtle.importKey('pkcs8', unb64u(secretKey), { name: 'Ed25519' }, false, ['sign'])
+    .then(function (key) {
+      var message = new TextEncoder().encode('boss-relay-join ' + nonce + ' ' + roomId + ' ' + side);
+      return crypto.subtle.sign({ name: 'Ed25519' }, key, message);
+    })
+    .then(function (signature) { return b64u(new Uint8Array(signature)); });
+}
+
 function seal(key, message) {
   var iv = crypto.getRandomValues(new Uint8Array(12));
   return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, new TextEncoder().encode(JSON.stringify(message)))
@@ -563,6 +589,35 @@ function scheduleRefresh(id) {
 }
 
 /**
+ * Answer the relay's challenge.
+ *
+ * The room belongs to the DESKTOP, so its id comes from the QR code as "d" —
+ * this phone cannot compute it, and that is the point. The signature is this
+ * phone's own, and proves only which phone is asking; the desktop decides
+ * whether to let it in when it sees the claim.
+ */
+function relayGreet(socket, nonce) {
+  if (!relay || relaySocket !== socket) return;
+  Promise.all([
+    deriveKey(relay.secret),
+    signChallenge(relay.secretKey, nonce, relay.deviceId, 'phone')
+  ]).then(function (parts) {
+    if (relaySocket !== socket || socket.readyState !== 1) return;
+    relayKey = parts[0];
+    socket.send(JSON.stringify({
+      type: 'hello', side: 'phone', deviceId: relay.deviceId, peerId: relay.peerId,
+      publicKey: relay.publicKey, signature: parts[1], v: 1
+    }));
+  }).catch(function (e) {
+    // Without this the socket opens, signing throws, and nothing is ever sent
+    // — a silent hang that looks identical to a network fault.
+    pairError = 'Encryption is unavailable: ' + (e && e.message ? e.message : String(e));
+    relayReady = false;
+    render();
+  });
+}
+
+/**
  * Open the relay socket and keep it open. Backoff matches the desktop's, so
  * a relay restart does not stampede reconnects from every paired phone.
  */
@@ -573,41 +628,23 @@ function relayConnect() {
   try { socket = new WebSocket(url); } catch (e) { scheduleRelayReconnect(); return; }
   relaySocket = socket;
 
-  socket.onopen = function () {
-    // Routing must use the DESKTOP's room, which the QR code carries as "d".
-    // Deriving it from the pairing secret instead puts the phone in a room of
-    // its own, where the desktop never sees the claim and pairing just times
-    // out. Once paired, relay.secret IS the room secret, so both agree.
-    Promise.all([
-      deriveKey(relay.secret),
-      relay.deviceId ? Promise.resolve(relay.deviceId) : deriveId('boss-relay-device:', relay.secret),
-      relay.joinProof ? Promise.resolve(relay.joinProof) : deriveId('boss-relay-join:', relay.secret)
-    ]).then(function (parts) {
-      relayKey = parts[0];
-      socket.send(JSON.stringify({
-        type: 'hello', side: 'phone', deviceId: parts[1], peerId: relay.peerId, proof: parts[2], v: 1
-      }));
-      relayAttempt = 0;
-      relayReady = true;
-      // A pending QR claim goes out as the first frame on the new socket.
-      if (pairingClaim) relaySend({ kind: 'claim', secret: pairingClaim, label: navigator.platform || 'Phone' });
-      // Already paired: ask for anything that happened while we were away.
-      else if (relay.token) relaySend({ kind: 'resume', since: lastSeq, token: relay.token });
-      render();
-    }).catch(function (e) {
-      // Without this the socket opens, the key derivation throws, and nothing
-      // is ever sent — a silent hang that looks identical to a network fault.
-      pairError = 'Encryption is unavailable: ' + (e && e.message ? e.message : String(e));
-      relayReady = false;
-      render();
-    });
-  };
+  // Nothing is sent on open: the relay speaks first with a nonce, and
+  // relayGreet answers it from onmessage below.
+  socket.onopen = function () { relayAttempt = 0; };
 
   socket.onmessage = function (raw) {
     var frame;
     try { frame = JSON.parse(raw.data); } catch (e) { return; }
+    if (frame.type === 'challenge' && frame.nonce) { relayGreet(socket, frame.nonce); return; }
     if (frame.type === 'peer.online' || frame.type === 'peer.offline' || frame.type === 'welcome') {
       desktopOnline = frame.desktopOnline !== false;
+      // A welcome means the relay accepted the signature. Claiming or resuming
+      // any earlier would send into a socket that is about to be closed.
+      if (frame.type === 'welcome') {
+        relayReady = true;
+        if (pairingClaim) relaySend({ kind: 'claim', secret: pairingClaim, label: navigator.platform || 'Phone' });
+        else if (relay && relay.token) relaySend({ kind: 'resume', since: lastSeq, token: relay.token });
+      }
       render();
       if (desktopOnline && frame.type !== 'peer.offline') boot();
       return;
@@ -672,7 +709,17 @@ function handleRelayMessage(message) {
     if (location.hash) history.replaceState(null, '', location.pathname + location.search);
     // Now holding the room secret, the phone derives its own routing values
     // again — the same ones the desktop uses — so the code's copies are dropped.
-    relay = { relayUrl: relay.relayUrl, secret: message.secret, token: message.token, peerId: relay.peerId };
+    // Everything but the secret and token survives: the room id and this
+    // phone's keypair are what get it back into the room on the next connect.
+    relay = {
+      relayUrl: relay.relayUrl,
+      secret: message.secret,
+      token: message.token,
+      deviceId: relay.deviceId,
+      publicKey: relay.publicKey,
+      secretKey: relay.secretKey,
+      peerId: relay.peerId
+    };
     localStorage.setItem('boss.relay', JSON.stringify(relay));
     // The room key changes with the secret, so reconnect into the real room.
     relayKey = null;
@@ -751,22 +798,32 @@ window.pairWithCode = function (raw) {
     if (err) err.textContent = pairError;
     return;
   }
-  // Pair using the one-time secret, then swap it for the long-lived one.
-  // deviceId and joinProof come from the code because they belong to the
-  // desktop's room, and the pairing secret cannot derive them.
-  relay = {
-    relayUrl: payload.r,
-    secret: payload.s,
-    token: '',
-    deviceId: payload.d,
-    joinProof: payload.j,
-    peerId: b64u(crypto.getRandomValues(new Uint8Array(8)))
-  };
+  // Pair using the one-time secret, then swap it for the long-lived one. The
+  // room id comes from the code as "d" because it is the hash of the DESKTOP's
+  // public key, which this phone has no way to compute.
   pairError = '';
   if (err) err.textContent = 'Pairing…';
-  // relayConnect sends the claim as soon as the socket is ready, and
-  // handleRelayMessage boots the app when the desktop answers.
-  pairingClaim = payload.s;
+  newIdentity().then(function (identity) {
+    relay = {
+      relayUrl: payload.r,
+      secret: payload.s,
+      token: '',
+      deviceId: payload.d,
+      // One keypair per browser, kept for the life of the pairing so the
+      // desktop can revoke this phone alone.
+      publicKey: identity.publicKey,
+      secretKey: identity.secretKey,
+      peerId: b64u(crypto.getRandomValues(new Uint8Array(8)))
+    };
+    // relayConnect answers the relay's challenge, then sends the claim once
+    // the welcome lands; handleRelayMessage boots the app when the desktop answers.
+    pairingClaim = payload.s;
+    relayConnect();
+    render();
+  }).catch(function (e) {
+    pairError = 'This browser cannot sign in to the relay: ' + (e && e.message ? e.message : String(e));
+    render();
+  });
   pairingTimeout = setTimeout(function () {
     if (relay && !relay.token) {
       unpairRelay();
@@ -775,9 +832,6 @@ window.pairWithCode = function (raw) {
       render();
     }
   }, 20000);
-  relayConnect();
-  // Show the attempt, not the state that preceded it.
-  render();
 };
 
 window.unpairRelay = function () {

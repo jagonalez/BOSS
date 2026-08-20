@@ -18,6 +18,20 @@ import { Rooms } from './rooms.js'
 // started and died on a module that resolved but exported nothing.
 import { MOBILE_PAGE } from './shared/mobile-page.js'
 import { SERVICE_WORKER, WEB_MANIFEST } from './shared/pwa-assets.js'
+import {
+  challengeExpired,
+  challengeMessage,
+  looksLikeKey,
+  looksLikeSignature,
+  newNonce,
+  roomIdForKey,
+  verifySignature,
+  type Challenge,
+  type SigningCrypto
+} from './shared/identity.js'
+import { webcrypto } from 'node:crypto'
+
+const crypto = webcrypto as unknown as SigningCrypto
 
 const PORT = Number(process.env.PORT ?? 8080)
 /** fly.io routes to the machine's internal address; override to bind narrowly. */
@@ -80,6 +94,12 @@ wss.on('connection', (socket, request) => {
   // A socket that never opens on the client looks identical to one that never
   // arrives. Logging the attempt tells those apart.
   process.stdout.write(`[relay] socket opened from ${request.socket.remoteAddress}\n`)
+
+  // The relay speaks first. A peer cannot choose what it signs, so a signature
+  // captured here is worthless on any other connection.
+  const challenge = { nonce: newNonce(crypto), issuedAt: Date.now() }
+  send(socket, { type: 'challenge', nonce: challenge.nonce })
+
   socket.on('message', (raw) => {
     let frame: Record<string, unknown>
     try {
@@ -91,37 +111,9 @@ wss.on('connection', (socket, request) => {
 
     const state = attached.get(socket)
 
-    // The first frame must be a hello that claims a device id and a side.
+    // The first frame must be a hello proving the peer holds a private key.
     if (!state) {
-      const deviceId = typeof frame.deviceId === 'string' ? frame.deviceId : ''
-      const peerId = typeof frame.peerId === 'string' ? frame.peerId : ''
-      const proof = typeof frame.proof === 'string' ? frame.proof : ''
-      const side = frame.side === 'desktop' ? 'desktop' : frame.side === 'phone' ? 'phone' : null
-      if (frame.type !== 'hello' || !side || !isId(deviceId) || !isId(peerId) || !isId(proof)) {
-        send(socket, { type: 'error', message: 'expected hello' })
-        socket.close(1008, 'expected hello')
-        return
-      }
-      const result = rooms.join(deviceId, proof, { peerId, side, socket })
-      if (result.rejected) {
-        send(socket, { type: 'error', message: result.rejected })
-        socket.close(1008, result.rejected)
-        return
-      }
-      if (result.displaced) {
-        send(result.displaced.socket, { type: 'error', message: 'replaced by a newer desktop connection' })
-        result.displaced.socket.close(1000, 'replaced')
-      }
-      attached.set(socket, { deviceId, peerId, side, alive: true })
-      process.stdout.write(`[relay] ${side} joined room ${deviceId.slice(0, 8)}… as ${peerId}\n`)
-      send(socket, {
-        type: 'welcome',
-        deviceId,
-        peerId,
-        desktopOnline: rooms.desktopOnline(deviceId)
-      })
-      if (side === 'desktop') notifyDesktopPresence(deviceId)
-      else send(socket, { type: rooms.desktopOnline(deviceId) ? 'peer.online' : 'peer.offline', desktopOnline: rooms.desktopOnline(deviceId) })
+      void admit(socket, frame, challenge)
       return
     }
 
@@ -171,9 +163,76 @@ wss.on('connection', (socket, request) => {
   })
 })
 
-/** Device and peer ids are opaque base64url strings; bound them so a room key cannot be abused. */
+/** Peer ids are opaque base64url strings chosen by the client; bound them. */
 function isId(value: string): boolean {
   return value.length > 0 && value.length <= 64 && /^[A-Za-z0-9_-]+$/.test(value)
+}
+
+/**
+ * Admit a socket, or refuse it.
+ *
+ * A DESKTOP's room is derived from the key that signed the nonce, never taken
+ * from the frame, so it can only ever own the one room its key hashes to. That
+ * is what makes a room unclaimable: knowing an id is not knowing a key.
+ *
+ * A PHONE names the room it wants, because it cannot compute the desktop's —
+ * the QR code hands it the id. The signature covers that id, so the relay
+ * still learns which phone is asking and cannot be told a lie about it. What
+ * the relay deliberately does NOT decide is whether that phone belongs there:
+ * it holds no list of paired devices and could not check one without being
+ * given something worth stealing. The desktop is the only party that knows,
+ * and it enforces it by key — a phone it has not paired cannot open a single
+ * frame, because every payload is sealed with a secret the relay never sees.
+ * So the worst an unpaired phone achieves here is to sit in a room reading
+ * ciphertext it cannot decrypt.
+ */
+async function admit(socket: WebSocket, frame: Record<string, unknown>, challenge: Challenge): Promise<void> {
+  const refuse = (message: string): void => {
+    send(socket, { type: 'error', message })
+    socket.close(1008, message)
+  }
+
+  const publicKey = frame.publicKey
+  const signature = frame.signature
+  const peerId = typeof frame.peerId === 'string' ? frame.peerId : ''
+  const side = frame.side === 'desktop' ? 'desktop' : frame.side === 'phone' ? 'phone' : null
+
+  if (frame.type !== 'hello' || !side || !isId(peerId)) return refuse('expected hello')
+  if (!looksLikeKey(publicKey) || !looksLikeSignature(signature)) return refuse('expected a signed hello')
+  // A slow phone gets 30 seconds; beyond that the nonce is worthless anyway.
+  if (challengeExpired(challenge, Date.now())) return refuse('challenge expired, reconnect')
+
+  // A phone asks for a room; a desktop's is dictated by its key.
+  const asked = typeof frame.deviceId === 'string' ? frame.deviceId : ''
+  if (side === 'phone' && !isId(asked)) return refuse('a phone must name the room it is joining')
+  const deviceId = side === 'desktop' ? await roomIdForKey(crypto, publicKey) : asked
+
+  const proven = await verifySignature(
+    crypto,
+    publicKey,
+    signature,
+    challengeMessage(challenge.nonce, deviceId, side)
+  )
+  if (!proven) return refuse('signature did not verify')
+
+  // The socket may have gone while the signature was being checked.
+  if (socket.readyState !== socket.OPEN) return
+
+  const result = rooms.join(deviceId, { peerId, side, socket })
+  if (result.rejected) return refuse(result.rejected)
+  if (result.displaced) {
+    send(result.displaced.socket, { type: 'error', message: 'replaced by a newer desktop connection' })
+    result.displaced.socket.close(1000, 'replaced')
+  }
+
+  attached.set(socket, { deviceId, peerId, side, alive: true })
+  process.stdout.write(`[relay] ${side} joined room ${deviceId.slice(0, 8)}… as ${peerId}\n`)
+  send(socket, { type: 'welcome', deviceId, peerId, desktopOnline: rooms.desktopOnline(deviceId) })
+  if (side === 'desktop') notifyDesktopPresence(deviceId)
+  else send(socket, {
+    type: rooms.desktopOnline(deviceId) ? 'peer.online' : 'peer.offline',
+    desktopOnline: rooms.desktopOnline(deviceId)
+  })
 }
 
 const heartbeat = setInterval(() => {

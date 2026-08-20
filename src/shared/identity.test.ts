@@ -141,3 +141,23 @@ test('garbage is refused without throwing', async () => {
   assert.equal(await verifySignature(crypto, 'not-a-key', 'not-a-signature', new Uint8Array([1])), false)
   assert.equal(await verifySignature(crypto, 'a'.repeat(43), 'b'.repeat(86), new Uint8Array([1])), false)
 })
+
+test('every client builds the same challenge message', async () => {
+  // The message is written out by hand in three places that cannot import this
+  // module: mobile/src/crypto.ts (React Native), src/shared/mobile-page.ts (a
+  // string of browser JavaScript), and the relay's copy. A one-character drift
+  // in any of them verifies locally and fails only on a real phone, which is
+  // how the expensive bugs in this feature have always presented.
+  const { readFileSync } = await import('node:fs')
+  const expected = new TextDecoder().decode(challengeMessage('N', 'R', 'phone'))
+  assert.equal(expected, 'boss-relay-join N R phone')
+
+  const sources = [
+    ['mobile/src/crypto.ts', /`boss-relay-join \$\{nonce\} \$\{roomId\} \$\{side\}`/],
+    ['src/shared/mobile-page.ts', /'boss-relay-join ' \+ nonce \+ ' ' \+ roomId \+ ' ' \+ side/]
+  ] as const
+  for (const [file, pattern] of sources) {
+    const text = readFileSync(new URL('../../' + file, import.meta.url), 'utf8')
+    assert.match(text, pattern, `${file} must build the same challenge message`)
+  }
+})

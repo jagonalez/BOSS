@@ -4,8 +4,6 @@ import type { BackendRequest } from '../shared/backend'
 import { mobileRequestAllowed, type MobileAccessRole } from '../shared/mobile'
 import { EventBuffer } from '../shared/event-buffer'
 import {
-  deriveDeviceId,
-  deriveJoinProof,
   deriveKey,
   encodePairing,
   hashToken,
@@ -19,6 +17,8 @@ import {
   type RemoteAccessStatus,
   type StoredDevice
 } from '../shared/relay'
+import { roomIdForKey, type SigningCrypto } from '../shared/identity'
+import { RelayIdentity } from './relay-identity'
 
 /**
  * Outbound half of remote access. The desktop dials the relay, so no inbound
@@ -30,7 +30,7 @@ import {
  * name, and this machine performs it.
  */
 
-const crypto = webcrypto as unknown as CryptoLike
+const crypto = webcrypto as unknown as CryptoLike & SigningCrypto
 
 /** Compare secret-derived values without leaking their contents through timing. */
 function sameSecret(a: string, b: string): boolean {
@@ -140,6 +140,8 @@ export class RelayClient {
   private readonly configFile: string
   private readonly host: RelayHost
   private readonly connect: SocketFactory
+  /** This desktop's Ed25519 keypair. Owns the room; never leaves the machine. */
+  private readonly identity: RelayIdentity
 
   // Plain fields rather than parameter properties: Node's type-stripping test
   // runner rejects the shorthand, and this class needs to be testable.
@@ -147,6 +149,8 @@ export class RelayClient {
     this.configFile = configFile
     this.host = host
     this.connect = connect
+    // Beside the config, so a user who clears remote access clears both.
+    this.identity = new RelayIdentity(configFile.replace(/\.json$/, '') + '-key.json')
     this.config = this.load()
   }
 
@@ -225,8 +229,9 @@ export class RelayClient {
     this.onChange?.()
 
     this.key = await deriveKey(crypto, this.config.secret)
-    this.deviceId = await deriveDeviceId(crypto, this.config.secret)
-    const proof = await deriveJoinProof(crypto, this.config.secret)
+    // The room now belongs to the keypair, not to the secret: it is the hash of
+    // the public key, so only the holder of the private key can enter it.
+    this.deviceId = await roomIdForKey(crypto, await this.identity.publicKey())
 
     let socket: Socket
     try {
@@ -237,21 +242,11 @@ export class RelayClient {
     }
     this.socket = socket
 
+    // No hello here. The relay speaks first with a nonce and this desktop
+    // answers with a signature over it, so a proof it captured is worthless on
+    // any other connection. receive() sends the hello when the challenge lands.
     socket.on('open', () => {
       this.attempt = 0
-      socket.send(JSON.stringify({
-        type: 'hello',
-        side: 'desktop',
-        deviceId: this.deviceId,
-        peerId: this.peerId,
-        proof,
-        v: RELAY_PROTOCOL_VERSION
-      }))
-      this.state = 'online'
-      this.lastError = undefined
-      this.offEvents?.()
-      this.offEvents = this.host.onEvent((event) => void this.broadcast(event))
-      this.onChange?.()
     })
 
     socket.on('message', (raw: unknown) => void this.receive(String(raw)))
@@ -295,6 +290,31 @@ export class RelayClient {
     this.reconnectTimer.unref?.()
   }
 
+  /** Answer the relay's challenge. The room id is derived locally from the
+   *  public key, so both sides compute the same room without exchanging it. */
+  private async greet(nonce: string): Promise<void> {
+    const socket = this.socket
+    if (!socket || socket.readyState !== 1) return
+    try {
+      const publicKey = await this.identity.publicKey()
+      const deviceId = await roomIdForKey(crypto, publicKey)
+      this.deviceId = deviceId
+      socket.send(JSON.stringify({
+        type: 'hello',
+        side: 'desktop',
+        peerId: this.peerId,
+        publicKey,
+        signature: await this.identity.sign(nonce, deviceId, 'desktop'),
+        v: RELAY_PROTOCOL_VERSION
+      }))
+    } catch (error) {
+      // Without a usable key this desktop can never join, so surface it rather
+      // than reconnecting in a loop that cannot succeed.
+      this.lastError = error instanceof Error ? error.message : String(error)
+      this.onChange?.()
+    }
+  }
+
   private async receive(raw: string): Promise<void> {
     let frame: Record<string, unknown>
     try {
@@ -302,9 +322,26 @@ export class RelayClient {
     } catch {
       return
     }
+    // The relay opens with a nonce. Signing it proves this desktop owns the
+    // room without ever sending anything reusable: the signature covers the
+    // nonce, the room and the side, so it is good for this connection only.
+    if (frame.type === 'challenge' && typeof frame.nonce === 'string') {
+      await this.greet(frame.nonce)
+      return
+    }
+
     // Relay control frames carry no user content.
     if (typeof frame.type === 'string' && frame.type !== 'frame') {
       if (frame.type === 'error') this.lastError = String(frame.message ?? 'relay error')
+      if (frame.type === 'welcome') {
+        // Online only once the relay has accepted the signature. Reporting it
+        // at socket-open would show a working connection to a relay that was
+        // about to refuse this desktop.
+        this.state = 'online'
+        this.lastError = undefined
+        this.offEvents?.()
+        this.offEvents = this.host.onEvent((event) => void this.broadcast(event))
+      }
       this.onChange?.()
       return
     }
@@ -457,8 +494,12 @@ export class RelayClient {
   private async beginPairing(): Promise<RemoteAccessStatus> {
     this.clearPairing()
     const secret = randomBytes(18).toString('base64url')
-    // The phone needs this desktop's room coordinates to reach it at all.
-    const joinProof = await deriveJoinProof(crypto, this.config.secret)
+    // The phone needs this desktop's room id to reach it at all, and cannot
+    // derive it: the room is the hash of this desktop's public key. Publishing
+    // the id is safe — entering the room needs the private key, which the QR
+    // code does not carry and the phone never sees.
+    const deviceId = this.deviceId ?? await roomIdForKey(crypto, await this.identity.publicKey())
+    this.deviceId = deviceId
     const expiresAt = Date.now() + PAIRING_TTL_MS
     const timer = setTimeout(() => {
       this.pairing = undefined
@@ -472,9 +513,8 @@ export class RelayClient {
       code: encodePairing({
         v: RELAY_PROTOCOL_VERSION,
         r: this.config.relayUrl,
-        d: this.deviceId ?? '',
-        s: secret,
-        j: joinProof
+        d: deviceId,
+        s: secret
       })
     }
     return this.status()
@@ -507,7 +547,8 @@ export class RelayClient {
         return this.status()
       }
       case 'remote.pair': {
-        if (!this.deviceId) this.deviceId = await deriveDeviceId(crypto, this.config.secret)
+        // beginPairing derives the room from the keypair, so pairing works
+        // before the socket has ever connected.
         return await this.beginPairing()
       }
       case 'remote.pair.cancel': {
