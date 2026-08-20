@@ -37,6 +37,7 @@ import {
   reorderTab,
   resizeSplit,
   saveWorkspace,
+  split,
   splitGroup,
   tab,
   threadCheckout,
@@ -45,6 +46,7 @@ import {
   group,
   walkGroups,
   walkTabs,
+  singleThreadView,
   workspaceView
 } from './workspaces'
 
@@ -67,7 +69,10 @@ export function initializeWorkspaceState(): void {
  *  still there when they switch back. */
 export function setViewMode(value: ViewMode): void {
   appStore.setState({ viewMode: value })
-  if (value === 'single') splitThreadsIntoOwnViews()
+  if (value === 'single') {
+    splitThreadsIntoOwnViews()
+    addPanelToSingleViews()
+  }
   try {
     localStorage.setItem('boss.viewMode', value)
   } catch {
@@ -430,11 +435,45 @@ function copyThreadPreferences(sourceId: string, targetId: string): void {
  *  reads as the setting doing nothing. Each extra thread moves to a view of its
  *  own; tabs that are not threads stay with the thread whose pane they are in,
  *  since a terminal belongs to the checkout it was opened against. */
+/** Give a single-mode view the panel it needs beside its conversation.
+ *
+ *  Views made before the panel existed are one group holding everything. The
+ *  thread stays where it is and the rest moves to a new pane beside it, so a
+ *  terminal opened earlier ends up where terminals now live rather than
+ *  vanishing from a strip that is no longer drawn. */
+function addPanelToSingleViews(): void {
+  // Bounded by the number of views: each pass converts one single-group view
+  // into two groups, so it cannot need more turns than there are views. The
+  // cap is a backstop against an update that silently does not apply.
+  const limit = (currentWorkspace()?.views.length ?? 0) + 1
+  for (let pass = 0; pass < limit; pass += 1) {
+    const workspace = currentWorkspace()
+    if (!workspace) return
+    const flat = workspace.views.find((view) => walkGroups(view.root).length === 1)
+    if (!flat) return
+    const only = walkGroups(flat.root)[0]
+    const panel = group([])
+    updateWorkspace((item) => ({
+      ...item,
+      views: item.views.map((view) => view.id === flat.id
+        ? { ...view, root: split('horizontal', only, panel, 0.62), focusedGroupId: only.id }
+        : view)
+    }))
+    // Anything that is not the thread belongs in the panel now.
+    for (const item of only.tabs.filter((entry) => entry.kind !== 'thread')) {
+      sendWorkspaceTabToView(item.id, flat.id, panel.id)
+    }
+  }
+}
+
 function splitThreadsIntoOwnViews(): void {
   const workspace = currentWorkspace()
   if (!workspace) return
   const sessions = appStore.getState().sessions
-  for (;;) {
+  // Same reasoning: every pass moves one thread out, so the number of extras
+  // strictly falls. The cap guards against an update that does not apply.
+  const limit = workspace.views.reduce((total, view) => total + walkTabs(view.root).length, 0) + 1
+  for (let pass = 0; pass < limit; pass += 1) {
     const current = currentWorkspace()
     if (!current) return
     const extra = current.views.flatMap((view) => {
@@ -586,7 +625,7 @@ function openSessionInOwnView(sessionId: string, workspace: WorkspaceState): boo
     return true
   }
   const session = appStore.getState().sessions.find((item) => item.id === sessionId)
-  const created = workspaceView(session?.title || 'Thread', group([tab('thread', sessionId)]))
+  const created = singleThreadView(session?.title || 'Thread', sessionId)
   updateWorkspace((item) => ({
     ...item,
     views: [...item.views, created],
