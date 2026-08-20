@@ -312,6 +312,9 @@ function AddMenu({
 }): React.JSX.Element {
   const sessions = useStore(appStore, (state) => state.sessions)
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  // Subscribed, not read from getState: the menu has to rebuild when the layout
+  // setting changes, and a value read inside the memo cannot trigger that.
+  const viewMode = useStore(appStore, (state) => state.viewMode)
 
   // A resource belongs to the thread it was opened from, so it takes that
   // thread's checkout — including its worktree — rather than asking. No
@@ -333,10 +336,10 @@ function AddMenu({
     // In single mode the panel holds no thread of its own — the conversation
     // beside it does, and everything in the panel belongs to that thread.
     // Without this the panel could only ever offer "start a thread".
-    if (appStore.getState().viewMode !== 'single') return undefined
+    if (viewMode !== 'single') return undefined
     const conversation = findGroup(view.root, conversationGroupId(view))
     return conversation?.tabs.find((item) => item.kind === 'thread')?.sessionId
-  }, [workspace, groupId, requested])
+  }, [workspace, groupId, requested, viewMode])
   const owner = sessions.find((session) => session.id === ownerId)
   const inherited = threadCheckout(owner)
 
