@@ -13,6 +13,7 @@ import type {
 } from '../shared/mcp'
 import { MCP_TOOL_PREFIX, SECRET_MASK } from '../shared/mcp'
 import type { BackendRequest } from '../shared/backend'
+import { mcpToolResultContent, type AgentToolResult } from '../shared/qa'
 import { HttpMcpClient, StdioMcpClient, type McpClient, type McpToolDefinition } from './mcp-client'
 
 interface StoredConnection extends Omit<McpConnection, 'env' | 'headers' | 'authToken'> {
@@ -379,11 +380,16 @@ export class McpHub {
       const toolName = name.slice(connection.slug.length + 1)
       if (!live.tools.some((tool) => tool.name === toolName)) continue
       const result = await live.client.callTool(toolName, args)
-      const text = result.content
-        .map((item) => (typeof item.text === 'string' ? item.text : JSON.stringify(item)))
-        .filter(Boolean)
-        .join('\n')
+      const { text, image } = mcpToolResultContent(result.content)
       if (result.isError) throw new Error(text || 'The MCP tool reported an error.')
+      // An image comes back in the AgentToolResult shape so the thread bus
+      // stores it and shows it, which is the same road a QA screenshot takes.
+      // Without one the return stays a plain string, so every existing caller
+      // that expects text is untouched.
+      if (image) {
+        const carried: AgentToolResult = { __bossToolResult: true, text: text || '(image result)', image }
+        return carried
+      }
       return text || '(empty result)'
     }
     throw new Error(`Unknown MCP tool: ${namespacedName}. Use boss_mcp_list to see available tools.`)

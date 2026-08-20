@@ -34,6 +34,77 @@ export function isAgentToolResult(value: unknown): value is AgentToolResult {
   return Boolean(value && typeof value === 'object' && (value as AgentToolResult).__bossToolResult === true)
 }
 
+/** Mime types the image store can put on disk, mirrored from its extension
+ *  table. Kept here because both the MCP hub and the backend manager have to
+ *  know what will be rejected before they hand bytes over, so that an image
+ *  BOSS cannot show is described in words rather than printed as base64. */
+export const DISPLAYABLE_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+
+export function isDisplayableImageMime(mime: string): boolean {
+  return (DISPLAYABLE_IMAGE_MIMES as readonly string[]).includes(mime)
+}
+
+/** The image carried by one tool-result content block, if it holds one.
+ *
+ *  Two shapes reach BOSS and both are read here: Claude nests the bytes under
+ *  source.data with the type on source.media_type, while MCP puts data and
+ *  mimeType at the top level. */
+export function toolResultImage(block: unknown): AgentToolImage | undefined {
+  if (!block || typeof block !== 'object') return undefined
+  const item = block as {
+    type?: string
+    data?: unknown
+    mimeType?: unknown
+    source?: { type?: string; media_type?: unknown; data?: unknown }
+  }
+  if (item.type !== 'image') return undefined
+  const source = item.source
+  if (source && typeof source.data === 'string' && typeof source.media_type === 'string') {
+    return { mimeType: source.media_type, data: source.data }
+  }
+  if (typeof item.data === 'string' && typeof item.mimeType === 'string') {
+    return { mimeType: item.mimeType, data: item.data }
+  }
+  return undefined
+}
+
+/** Split an MCP tool result into the text the model reads and the first image
+ *  worth showing.
+ *
+ *  An MCP image block carries data/mimeType and no text, so stringifying the
+ *  content turned a screenshot into a wall of base64 in the transcript. Only
+ *  one image is carried because AgentToolResult holds one, matching what the
+ *  QA tools already return; any others stay named so nothing vanishes without
+ *  explanation. */
+export function mcpToolResultContent(content: Array<Record<string, unknown>>): { text: string; image?: AgentToolImage } {
+  const text: string[] = []
+  let image: AgentToolImage | undefined
+  for (const item of content) {
+    if (!item || typeof item !== 'object') continue
+    if (typeof item.text === 'string') {
+      if (item.text) text.push(item.text)
+      continue
+    }
+    const found = toolResultImage(item)
+    if (found) {
+      if (!isDisplayableImageMime(found.mimeType)) {
+        // Degrades to a sentence rather than disappearing or crashing: the
+        // model is told an image came back and why it is not on screen.
+        text.push(`[Image omitted: ${found.mimeType} is not a format BOSS can display.]`)
+      } else if (image) {
+        text.push(`[Additional ${found.mimeType} image omitted: only the first is shown.]`)
+      } else {
+        image = found
+      }
+      continue
+    }
+    // Anything else — resource links, embedded resources, future block types —
+    // keeps its old behaviour rather than being dropped on the floor.
+    text.push(JSON.stringify(item))
+  }
+  return { text: text.filter(Boolean).join('\n'), image }
+}
+
 /** Told to the agent once, alongside the tool list.
  *
  *  Written to answer "when would I reach for these", because the tools were
