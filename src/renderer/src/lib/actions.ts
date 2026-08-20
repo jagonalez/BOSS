@@ -17,7 +17,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, ViewMode, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
+import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, ViewMode, Workspace as WorkspaceState, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
 import {
   activeWorkspaceView,
   activateTab,
@@ -42,6 +42,7 @@ import {
   threadCheckout,
   updateActiveWorkspaceView,
   updateGroup,
+  group,
   walkGroups,
   workspaceView
 } from './workspaces'
@@ -522,21 +523,43 @@ export function reorderWorkspaceTab(groupId: string, tabId: string, beforeTabId?
 export function openSessionInWorkspace(sessionId: string): boolean {
   const workspace = currentWorkspace()
   if (!workspace) return false
+  if (appStore.getState().viewMode === 'single') return openSessionInOwnView(sessionId, workspace)
   const view = activeWorkspaceView(workspace)
-  const single = appStore.getState().viewMode === 'single'
-  const visibleGroupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
   const existing = findSessionTab(view.root, sessionId)
   if (existing) {
-    // In single mode only one pane is on screen, so a tab found in another one
-    // would be activated where nobody can see it. Bring it across instead.
-    if (single && existing.group.id !== visibleGroupId) {
-      sendWorkspaceTabToView(existing.tab.id, view.id, visibleGroupId)
-      return true
-    }
     activateWorkspaceTab(existing.group.id, existing.tab.id)
     return true
   }
-  addWorkspaceTab(visibleGroupId, 'thread', sessionId)
+  const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
+  addWorkspaceTab(groupId, 'thread', sessionId)
+  return true
+}
+
+/** One thread per view, which is what single mode means.
+ *
+ *  A thread already showing somewhere goes back to that view rather than
+ *  opening a second one, so the terminals and files left there come with it.
+ *  Anything else gets a view of its own instead of another tab in the strip —
+ *  piling threads into one pane is the thing single mode exists to avoid.
+ *
+ *  Views made this way are ordinary views. They appear in the Views strip in
+ *  multi mode and can be arranged like any other; the strip is simply hidden
+ *  while single mode is on. */
+function openSessionInOwnView(sessionId: string, workspace: WorkspaceState): boolean {
+  const owning = workspace.views.find((view) => findSessionTab(view.root, sessionId))
+  if (owning) {
+    const found = findSessionTab(owning.root, sessionId)
+    if (workspace.activeViewId !== owning.id) activateWorkspaceView(owning.id)
+    if (found) activateWorkspaceTab(found.group.id, found.tab.id)
+    return true
+  }
+  const session = appStore.getState().sessions.find((item) => item.id === sessionId)
+  const created = workspaceView(session?.title || 'Thread', group([tab('thread', sessionId)]))
+  updateWorkspace((item) => ({
+    ...item,
+    views: [...item.views, created],
+    activeViewId: created.id
+  }))
   return true
 }
 
