@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView, reviewWorkspaceView, findReviewView } from './workspaces.ts'
 
 test('a resource opened from a thread looks at that thread’s checkout', () => {
   // A review opened from a worktree thread fell back to the main project
@@ -398,4 +398,45 @@ test('a drop involving a path the list does not hold is ignored', () => {
   const paths = ['/a', '/b']
   assert.equal(reorderPaths(paths, '/gone', '/a', true), paths)
   assert.equal(reorderPaths(paths, '/a', '/gone', true), paths)
+})
+
+test('a review view opens with the diff beside the conversation', () => {
+  const view = reviewWorkspaceView('thread-1', 'OAuth hardening')
+  assert.equal(view.reviewSessionId, 'thread-1')
+  const kinds = walkTabs(view.root).map((item) => item.kind)
+  assert.deepEqual(kinds, ['review', 'thread'])
+  // Both panes are the same thread's: a review view holds one thread's work.
+  assert.ok(walkTabs(view.root).every((item) => item.sessionId === 'thread-1'))
+})
+
+test('a review view focuses the conversation, not the diff', () => {
+  const view = reviewWorkspaceView('thread-1', 'OAuth hardening')
+  const groups = walkGroups(view.root)
+  const focused = groups.find((item) => item.id === view.focusedGroupId)
+  assert.equal(focused?.tabs[0]?.kind, 'thread')
+})
+
+test('a review view is an ordinary view, so panes and tabs work in it', () => {
+  const view = reviewWorkspaceView('thread-1', 'OAuth hardening')
+  // Two groups from the seeded split, both reachable by the same walkers every
+  // other view uses. This is what lets terminals open into a review.
+  assert.equal(walkGroups(view.root).length, 2)
+  assert.ok(view.focusedGroupId)
+})
+
+test('a thread finds the review view it already has', () => {
+  const review = reviewWorkspaceView('thread-1', 'One')
+  const plain = workspaceView('Leading')
+  const workspace = { views: [plain, review], activeViewId: plain.id, updatedAt: 0 }
+  assert.equal(findReviewView(workspace, 'thread-1')?.id, review.id)
+  // A thread with no review view yet must not borrow someone else's.
+  assert.equal(findReviewView(workspace, 'thread-2'), undefined)
+})
+
+test('review views are keyed per thread', () => {
+  const first = reviewWorkspaceView('thread-1', 'One')
+  const second = reviewWorkspaceView('thread-2', 'Two')
+  const workspace = { views: [first, second], activeViewId: first.id, updatedAt: 0 }
+  assert.equal(findReviewView(workspace, 'thread-2')?.id, second.id)
+  assert.notEqual(first.id, second.id)
 })

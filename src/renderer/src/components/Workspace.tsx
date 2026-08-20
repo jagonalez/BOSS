@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { DropPosition, Workspace as WorkspaceState, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
+import type { DropPosition, Workspace as WorkspaceState, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
+import type { SupervisedThread } from '@shared/supervision'
+import { OpenCode } from '../lib/opencode'
 import { useStore, appStore } from '../state/AppState'
 import { ChatView } from './ChatView'
 import { BrowseTab } from './BrowseTab'
@@ -29,7 +31,8 @@ import {
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
   splitWorkspaceGroup,
-  undoWorkspaceChange
+  undoWorkspaceChange,
+  closeThreadReview
 } from '../lib/actions'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { tabContentNode } from '../lib/tab-content-nodes'
@@ -1089,7 +1092,11 @@ function WorkspaceBar(): React.JSX.Element {
   return (
     <div className="workspace-bar">
       <div className="workspace-view-tabs" role="tablist" aria-label="Project views">
-        {workspace?.views.map((view) => (
+        {/* Review views are not listed here. They belong to a thread rather
+            than to the user, are entered from the sidebar or the review
+            toggle, and would otherwise pile up beside the views someone
+            actually arranged. */}
+        {workspace?.views.filter((view) => !view.reviewSessionId).map((view) => (
           <div
             key={view.id}
             className={`workspace-view-tab ${view.id === workspace.activeViewId ? 'active' : ''}`}
@@ -1213,8 +1220,70 @@ function focusNeighbor(direction: 'left' | 'right' | 'up' | 'down'): void {
   if (candidates[0]) focusWorkspaceGroup(candidates[0].id)
 }
 
+/** The bar shown instead of the view tabs while reviewing one thread.
+ *
+ *  Names the thread, says what its last run produced and how its reviewers
+ *  answered, and gets out of the way. No merge or accept controls: the backend
+ *  has no such operation, and drawing one would promise something BOSS cannot
+ *  do. */
+function ReviewBar({ view }: { view: WorkspaceView }): React.JSX.Element {
+  const sessionId = view.reviewSessionId
+  const session = useStore(appStore, (state) => state.sessions.find((item) => item.id === sessionId))
+  const [thread, setThread] = useState<SupervisedThread | undefined>()
+
+  useEffect(() => {
+    if (!sessionId) return
+    let disposed = false
+    const refresh = (): void => {
+      void OpenCode.supervision().then((snapshot) => {
+        if (disposed) return
+        setThread(snapshot.threads.find((item) => item.threadId === sessionId))
+      }).catch(() => {})
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 5_000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [sessionId])
+
+  const result = thread?.result
+  const facts = [
+    result?.changedFiles ? `${result.changedFiles} file${result.changedFiles === 1 ? '' : 's'} changed` : '',
+    result?.branch ?? session?.worktree?.branch ?? '',
+    thread?.running ? 'working' : ''
+  ].filter(Boolean).join(' · ')
+  const verdicts = thread?.policyState?.reviewers ?? []
+  const latest = verdicts.length ? verdicts[verdicts.length - 1] : undefined
+
+  return (
+    <div className="workspace-bar review-bar">
+      <button className="review-back" onClick={() => closeThreadReview()} title="Back to your panes">
+        <ChevronIcon size={13} />
+        <span>Panes</span>
+      </button>
+      <div className="review-bar-title">
+        <strong>{session?.title || view.name}</strong>
+        {facts ? <small>{facts}</small> : null}
+      </div>
+      {latest?.verdict ? (
+        <span className={`review-verdict ${latest.verdict === 'pass' ? 'pass' : 'changes'}`}>
+          {latest.verdict === 'pass' ? 'Reviewer passed' : 'Changes requested'}
+        </span>
+      ) : null}
+      {result?.summary ? <span className="review-bar-summary">{result.summary}</span> : null}
+    </div>
+  )
+}
+
 export function Workspace(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const mainMode = useStore(appStore, (state) => state.mainMode)
+  // The active view only counts as a review while review mode is on, so
+  // switching back to tiling never leaves the review chrome behind.
+  const active = workspace ? activeWorkspaceView(workspace) : undefined
+  const reviewView = mainMode === 'review' && active?.reviewSessionId ? active : undefined
 
   // Detach native views for the whole of a drag. A browser is composited over
   // the page, so dragging across one never reaches the pane underneath: no
@@ -1311,7 +1380,7 @@ export function Workspace(): React.JSX.Element {
   return (
     <TabSlotProvider>
       <div className="workspace-shell">
-        <WorkspaceBar />
+        {reviewView ? <ReviewBar view={reviewView} /> : <WorkspaceBar />}
         {/* Every view stays mounted, inactive ones hidden. Rendering only the
             active tree unmounted the others, so switching views killed their
             terminals and restarted them on the way back. A view is a place

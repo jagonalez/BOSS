@@ -31,7 +31,7 @@ import type {
 } from '@shared/ipc'
 import type { ProjectInfo } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, Layout, Workspace, TerminalStartLocation } from '@shared/workspace'
+import type { AppPage, Layout, MainMode, SidebarMode, Workspace, TerminalStartLocation } from '@shared/workspace'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
 
@@ -47,6 +47,10 @@ export interface Attachment {
 export interface AppState {
   activePage: AppPage
   projectWorkspace: Workspace | null
+  /** Which list the sidebar shows, and what the main area shows. Deliberately
+   *  independent: see SidebarMode in @shared/workspace. */
+  sidebarMode: SidebarMode
+  mainMode: MainMode
   /** Tab to flash after it lands somewhere new. Clears itself. */
   highlightedTabId?: string
   /** Browser tabs an agent has driven since you last looked at them. Keyed by
@@ -155,6 +159,8 @@ export const initialBrowseState: BrowseNavigationState = {
 export const initialState: AppState = {
   activePage: 'command-center',
   projectWorkspace: null,
+  sidebarMode: 'projects',
+  mainMode: 'tiling',
   browseAgentActivity: {},
   workspaceUndo: null,
   layouts: [],
