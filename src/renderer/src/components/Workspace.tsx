@@ -312,6 +312,9 @@ function AddMenu({
 }): React.JSX.Element {
   const sessions = useStore(appStore, (state) => state.sessions)
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  // Subscribed, not read from getState: the menu has to rebuild when the layout
+  // setting changes, and a value read inside the memo cannot trigger that.
+  const viewMode = useStore(appStore, (state) => state.viewMode)
 
   // A resource belongs to the thread it was opened from, so it takes that
   // thread's checkout — including its worktree — rather than asking. No
@@ -320,15 +323,23 @@ function AddMenu({
   const ownerId = useMemo(() => {
     if (requested) return requested
     if (!workspace) return undefined
-    const pane = findGroup(activeWorkspaceView(workspace).root, groupId)
+    const view = activeWorkspaceView(workspace)
+    const pane = findGroup(view.root, groupId)
     if (!pane) return undefined
     // The thread you are looking at, not the first one in the pane. A pane can
     // hold several, and taking the leftmost bound a review to whichever thread
     // happened to be furthest left rather than the open one.
     const active = pane.tabs.find((item) => item.id === pane.activeTabId)
     if (active?.kind === 'thread' && active.sessionId) return active.sessionId
-    return pane.tabs.find((item) => item.kind === 'thread')?.sessionId
-  }, [workspace, groupId, requested])
+    const own = pane.tabs.find((item) => item.kind === 'thread')?.sessionId
+    if (own) return own
+    // In single mode the panel holds no thread of its own — the conversation
+    // beside it does, and everything in the panel belongs to that thread.
+    // Without this the panel could only ever offer "start a thread".
+    if (viewMode !== 'single') return undefined
+    const conversation = findGroup(view.root, conversationGroupId(view))
+    return conversation?.tabs.find((item) => item.kind === 'thread')?.sessionId
+  }, [workspace, groupId, requested, viewMode])
   const owner = sessions.find((session) => session.id === ownerId)
   const inherited = threadCheckout(owner)
 
@@ -547,9 +558,12 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
  *  is then the whole surface, so the things that only mean something beside
  *  another pane — splitting, and dropping to one side — are suppressed. Tabs
  *  themselves work exactly as they do in tiling. */
-function GroupView({ group, viewId, conversation = false }: {
+function GroupView({ group, viewId, conversation = false, panel = false }: {
   group: WorkspaceGroup
   viewId: string
+  /** The pane beside the conversation in single mode. It is created by the bar
+   *  button rather than by the user, so it must not greet them with a menu. */
+  panel?: boolean
   /** The pane that holds the thread itself in single mode. Its tab is the
    *  thread, so it stays one pane and its strip is not worth drawing. */
   conversation?: boolean
@@ -568,7 +582,10 @@ function GroupView({ group, viewId, conversation = false }: {
     return Boolean(session && (session.projectPath ?? session.directory ?? session.path))
   }
   const movable = Boolean(view && walkTabs(view.root).length > 1)
-  const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
+  // An empty pane opens its own add menu, which is right when the user made the
+  // pane. Single mode's panel is created for them by the bar button, which is
+  // opening its own menu at that moment — so the panel would show two.
+  const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0 && !panel)
   const [menuRight, setMenuRight] = useState<number | null>(null)
   /** Set when the menu was opened from one thread's own + rather than the
    *  pane's, so it adds to that thread rather than whichever the pane shows. */
@@ -1083,7 +1100,13 @@ function WorkspaceNodeView({ node, viewId, single = false, conversationId }: {
   if (node.type === 'group') {
     return (
       <div className="workspace-node">
-        <GroupView key={node.id} group={node} viewId={viewId} conversation={single && node.id === conversationId} />
+        <GroupView
+          key={node.id}
+          group={node}
+          viewId={viewId}
+          conversation={single && node.id === conversationId}
+          panel={single && node.id !== conversationId}
+        />
       </div>
     )
   }
@@ -1096,9 +1119,29 @@ function WorkspaceNodeView({ node, viewId, single = false, conversationId }: {
  *  The panel is an ordinary pane, so adding to it is the same AddMenu every
  *  other pane uses — this just aims it at the panel group rather than at
  *  whichever pane happens to be focused. */
-function SinglePanelControls(): React.JSX.Element | null {
+/** The thread on screen, named at the left of the bar. */
+function SingleThreadTitle(): React.JSX.Element | null {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const sessions = useStore(appStore, (state) => state.sessions)
+  const view = workspace?.views.find((item) => item.id === workspace.activeViewId)
+  if (!view) return null
+  const conversation = walkGroups(view.root).find((item) => item.id === conversationGroupId(view))
+  const sessionId = conversation?.tabs.find((item) => item.kind === 'thread')?.sessionId
+  const session = sessions.find((item) => item.id === sessionId)
+  const branch = session?.worktree?.status === 'active' ? session.worktree.branch : undefined
+  const where = branch ?? (session?.projectPath ? session.projectPath.split(/[\\/]/).pop() : undefined)
+  return (
+    <div className="workspace-single-title">
+      <strong>{session?.title || view.name}</strong>
+      {where ? <small>{where}</small> : null}
+    </div>
+  )
+}
+
+/** The panel control, at the right of the bar where the layout controls sit in
+ *  multi mode. Separate from the title so the spacer can sit between them. */
+function SinglePanelButton(): React.JSX.Element | null {
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -1119,25 +1162,27 @@ function SinglePanelControls(): React.JSX.Element | null {
   // May be missing on a view carried over from tiling. The button still shows:
   // choosing something is what creates the panel.
   const panelId = panelGroupId(view)
+  const panelGroup = panelId ? groups.find((item) => item.id === panelId) : undefined
+  const panelHasTabs = (panelGroup?.tabs.length ?? 0) > 0
   const sessionId = conversation.tabs.find((item) => item.kind === 'thread')?.sessionId
-  const session = sessions.find((item) => item.id === sessionId)
-  const branch = session?.worktree?.status === 'active' ? session.worktree.branch : undefined
-  const where = branch ?? (session?.projectPath ? session.projectPath.split(/[\\/]/).pop() : undefined)
 
   return (
     <>
-      <div className="workspace-single-title">
-        <strong>{session?.title || view.name}</strong>
-        {where ? <small>{where}</small> : null}
-      </div>
       <div className="workspace-single-panel-control" ref={ref}>
         <button
           className={`workspace-bar-button ${open ? 'active' : ''}`}
           onClick={() => {
-            if (!open && !panelId) ensurePanel(view.id)
+            // With something in the panel the button is a toggle: hide what is
+            // there rather than offering to add more. Only an empty panel opens
+            // the menu, which is the only time "add" is the obvious intent.
+            if (panelHasTabs && panelGroup) {
+              requestCloseWorkspaceGroup(panelGroup)
+              return
+            }
+            if (!panelId) ensurePanel(view.id)
             setOpen((value) => !value)
           }}
-          title="Open a terminal, browser, files, or a side chat beside this thread"
+          title={panelHasTabs ? 'Close the panel' : 'Open a terminal, browser, files, or a side chat beside this thread'}
         >
           <PanelIcon size={13} />
         </button>
@@ -1152,11 +1197,6 @@ function WorkspaceBar(): React.JSX.Element {
   // Single mode holds one thread per view and hides the strip, so the controls
   // for arranging views and applying layouts have nothing to act on.
   const single = useStore(appStore, (state) => state.viewMode) === 'single'
-  // The strip is hidden in single mode, so the bar says which thread is on
-  // screen instead. Otherwise nothing names it.
-  const activeViewName = workspace
-    ? (workspace.views.find((view) => view.id === workspace.activeViewId)?.name ?? '')
-    : ''
   const layouts = useStore(appStore, (state) => state.layouts)
   const undo = useStore(appStore, (state) => state.workspaceUndo)
   const [layoutsOpen, setLayoutsOpen] = useState(false)
@@ -1283,9 +1323,9 @@ function WorkspaceBar(): React.JSX.Element {
           <PlusIcon size={13} />
         </button>
       </div>
-      {single ? <div className="workspace-single-title">{activeViewName}</div> : null}
-      {single ? <SinglePanelControls /> : null}
+      {single ? <SingleThreadTitle /> : null}
       <div className="workspace-bar-spacer" />
+      {single ? <SinglePanelButton /> : null}
       {undo ? (
         <button className="workspace-undo" onClick={undoWorkspaceChange} title="Undo the last close">
           {undo.label} — Undo

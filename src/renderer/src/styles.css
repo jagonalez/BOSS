@@ -1263,6 +1263,17 @@ textarea {
   color: var(--text);
 }
 
+/* The add menu sizes itself against its positioning parent, which inside a pane
+   is the pane. Here the parent is a button, so the percentage widths collapse
+   to a sliver. Anchor it to the button and give it its own size instead. */
+.workspace-single-panel-control .workspace-add-menu {
+  top: calc(100% + 6px);
+  right: 0;
+  left: auto;
+  width: 240px;
+  max-height: min(420px, 60vh);
+}
+
 .workspace-bar-spacer {
   flex: 1;
 }
