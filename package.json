@@ -81,6 +81,9 @@
       "out/**/*",
       "resources/**/*"
     ],
+    "asarUnpack": [
+      "node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+    ],
     "icon": "resources/icons/512x512.png",
     "extraResources": [
       {

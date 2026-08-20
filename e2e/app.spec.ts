@@ -150,6 +150,21 @@ test('a thread an agent spawned shows the model it runs on, not the app default'
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Claude Opus 5' })).toBeVisible()
 })
 
+test('a Claude thread can submit a message without a transport error', async ({ appPage }) => {
+  const title = 'Claude SDK executable test'
+  await control(appPage).then((item) => item.spawnThread('claude', title))
+  await appPage.locator('.session-row').filter({ hasText: title }).click()
+  await control(appPage).then((item) => item.resetCalls())
+
+  const composer = appPage.getByPlaceholder(/^Ask /)
+  await composer.fill('Verify the Claude SDK transport.')
+  await composer.press('Enter')
+
+  const call = await lastBackendCall(appPage, 'thread.send')
+  expect(call.request).toMatchObject({ threadId: 'thread-created-1' })
+  await expect(appPage.locator('.chat-error')).toHaveCount(0)
+})
+
 test('delegation sends the chosen backend, worktree placement, and target defaults', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
   await appPage.getByRole('button', { name: 'Done' }).click()
