@@ -4,6 +4,9 @@ import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions, BackendModeId } from '@shared/backend'
 import type { EventMessage, FileContent, FileDiff, FileNode, MessageWithParts, SessionInfo, Todo } from '@shared/opencode'
+import type { ThreadBusToolCall } from '@shared/thread-bus'
+// @ts-expect-error Application builds use bundler resolution.
+import { THREAD_TOOL_DEFINITIONS, isThreadTool } from './lab-thread-tools.ts'
 // The explicit extensions keep this module executable under Node's type-stripping test runner.
 // @ts-expect-error Application builds use bundler resolution.
 import { LabEngine, type EngineGate, type EngineSink } from './lab-engine.ts'
@@ -60,6 +63,7 @@ export class LabBackend implements Backend {
   private healthy = false
   private readonly pendingPermissions = new Map<string, PendingPermission>()
   private readonly liveText = new Map<string, string>()
+  private threadBusHandler?: (call: ThreadBusToolCall) => Promise<unknown>
 
   constructor(options: LabBackendOptions = {}) {
     this.engine = new LabEngine({
@@ -67,7 +71,23 @@ export class LabBackend implements Backend {
       configFile: options.configFile ?? userDataFile('lab-config.json'),
       config: configFromEnv(),
       sink: this.sink(),
-      gate: { request: (sessionId, call, args, signal) => this.requestPermission(sessionId, call, args, signal) }
+      gate: { request: (sessionId, call, args, signal) => this.requestPermission(sessionId, call, args, signal) },
+      // The thread bus reaches Lab as external tools rather than over MCP: Lab
+      // has no MCP client, and the host can hand over an execute function
+      // directly. They appear only once BOSS installs a handler, so the CLI and
+      // ACP server see the built-in tools alone.
+      externalTools: {
+        definitions: () => (this.threadBusHandler ? THREAD_TOOL_DEFINITIONS : []),
+        execute: async (name: string, args: Record<string, unknown>, sessionId: string) => {
+          if (!this.threadBusHandler || !isThreadTool(name)) throw new Error(`Unknown tool: ${name}`)
+          const result = await this.threadBusHandler({
+            nativeThreadId: sessionId,
+            tool: name as ThreadBusToolCall['tool'],
+            arguments: args
+          })
+          return typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+        }
+      }
     })
     void this.refreshHealth()
   }
@@ -128,6 +148,10 @@ export class LabBackend implements Backend {
   supportsMcp(): boolean { return false }
   async registerMcpServer(_name: string, _config: McpServerConfig): Promise<boolean> { return false }
   async unregisterMcpServer(_name: string): Promise<void> {}
+
+  setThreadBusHandler(handler: (call: ThreadBusToolCall) => Promise<unknown>): void {
+    this.threadBusHandler = handler
+  }
 
   onEvent(callback: (event: EventMessage) => void): () => void {
     this.eventCb = callback

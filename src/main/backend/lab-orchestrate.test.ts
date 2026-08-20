@@ -571,3 +571,39 @@ test('diffGet, fileTree, and fileContent reflect the working tree', async () => 
     fx.cleanup()
   }
 })
+
+test('a thread tool call routes to the BOSS thread bus with the calling session attached', async () => {
+  // The assistant asks who else is working, then reports. The bus tools only
+  // exist once BOSS installs a handler, so this also covers the wiring.
+  const fx = await bodyFixture((index) => {
+    if (index === 0) {
+      return (res) => {
+        res.write(toolCallChunk({ id: 'bus-1', name: 'boss_threads_list', arguments: '{}' }))
+        res.write(done())
+        res.end()
+      }
+    }
+    return (res) => {
+      res.write(textChunk('Thread 2 is busy on the parser.'))
+      res.write(done())
+      res.end()
+    }
+  })
+  try {
+    const calls: Array<{ tool: string; nativeThreadId: string }> = []
+    fx.backend.setThreadBusHandler(async (call) => {
+      calls.push({ tool: call.tool, nativeThreadId: call.nativeThreadId })
+      return [{ id: 'thread-2', title: 'parser', busy: true }]
+    })
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'who else is working?' }], { mode: 'auto' })
+
+    assert.deepEqual(calls, [{ tool: 'boss_threads_list', nativeThreadId: fx.sessionId }])
+    const parts = fx.readStore().messages(fx.sessionId).flatMap((message) => message.parts)
+    const busPart = parts.find((part) => part.type === 'tool' && part.state?.tool === 'boss_threads_list')
+    assert.ok(busPart, 'the bus call should be recorded as a tool part')
+    assert.equal(busPart?.state?.status, 'completed')
+    assert.match(String(busPart?.state?.output), /thread-2/)
+  } finally {
+    fx.cleanup()
+  }
+})

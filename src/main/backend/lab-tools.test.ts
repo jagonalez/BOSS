@@ -5,10 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { CORE_TOOL_DEFINITIONS, FileSnapshots, alwaysGrantsAllow, applyEdit, fileTreeFromPaths, globFiles, globToRegExp, grepFiles, inferToolName, lineSlice, parseGitLog, parseGitStatus, parseNumStat, pathExists, permissionForTool, resolveInCwd, resolveToolGate, runTool,
-  ASSISTANT_TOOL_DEFINITIONS,
-  LAB_TOOL_DEFINITIONS
-} from './lab-tools.ts'
+import { ASSISTANT_TOOL_DEFINITIONS, CORE_TOOL_DEFINITIONS, FileSnapshots, LAB_TOOL_DEFINITIONS, alwaysGrantsAllow, applyEdit, fileTreeFromPaths, globFiles, globToRegExp, grepFiles, inferToolName, lineSlice, parseGitLog, parseGitStatus, parseNumStat, pathExists, permissionForTool, resolveInCwd, resolveToolGate, runTool } from './lab-tools.ts'
 
 async function withDir(run: (dir: string) => void | Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'boss-lab-tools-'))

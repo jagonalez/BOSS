@@ -34,6 +34,20 @@ export interface LabEngineConfig {
  *  `onTextDelta` carries only the newly generated text since the previous call;
  *  a transport that shows the whole reply (like BOSS's part replacement) must
  *  accumulate it itself. */
+/** Tools the engine does not implement itself, supplied by the host. BOSS uses
+ *  this for the thread bus, so an assistant can see and drive sibling threads;
+ *  the CLI and ACP server pass nothing and the tools simply do not appear.
+ *
+ *  Kept as an injected provider rather than an MCP client so the engine stays
+ *  transport-agnostic: the host already owns the thread bus and can hand over
+ *  definitions plus one execute function. */
+export interface ExternalTools {
+  definitions(): LabToolFunction[]
+  /** `sessionId` identifies the calling thread to the host, which resolves it
+   *  to a BOSS thread and applies that project's own sharing policy. */
+  execute(name: string, args: Record<string, unknown>, sessionId: string): Promise<string>
+}
+
 export interface EngineSink {
   onUserMessage(sessionId: string, message: MessageWithParts): void
   onAssistantMessage(sessionId: string, message: MessageWithParts): void
@@ -106,6 +120,7 @@ export class LabEngine {
   private readonly config: LabEngineConfig
   private readonly sink: EngineSink
   private readonly gate: EngineGate
+  private readonly externalTools?: ExternalTools
   private readonly orchestrator: LabOrchestrator
   private readonly modes = new Map<string, BackendModeId>()
   private readonly running = new Map<string, AbortController>()
@@ -122,18 +137,21 @@ export class LabEngine {
     config: LabEngineConfig
     gate: EngineGate
     sink?: EngineSink
+    externalTools?: ExternalTools
   }) {
     this.store = new LabSessionStore(options.storeFile)
     this.configFile = options.configFile
     this.config = options.config
     this.gate = options.gate
+    this.externalTools = options.externalTools
     this.sink = options.sink ?? noopSink
-    this.tools =
+    const builtin =
       options.config.tools === 'core'
         ? CORE_TOOL_DEFINITIONS
         : options.config.tools === 'assistant'
           ? ASSISTANT_TOOL_DEFINITIONS
           : LAB_TOOL_DEFINITIONS
+    this.tools = [...builtin, ...(options.externalTools?.definitions() ?? [])]
     this.selectedModel = this.config.defaultModel
     try {
       const stored = JSON.parse(readFileSync(this.configFile, 'utf8')) as { model?: string }
@@ -606,6 +624,18 @@ export class LabEngine {
       const output = await this.orchestrator.execute(sessionId, name, args, { model: ctx.model, cwd: ctx.cwd, parentSignal: ctx.signal })
       this.reportToolResult(sessionId, assistantId, call.id, { status: 'completed', tool: name, input: args, output })
       return output
+    }
+    const external = this.externalTools
+    if (external && external.definitions().some((tool) => tool.function.name === name)) {
+      try {
+        const output = await external.execute(name, args, sessionId)
+        this.reportToolResult(sessionId, assistantId, call.id, { status: 'completed', tool: name, input: args, output })
+        return output
+      } catch (error) {
+        const output = error instanceof Error ? error.message : String(error)
+        this.reportToolResult(sessionId, assistantId, call.id, { status: 'error', tool: name, input: args, output })
+        return output
+      }
     }
     if (name === 'todos') {
       const todos = this.normalizeTodos(args.todos)
