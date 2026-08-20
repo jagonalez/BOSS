@@ -122,6 +122,20 @@ function parseJson<T>(value: string): T | undefined {
   }
 }
 
+/** Ids BOSS mints itself, for transcript entries no backend will ever report.
+ *
+ *  A steered message is folded into the run the backend is already doing, and a
+ *  tool image is produced by BOSS rather than by the model, so neither comes
+ *  back in a native history list. Kept here as a literal rather than imported
+ *  from @shared: this file is one of the few the node test runner can load, and
+ *  a value import from an aliased path is exactly what would break that.
+ *  Mirrors isLocallyAuthoredMessageId in src/shared/opencode.ts. */
+const LOCAL_MESSAGE_PREFIXES = ['steer-', 'assistant-tool-image-']
+
+function isLocallyAuthoredMessageId(messageId: string): boolean {
+  return LOCAL_MESSAGE_PREFIXES.some((prefix) => messageId.startsWith(prefix))
+}
+
 function narrativeKey(part: Part): string | undefined {
   if (part.type !== 'text' && part.type !== 'reasoning') return undefined
   const text = (part.text ?? part.state?.text ?? '').replace(/\s+/g, ' ').trim()
@@ -318,6 +332,11 @@ export class TranscriptStore {
         ).all(source.threadId) as unknown as Array<{ message_id: string }>
         for (const row of existing) {
           if (ids.has(row.message_id)) continue
+          // A message BOSS authored is absent from every native history by
+          // construction, so "the backend did not report it" says nothing about
+          // whether it is real. Pruning it deleted the steered message the user
+          // had just sent, and the screenshots agent tools published.
+          if (isLocallyAuthoredMessageId(row.message_id)) continue
           this.database.prepare(
             'DELETE FROM transcript_parts WHERE thread_id = ? AND message_id = ?'
           ).run(source.threadId, row.message_id)

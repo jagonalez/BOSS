@@ -44,6 +44,17 @@ export interface Attachment {
   dataUrl: string
 }
 
+/** A send that did not reach the backend, kept so the user can retry it.
+ *
+ *  Session-scoped rather than global because lastErrorBySession cannot say
+ *  which message failed, and the text has to survive with its attachments or
+ *  a retry silently drops the images the user pasted. */
+export interface FailedSend {
+  text: string
+  attachments: Attachment[]
+  error: string
+}
+
 export interface AppState {
   activePage: AppPage
   projectWorkspace: Workspace | null
@@ -122,6 +133,7 @@ export interface AppState {
   terminalStartLocation: TerminalStartLocation
   lastError: string | null
   lastErrorBySession: Record<string, string>
+  failedSendBySession: Record<string, FailedSend | undefined>
   drafts: Record<string, string>
   attachments: Record<string, Attachment[]>
   followUps: Record<string, QueuedFollowUp[]>
@@ -223,6 +235,7 @@ export const initialState: AppState = {
   terminalStartLocation: 'focused-checkout',
   lastError: null,
   lastErrorBySession: {},
+  failedSendBySession: {},
   drafts: {},
   attachments: {},
   followUps: {},
