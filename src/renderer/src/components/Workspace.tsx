@@ -320,14 +320,22 @@ function AddMenu({
   const ownerId = useMemo(() => {
     if (requested) return requested
     if (!workspace) return undefined
-    const pane = findGroup(activeWorkspaceView(workspace).root, groupId)
+    const view = activeWorkspaceView(workspace)
+    const pane = findGroup(view.root, groupId)
     if (!pane) return undefined
     // The thread you are looking at, not the first one in the pane. A pane can
     // hold several, and taking the leftmost bound a review to whichever thread
     // happened to be furthest left rather than the open one.
     const active = pane.tabs.find((item) => item.id === pane.activeTabId)
     if (active?.kind === 'thread' && active.sessionId) return active.sessionId
-    return pane.tabs.find((item) => item.kind === 'thread')?.sessionId
+    const own = pane.tabs.find((item) => item.kind === 'thread')?.sessionId
+    if (own) return own
+    // In single mode the panel holds no thread of its own — the conversation
+    // beside it does, and everything in the panel belongs to that thread.
+    // Without this the panel could only ever offer "start a thread".
+    if (appStore.getState().viewMode !== 'single') return undefined
+    const conversation = findGroup(view.root, conversationGroupId(view))
+    return conversation?.tabs.find((item) => item.kind === 'thread')?.sessionId
   }, [workspace, groupId, requested])
   const owner = sessions.find((session) => session.id === ownerId)
   const inherited = threadCheckout(owner)
@@ -1119,6 +1127,8 @@ function SinglePanelControls(): React.JSX.Element | null {
   // May be missing on a view carried over from tiling. The button still shows:
   // choosing something is what creates the panel.
   const panelId = panelGroupId(view)
+  const panelGroup = panelId ? groups.find((item) => item.id === panelId) : undefined
+  const panelHasTabs = (panelGroup?.tabs.length ?? 0) > 0
   const sessionId = conversation.tabs.find((item) => item.kind === 'thread')?.sessionId
   const session = sessions.find((item) => item.id === sessionId)
   const branch = session?.worktree?.status === 'active' ? session.worktree.branch : undefined
@@ -1134,10 +1144,17 @@ function SinglePanelControls(): React.JSX.Element | null {
         <button
           className={`workspace-bar-button ${open ? 'active' : ''}`}
           onClick={() => {
-            if (!open && !panelId) ensurePanel(view.id)
+            // With something in the panel the button is a toggle: hide what is
+            // there rather than offering to add more. Only an empty panel opens
+            // the menu, which is the only time "add" is the obvious intent.
+            if (panelHasTabs && panelGroup) {
+              requestCloseWorkspaceGroup(panelGroup)
+              return
+            }
+            if (!panelId) ensurePanel(view.id)
             setOpen((value) => !value)
           }}
-          title="Open a terminal, browser, files, or a side chat beside this thread"
+          title={panelHasTabs ? 'Close the panel' : 'Open a terminal, browser, files, or a side chat beside this thread'}
         >
           <PanelIcon size={13} />
         </button>
@@ -1152,11 +1169,6 @@ function WorkspaceBar(): React.JSX.Element {
   // Single mode holds one thread per view and hides the strip, so the controls
   // for arranging views and applying layouts have nothing to act on.
   const single = useStore(appStore, (state) => state.viewMode) === 'single'
-  // The strip is hidden in single mode, so the bar says which thread is on
-  // screen instead. Otherwise nothing names it.
-  const activeViewName = workspace
-    ? (workspace.views.find((view) => view.id === workspace.activeViewId)?.name ?? '')
-    : ''
   const layouts = useStore(appStore, (state) => state.layouts)
   const undo = useStore(appStore, (state) => state.workspaceUndo)
   const [layoutsOpen, setLayoutsOpen] = useState(false)
@@ -1283,7 +1295,6 @@ function WorkspaceBar(): React.JSX.Element {
           <PlusIcon size={13} />
         </button>
       </div>
-      {single ? <div className="workspace-single-title">{activeViewName}</div> : null}
       {single ? <SinglePanelControls /> : null}
       <div className="workspace-bar-spacer" />
       {undo ? (
