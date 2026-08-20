@@ -2,7 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
-import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import type { ViewMode } from '@shared/workspace'
+import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { projectName } from './CommandCenter'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
@@ -42,6 +43,45 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
       { id: 'voice', label: 'Voice' },
       { id: 'updates', label: 'Updates' }
     ]
+  }
+]
+
+/** The layout choices, each drawn rather than described. A silhouette says
+ *  what changes faster than a sentence does. */
+const VIEW_MODES: Array<{
+  id: ViewMode
+  label: string
+  description: string
+  silhouette: React.JSX.Element
+}> = [
+  {
+    id: 'multi',
+    label: 'Multi-thread',
+    description: 'Several threads at once, split however you arrange them.',
+    silhouette: (
+      <svg viewBox="0 0 64 44" aria-hidden="true">
+        <rect x="1" y="1" width="62" height="42" rx="4" className="viewmode-frame" />
+        <rect x="5" y="9" width="26" height="30" rx="2" className="viewmode-pane" />
+        <rect x="35" y="9" width="24" height="14" rx="2" className="viewmode-pane" />
+        <rect x="35" y="25" width="24" height="14" rx="2" className="viewmode-pane" />
+        <rect x="5" y="4" width="12" height="3" rx="1.5" className="viewmode-tab" />
+        <rect x="35" y="4" width="10" height="3" rx="1.5" className="viewmode-tab" />
+      </svg>
+    )
+  },
+  {
+    id: 'single',
+    label: 'Single-thread',
+    description: 'One thread filling the window, with its own tabs. No splits.',
+    silhouette: (
+      <svg viewBox="0 0 64 44" aria-hidden="true">
+        <rect x="1" y="1" width="62" height="42" rx="4" className="viewmode-frame" />
+        <rect x="5" y="9" width="54" height="30" rx="2" className="viewmode-pane" />
+        <rect x="5" y="4" width="12" height="3" rx="1.5" className="viewmode-tab active" />
+        <rect x="19" y="4" width="10" height="3" rx="1.5" className="viewmode-tab" />
+        <rect x="31" y="4" width="10" height="3" rx="1.5" className="viewmode-tab" />
+      </svg>
+    )
   }
 ]
 
@@ -373,6 +413,7 @@ export function SettingsModal(): React.JSX.Element | null {
   const computerUse = useStore(appStore, (s) => s.computerUse)
   const computerUsePerms = useStore(appStore, (s) => s.computerUsePerms)
   const terminalStartLocation = useStore(appStore, (s) => s.terminalStartLocation)
+  const viewMode = useStore(appStore, (s) => s.viewMode)
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
@@ -803,6 +844,32 @@ export function SettingsModal(): React.JSX.Element | null {
             ) : null}
 
             {section === 'appearance' ? (
+              <>
+              <section className="settings-card">
+                <div className="settings-card-heading">
+                  <div>
+                    <h2>Workspace layout</h2>
+                    <p>How threads are shown. Your panes are kept either way, so switching back restores the layout you arranged.</p>
+                  </div>
+                </div>
+                <div className="viewmode-grid" role="radiogroup" aria-label="Workspace layout">
+                  {VIEW_MODES.map((mode) => (
+                    <button
+                      key={mode.id}
+                      role="radio"
+                      aria-checked={viewMode === mode.id}
+                      className={`viewmode-option ${viewMode === mode.id ? 'active' : ''}`}
+                      onClick={() => setViewMode(mode.id)}
+                    >
+                      <span className="viewmode-preview">{mode.silhouette}</span>
+                      <span className="viewmode-copy">
+                        <strong>{mode.label}</strong>
+                        <small>{mode.description}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
               <section className="settings-card">
                 <div className="settings-card-heading">
                   <div>
@@ -841,6 +908,7 @@ export function SettingsModal(): React.JSX.Element | null {
                   ))}
                 </div>
               </section>
+              </>
             ) : null}
 
             {section === 'voice' ? (

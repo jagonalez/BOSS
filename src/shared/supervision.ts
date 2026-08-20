@@ -1,5 +1,5 @@
 import type { BackendId } from './backend'
-import type { TaskPolicy } from './task-policy'
+import type { TaskPolicy, TaskPolicyState } from './task-policy'
 
 export type RunStatus = 'running' | 'completed' | 'error' | 'interrupted'
 export type AttentionKind = 'permission' | 'question' | 'completed' | 'error' | 'interrupted'
@@ -67,6 +67,10 @@ export interface SupervisedThread {
   lineage?: ThreadLineage
   /** What the thread's last finished run produced. */
   result?: ThreadResult
+  /** What the task policy has actually done: which reviewers ran and how they
+   *  answered. Recorded since reviewers were wired, but without this no surface
+   *  could show a verdict without opening the reviewer's own thread. */
+  policyState?: TaskPolicyState
 }
 
 export interface SupervisionSnapshot {

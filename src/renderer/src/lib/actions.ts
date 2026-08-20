@@ -17,7 +17,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
+import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, ViewMode, Workspace as WorkspaceState, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
 import {
   activeWorkspaceView,
   activateTab,
@@ -42,18 +42,35 @@ import {
   threadCheckout,
   updateActiveWorkspaceView,
   updateGroup,
+  group,
   walkGroups,
   workspaceView
 } from './workspaces'
 
 export function initializeWorkspaceState(): void {
   let terminalStartLocation: TerminalStartLocation = 'focused-checkout'
+  let viewMode: ViewMode = 'multi'
   try {
     if (localStorage.getItem('boss.terminalStartLocation') === 'project-root') terminalStartLocation = 'project-root'
+    if (localStorage.getItem('boss.viewMode') === 'single') viewMode = 'single'
   } catch {
-    /* Retain the focused-checkout default. */
+    /* Retain the focused-checkout and tiling defaults. */
   }
-  appStore.setState({ layouts: loadLayouts(), terminalStartLocation })
+  appStore.setState({ layouts: loadLayouts(), terminalStartLocation, viewMode })
+}
+
+/** Switch between the tiling layout and one thread at a time.
+ *
+ *  The views themselves are untouched. Single mode renders one of them
+ *  differently rather than replacing them, so a layout someone arranged is
+ *  still there when they switch back. */
+export function setViewMode(value: ViewMode): void {
+  appStore.setState({ viewMode: value })
+  try {
+    localStorage.setItem('boss.viewMode', value)
+  } catch {
+    /* The in-memory setting still applies for this run. */
+  }
 }
 
 export function setTerminalStartLocation(value: TerminalStartLocation): void {
@@ -506,6 +523,7 @@ export function reorderWorkspaceTab(groupId: string, tabId: string, beforeTabId?
 export function openSessionInWorkspace(sessionId: string): boolean {
   const workspace = currentWorkspace()
   if (!workspace) return false
+  if (appStore.getState().viewMode === 'single') return openSessionInOwnView(sessionId, workspace)
   const view = activeWorkspaceView(workspace)
   const existing = findSessionTab(view.root, sessionId)
   if (existing) {
@@ -514,6 +532,34 @@ export function openSessionInWorkspace(sessionId: string): boolean {
   }
   const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
   addWorkspaceTab(groupId, 'thread', sessionId)
+  return true
+}
+
+/** One thread per view, which is what single mode means.
+ *
+ *  A thread already showing somewhere goes back to that view rather than
+ *  opening a second one, so the terminals and files left there come with it.
+ *  Anything else gets a view of its own instead of another tab in the strip —
+ *  piling threads into one pane is the thing single mode exists to avoid.
+ *
+ *  Views made this way are ordinary views. They appear in the Views strip in
+ *  multi mode and can be arranged like any other; the strip is simply hidden
+ *  while single mode is on. */
+function openSessionInOwnView(sessionId: string, workspace: WorkspaceState): boolean {
+  const owning = workspace.views.find((view) => findSessionTab(view.root, sessionId))
+  if (owning) {
+    const found = findSessionTab(owning.root, sessionId)
+    if (workspace.activeViewId !== owning.id) activateWorkspaceView(owning.id)
+    if (found) activateWorkspaceTab(found.group.id, found.tab.id)
+    return true
+  }
+  const session = appStore.getState().sessions.find((item) => item.id === sessionId)
+  const created = workspaceView(session?.title || 'Thread', group([tab('thread', sessionId)]))
+  updateWorkspace((item) => ({
+    ...item,
+    views: [...item.views, created],
+    activeViewId: created.id
+  }))
   return true
 }
 

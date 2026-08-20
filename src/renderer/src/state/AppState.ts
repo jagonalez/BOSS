@@ -31,7 +31,7 @@ import type {
 } from '@shared/ipc'
 import type { ProjectInfo } from '@shared/ipc'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, Layout, Workspace, TerminalStartLocation } from '@shared/workspace'
+import type { AppPage, Layout, ViewMode, Workspace, TerminalStartLocation } from '@shared/workspace'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
 
@@ -47,6 +47,8 @@ export interface Attachment {
 export interface AppState {
   activePage: AppPage
   projectWorkspace: Workspace | null
+  /** Tiling, or one thread at a time. See ViewMode in @shared/workspace. */
+  viewMode: ViewMode
   /** Tab to flash after it lands somewhere new. Clears itself. */
   highlightedTabId?: string
   /** Browser tabs an agent has driven since you last looked at them. Keyed by
@@ -155,6 +157,7 @@ export const initialBrowseState: BrowseNavigationState = {
 export const initialState: AppState = {
   activePage: 'command-center',
   projectWorkspace: null,
+  viewMode: 'multi',
   browseAgentActivity: {},
   workspaceUndo: null,
   layouts: [],
