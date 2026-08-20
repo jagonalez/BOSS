@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, findSessionTab, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
 
 test('a resource opened from a thread looks at that thread’s checkout', () => {
   // A review opened from a worktree thread fell back to the main project
@@ -398,6 +398,26 @@ test('a drop involving a path the list does not hold is ignored', () => {
   const paths = ['/a', '/b']
   assert.equal(reorderPaths(paths, '/gone', '/a', true), paths)
   assert.equal(reorderPaths(paths, '/a', '/gone', true), paths)
+})
+
+test('a per-thread view holds exactly that thread', () => {
+  // What single mode creates: one view, one group, one thread tab. Clicking
+  // another thread makes another view rather than adding to this strip.
+  const view = workspaceView('OAuth hardening', group([tab('thread', 'thread-1')]))
+  const tabs = walkTabs(view.root)
+  assert.equal(tabs.length, 1)
+  assert.equal(tabs[0].sessionId, 'thread-1')
+  assert.equal(walkGroups(view.root).length, 1)
+})
+
+test('an existing view is found by the thread it holds', () => {
+  // Reuse is what keeps a thread's terminals: opening it again has to return to
+  // the view it already lives in rather than build a second one.
+  const first = workspaceView('One', group([tab('thread', 'thread-1')]))
+  const second = workspaceView('Two', group([tab('thread', 'thread-2')]))
+  const owning = [first, second].find((view) => findSessionTab(view.root, 'thread-2'))
+  assert.equal(owning?.id, second.id)
+  assert.equal([first, second].find((view) => findSessionTab(view.root, 'thread-3')), undefined)
 })
 
 test('single mode shows the focused pane, and falls back when focus is stale', () => {

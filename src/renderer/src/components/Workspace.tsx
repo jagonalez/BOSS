@@ -1069,8 +1069,33 @@ function WorkspaceNodeView({ node, viewId, soloGroupId }: { node: WorkspaceNode;
   return <SplitView key={node.id} node={node} viewId={viewId} soloGroupId={soloGroupId} />
 }
 
+/** What the bar says while the Views strip is hidden.
+ *
+ *  The bar cannot simply go: it is the window's drag region, and on macOS its
+ *  height is what clears the traffic lights. So it carries the one thing worth
+ *  knowing instead — which thread is on screen, and where it is running. */
+function SingleThreadTitle(): React.JSX.Element | null {
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const sessions = useStore(appStore, (state) => state.sessions)
+  const view = workspace?.views.find((item) => item.id === workspace.activeViewId)
+  const sessionId = view ? walkTabs(view.root).find((item) => item.kind === 'thread')?.sessionId : undefined
+  const session = sessions.find((item) => item.id === sessionId)
+  if (!view) return null
+  const branch = session?.worktree?.status === 'active' ? session.worktree.branch : undefined
+  const where = branch ?? (session?.projectPath ? session.projectPath.split(/[\\/]/).pop() : undefined)
+  return (
+    <div className="workspace-single-title">
+      <strong>{session?.title || view.name}</strong>
+      {where ? <small>{where}</small> : null}
+    </div>
+  )
+}
+
 function WorkspaceBar(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  // Single mode holds one thread per view and hides the strip, so the controls
+  // for arranging views and applying layouts have nothing to act on.
+  const single = useStore(appStore, (state) => state.viewMode) === 'single'
   const layouts = useStore(appStore, (state) => state.layouts)
   const undo = useStore(appStore, (state) => state.workspaceUndo)
   const [layoutsOpen, setLayoutsOpen] = useState(false)
@@ -1123,7 +1148,7 @@ function WorkspaceBar(): React.JSX.Element {
 
   return (
     <div className="workspace-bar">
-      <div className="workspace-view-tabs" role="tablist" aria-label="Project views">
+      <div className="workspace-view-tabs" role="tablist" aria-label="Project views" hidden={single}>
         {workspace?.views.map((view) => (
           <div
             key={view.id}
@@ -1197,13 +1222,14 @@ function WorkspaceBar(): React.JSX.Element {
           <PlusIcon size={13} />
         </button>
       </div>
+      {single ? <SingleThreadTitle /> : null}
       <div className="workspace-bar-spacer" />
       {undo ? (
         <button className="workspace-undo" onClick={undoWorkspaceChange} title="Undo the last close">
           {undo.label} — Undo
         </button>
       ) : null}
-      <div className="workspace-layout-control" ref={menuRef}>
+      <div className="workspace-layout-control" ref={menuRef} hidden={single}>
         <button className="workspace-bar-button" onClick={() => setLayoutsOpen((open) => !open)}>
           <span>Layouts</span>
           {/* Drawn, not the ⌄ glyph it replaces: that character sits on the
