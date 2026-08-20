@@ -94,10 +94,22 @@ export function singleThreadView(name: string, sessionId: string): WorkspaceView
   return { ...view, focusedGroupId: conversation.id }
 }
 
-/** The conversation pane of a single-thread view: the first group, by
- *  construction. Everything else in the view is panel. */
+/** The conversation pane of a single-thread view.
+ *
+ *  The pane holding a thread tab, not simply the first group: a view carried
+ *  over from tiling can have its thread anywhere, and treating the wrong pane
+ *  as the conversation hides the wrong tab strip. Falls back to the first
+ *  group for a view that holds no thread at all. */
 export function conversationGroupId(view: WorkspaceView): string {
-  return walkGroups(view.root)[0].id
+  const groups = walkGroups(view.root)
+  return groups.find((item) => item.tabs.some((entry) => entry.kind === 'thread'))?.id ?? groups[0].id
+}
+
+/** The pane a thread's terminals, files and reviews belong in: the one that is
+ *  not its conversation. Undefined when the view has no second pane yet. */
+export function panelGroupId(view: WorkspaceView): string | undefined {
+  const conversation = conversationGroupId(view)
+  return walkGroups(view.root).find((item) => item.id !== conversation)?.id
 }
 
 export function nextWorkspaceViewName(views: Array<Pick<WorkspaceView, 'name'>>): string {

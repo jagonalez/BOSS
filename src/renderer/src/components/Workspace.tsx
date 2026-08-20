@@ -29,9 +29,10 @@ import {
   setNativeViewsSuspended,
   setWorkspaceSplitRatio,
   splitWorkspaceGroup,
+  ensurePanel,
   undoWorkspaceChange
 } from '../lib/actions'
-import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, conversationGroupId, findGroup, findSessionTab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, conversationGroupId, panelGroupId, findGroup, findSessionTab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { tabContentNode } from '../lib/tab-content-nodes'
 import { BACKEND_MARKS, BackIcon, ChatIcon, ChevronIcon, FilesIcon, GlobeIcon, PanelIcon, PlusIcon, RenameIcon, ReviewIcon, TerminalIcon, TrashIcon } from './icons'
 import { BackendBadge } from './BackendControls'
@@ -1113,8 +1114,11 @@ function SinglePanelControls(): React.JSX.Element | null {
   const view = workspace?.views.find((item) => item.id === workspace.activeViewId)
   if (!view) return null
   const groups = walkGroups(view.root)
-  const conversation = groups[0]
-  const panel = groups[1]
+  const conversationId = conversationGroupId(view)
+  const conversation = groups.find((item) => item.id === conversationId) ?? groups[0]
+  // May be missing on a view carried over from tiling. The button still shows:
+  // choosing something is what creates the panel.
+  const panelId = panelGroupId(view)
   const sessionId = conversation.tabs.find((item) => item.kind === 'thread')?.sessionId
   const session = sessions.find((item) => item.id === sessionId)
   const branch = session?.worktree?.status === 'active' ? session.worktree.branch : undefined
@@ -1126,18 +1130,19 @@ function SinglePanelControls(): React.JSX.Element | null {
         <strong>{session?.title || view.name}</strong>
         {where ? <small>{where}</small> : null}
       </div>
-      {panel ? (
-        <div className="workspace-single-panel-control" ref={ref}>
-          <button
-            className={`workspace-bar-button ${open ? 'active' : ''}`}
-            onClick={() => setOpen((value) => !value)}
-            title="Open a terminal, browser, files, or a side chat beside this thread"
-          >
-            <PanelIcon size={13} />
-          </button>
-          {open ? <AddMenu groupId={panel.id} ownerId={sessionId} close={() => setOpen(false)} /> : null}
-        </div>
-      ) : null}
+      <div className="workspace-single-panel-control" ref={ref}>
+        <button
+          className={`workspace-bar-button ${open ? 'active' : ''}`}
+          onClick={() => {
+            if (!open && !panelId) ensurePanel(view.id)
+            setOpen((value) => !value)
+          }}
+          title="Open a terminal, browser, files, or a side chat beside this thread"
+        >
+          <PanelIcon size={13} />
+        </button>
+        {open && panelId ? <AddMenu groupId={panelId} ownerId={sessionId} close={() => setOpen(false)} /> : null}
+      </div>
     </>
   )
 }

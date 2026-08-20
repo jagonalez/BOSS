@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, findSessionTab, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView, singleThreadView, conversationGroupId } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, findSessionTab, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView, singleThreadView, conversationGroupId, panelGroupId } from './workspaces.ts'
 
 test('a resource opened from a thread looks at that thread’s checkout', () => {
   // A review opened from a worktree thread fell back to the main project
@@ -463,4 +463,26 @@ test('a single-thread view is the conversation beside an empty panel', () => {
 test('the conversation pane keeps focus, not the panel', () => {
   const view = singleThreadView('OAuth hardening', 'thread-1')
   assert.equal(view.focusedGroupId, conversationGroupId(view))
+})
+
+test('the conversation is the pane holding the thread, wherever it sits', () => {
+  // A view carried over from tiling can have its thread in the second pane.
+  // Taking the first group on faith hid the wrong strip and sent terminals into
+  // the thread's own pane.
+  const first = group([tab('terminal', 'a')])
+  const second = group([tab('thread', 'a')])
+  const view = workspaceView('Carried over', split('horizontal', first, second))
+  assert.equal(conversationGroupId(view), second.id)
+  assert.equal(panelGroupId(view), first.id)
+})
+
+test('a view with no panel yet reports none', () => {
+  const view = workspaceView('Flat', group([tab('thread', 'a')]))
+  assert.equal(panelGroupId(view), undefined)
+  assert.equal(conversationGroupId(view), walkGroups(view.root)[0].id)
+})
+
+test('a view with no thread still names a conversation pane', () => {
+  const view = workspaceView('Empty', group([]))
+  assert.equal(conversationGroupId(view), walkGroups(view.root)[0].id)
 })
