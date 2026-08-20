@@ -44,6 +44,7 @@ import {
   updateGroup,
   group,
   walkGroups,
+  walkTabs,
   workspaceView
 } from './workspaces'
 
@@ -66,6 +67,7 @@ export function initializeWorkspaceState(): void {
  *  still there when they switch back. */
 export function setViewMode(value: ViewMode): void {
   appStore.setState({ viewMode: value })
+  if (value === 'single') splitThreadsIntoOwnViews()
   try {
     localStorage.setItem('boss.viewMode', value)
   } catch {
@@ -421,6 +423,33 @@ function copyThreadPreferences(sourceId: string, targetId: string): void {
   setMode(modeForSession(sourceId), targetId)
 }
 
+/** Give every thread its own view, once, when single mode is turned on.
+ *
+ *  Views made before the switch hold several threads in one strip, which is the
+ *  pile single mode exists to avoid — turning it on and still seeing four tabs
+ *  reads as the setting doing nothing. Each extra thread moves to a view of its
+ *  own; tabs that are not threads stay with the thread whose pane they are in,
+ *  since a terminal belongs to the checkout it was opened against. */
+function splitThreadsIntoOwnViews(): void {
+  const workspace = currentWorkspace()
+  if (!workspace) return
+  const sessions = appStore.getState().sessions
+  for (;;) {
+    const current = currentWorkspace()
+    if (!current) return
+    const extra = current.views.flatMap((view) => {
+      const threads = walkTabs(view.root).filter((item) => item.kind === 'thread')
+      return threads.slice(1).map((item) => ({ viewId: view.id, tab: item }))
+    })
+    if (!extra.length) return
+    const { tab: moving } = extra[0]
+    const title = sessions.find((item) => item.id === moving.sessionId)?.title
+    const created = workspaceView(title || 'Thread', group([]))
+    updateWorkspace((item) => ({ ...item, views: [...item.views, created] }))
+    sendWorkspaceTabToView(moving.id, created.id, walkGroups(created.root)[0].id)
+  }
+}
+
 export async function createThreadInGroup(groupId: string, backendId: BackendId = appStore.getState().engine): Promise<void> {
   try {
     const session = await OpenCode.createSession(undefined, backendId)
@@ -428,7 +457,10 @@ export async function createThreadInGroup(groupId: string, backendId: BackendId 
     upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? appStore.getState().projectPath })
     await refreshSessions()
     await refreshProviders(session.id)
-    addWorkspaceTab(groupId, 'thread', session.id)
+    // Single mode gives every thread its own view, so a new one cannot land as
+    // another tab in the pane that asked for it.
+    if (appStore.getState().viewMode === 'single') openSessionInWorkspace(session.id)
+    else addWorkspaceTab(groupId, 'thread', session.id)
   } catch {
     /* ignore */
   }
