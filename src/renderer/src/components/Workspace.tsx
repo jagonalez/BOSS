@@ -1071,6 +1071,14 @@ function WorkspaceNodeView({ node, viewId, soloGroupId }: { node: WorkspaceNode;
 
 function WorkspaceBar(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  // Single mode holds one thread per view and hides the strip, so the controls
+  // for arranging views and applying layouts have nothing to act on.
+  const single = useStore(appStore, (state) => state.viewMode) === 'single'
+  // The strip is hidden in single mode, so the bar says which thread is on
+  // screen instead. Otherwise nothing names it.
+  const activeViewName = workspace
+    ? (workspace.views.find((view) => view.id === workspace.activeViewId)?.name ?? '')
+    : ''
   const layouts = useStore(appStore, (state) => state.layouts)
   const undo = useStore(appStore, (state) => state.workspaceUndo)
   const [layoutsOpen, setLayoutsOpen] = useState(false)
@@ -1123,7 +1131,7 @@ function WorkspaceBar(): React.JSX.Element {
 
   return (
     <div className="workspace-bar">
-      <div className="workspace-view-tabs" role="tablist" aria-label="Project views">
+      <div className="workspace-view-tabs" role="tablist" aria-label="Project views" hidden={single}>
         {workspace?.views.map((view) => (
           <div
             key={view.id}
@@ -1197,13 +1205,14 @@ function WorkspaceBar(): React.JSX.Element {
           <PlusIcon size={13} />
         </button>
       </div>
+      {single ? <div className="workspace-single-title">{activeViewName}</div> : null}
       <div className="workspace-bar-spacer" />
       {undo ? (
         <button className="workspace-undo" onClick={undoWorkspaceChange} title="Undo the last close">
           {undo.label} — Undo
         </button>
       ) : null}
-      <div className="workspace-layout-control" ref={menuRef}>
+      <div className="workspace-layout-control" ref={menuRef} hidden={single}>
         <button className="workspace-bar-button" onClick={() => setLayoutsOpen((open) => !open)}>
           <span>Layouts</span>
           {/* Drawn, not the ⌄ glyph it replaces: that character sits on the
