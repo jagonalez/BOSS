@@ -103,16 +103,6 @@ export interface PairingPayload {
   d: string
   /** One-time pairing secret, base64url. */
   s: string
-  /**
-   * The desktop's join proof for its room.
-   *
-   * Both `d` and this are derived from the room secret, which a pairing phone
-   * does not have yet. Without them the phone derives a room of its own from
-   * the pairing secret, joins it alone, and its claim reaches nobody. Carrying
-   * them costs nothing: they are one-way hashes, and the relay already sees
-   * both on every connection.
-   */
-  j?: string
 }
 
 /**
@@ -177,21 +167,7 @@ export async function deriveKey(crypto: CryptoLike, secret: string): Promise<Aes
   return importAes(crypto, await digest(crypto, `boss-relay-key:${secret}`))
 }
 
-export async function deriveDeviceId(crypto: CryptoLike, secret: string): Promise<string> {
-  return toBase64Url(new Uint8Array(await digest(crypto, `boss-relay-device:${secret}`)).slice(0, 16))
-}
 
-/**
- * Proof that the sender holds the pairing secret, without disclosing it.
- *
- * The relay stores the first proof it sees for a device id and requires every
- * later connection to that id to match. A third party who learns a device id
- * off the wire still cannot join, because the id and the proof are separate
- * one-way derivations of a secret the relay never receives.
- */
-export async function deriveJoinProof(crypto: CryptoLike, secret: string): Promise<string> {
-  return toBase64Url(new Uint8Array(await digest(crypto, `boss-relay-join:${secret}`)).slice(0, 16))
-}
 
 async function digest(crypto: CryptoLike, input: string): Promise<ArrayBuffer> {
   return crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))

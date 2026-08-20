@@ -25,8 +25,17 @@ import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { RelayClient } from '../dist/test/relay-client.mjs'
 import { decodePairing, deriveKey, open, seal } from '../../src/shared/relay.ts'
+import { challengeMessage, toBase64Url } from '../../src/shared/identity.ts'
 
 const crypto = webcrypto as never
+// The generate/sign half of WebCrypto, so the test can act as a real phone.
+const signing = webcrypto as unknown as {
+  subtle: {
+    generateKey(a: { name: string }, e: boolean, u: string[]): Promise<{ publicKey: object; privateKey: object }>
+    exportKey(format: 'raw', key: object): Promise<ArrayBuffer>
+    sign(a: { name: string }, key: object, data: Uint8Array): Promise<ArrayBuffer>
+  }
+}
 const PORT = 8902
 
 async function canListen(): Promise<boolean> {
@@ -49,10 +58,19 @@ let dir = ''
 test.before(async () => {
   if (!listenable) return
   dir = await mkdtemp(join(tmpdir(), 'boss-pairing-'))
-  relay = spawn('node', ['dist/relay/src/server.js'], {
+  relay = spawn('node', ['dist/server.js'], {
     cwd: new URL('..', import.meta.url).pathname,
     env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1' },
     stdio: 'ignore'
+  })
+  // A relay left running by an earlier run would answer instead of the one
+  // just built, and the suite would silently test stale code. That is exactly
+  // how a months-old binary kept passing here. Refuse the port unless it is
+  // ours.
+  relay.once('exit', (code) => {
+    if (code !== 0 && code !== null) {
+      throw new Error(`the relay exited with ${code} — another process may hold port ${PORT}`)
+    }
   })
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
@@ -91,8 +109,10 @@ liveTest('a phone pairs with a desktop by scanning its QR code', async () => {
   const status = await desktop.handle({ type: 'remote.pair' })
   const payload = decodePairing((status as { pairing: { code: string } }).pairing.code)
   assert.ok(payload, 'the QR code must decode')
+  // The room id is the only routing fact the phone cannot compute: it is the
+  // hash of the desktop's public key. It is safe to publish, because entering
+  // the room needs the private key the QR code never carries.
   assert.ok(payload.d, 'the code must carry the desktop room id')
-  assert.ok(payload.j, 'the code must carry the desktop join proof')
 
   // --- the phone, using ONLY what the QR code gave it ---
   const pairingKey = await deriveKey(crypto, payload.s)
@@ -110,11 +130,29 @@ liveTest('a phone pairs with a desktop by scanning its QR code', async () => {
     })
   })
 
-  await new Promise<void>((resolve) => phone.once('open', () => resolve()))
-  phone.send(JSON.stringify({
-    type: 'hello', side: 'phone', deviceId: payload.d, peerId: 'test-phone', proof: payload.j, v: 1
-  }))
-  await new Promise((r) => setTimeout(r, 300))
+  // The phone mints its own keypair and answers the relay's challenge with it.
+  // It proves which phone is asking; the desktop decides whether to let it in.
+  const pair = await signing.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])
+  const publicKey = new Uint8Array(await signing.subtle.exportKey('raw', pair.publicKey))
+
+  const admitted = new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('the relay never admitted the phone')), 6000)
+    phone.on('message', async (raw: unknown) => {
+      const frame = JSON.parse(String(raw)) as Record<string, unknown>
+      if (frame.type === 'challenge') {
+        const signature = new Uint8Array(await signing.subtle.sign(
+          { name: 'Ed25519' }, pair.privateKey,
+          challengeMessage(String(frame.nonce), payload.d, 'phone')
+        ))
+        phone.send(JSON.stringify({
+          type: 'hello', side: 'phone', deviceId: payload.d, peerId: 'test-phone',
+          publicKey: toBase64Url(publicKey), signature: toBase64Url(signature), v: 1
+        }))
+      }
+      if (frame.type === 'welcome') { clearTimeout(timer); resolve() }
+    })
+  })
+  await admitted
   phone.send(JSON.stringify({
     sealed: await seal(crypto, pairingKey, { kind: 'claim', secret: payload.s, label: 'TestPhone' })
   }))

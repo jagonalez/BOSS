@@ -11,6 +11,7 @@
  */
 import { gcm } from '@noble/ciphers/aes.js'
 import { sha256 } from '@noble/hashes/sha2.js'
+import { ed25519 } from '@noble/curves/ed25519.js'
 
 export function toBase64Url(bytes: Uint8Array): string {
   let binary = ''
@@ -35,15 +36,7 @@ export function deriveKey(secret: string): Uint8Array {
   return digest(`boss-relay-key:${secret}`)
 }
 
-/** Routing key. A separate derivation, so holding it does not yield the key. */
-export function deriveDeviceId(secret: string): string {
-  return toBase64Url(digest(`boss-relay-device:${secret}`).slice(0, 16))
-}
 
-/** Proves room membership to the relay without disclosing the secret. */
-export function deriveJoinProof(secret: string): string {
-  return toBase64Url(digest(`boss-relay-join:${secret}`).slice(0, 16))
-}
 
 /** `base64url(iv).base64url(ciphertext+tag)`, matching the desktop's format. */
 export function seal(key: Uint8Array, message: unknown): string {
@@ -62,4 +55,30 @@ export function open<T>(key: Uint8Array, sealed: string): T | null {
   } catch {
     return null
   }
+}
+
+/**
+ * This phone's relay identity.
+ *
+ * Ed25519 through @noble rather than crypto.subtle: React Native has no
+ * WebCrypto signing, and a native module would put the app outside Expo Go.
+ * Verified against Node's WebCrypto in both directions — the relay verifies
+ * what this signs, and this verifies what the relay's peers sign.
+ *
+ * The private key stays in the phone's Keychain. Only the public key and
+ * per-connection signatures ever reach the relay.
+ */
+export function newSecretKey(): string {
+  return toBase64Url(ed25519.utils.randomSecretKey())
+}
+
+export function publicKeyOf(secretKey: string): string {
+  return toBase64Url(ed25519.getPublicKey(fromBase64Url(secretKey)))
+}
+
+/** Sign a relay challenge. The nonce, room and side are all bound in, so the
+ *  result cannot be replayed on another connection, room, or side. */
+export function signChallenge(secretKey: string, nonce: string, roomId: string, side: 'desktop' | 'phone'): string {
+  const message = new TextEncoder().encode(`boss-relay-join ${nonce} ${roomId} ${side}`)
+  return toBase64Url(ed25519.sign(message, fromBase64Url(secretKey)))
 }

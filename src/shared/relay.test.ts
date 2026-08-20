@@ -3,7 +3,7 @@ import test from 'node:test'
 import { webcrypto } from 'node:crypto'
 // Node's type-stripping test runner requires explicit extensions.
 // @ts-expect-error Application code uses bundler resolution.
-import { decodePairing, deriveDeviceId, deriveJoinProof, deriveKey, encodePairing, open, reconnectDelay, seal, RELAY_PROTOCOL_VERSION, type CryptoLike } from './relay.ts'
+import { decodePairing, deriveKey, encodePairing, open, reconnectDelay, seal, RELAY_PROTOCOL_VERSION, type CryptoLike } from './relay.ts'
 
 const crypto = webcrypto as unknown as CryptoLike
 
@@ -36,18 +36,8 @@ test('every frame uses a fresh nonce, so identical messages differ on the wire',
   assert.notEqual(a, b)
 })
 
-test('the device id and the join proof leak no secret and differ from each other', async () => {
-  const deviceId = await deriveDeviceId(crypto, 'secret-one')
-  const proof = await deriveJoinProof(crypto, 'secret-one')
-  assert.notEqual(deviceId, proof)
-  for (const value of [deviceId, proof]) {
-    assert.doesNotMatch(value, /secret-one/)
-    assert.match(value, /^[A-Za-z0-9_-]+$/)
-  }
-  // Derivation is stable, so a reconnect reaches the same room.
-  assert.equal(await deriveDeviceId(crypto, 'secret-one'), deviceId)
-  assert.notEqual(await deriveDeviceId(crypto, 'secret-two'), deviceId)
-})
+// The room id and the join proof used to be hashes of the room secret. The
+// room now belongs to an Ed25519 keypair, so identity.test.ts covers it.
 
 test('a pairing code round-trips through the QR payload', () => {
   const payload = { v: RELAY_PROTOCOL_VERSION, r: 'https://boss-relay.fly.dev', d: 'device-1', s: 'secret-1' }

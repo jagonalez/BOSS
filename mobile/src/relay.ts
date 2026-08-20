@@ -10,7 +10,7 @@
  * The relay only ever sees ciphertext. Nothing here sends a plaintext frame.
  */
 import * as SecureStore from 'expo-secure-store'
-import { deriveDeviceId, deriveJoinProof, deriveKey, fromBase64Url, open as openSealed, seal, toBase64Url } from './crypto'
+import { deriveKey, fromBase64Url, newSecretKey, open as openSealed, publicKeyOf, seal, signChallenge, toBase64Url } from './crypto'
 
 export interface RelayCredentials {
   relayUrl: string
@@ -20,14 +20,19 @@ export interface RelayCredentials {
   token: string
   peerId: string
   /**
-   * Set only while pairing. The desktop's room id and join proof come from the
-   * QR code, because they derive from the room secret the phone does not have
-   * yet — deriving them from the pairing secret instead puts the phone alone
-   * in a room the desktop never sees. Both are dropped once paired, when
-   * `secret` becomes the room secret and the phone derives them itself.
+   * The room this phone belongs to: the hash of the DESKTOP's public key, read
+   * from the QR code. A phone cannot compute it — that is the point. It proves
+   * only that it is itself, and the desktop decides whether that identity is
+   * allowed in.
    */
   deviceId?: string
-  joinProof?: string
+  /**
+   * This phone's own Ed25519 secret key, base64url. Generated on this device at
+   * pairing and never transmitted; the relay sees only the public half and
+   * signatures over nonces it issued. Held in the Keychain with the rest of the
+   * credentials.
+   */
+  secretKey?: string
 }
 
 export type RelayMessage =
@@ -134,7 +139,9 @@ export class RelayConnection {
       secret: payload.s,
       token: '',
       deviceId: payload.d,
-      joinProof: payload.j,
+      // One keypair per phone, minted here and kept for the life of the
+      // pairing, so the desktop can revoke this phone alone by its public key.
+      secretKey: newSecretKey(),
       peerId: toBase64Url(crypto.getRandomValues(new Uint8Array(8)))
     }
     this.pendingClaim = payload.s
@@ -160,37 +167,10 @@ export class RelayConnection {
     const socket = new WebSocket(url)
     this.socket = socket
 
-    socket.onopen = async () => {
-      // Read this.credentials rather than the value captured above: pairing
-      // replaces it with the room secret, and a reconnect scheduled before
-      // that would otherwise keep deriving keys from the spent pairing
-      // secret and seal every frame with a key the desktop cannot open.
-      const current = this.credentials
-      // A socket superseded during pairing must not send on the new one's behalf.
-      if (!current || this.socket !== socket) return
-      this.key = deriveKey(current.secret)
-      socket.send(
-        JSON.stringify({
-          type: 'hello',
-          side: 'phone',
-          deviceId: current.deviceId ?? deriveDeviceId(current.secret),
-          peerId: current.peerId,
-          proof: current.joinProof ?? deriveJoinProof(current.secret),
-          v: 1
-        })
-      )
+    // Nothing is sent on open. The relay speaks first with a nonce, and the
+    // hello answers it — see greet(), driven from receive().
+    socket.onopen = () => {
       this.attempt = 0
-      this.ready = true
-      if (this.pendingClaim) {
-        await this.send({ kind: 'claim', secret: this.pendingClaim, label: 'iPhone' })
-      } else if (current.token) {
-        await this.send({ kind: 'resume', since: this.lastSeq, token: current.token })
-      }
-      this.handlers.onStateChange(this.state)
-      // Only now can a request be sent. onPaired fires while the replacement
-      // socket is still opening, so anything issued there would be rejected
-      // outright with "Connecting…" and never retried.
-      if (current.token) this.handlers.onReady()
     }
 
     socket.onmessage = (raw) => {
@@ -215,6 +195,58 @@ export class RelayConnection {
     }
   }
 
+  /**
+   * Answer the relay's challenge.
+   *
+   * The room is the desktop's, so its id comes from the QR code rather than
+   * from anything this phone can compute. The signature is this phone's own:
+   * it proves which phone is asking, not that it may enter. The desktop makes
+   * that call when it sees the claim.
+   */
+  private greet(nonce: string): void {
+    const socket = this.socket
+    const current = this.credentials
+    if (!socket || !current || socket.readyState !== 1) return
+    // Read this.credentials rather than a captured local: pairing replaces it
+    // with the room secret, and a reconnect scheduled before that would keep
+    // deriving keys from the spent pairing secret and seal every frame with a
+    // key the desktop cannot open.
+    this.key = deriveKey(current.secret)
+    const deviceId = current.deviceId
+    const secretKey = current.secretKey
+    if (!deviceId || !secretKey) return
+    socket.send(
+      JSON.stringify({
+        type: 'hello',
+        side: 'phone',
+        // The desktop's room, from the QR code. A phone cannot derive it, so it
+        // names it and signs it; the relay verifies the signature covers this
+        // exact room, which stops a phone being redirected into another one.
+        deviceId,
+        peerId: current.peerId,
+        publicKey: publicKeyOf(secretKey),
+        signature: signChallenge(secretKey, nonce, deviceId, 'phone'),
+        v: 1
+      })
+    )
+  }
+
+  /** The relay let this socket into the room. Now the desktop can be addressed. */
+  private async admitted(): Promise<void> {
+    const current = this.credentials
+    if (!current) return
+    this.ready = true
+    if (this.pendingClaim) {
+      await this.send({ kind: 'claim', secret: this.pendingClaim, label: 'iPhone' })
+    } else if (current.token) {
+      await this.send({ kind: 'resume', since: this.lastSeq, token: current.token })
+    }
+    // Only now can a request be sent. onPaired fires while the replacement
+    // socket is still opening, so anything issued there would be rejected
+    // outright with "Connecting…" and never retried.
+    if (current.token) this.handlers.onReady()
+  }
+
   private async receive(raw: string): Promise<void> {
     let frame: Record<string, unknown>
     try {
@@ -223,9 +255,19 @@ export class RelayConnection {
       return
     }
 
+    // The relay opens with a nonce. Answering it proves this phone holds its
+    // own private key, and nothing sent here is reusable on another connection.
+    if (frame.type === 'challenge' && typeof frame.nonce === 'string') {
+      this.greet(frame.nonce)
+      return
+    }
+
     if (typeof frame.type === 'string' && frame.type !== 'frame') {
       if (frame.type === 'welcome' || frame.type === 'peer.online' || frame.type === 'peer.offline') {
         this.desktopOnline = frame.desktopOnline !== false
+        // Only a welcome means the relay accepted the signature. Claiming or
+        // resuming before it would send into a socket about to be closed.
+        if (frame.type === 'welcome') await this.admitted()
         this.handlers.onStateChange(this.state)
       }
       return
@@ -266,10 +308,15 @@ export class RelayConnection {
 
     if (message.kind === 'claimed' && this.credentials) {
       // Swap the one-time pairing secret for the long-lived credentials.
+      // Everything but the secret and token survives: the room id and this
+      // phone's keypair are what get it back into the room on the next
+      // connect, and it can derive neither of them again.
       const credentials: RelayCredentials = {
         relayUrl: this.credentials.relayUrl,
         secret: message.secret,
         token: message.token,
+        deviceId: this.credentials.deviceId,
+        secretKey: this.credentials.secretKey,
         peerId: this.credentials.peerId
       }
       await saveCredentials(credentials)
