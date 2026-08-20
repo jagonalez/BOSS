@@ -13,7 +13,7 @@ import { cropHistory, openAiMessagesFromHistory, type LabChatMessage } from './l
 // @ts-expect-error Application builds use bundler resolution.
 import { parseToolArguments, type LabFunctionCall } from './lab-tool-call.ts'
 // @ts-expect-error Application builds use bundler resolution.
-import { CORE_TOOL_DEFINITIONS, FileSnapshots, LAB_TOOL_DEFINITIONS, alwaysGrantsAllow, fileTreeFromPaths, inferToolName, parseGitStatus, parseNumStat, permissionForTool, resolveInCwd, resolveToolGate, runGit, runTool, walkFiles, type LabToolFunction } from './lab-tools.ts'
+import { ASSISTANT_TOOL_DEFINITIONS, CORE_TOOL_DEFINITIONS, FileSnapshots, LAB_TOOL_DEFINITIONS, alwaysGrantsAllow, fileTreeFromPaths, inferToolName, parseGitStatus, parseNumStat, permissionForTool, resolveInCwd, resolveToolGate, runGit, runTool, walkFiles, type LabToolFunction } from './lab-tools.ts'
 // @ts-expect-error Application builds use bundler resolution.
 import { isOrchestrationTool, LabOrchestrator } from './lab-orchestrator.ts'
 
@@ -24,7 +24,7 @@ export interface LabEngineConfig {
   contextChars: number
   maxToolIterations: number
   maxReadOnlyRounds: number
-  tools: 'core' | 'all'
+  tools: 'core' | 'all' | 'assistant'
 }
 
 /** Where the engine's own progress is published. A transport maps these to its
@@ -128,7 +128,12 @@ export class LabEngine {
     this.config = options.config
     this.gate = options.gate
     this.sink = options.sink ?? noopSink
-    this.tools = options.config.tools === 'core' ? CORE_TOOL_DEFINITIONS : LAB_TOOL_DEFINITIONS
+    this.tools =
+      options.config.tools === 'core'
+        ? CORE_TOOL_DEFINITIONS
+        : options.config.tools === 'assistant'
+          ? ASSISTANT_TOOL_DEFINITIONS
+          : LAB_TOOL_DEFINITIONS
     this.selectedModel = this.config.defaultModel
     try {
       const stored = JSON.parse(readFileSync(this.configFile, 'utf8')) as { model?: string }
@@ -382,20 +387,48 @@ export class LabEngine {
     }
   }
 
+  /** The assistant is a cheap, always-on helper. It routes work and asks for
+   *  the user early; the frontier models do the code changes. Its prompt is a
+   *  separate role, not a variation on the coding prompt: telling a router to
+   *  "always finish with a real edit" is the wrong instruction and pushes it to
+   *  do the work itself. */
+  private assistantPrompt(cwd: string, context?: string): string {
+    return [
+      'You are the assistant inside BOSS: a helper that manages threads and tasks.',
+      'You route work. You do not write code yourself — you cannot, and that is deliberate.',
+      '',
+      'Available tools:',
+      ...this.tools.map((tool) => `- ${tool.function.name}`),
+      '',
+      'How to work:',
+      '- Read, search, and inspect git freely to understand what is being asked.',
+      '- Delegate every code change with spawn_subagent. Pass a stronger model for work that writes code.',
+      '- Give a sub-agent a complete, self-contained instruction: it sees only what you write, not this thread.',
+      '- Collect results with wait_subagent, then report what changed.',
+      '- Use todos to track a task with several parts.',
+      '',
+      'When to bring in the user:',
+      '- Bringing the user in is the default, not the exception. Say what you need and stop.',
+      '- Ask before anything hard to reverse, anything outside the current task, or anything you are unsure is wanted.',
+      '- If a task is ambiguous, ask rather than guess. A wrong delegation costs more than a question.',
+      '- Report a sub-agent failure instead of retrying it a second time.',
+      '- A run that ends by asking a good question is a success.',
+      '',
+      `Current working directory: ${cwd}`,
+      context ? `\n${context}` : ''
+    ].filter(Boolean).join('\n')
+  }
+
   private systemPrompt(cwd: string, context?: string): string {
+    if (this.config.tools === 'assistant') return this.assistantPrompt(cwd, context)
     return [
       'You are an expert coding agent operating inside Lab, a coding agent harness.',
       'Your job is to complete the user\'s task by making real, minimal, working changes to the code.',
       '',
       'Available tools:',
-      '- read_file: read a file (optionally a line range)',
-      '- grep: search file contents',
-      '- glob: find files by pattern',
-      '- edit_file: apply a targeted edit',
-      '- write_file: create or overwrite a file',
-      '- revert_file: undo the last edit to a file',
-      '- bash: run a shell command or tests',
-      '- spawn_subagent / wait_subagent / list_subagents / abort_subagent: delegate work',
+      // Listed from the definitions actually sent, so the prompt cannot claim a
+      // tool the model was never given.
+      ...this.tools.map((tool) => `- ${tool.function.name}`),
       '',
       'How to work:',
       '- Understand the task first. Reproduce the problem or read the failing test to find the exact cause before editing.',

@@ -85,3 +85,24 @@ test('wait_subagents with no children returns an empty batch', async () => {
     fx.cleanup()
   }
 })
+test('a sub-agent runs on the model the parent asked for, not the parent\'s own', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lab-spawn-model-'))
+  try {
+    const store = new LabSessionStore(join(dir, 'sessions.json'))
+    const parent = store.create('parent')
+    const seen: string[] = []
+    const orchestrator = new LabOrchestrator(store, async (request) => {
+      seen.push(request.model)
+      return { status: 'completed' }
+    })
+    const opts = { model: 'hy3', cwd: dir, parentSignal: new AbortController().signal }
+
+    await orchestrator.spawnSubagent(parent.id, { instruction: 'write the fix', model: 'deepseek-v4-pro' }, opts)
+    await orchestrator.spawnSubagent(parent.id, { instruction: 'no model given' }, opts)
+
+    // The explicit model wins; a spawn without one inherits the parent's.
+    assert.deepEqual(seen, ['deepseek-v4-pro', 'hy3'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

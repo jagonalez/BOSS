@@ -164,6 +164,10 @@ export class LabOrchestrator {
     }
     const wait = args.wait !== false
     const title = String(args.title ?? '').trim()
+    // A sub-agent may run on a different model than its parent: a cheap
+    // assistant routes and delegates, and the worker that writes the code runs
+    // on a stronger one. An unset or blank model inherits the parent's.
+    const model = String(args.model ?? '').trim() || opts.model
     const child = this.store.createParented(title || undefined, opts.cwd, parentSessionId)
     this.store.setStatus(child.id, 'running')
     const controller = new AbortController()
@@ -177,7 +181,7 @@ export class LabOrchestrator {
     const run = this.runChild({
       sessionId: child.id,
       instruction,
-      model: opts.model,
+      model,
       cwd: opts.cwd,
       controller,
       signal,

@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { CORE_TOOL_DEFINITIONS, FileSnapshots, alwaysGrantsAllow, applyEdit, fileTreeFromPaths, globFiles, globToRegExp, grepFiles, inferToolName, lineSlice, parseGitLog, parseGitStatus, parseNumStat, pathExists, permissionForTool, resolveInCwd, resolveToolGate, runTool } from './lab-tools.ts'
+import { CORE_TOOL_DEFINITIONS, FileSnapshots, alwaysGrantsAllow, applyEdit, fileTreeFromPaths, globFiles, globToRegExp, grepFiles, inferToolName, lineSlice, parseGitLog, parseGitStatus, parseNumStat, pathExists, permissionForTool, resolveInCwd, resolveToolGate, runTool,
+  ASSISTANT_TOOL_DEFINITIONS,
+  LAB_TOOL_DEFINITIONS
+} from './lab-tools.ts'
 
 async function withDir(run: (dir: string) => void | Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'boss-lab-tools-'))
@@ -462,4 +465,29 @@ test('write_file captures the previous content for revert', async () => {
     await runTool('revert_file', { path: 'x.txt' }, { cwd: dir, snapshots })
     assert.equal(readFileSync(join(dir, 'x.txt'), 'utf8'), 'before')
   })
+})
+test('the assistant tool set can delegate and inspect but never write', () => {
+  const names = ASSISTANT_TOOL_DEFINITIONS.map((tool) => tool.function.name)
+  // Routing and looking around: allowed.
+  for (const allowed of ['read_file', 'grep', 'spawn_subagent', 'wait_subagent', 'todos']) {
+    assert.ok(names.includes(allowed), `assistant should have ${allowed}`)
+  }
+  // Anything that changes the working tree is withheld by construction, so a
+  // cheap model cannot edit code even if it decides to try.
+  for (const withheld of ['write_file', 'edit_file', 'bash', 'git_commit', 'revert_file']) {
+    assert.ok(!names.includes(withheld), `assistant must not have ${withheld}`)
+  }
+  // Delegating is itself gated ('write'), so spawning a worker still surfaces a
+  // permission card — the assistant asks before it spends a frontier model.
+  assert.equal(permissionForTool('spawn_subagent'), 'write')
+  // Nothing the assistant holds runs a shell.
+  assert.ok(ASSISTANT_TOOL_DEFINITIONS.every((tool) => permissionForTool(tool.function.name) !== 'shell'))
+})
+
+test('spawn_subagent exposes a model parameter for escalating to a stronger model', () => {
+  const spawn = LAB_TOOL_DEFINITIONS.find((tool) => tool.function.name === 'spawn_subagent')
+  assert.ok(spawn)
+  assert.ok('model' in spawn.function.parameters.properties)
+  // Optional: omitting it inherits the parent's model.
+  assert.deepEqual(spawn.function.parameters.required, ['instruction'])
 })

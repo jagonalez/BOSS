@@ -124,7 +124,8 @@ export const LAB_TOOL_DEFINITIONS: LabToolFunction[] = [
         type: 'object',
         properties: {
           instruction: { type: 'string', description: 'The task for the sub-agent, stated in full with any context it needs.' },
-          title: { type: 'string', description: 'Short name, e.g. "write the parser tests".' }
+          title: { type: 'string', description: 'Short name, e.g. "write the parser tests".' },
+          model: { type: 'string', description: 'Model for the sub-agent, e.g. a stronger one for work that writes code. Omit to use this thread\'s model.' }
         },
         required: ['instruction']
       }
@@ -283,6 +284,30 @@ export const CORE_TOOL_NAMES = new Set(['read_file', 'write_file', 'edit_file', 
 
 export const CORE_TOOL_DEFINITIONS: LabToolFunction[] = LAB_TOOL_DEFINITIONS.filter(
   (tool) => CORE_TOOL_NAMES.has(tool.function.name)
+)
+
+/** The assistant's tools. The assistant is a cheap always-on helper that routes
+ *  work rather than doing it: it may look around and delegate, but every code
+ *  change goes to a sub-agent on a stronger model. Leaving out write_file,
+ *  edit_file, bash, and git_commit makes that a property of the tool set rather
+ *  than something a small model has to be trusted to respect. */
+export const ASSISTANT_TOOL_NAMES = new Set([
+  'read_file',
+  'grep',
+  'glob',
+  'git_status',
+  'git_diff',
+  'git_log',
+  'todos',
+  'spawn_subagent',
+  'list_subagents',
+  'wait_subagent',
+  'wait_subagents',
+  'abort_subagent'
+])
+
+export const ASSISTANT_TOOL_DEFINITIONS: LabToolFunction[] = LAB_TOOL_DEFINITIONS.filter(
+  (tool) => ASSISTANT_TOOL_NAMES.has(tool.function.name)
 )
 
 /** Recover a tool name when a provider streams a call with an empty
