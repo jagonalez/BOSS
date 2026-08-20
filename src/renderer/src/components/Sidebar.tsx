@@ -5,6 +5,8 @@ import type { SessionInfo } from '@shared/opencode'
 import type { ChangeRequestSummary } from '@shared/review'
 import type { Workspace, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import type { OwnedResource } from '../lib/workspaces'
+import type { SupervisedThread, SupervisionSnapshot } from '@shared/supervision'
+import { OpenCode } from '../lib/opencode'
 import { PROJECT_DRAG_TYPE, SESSION_DRAG_TYPE, TAB_DRAG_TYPE, findGroup, reorderPaths, resourcesByThread, walkGroups } from '../lib/workspaces'
 import { ThreadCard } from './ThreadCard'
 import { useHoverCard } from '../lib/use-hover-card'
@@ -305,8 +307,12 @@ export function Sidebar(): React.JSX.Element {
   const archived = useStore(appStore, (s) => s.archived)
   const backends = useStore(appStore, (s) => s.backends)
   const workspace = useStore(appStore, (s) => s.projectWorkspace)
-  const [tab, setTab] = useState<'projects' | 'chats'>(() => {
-    try { return localStorage.getItem('boss.sidebarTab') === 'chats' ? 'chats' : 'projects' } catch { return 'projects' }
+  const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
+  const [tab, setTab] = useState<'projects' | 'chats' | 'review'>(() => {
+    try {
+      const saved = localStorage.getItem('boss.sidebarTab')
+      return saved === 'chats' || saved === 'review' ? saved : 'projects'
+    } catch { return 'projects' }
   })
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [liftedCaps, setLiftedCaps] = useState<Set<string>>(new Set())
@@ -324,6 +330,57 @@ export function Sidebar(): React.JSX.Element {
     () => resourcesByThread(workspace?.views ?? []),
     [workspace]
   )
+  // Review lists threads by what they need rather than by where they live. The
+  // supervision snapshot is the only place attention and results exist, so this
+  // panel polls it: the sidebar's own session list has neither.
+  const [supervision, setSupervision] = useState<SupervisionSnapshot | null>(null)
+  useEffect(() => {
+    if (tab !== 'review') return
+    let disposed = false
+    const refresh = (): void => {
+      void OpenCode.supervision().then((value) => {
+        if (!disposed) setSupervision(value)
+      }).catch(() => {})
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 5_000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [tab])
+
+  /** Threads grouped by what they want from the user.
+   *
+   *  Order is the point: what blocks you, then what is finished and waiting on
+   *  a decision, then what is still going. A thread lands in exactly one
+   *  bucket, so the counts add up to the list. */
+  const reviewBuckets = useMemo(() => {
+    const threads = supervision?.threads ?? []
+    const needs: Array<{ thread: SupervisedThread; detail: string }> = []
+    const ready: Array<{ thread: SupervisedThread; detail: string }> = []
+    const running: Array<{ thread: SupervisedThread; detail: string }> = []
+    for (const thread of threads) {
+      const attention = thread.attention
+      if (attention?.kind === 'permission') needs.push({ thread, detail: 'Needs permission' })
+      else if (attention?.kind === 'question') needs.push({ thread, detail: 'Needs an answer' })
+      else if (attention?.kind === 'error' || thread.lastRun?.status === 'error') {
+        needs.push({ thread, detail: attention?.detail ?? 'Run failed' })
+      } else if (thread.running) running.push({ thread, detail: 'Working' })
+      else if (thread.result?.changedFiles) {
+        const files = thread.result.changedFiles
+        ready.push({ thread, detail: `${files} file${files === 1 ? '' : 's'} changed` })
+      }
+    }
+    return [
+      { label: 'Needs you', threads: needs },
+      { label: 'Ready to review', threads: ready },
+      { label: 'Running', threads: running }
+    ].filter((bucket) => bucket.threads.length > 0)
+  }, [supervision])
+
+  const needsYouCount = reviewBuckets.find((bucket) => bucket.label === 'Needs you')?.threads.length ?? 0
+
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   /** Where the menu ends up once its height is known.
@@ -422,7 +479,7 @@ export function Sidebar(): React.JSX.Element {
     }
   }, [ctx])
 
-  const selectTab = (next: 'projects' | 'chats'): void => {
+  const selectTab = (next: 'projects' | 'chats' | 'review'): void => {
     setTab(next)
     try { localStorage.setItem('boss.sidebarTab', next) } catch { /* ignore */ }
   }
@@ -572,19 +629,29 @@ export function Sidebar(): React.JSX.Element {
         >
           Chats{looseChats.length ? <small>{looseChats.length}</small> : null}
         </button>
-        <IconButton
-          size="small"
-          className="section-add"
-          onClick={() => (tab === 'projects' ? void openProjectFolder() : void newGlobalChat())}
-          label={tab === 'projects' ? 'New project' : 'New chat'}
+        <button
+          role="tab"
+          aria-selected={tab === 'review'}
+          className={`sidebar-tab ${tab === 'review' ? 'active' : ''}`}
+          onClick={() => selectTab('review')}
         >
-          <PlusIcon size={12} />
-        </IconButton>
+          Review{needsYouCount ? <small>{needsYouCount}</small> : null}
+        </button>
+        {tab === 'review' ? null : (
+          <IconButton
+            size="small"
+            className="section-add"
+            onClick={() => (tab === 'projects' ? void openProjectFolder() : void newGlobalChat())}
+            label={tab === 'projects' ? 'New project' : 'New chat'}
+          >
+            <PlusIcon size={12} />
+          </IconButton>
+        )}
       </div>
 
       {/* Above the tabs: matches() filters loose chats as well as project
           threads, so one box serves both panels. */}
-      <div className="sidebar-filter">
+      <div className="sidebar-filter" hidden={tab === 'review'}>
         <input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
@@ -717,6 +784,33 @@ export function Sidebar(): React.JSX.Element {
             <div className="sidebar-empty">No chats yet</div>
           )}
         </div>
+      </div>
+
+      <div className="sidebar-section review" hidden={tab !== 'review'}>
+        {reviewBuckets.map((bucket) => (
+          <React.Fragment key={bucket.label}>
+            <div className="section-label">{bucket.label}<small>{bucket.threads.length}</small></div>
+            <div className="list">
+              {bucket.threads.map((entry) => (
+                <div
+                  key={entry.thread.threadId}
+                  className={`item sub session-row ${activeSessionId === entry.thread.threadId ? 'active' : ''}`}
+                  onClick={() => selectSession(entry.thread.threadId)}
+                  title={entry.thread.title}
+                >
+                  <span className={`session-state ${entry.thread.running ? 'busy' : 'idle'}`}><span /></span>
+                  <span className="session-copy">
+                    <span className="name">{entry.thread.title || 'Untitled'}</span>
+                    <span className="session-details">{entry.detail}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </React.Fragment>
+        ))}
+        {reviewBuckets.length === 0 && (
+          <div className="sidebar-empty">{supervision ? 'Nothing needs you' : 'Loading…'}</div>
+        )}
       </div>
 
       {archivedSessions.length > 0 && (

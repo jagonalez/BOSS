@@ -50,6 +50,17 @@ export interface WorkspaceView {
   focusedGroupId: string
 }
 
+/** How the workspace displays.
+ *
+ *  'multi' is the tiling layout: several threads at once, split however the
+ *  user arranged them. 'single' shows one thread in one pane with its own tabs
+ *  — no splits, no view tabs — for when the layout is a distraction rather than
+ *  the point.
+ *
+ *  A setting rather than a per-thread mode. Which one suits you depends on how
+ *  you work, not on which thread you happen to be looking at. */
+export type ViewMode = 'single' | 'multi'
+
 /** Every view in the app. Not scoped to a project: a view holds threads from
  *  wherever they live, and each thread carries its own checkout. */
 export interface Workspace {

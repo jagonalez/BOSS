@@ -17,7 +17,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
+import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, ViewMode, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
 import {
   activeWorkspaceView,
   activateTab,
@@ -48,12 +48,28 @@ import {
 
 export function initializeWorkspaceState(): void {
   let terminalStartLocation: TerminalStartLocation = 'focused-checkout'
+  let viewMode: ViewMode = 'multi'
   try {
     if (localStorage.getItem('boss.terminalStartLocation') === 'project-root') terminalStartLocation = 'project-root'
+    if (localStorage.getItem('boss.viewMode') === 'single') viewMode = 'single'
   } catch {
-    /* Retain the focused-checkout default. */
+    /* Retain the focused-checkout and tiling defaults. */
   }
-  appStore.setState({ layouts: loadLayouts(), terminalStartLocation })
+  appStore.setState({ layouts: loadLayouts(), terminalStartLocation, viewMode })
+}
+
+/** Switch between the tiling layout and one thread at a time.
+ *
+ *  The views themselves are untouched. Single mode renders one of them
+ *  differently rather than replacing them, so a layout someone arranged is
+ *  still there when they switch back. */
+export function setViewMode(value: ViewMode): void {
+  appStore.setState({ viewMode: value })
+  try {
+    localStorage.setItem('boss.viewMode', value)
+  } catch {
+    /* The in-memory setting still applies for this run. */
+  }
 }
 
 export function setTerminalStartLocation(value: TerminalStartLocation): void {
@@ -507,13 +523,20 @@ export function openSessionInWorkspace(sessionId: string): boolean {
   const workspace = currentWorkspace()
   if (!workspace) return false
   const view = activeWorkspaceView(workspace)
+  const single = appStore.getState().viewMode === 'single'
+  const visibleGroupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
   const existing = findSessionTab(view.root, sessionId)
   if (existing) {
+    // In single mode only one pane is on screen, so a tab found in another one
+    // would be activated where nobody can see it. Bring it across instead.
+    if (single && existing.group.id !== visibleGroupId) {
+      sendWorkspaceTabToView(existing.tab.id, view.id, visibleGroupId)
+      return true
+    }
     activateWorkspaceTab(existing.group.id, existing.tab.id)
     return true
   }
-  const groupId = findGroup(view.root, view.focusedGroupId)?.id ?? walkGroups(view.root)[0].id
-  addWorkspaceTab(groupId, 'thread', sessionId)
+  addWorkspaceTab(visibleGroupId, 'thread', sessionId)
   return true
 }
 

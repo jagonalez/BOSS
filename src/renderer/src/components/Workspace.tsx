@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { DropPosition, Workspace as WorkspaceState, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
+import type { DropPosition, Workspace as WorkspaceState, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
 import { useStore, appStore } from '../state/AppState'
 import { ChatView } from './ChatView'
 import { BrowseTab } from './BrowseTab'
@@ -540,7 +540,13 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
   return 'center'
 }
 
-function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string }): React.JSX.Element {
+/** A pane and its tab strip.
+ *
+ *  `single` is set when the workspace is showing one thread at a time. The pane
+ *  is then the whole surface, so the things that only mean something beside
+ *  another pane — splitting, and dropping to one side — are suppressed. Tabs
+ *  themselves work exactly as they do in tiling. */
+function GroupView({ group, viewId, single = false }: { group: WorkspaceGroup; viewId: string; single?: boolean }): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const highlightedTabId = useStore(appStore, (state) => state.highlightedTabId)
   // The view this pane is in, not whichever is on screen: every view stays
@@ -673,7 +679,9 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
     event.preventDefault()
     event.stopPropagation()
     if (!view) return
-    const position = dropTarget ?? 'center'
+    // Every drop is a plain add in single mode: there is nowhere to drop
+    // beside, so a side position would silently split the one pane.
+    const position = single ? 'center' : (dropTarget ?? 'center')
     // Two payloads land here. A tab drag moves something that already exists,
     // possibly out of another view. A session drag carries a thread that may
     // not be open at all, which is how an empty pane gets filled.
@@ -698,7 +706,7 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
         const types = event.dataTransfer.types
         if (!types.includes(TAB_DRAG_TYPE) && !types.includes(SESSION_DRAG_TYPE)) return
         event.preventDefault()
-        setDropTarget(dropPosition(event, event.currentTarget))
+        setDropTarget(single ? 'center' : dropPosition(event, event.currentTarget))
       }}
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null)
@@ -835,8 +843,12 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
           </button>
         ) : null}
         <div className="workspace-group-actions">
-          <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>
-          <button onClick={() => splitWorkspaceGroup(group.id, 'vertical')} title="Split top and bottom">↕</button>
+          {single ? null : (
+            <>
+              <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>
+              <button onClick={() => splitWorkspaceGroup(group.id, 'vertical')} title="Split top and bottom">↕</button>
+            </>
+          )}
           <button
             onClick={() => requestCloseWorkspaceGroup(group)}
             title={group.tabs.some(isLiveSurface) ? 'Close pane and its live resources' : 'Hide pane'}
@@ -992,7 +1004,7 @@ function GroupView({ group, viewId }: { group: WorkspaceGroup; viewId: string })
   )
 }
 
-function SplitView({ node, viewId }: { node: WorkspaceSplit; viewId: string }): React.JSX.Element {
+function SplitView({ node, viewId, soloGroupId }: { node: WorkspaceSplit; viewId: string; soloGroupId?: string }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const onMouseDown = (event: React.MouseEvent): void => {
     event.preventDefault()
@@ -1021,17 +1033,40 @@ function SplitView({ node, viewId }: { node: WorkspaceSplit; viewId: string }): 
           slot and rebuilt the subtree, which recreates the slot a tab portals
           into: a files tab in an untouched pane lost its open files, its
           expanded folders and its scroll. */}
-      <div key={node.first.id} className="workspace-split-child" style={{ flexBasis: `${node.ratio * 100}%` }}><WorkspaceNodeView node={node.first} viewId={viewId} /></div>
-      <div key={`splitter-${node.id}`} className="workspace-splitter" onMouseDown={onMouseDown} />
-      <div key={node.second.id} className="workspace-split-child" style={{ flexBasis: `${(1 - node.ratio) * 100}%` }}><WorkspaceNodeView node={node.second} viewId={viewId} /></div>
+      {/* In single mode the shown pane takes the whole split and the ratio is
+          ignored, so the one visible pane fills the window rather than keeping
+          the width it happened to have in the layout. */}
+      <div
+        key={node.first.id}
+        className="workspace-split-child"
+        style={{ flexBasis: soloGroupId ? '100%' : `${node.ratio * 100}%` }}
+      >
+        <WorkspaceNodeView node={node.first} viewId={viewId} soloGroupId={soloGroupId} />
+      </div>
+      <div key={`splitter-${node.id}`} className="workspace-splitter" onMouseDown={onMouseDown} hidden={Boolean(soloGroupId)} />
+      <div
+        key={node.second.id}
+        className="workspace-split-child"
+        style={{ flexBasis: soloGroupId ? '100%' : `${(1 - node.ratio) * 100}%` }}
+      >
+        <WorkspaceNodeView node={node.second} viewId={viewId} soloGroupId={soloGroupId} />
+      </div>
     </div>
   )
 }
 
-function WorkspaceNodeView({ node, viewId }: { node: WorkspaceNode; viewId: string }): React.JSX.Element {
-  return node.type === 'group'
-    ? <GroupView key={node.id} group={node} viewId={viewId} />
-    : <SplitView key={node.id} node={node} viewId={viewId} />
+function WorkspaceNodeView({ node, viewId, soloGroupId }: { node: WorkspaceNode; viewId: string; soloGroupId?: string }): React.JSX.Element {
+  if (node.type === 'group') {
+    // Hidden, not skipped: an unrendered pane unmounts its tabs and takes their
+    // terminals with them.
+    const hidden = Boolean(soloGroupId) && node.id !== soloGroupId
+    return (
+      <div className="workspace-node" hidden={hidden}>
+        <GroupView key={node.id} group={node} viewId={viewId} single={Boolean(soloGroupId)} />
+      </div>
+    )
+  }
+  return <SplitView key={node.id} node={node} viewId={viewId} soloGroupId={soloGroupId} />
 }
 
 function WorkspaceBar(): React.JSX.Element {
@@ -1213,8 +1248,16 @@ function focusNeighbor(direction: 'left' | 'right' | 'up' | 'down'): void {
   if (candidates[0]) focusWorkspaceGroup(candidates[0].id)
 }
 
+/** The one pane single mode shows: the focused one, or the first if focus
+ *  points at a pane that has since gone. */
+function soloGroupId(view: WorkspaceView): string {
+  const groups = walkGroups(view.root)
+  return groups.find((item) => item.id === view.focusedGroupId)?.id ?? groups[0].id
+}
+
 export function Workspace(): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const single = useStore(appStore, (state) => state.viewMode) === 'single'
 
   // Detach native views for the whole of a drag. A browser is composited over
   // the page, so dragging across one never reaches the pane underneath: no
@@ -1319,10 +1362,14 @@ export function Workspace(): React.JSX.Element {
         {workspace.views.map((view) => (
           <div
             key={view.id}
-            className="workspace-canvas"
+            className={`workspace-canvas ${single ? 'single' : ''}`}
             hidden={view.id !== workspace.activeViewId}
           >
-            <WorkspaceNodeView node={view.root} viewId={view.id} />
+            {/* Single mode hides the other panes rather than unmounting them,
+                for the same reason inactive views stay mounted: a terminal that
+                leaves the tree dies with it. Switching back to tiling has to
+                find the layout exactly as it was left. */}
+            <WorkspaceNodeView node={view.root} viewId={view.id} soloGroupId={single ? soloGroupId(view) : undefined} />
           </div>
         ))}
         <TabContents workspace={workspace} />
