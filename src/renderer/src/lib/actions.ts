@@ -44,6 +44,7 @@ import {
   updateActiveWorkspaceView,
   updateGroup,
   group,
+  panelGroupId,
   walkGroups,
   walkTabs,
   singleThreadView,
@@ -441,29 +442,36 @@ function copyThreadPreferences(sourceId: string, targetId: string): void {
  *  thread stays where it is and the rest moves to a new pane beside it, so a
  *  terminal opened earlier ends up where terminals now live rather than
  *  vanishing from a strip that is no longer drawn. */
-function addPanelToSingleViews(): void {
-  // Bounded by the number of views: each pass converts one single-group view
-  // into two groups, so it cannot need more turns than there are views. The
-  // cap is a backstop against an update that silently does not apply.
-  const limit = (currentWorkspace()?.views.length ?? 0) + 1
-  for (let pass = 0; pass < limit; pass += 1) {
-    const workspace = currentWorkspace()
-    if (!workspace) return
-    const flat = workspace.views.find((view) => walkGroups(view.root).length === 1)
-    if (!flat) return
-    const only = walkGroups(flat.root)[0]
-    const panel = group([])
-    updateWorkspace((item) => ({
-      ...item,
-      views: item.views.map((view) => view.id === flat.id
-        ? { ...view, root: split('horizontal', only, panel, 0.62), focusedGroupId: only.id }
-        : view)
-    }))
-    // Anything that is not the thread belongs in the panel now.
-    for (const item of only.tabs.filter((entry) => entry.kind !== 'thread')) {
-      sendWorkspaceTabToView(item.id, flat.id, panel.id)
-    }
+/** Make sure a single-mode view has a pane beside its conversation.
+ *
+ *  A view can reach single mode three ways — created there, carried over from
+ *  tiling, or saved before the panel existed — and only one of them built the
+ *  split. Without this, a thread's terminals land in the conversation pane and
+ *  cover the thread.
+ *
+ *  Anything already in the conversation pane that is not the thread moves
+ *  across, so a terminal opened earlier ends up where terminals now live. */
+export function ensurePanel(viewId: string): void {
+  const workspace = currentWorkspace()
+  const view = workspace?.views.find((item) => item.id === viewId)
+  if (!view) return
+  const groups = walkGroups(view.root)
+  if (groups.length > 1) return
+  const only = groups[0]
+  const panel = group([])
+  updateWorkspace((item) => ({
+    ...item,
+    views: item.views.map((entry) => entry.id === viewId
+      ? { ...entry, root: split('horizontal', only, panel, 0.62), focusedGroupId: only.id }
+      : entry)
+  }))
+  for (const item of only.tabs.filter((entry) => entry.kind !== 'thread')) {
+    sendWorkspaceTabToView(item.id, viewId, panel.id)
   }
+}
+
+function addPanelToSingleViews(): void {
+  for (const view of currentWorkspace()?.views ?? []) ensurePanel(view.id)
 }
 
 function splitThreadsIntoOwnViews(): void {
@@ -483,9 +491,12 @@ function splitThreadsIntoOwnViews(): void {
     if (!extra.length) return
     const { tab: moving } = extra[0]
     const title = sessions.find((item) => item.id === moving.sessionId)?.title
-    const created = workspaceView(title || 'Thread', group([]))
+    // Built empty on both sides, then the thread moves in: singleThreadView
+    // would mint a second thread tab for a thread that already exists.
+    const conversation = group([])
+    const created = { ...workspaceView(title || 'Thread', split('horizontal', conversation, group([]), 0.62)), focusedGroupId: conversation.id }
     updateWorkspace((item) => ({ ...item, views: [...item.views, created] }))
-    sendWorkspaceTabToView(moving.id, created.id, walkGroups(created.root)[0].id)
+    sendWorkspaceTabToView(moving.id, created.id, conversation.id)
   }
 }
 
@@ -622,6 +633,9 @@ function openSessionInOwnView(sessionId: string, workspace: WorkspaceState): boo
     const found = findSessionTab(owning.root, sessionId)
     if (workspace.activeViewId !== owning.id) activateWorkspaceView(owning.id)
     if (found) activateWorkspaceTab(found.group.id, found.tab.id)
+    // A view carried over from tiling, or made before the panel existed, has
+    // only the one pane. Give it somewhere to put a terminal.
+    ensurePanel(owning.id)
     return true
   }
   const session = appStore.getState().sessions.find((item) => item.id === sessionId)
@@ -704,11 +718,18 @@ export function addResourceToSession(sessionId: string, kind: WorkspaceTabKind):
   const workspace = currentWorkspace()
   if (!workspace) return
 
+  const single = appStore.getState().viewMode === 'single'
   let placement: { viewId: string; groupId: string } | undefined
   for (const view of workspace.views) {
     const found = findSessionTab(view.root, sessionId)
     if (found) {
-      placement = { viewId: view.id, groupId: found.group.id }
+      // In single mode a resource belongs beside the conversation, not in it:
+      // adding to the thread's own pane covers the thread with the terminal.
+      if (single) ensurePanel(view.id)
+      const target = single
+        ? (panelGroupId(currentWorkspace()?.views.find((item) => item.id === view.id) ?? view) ?? found.group.id)
+        : found.group.id
+      placement = { viewId: view.id, groupId: target }
       break
     }
   }
