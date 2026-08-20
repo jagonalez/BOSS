@@ -47,6 +47,12 @@
   --line-strong: var(--border);
   --focus-ring: var(--accent);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+  /* macOS inset traffic lights. The OS draws them over the renderer at
+     trafficLightPosition {x:16,y:16} (see src/main/index.ts), so layout must
+     reserve room for them. Width covers x:16 plus the three 12px lights and
+     their 8px gaps, rounded up to a comfortable edge. */
+  --traffic-light-inset: 46px;
+  --traffic-light-width: 78px;
   --workspace-gap: 5px;
   --workspace-tab-height: 34px;
   --workspace-tab-min-width: 124px;
@@ -285,8 +291,15 @@ textarea {
   user-select: none;
 }
 
+/* The collapsed rail is narrower than the traffic lights, so on macOS it must
+   widen to contain them. Without this the lights overhang the 38px rail and
+   land on top of the thread title in .workspace-bar, which has no clearance of
+   its own. Widening the rail keeps the fix in the element that owns the
+   traffic-light region, so no sibling needs to know the sidebar is collapsed. */
 [data-platform='darwin'] .sidebar-collapsed {
-  padding-top: 46px;
+  width: var(--traffic-light-width);
+  flex-basis: var(--traffic-light-width);
+  padding-top: var(--traffic-light-inset);
 }
 
 .sidebar-collapsed button {
