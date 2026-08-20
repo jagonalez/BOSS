@@ -150,17 +150,62 @@ function RemoteAccessSection(): React.JSX.Element {
             <SettingsRow
               key={device.id}
               title={device.label}
-              description={`Paired ${new Date(device.pairedAt).toLocaleString()}${device.online ? ' · connected' : ''}`}
+              description={[
+                `Paired ${new Date(device.pairedAt).toLocaleString()}`,
+                device.online ? 'connected' : lastSeen(device.lastSeenAt),
+                `key ${shortKey(device.id)}`
+              ].filter(Boolean).join(' · ')}
             >
               <Button size="small" variant="ghost" disabled={busy} onClick={() => void run(() => OpenCode.remoteSet({ forgetDeviceId: device.id }))}>
                 Revoke
               </Button>
             </SettingsRow>
           ))}
+
+          {/* Keys in the room that never paired. Usually empty. Such a device
+              can read nothing — every frame is sealed with a secret the relay
+              never sees — but a room you cannot inspect is worse than one you
+              can. Listed here rather than raised as a notification, because
+              the ordinary cause is a stale reconnect. */}
+          {status.unknown.length ? (
+            <>
+              <SettingsRow
+                title="Unrecognized devices"
+                description="These are in your room but have never paired. They cannot read anything."
+              />
+              {status.unknown.map((device) => (
+                <SettingsRow
+                  key={device.id}
+                  title={`Unknown device · key ${shortKey(device.id)}`}
+                  description={`First seen ${new Date(device.firstSeenAt).toLocaleString()}`}
+                >
+                  <Button size="small" variant="ghost" disabled={busy} onClick={() => void run(() => OpenCode.remoteSet({ forgetDeviceId: device.id }))}>
+                    Block
+                  </Button>
+                </SettingsRow>
+              ))}
+            </>
+          ) : null}
         </>
       ) : null}
     </section>
   )
+}
+
+
+/** Enough of a key to tell two devices apart, without a wall of base64url. */
+function shortKey(publicKey: string): string {
+  return `${publicKey.slice(0, 4)}…${publicKey.slice(-4)}`
+}
+
+function lastSeen(at?: number): string {
+  if (!at) return ''
+  const minutes = Math.round((Date.now() - at) / 60_000)
+  if (minutes < 1) return 'last seen just now'
+  if (minutes < 60) return `last seen ${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `last seen ${hours}h ago`
+  return `last seen ${new Date(at).toLocaleDateString()}`
 }
 
 export function MobileSettings(): React.JSX.Element {
