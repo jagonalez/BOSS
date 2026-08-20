@@ -76,34 +76,6 @@ export function workspaceView(name = 'Workspace', root: WorkspaceNode = group())
   return { id: workspaceId('workspace'), name, root, focusedGroupId: first.id }
 }
 
-/** A view holding one thread's review: its diff beside its conversation.
- *
- *  Seeded rather than empty. A review view that opens with nothing in it is not
- *  reviewing anything, and the two panes are what every review starts from. The
- *  user can split, drag and close from there like any other view, and open
- *  terminals or browsers into it — those are ordinary tabs in ordinary panes,
- *  which is the whole reason this is a view and not a new kind of surface.
- */
-export function reviewWorkspaceView(
-  sessionId: string,
-  name: string,
-  checkout?: WorkspaceCheckoutBinding
-): WorkspaceView {
-  const diff = group([tab('review', sessionId, checkout)])
-  const conversation = group([tab('thread', sessionId)])
-  const view = workspaceView(name, split('horizontal', diff, conversation, 0.58))
-  return { ...view, reviewSessionId: sessionId, focusedGroupId: conversation.id }
-}
-
-/** The review view for a thread, if one has been opened before.
- *
- *  Keyed by session so returning to a thread returns to the panes and
- *  terminals left there, rather than building a second view over the same work.
- */
-export function findReviewView(workspace: Workspace, sessionId: string): WorkspaceView | undefined {
-  return workspace.views.find((view) => view.reviewSessionId === sessionId)
-}
-
 export function nextWorkspaceViewName(views: Array<Pick<WorkspaceView, 'name'>>): string {
   const highest = views.reduce((current, view) => {
     const match = /^View (\d+)$/.exec(view.name)

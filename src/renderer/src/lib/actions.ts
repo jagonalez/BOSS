@@ -17,7 +17,7 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
 import type { AsrStatus, TtsStatus } from '@shared/speech'
-import type { AppPage, DropPosition, MainMode, SidebarMode, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
+import type { AppPage, DropPosition, SplitDirection, TerminalStartLocation, WorkspaceCheckoutBinding, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
 import {
   activeWorkspaceView,
   activateTab,
@@ -43,9 +43,7 @@ import {
   updateActiveWorkspaceView,
   updateGroup,
   walkGroups,
-  workspaceView,
-  reviewWorkspaceView,
-  findReviewView
+  workspaceView
 } from './workspaces'
 
 export function initializeWorkspaceState(): void {
@@ -98,80 +96,11 @@ export function createWorkspaceView(): void {
   }))
 }
 
-/** Show one thread full-width, as a review.
- *
- *  Reuses the thread's existing review view when there is one, so the panes,
- *  terminals and scroll left there come back rather than being rebuilt beside
- *  the old ones. The tiling view being left is remembered, so switching back
- *  returns to the layout the user was actually watching.
- */
-export function openThreadReview(sessionId: string): void {
-  const workspace = currentWorkspace()
-  if (!workspace) return
-  const session = appStore.getState().sessions.find((item) => item.id === sessionId)
-  const existing = findReviewView(workspace, sessionId)
-  const leaving = activeWorkspaceView(workspace)
-  const tilingViewId = leaving.reviewSessionId ? workspace.tilingViewId : leaving.id
-  if (existing) {
-    updateWorkspace((item) => ({ ...item, activeViewId: existing.id, tilingViewId }))
-  } else {
-    const created = reviewWorkspaceView(
-      sessionId,
-      session?.title || 'Review',
-      session ? threadCheckout(session) : undefined
-    )
-    updateWorkspace((item) => ({
-      ...item,
-      views: [...item.views, created],
-      activeViewId: created.id,
-      tilingViewId
-    }))
-  }
-  appStore.setState({ mainMode: 'review', activeSessionId: sessionId, activePage: 'project' })
-  syncFocusedThread()
-}
-
-/** Leave review and return to the tiling view that was open before it. */
-export function closeThreadReview(): void {
-  const workspace = currentWorkspace()
-  appStore.setState({ mainMode: 'tiling' })
-  if (!workspace) return
-  const target = workspace.views.find((view) => view.id === workspace.tilingViewId && !view.reviewSessionId)
-    ?? workspace.views.find((view) => !view.reviewSessionId)
-  if (!target || workspace.activeViewId === target.id) return
-  updateWorkspace((item) => ({ ...item, activeViewId: target.id }))
-  syncFocusedThread()
-}
-
-export function setSidebarMode(mode: SidebarMode): void {
-  appStore.setState({ sidebarMode: mode })
-}
-
-/** Switch the main area. Entering review needs a thread to review: the one
- *  already focused, or the last one reviewed. */
-export function setMainMode(mode: MainMode): void {
-  if (mode === 'tiling') {
-    closeThreadReview()
-    return
-  }
-  const state = appStore.getState()
-  const workspace = state.projectWorkspace
-  const target = state.activeSessionId
-    ?? (workspace ? activeWorkspaceView(workspace).reviewSessionId : undefined)
-  if (!target) return
-  openThreadReview(target)
-}
-
 export function activateWorkspaceView(viewId: string): void {
   const workspace = currentWorkspace()
   if (!workspace?.views.some((view) => view.id === viewId) || workspace.activeViewId === viewId) return
   const next = updateWorkspace((item) => ({ ...item, activeViewId: viewId }))
-  if (!next) return
-  // Follow the view that was picked. Activating a tiling view while review mode
-  // is on would otherwise leave the review chrome above someone else's panes.
-  const target = next.views.find((view) => view.id === viewId)
-  appStore.setState({ mainMode: target?.reviewSessionId ? 'review' : 'tiling' })
-  syncFocusedThread()
+  if (next) syncFocusedThread()
 }
 
 export function renameWorkspaceView(viewId: string, name: string): void {
@@ -1810,25 +1739,17 @@ export async function deleteSession(id: string): Promise<void> {
     const workspace = currentWorkspace()
     if (workspace) {
       updateWorkspace((item) => {
-        // A review view belongs to the thread being deleted, so it goes with
-        // it. Stripping its tabs would otherwise leave an empty view named
-        // after work that no longer exists.
-        const views = item.views
-          .filter((view) => view.reviewSessionId !== id)
-          .map((view) => {
-            let root = view.root
-            let found = findSessionTab(root, id)
-            while (found) {
-              root = closeTab(root, found.group.id, found.tab.id)
-              found = findSessionTab(root, id)
-            }
-            const focusedGroupId = findGroup(root, view.focusedGroupId)?.id ?? walkGroups(root)[0].id
-            return { ...view, root, focusedGroupId }
-          })
-        const activeViewId = views.some((view) => view.id === item.activeViewId)
-          ? item.activeViewId
-          : (views.find((view) => !view.reviewSessionId) ?? views[0])?.id ?? item.activeViewId
-        return { ...item, views, activeViewId }
+        const views = item.views.map((view) => {
+          let root = view.root
+          let found = findSessionTab(root, id)
+          while (found) {
+            root = closeTab(root, found.group.id, found.tab.id)
+            found = findSessionTab(root, id)
+          }
+          const focusedGroupId = findGroup(root, view.focusedGroupId)?.id ?? walkGroups(root)[0].id
+          return { ...view, root, focusedGroupId }
+        })
+        return { ...item, views }
       })
     }
     appStore.setState((s) => {
@@ -1850,9 +1771,6 @@ export async function deleteSession(id: string): Promise<void> {
       return {
         ...threadCaches,
         ...(s.activeSessionId === id ? { activeSessionId: null, diffs: null } : {}),
-        // Its review view has just been removed, so review mode has nothing
-        // left to show.
-        ...(s.mainMode === 'review' && s.activeSessionId === id ? { mainMode: 'tiling' as const } : {}),
         archived: s.archived.filter((x) => x !== id),
         modelsBySession,
         modelProvidersBySession,
