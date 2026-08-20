@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { resolveBackendBin } from '../backend-bin'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -12,9 +13,31 @@ import type { ThreadBusConnection } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
+import { unpackedAsarPath } from './claude-executable'
 import { textFromParts } from './manager'
 import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
+
+const requireFromMain = createRequire(import.meta.url)
+
+/**
+ * electron-builder unpacks the SDK's native package, but Node's package
+ * resolver still returns the corresponding virtual `app.asar/...` path. A
+ * child process must receive the literal `app.asar.unpacked/...` filesystem
+ * path on packaged builds or macOS reports `spawn ENOTDIR`.
+ */
+function packagedSdkClaudeBinary(): string | undefined {
+  if (!app.isPackaged) return undefined
+  try {
+    const sdkEntry = requireFromMain.resolve('@anthropic-ai/claude-agent-sdk')
+    const sdkRequire = createRequire(sdkEntry)
+    const platformPackage = `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`
+    const resolved = sdkRequire.resolve(`${platformPackage}/claude`)
+    return unpackedAsarPath(resolved)
+  } catch {
+    return undefined
+  }
+}
 
 /** A turn in flight, and the questions it is still waiting on.
  *
@@ -282,6 +305,7 @@ export class ClaudeBackend implements Backend {
 
     const hasHistory = record.messages.some((message) => message.info.role === 'assistant')
     const mode = claudePermissionMode(options?.mode)
+    const packagedBinary = packagedSdkClaudeBinary()
     const cwd = this.sessionDirectories.resolve(sessionId, record.projectPath || this.projectPath)
       || globalThis.process.cwd()
 
@@ -373,7 +397,11 @@ export class ClaudeBackend implements Backend {
         // The user's own binary when one is configured, so a BOSS_CLAUDE_BIN or
         // a settings path still wins. Otherwise the SDK runs the version it
         // ships, which is the one BOSS is built against.
-        ...(this.command !== 'claude' ? { pathToClaudeCodeExecutable: this.command } : {}),
+        ...(this.command !== 'claude'
+          ? { pathToClaudeCodeExecutable: this.command }
+          : packagedBinary
+            ? { pathToClaudeCodeExecutable: packagedBinary }
+            : {}),
         permissionMode: mode,
         canUseTool: canUseTool as never,
         includePartialMessages: true,
