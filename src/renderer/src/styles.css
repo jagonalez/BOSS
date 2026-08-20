@@ -1486,6 +1486,105 @@ textarea {
   flex-shrink: 1;
 }
 
+/* One thread at a time. The other panes stay mounted so their terminals live,
+   but a wrapper whose pane is hidden must take no space — flex-basis alone
+   would leave it holding a share of the split. */
+.workspace-canvas.single .workspace-node[hidden] {
+  display: none;
+}
+
+.workspace-canvas.single .workspace-split-child:not(:has(.workspace-node:not([hidden]))) {
+  display: none;
+}
+
+.workspace-canvas.single .workspace-split-child {
+  flex-basis: 100% !important;
+  flex-grow: 1;
+}
+
+/* Layout picker. The silhouette carries the meaning, so the drawing is sized
+   to be read at a glance rather than studied. */
+.viewmode-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.viewmode-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line-default);
+  border-radius: var(--radius);
+  background: var(--surface-pane);
+  cursor: pointer;
+  text-align: left;
+}
+
+.viewmode-option:hover {
+  background: var(--surface-hover);
+}
+
+.viewmode-option.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.viewmode-preview svg {
+  display: block;
+  width: 64px;
+  height: 44px;
+}
+
+.viewmode-frame {
+  fill: var(--surface-inset);
+  stroke: var(--line-default);
+}
+
+.viewmode-pane {
+  fill: var(--surface-raised);
+}
+
+.viewmode-option.active .viewmode-pane {
+  fill: var(--surface-selected);
+}
+
+.viewmode-tab {
+  fill: var(--text-faint);
+  opacity: 0.5;
+}
+
+.viewmode-tab.active {
+  fill: var(--accent);
+  opacity: 1;
+}
+
+.viewmode-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viewmode-copy strong {
+  font-size: var(--type-body);
+}
+
+.viewmode-copy small {
+  color: var(--text-muted);
+  font-size: var(--type-meta);
+  line-height: var(--leading-compact);
+}
+
+.workspace-node {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+
 .workspace-split.horizontal > .workspace-splitter {
   width: var(--workspace-gap);
   flex: 0 0 var(--workspace-gap);

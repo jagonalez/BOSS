@@ -2275,7 +2275,8 @@ export class BackendManager {
         usage: usage.totals,
         policy: binding.policy,
         lineage: binding.lineage,
-        result: binding.result
+        result: binding.result,
+        policyState: binding.policyState
       }
     }).sort((a, b) => b.updatedAt - a.updatedAt)
     const totals = threads.reduce<ThreadUsageTotals>((value, thread) => ({

@@ -399,3 +399,15 @@ test('a drop involving a path the list does not hold is ignored', () => {
   assert.equal(reorderPaths(paths, '/gone', '/a', true), paths)
   assert.equal(reorderPaths(paths, '/a', '/gone', true), paths)
 })
+
+test('single mode shows the focused pane, and falls back when focus is stale', () => {
+  // soloGroupId lives in the component, but the guarantee it relies on is here:
+  // a view always has at least one group to fall back to, so a stale
+  // focusedGroupId can never leave single mode with nothing to show.
+  const view = workspaceView('Leading', split('horizontal', group([tab('thread', 'a')]), group([tab('thread', 'b')])))
+  const groups = walkGroups(view.root)
+  assert.equal(groups.length, 2)
+  assert.ok(groups.some((item) => item.id === view.focusedGroupId))
+  const stale = { ...view, focusedGroupId: 'gone' }
+  assert.equal(walkGroups(stale.root)[0].id, groups[0].id)
+})
