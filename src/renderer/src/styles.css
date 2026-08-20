@@ -1224,6 +1224,45 @@ textarea {
   -webkit-app-region: drag;
 }
 
+/* Single mode: the bar names the thread and offers the panel, since the view
+   strip is gone. The bar itself stays because it is the window drag region and
+   its height clears the traffic lights on macOS. */
+.workspace-single-title {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  flex-direction: column;
+  padding-left: 4px;
+  line-height: var(--leading-compact);
+  -webkit-app-region: no-drag;
+}
+
+.workspace-single-title strong {
+  overflow: hidden;
+  font-size: var(--type-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-single-title small {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-single-panel-control {
+  position: relative;
+  margin-left: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-single-panel-control .workspace-bar-button.active {
+  background: var(--surface-selected);
+  color: var(--text);
+}
+
 .workspace-bar-spacer {
   flex: 1;
 }
@@ -1697,6 +1736,12 @@ textarea {
     animation: none;
     border-color: var(--accent);
   }
+}
+
+/* An explicit display beats the hidden attribute, which is only display: none
+   from the UA stylesheet. */
+.workspace-group-tabs[hidden] {
+  display: none;
 }
 
 .workspace-group-tabs {

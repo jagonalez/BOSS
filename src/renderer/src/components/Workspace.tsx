@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { DropPosition, Workspace as WorkspaceState, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind, WorkspaceView } from '@shared/workspace'
+import type { DropPosition, Workspace as WorkspaceState, WorkspaceGroup, WorkspaceNode, WorkspaceSplit, WorkspaceTab, WorkspaceTabKind } from '@shared/workspace'
 import { useStore, appStore } from '../state/AppState'
 import { ChatView } from './ChatView'
 import { BrowseTab } from './BrowseTab'
@@ -31,7 +31,7 @@ import {
   splitWorkspaceGroup,
   undoWorkspaceChange
 } from '../lib/actions'
-import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, findGroup, findSessionTab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
+import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, conversationGroupId, findGroup, findSessionTab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { tabContentNode } from '../lib/tab-content-nodes'
 import { BACKEND_MARKS, BackIcon, ChatIcon, ChevronIcon, FilesIcon, GlobeIcon, PanelIcon, PlusIcon, RenameIcon, ReviewIcon, TerminalIcon, TrashIcon } from './icons'
 import { BackendBadge } from './BackendControls'
@@ -546,7 +546,13 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
  *  is then the whole surface, so the things that only mean something beside
  *  another pane — splitting, and dropping to one side — are suppressed. Tabs
  *  themselves work exactly as they do in tiling. */
-function GroupView({ group, viewId, single = false }: { group: WorkspaceGroup; viewId: string; single?: boolean }): React.JSX.Element {
+function GroupView({ group, viewId, conversation = false }: {
+  group: WorkspaceGroup
+  viewId: string
+  /** The pane that holds the thread itself in single mode. Its tab is the
+   *  thread, so it stays one pane and its strip is not worth drawing. */
+  conversation?: boolean
+}): React.JSX.Element {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const highlightedTabId = useStore(appStore, (state) => state.highlightedTabId)
   // The view this pane is in, not whichever is on screen: every view stays
@@ -679,9 +685,10 @@ function GroupView({ group, viewId, single = false }: { group: WorkspaceGroup; v
     event.preventDefault()
     event.stopPropagation()
     if (!view) return
-    // Every drop is a plain add in single mode: there is nowhere to drop
-    // beside, so a side position would silently split the one pane.
-    const position = single ? 'center' : (dropTarget ?? 'center')
+    // The conversation pane is the thread and stays one pane, so a side drop
+    // there would split what single mode exists to keep whole. The panel splits
+    // like any other.
+    const position = conversation ? 'center' : (dropTarget ?? 'center')
     // Two payloads land here. A tab drag moves something that already exists,
     // possibly out of another view. A session drag carries a thread that may
     // not be open at all, which is how an empty pane gets filled.
@@ -706,14 +713,16 @@ function GroupView({ group, viewId, single = false }: { group: WorkspaceGroup; v
         const types = event.dataTransfer.types
         if (!types.includes(TAB_DRAG_TYPE) && !types.includes(SESSION_DRAG_TYPE)) return
         event.preventDefault()
-        setDropTarget(single ? 'center' : dropPosition(event, event.currentTarget))
+        setDropTarget(conversation ? 'center' : dropPosition(event, event.currentTarget))
       }}
       onDragLeave={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null)
       }}
       onDrop={onDrop}
     >
-      <header className="workspace-group-tabs">
+      {/* The conversation pane has one tab and it is the thread, so its strip
+          says nothing the bar does not already say. */}
+      <header className="workspace-group-tabs" hidden={conversation}>
         <div className="workspace-tabs" role="tablist" ref={tabsRef}>
           {group.tabs.map((item) => (
             <button
@@ -843,7 +852,7 @@ function GroupView({ group, viewId, single = false }: { group: WorkspaceGroup; v
           </button>
         ) : null}
         <div className="workspace-group-actions">
-          {single ? null : (
+          {conversation ? null : (
             <>
               <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>
               <button onClick={() => splitWorkspaceGroup(group.id, 'vertical')} title="Split top and bottom">↕</button>
@@ -1004,7 +1013,15 @@ function GroupView({ group, viewId, single = false }: { group: WorkspaceGroup; v
   )
 }
 
-function SplitView({ node, viewId, soloGroupId }: { node: WorkspaceSplit; viewId: string; soloGroupId?: string }): React.JSX.Element {
+function SplitView({ node, viewId, single = false, conversationId }: {
+  node: WorkspaceSplit
+  viewId: string
+  single?: boolean
+  conversationId?: string
+}): React.JSX.Element {
+  // An empty panel takes no room, so a thread with nothing attached reads as
+  // one conversation filling the window rather than a blank half.
+  const emptySecond = single && node.second.type === 'group' && node.second.tabs.length === 0
   const ref = useRef<HTMLDivElement>(null)
   const onMouseDown = (event: React.MouseEvent): void => {
     event.preventDefault()
@@ -1039,34 +1056,90 @@ function SplitView({ node, viewId, soloGroupId }: { node: WorkspaceSplit; viewId
       <div
         key={node.first.id}
         className="workspace-split-child"
-        style={{ flexBasis: soloGroupId ? '100%' : `${node.ratio * 100}%` }}
+        style={{ flexBasis: emptySecond ? '100%' : `${node.ratio * 100}%` }}
       >
-        <WorkspaceNodeView node={node.first} viewId={viewId} soloGroupId={soloGroupId} />
+        <WorkspaceNodeView node={node.first} viewId={viewId} single={single} conversationId={conversationId} />
       </div>
-      <div key={`splitter-${node.id}`} className="workspace-splitter" onMouseDown={onMouseDown} hidden={Boolean(soloGroupId)} />
+      <div key={`splitter-${node.id}`} className="workspace-splitter" onMouseDown={onMouseDown} hidden={emptySecond} />
       <div
         key={node.second.id}
         className="workspace-split-child"
-        style={{ flexBasis: soloGroupId ? '100%' : `${(1 - node.ratio) * 100}%` }}
+        style={{ flexBasis: emptySecond ? '0%' : `${(1 - node.ratio) * 100}%` }}
+        hidden={emptySecond}
       >
-        <WorkspaceNodeView node={node.second} viewId={viewId} soloGroupId={soloGroupId} />
+        <WorkspaceNodeView node={node.second} viewId={viewId} single={single} conversationId={conversationId} />
       </div>
     </div>
   )
 }
 
-function WorkspaceNodeView({ node, viewId, soloGroupId }: { node: WorkspaceNode; viewId: string; soloGroupId?: string }): React.JSX.Element {
+function WorkspaceNodeView({ node, viewId, single = false, conversationId }: {
+  node: WorkspaceNode
+  viewId: string
+  single?: boolean
+  conversationId?: string
+}): React.JSX.Element {
   if (node.type === 'group') {
-    // Hidden, not skipped: an unrendered pane unmounts its tabs and takes their
-    // terminals with them.
-    const hidden = Boolean(soloGroupId) && node.id !== soloGroupId
     return (
-      <div className="workspace-node" hidden={hidden}>
-        <GroupView key={node.id} group={node} viewId={viewId} single={Boolean(soloGroupId)} />
+      <div className="workspace-node">
+        <GroupView key={node.id} group={node} viewId={viewId} conversation={single && node.id === conversationId} />
       </div>
     )
   }
-  return <SplitView key={node.id} node={node} viewId={viewId} soloGroupId={soloGroupId} />
+  return <SplitView key={node.id} node={node} viewId={viewId} single={single} conversationId={conversationId} />
+}
+
+/** Bar controls for single mode: what thread is on screen, and a way to put
+ *  something beside it.
+ *
+ *  The panel is an ordinary pane, so adding to it is the same AddMenu every
+ *  other pane uses — this just aims it at the panel group rather than at
+ *  whichever pane happens to be focused. */
+function SinglePanelControls(): React.JSX.Element | null {
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
+  const sessions = useStore(appStore, (state) => state.sessions)
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const away = (event: MouseEvent): void => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [open])
+
+  const view = workspace?.views.find((item) => item.id === workspace.activeViewId)
+  if (!view) return null
+  const groups = walkGroups(view.root)
+  const conversation = groups[0]
+  const panel = groups[1]
+  const sessionId = conversation.tabs.find((item) => item.kind === 'thread')?.sessionId
+  const session = sessions.find((item) => item.id === sessionId)
+  const branch = session?.worktree?.status === 'active' ? session.worktree.branch : undefined
+  const where = branch ?? (session?.projectPath ? session.projectPath.split(/[\\/]/).pop() : undefined)
+
+  return (
+    <>
+      <div className="workspace-single-title">
+        <strong>{session?.title || view.name}</strong>
+        {where ? <small>{where}</small> : null}
+      </div>
+      {panel ? (
+        <div className="workspace-single-panel-control" ref={ref}>
+          <button
+            className={`workspace-bar-button ${open ? 'active' : ''}`}
+            onClick={() => setOpen((value) => !value)}
+            title="Open a terminal, browser, files, or a side chat beside this thread"
+          >
+            <PanelIcon size={13} />
+          </button>
+          {open ? <AddMenu groupId={panel.id} ownerId={sessionId} close={() => setOpen(false)} /> : null}
+        </div>
+      ) : null}
+    </>
+  )
 }
 
 function WorkspaceBar(): React.JSX.Element {
@@ -1206,6 +1279,7 @@ function WorkspaceBar(): React.JSX.Element {
         </button>
       </div>
       {single ? <div className="workspace-single-title">{activeViewName}</div> : null}
+      {single ? <SinglePanelControls /> : null}
       <div className="workspace-bar-spacer" />
       {undo ? (
         <button className="workspace-undo" onClick={undoWorkspaceChange} title="Undo the last close">
@@ -1255,13 +1329,6 @@ function focusNeighbor(direction: 'left' | 'right' | 'up' | 'down'): void {
     return [{ id: item.dataset.workspaceGroup!, score: primary + secondary * 0.4 }]
   }).sort((a, b) => a.score - b.score)
   if (candidates[0]) focusWorkspaceGroup(candidates[0].id)
-}
-
-/** The one pane single mode shows: the focused one, or the first if focus
- *  points at a pane that has since gone. */
-function soloGroupId(view: WorkspaceView): string {
-  const groups = walkGroups(view.root)
-  return groups.find((item) => item.id === view.focusedGroupId)?.id ?? groups[0].id
 }
 
 export function Workspace(): React.JSX.Element {
@@ -1378,7 +1445,12 @@ export function Workspace(): React.JSX.Element {
                 for the same reason inactive views stay mounted: a terminal that
                 leaves the tree dies with it. Switching back to tiling has to
                 find the layout exactly as it was left. */}
-            <WorkspaceNodeView node={view.root} viewId={view.id} soloGroupId={single ? soloGroupId(view) : undefined} />
+            <WorkspaceNodeView
+              node={view.root}
+              viewId={view.id}
+              single={single}
+              conversationId={single ? conversationGroupId(view) : undefined}
+            />
           </div>
         ))}
         <TabContents workspace={workspace} />

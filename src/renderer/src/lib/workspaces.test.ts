@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, findSessionTab, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, findSessionTab, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView, singleThreadView, conversationGroupId } from './workspaces.ts'
 
 test('a resource opened from a thread looks at that thread’s checkout', () => {
   // A review opened from a worktree thread fell back to the main project
@@ -446,4 +446,21 @@ test('splitting threads out leaves one thread per view', () => {
   const moved = workspaceView('b', group([tab('thread', 'b')]))
   const remaining = walkTabs(moved.root).filter((item) => item.kind === 'thread').slice(1)
   assert.equal(remaining.length, 0)
+})
+
+test('a single-thread view is the conversation beside an empty panel', () => {
+  const view = singleThreadView('OAuth hardening', 'thread-1')
+  const groups = walkGroups(view.root)
+  assert.equal(groups.length, 2)
+  // The thread owns the first pane and is the only thing in it.
+  assert.deepEqual(groups[0].tabs.map((item) => item.kind), ['thread'])
+  assert.equal(groups[0].tabs[0].sessionId, 'thread-1')
+  // The panel starts empty, so a thread with nothing attached shows no panel.
+  assert.deepEqual(groups[1].tabs, [])
+  assert.equal(conversationGroupId(view), groups[0].id)
+})
+
+test('the conversation pane keeps focus, not the panel', () => {
+  const view = singleThreadView('OAuth hardening', 'thread-1')
+  assert.equal(view.focusedGroupId, conversationGroupId(view))
 })

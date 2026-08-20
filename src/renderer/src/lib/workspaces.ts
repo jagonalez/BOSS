@@ -76,6 +76,30 @@ export function workspaceView(name = 'Workspace', root: WorkspaceNode = group())
   return { id: workspaceId('workspace'), name, root, focusedGroupId: first.id }
 }
 
+/** A view for one thread: the conversation, and a panel beside it.
+ *
+ *  The conversation owns the left pane and never leaves it — in single mode it
+ *  is the thread, not a tab you can close. Everything the thread accumulates
+ *  (terminals, browsers, files, a side chat) goes in the right pane, which is
+ *  an ordinary group and so brings its own tab strip, drag and drop, and close
+ *  buttons with it.
+ *
+ *  The panel starts empty and is hidden until something is put in it, so a
+ *  thread with nothing attached reads as one conversation filling the window.
+ */
+export function singleThreadView(name: string, sessionId: string): WorkspaceView {
+  const conversation = group([tab('thread', sessionId)])
+  const panel = group([])
+  const view = workspaceView(name, split('horizontal', conversation, panel, 0.62))
+  return { ...view, focusedGroupId: conversation.id }
+}
+
+/** The conversation pane of a single-thread view: the first group, by
+ *  construction. Everything else in the view is panel. */
+export function conversationGroupId(view: WorkspaceView): string {
+  return walkGroups(view.root)[0].id
+}
+
 export function nextWorkspaceViewName(views: Array<Pick<WorkspaceView, 'name'>>): string {
   const highest = views.reduce((current, view) => {
     const match = /^View (\d+)$/.exec(view.name)
