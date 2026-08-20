@@ -1068,9 +1068,9 @@ function SplitView({ node, viewId, single = false, conversationId }: {
           slot and rebuilt the subtree, which recreates the slot a tab portals
           into: a files tab in an untouched pane lost its open files, its
           expanded folders and its scroll. */}
-      {/* In single mode the shown pane takes the whole split and the ratio is
-          ignored, so the one visible pane fills the window rather than keeping
-          the width it happened to have in the layout. */}
+      {/* An empty panel takes no width, so the conversation fills the window
+          until something is put beside it. Once the panel holds a tab the
+          ratio applies again and the splitter between them can be dragged. */}
       <div
         key={node.first.id}
         className="workspace-split-child"
@@ -1483,7 +1483,7 @@ export function Workspace(): React.JSX.Element {
         {workspace.views.map((view) => (
           <div
             key={view.id}
-            className={`workspace-canvas ${single ? 'single' : ''}`}
+            className="workspace-canvas"
             hidden={view.id !== workspace.activeViewId}
           >
             {/* Single mode hides the other panes rather than unmounting them,

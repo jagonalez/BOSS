@@ -1544,20 +1544,11 @@ textarea {
   flex-shrink: 1;
 }
 
-/* One thread at a time. The other panes stay mounted so their terminals live,
-   but a wrapper whose pane is hidden must take no space — flex-basis alone
-   would leave it holding a share of the split. */
-.workspace-canvas.single .workspace-node[hidden] {
+/* A split child whose pane is hidden takes no space. Single mode hides the
+   panel until something is in it, and flex-basis alone would leave the empty
+   half holding a share of the split. */
+.workspace-split-child[hidden] {
   display: none;
-}
-
-.workspace-canvas.single .workspace-split-child:not(:has(.workspace-node:not([hidden]))) {
-  display: none;
-}
-
-.workspace-canvas.single .workspace-split-child {
-  flex-basis: 100% !important;
-  flex-grow: 1;
 }
 
 /* Layout picker. The silhouette carries the meaning, so the drawing is sized
