@@ -431,3 +431,19 @@ test('single mode shows the focused pane, and falls back when focus is stale', (
   const stale = { ...view, focusedGroupId: 'gone' }
   assert.equal(walkGroups(stale.root)[0].id, groups[0].id)
 })
+
+test('splitting threads out leaves one thread per view', () => {
+  // The shape splitThreadsIntoOwnViews drives toward. Each pass moves one extra
+  // thread to a new view, so the count of extras strictly falls and the loop
+  // ends — the property that keeps it from spinning.
+  const crowded = workspaceView('View 2', group([
+    tab('thread', 'a'),
+    tab('thread', 'b'),
+    tab('terminal', 'a')
+  ]))
+  const extras = walkTabs(crowded.root).filter((item) => item.kind === 'thread').slice(1)
+  assert.equal(extras.length, 1)
+  const moved = workspaceView('b', group([tab('thread', 'b')]))
+  const remaining = walkTabs(moved.root).filter((item) => item.kind === 'thread').slice(1)
+  assert.equal(remaining.length, 0)
+})

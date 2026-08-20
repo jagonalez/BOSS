@@ -1228,6 +1228,13 @@ textarea {
   flex: 1;
 }
 
+/* An explicit display beats the hidden attribute, which is only display: none
+   from the UA stylesheet. Stated here so single mode can actually drop the
+   strip. */
+.workspace-view-tabs[hidden] {
+  display: none;
+}
+
 .workspace-view-tabs {
   min-width: 120px;
   max-width: min(52vw, 720px);
