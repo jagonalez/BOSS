@@ -1107,9 +1107,29 @@ function WorkspaceNodeView({ node, viewId, single = false, conversationId }: {
  *  The panel is an ordinary pane, so adding to it is the same AddMenu every
  *  other pane uses — this just aims it at the panel group rather than at
  *  whichever pane happens to be focused. */
-function SinglePanelControls(): React.JSX.Element | null {
+/** The thread on screen, named at the left of the bar. */
+function SingleThreadTitle(): React.JSX.Element | null {
   const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const sessions = useStore(appStore, (state) => state.sessions)
+  const view = workspace?.views.find((item) => item.id === workspace.activeViewId)
+  if (!view) return null
+  const conversation = walkGroups(view.root).find((item) => item.id === conversationGroupId(view))
+  const sessionId = conversation?.tabs.find((item) => item.kind === 'thread')?.sessionId
+  const session = sessions.find((item) => item.id === sessionId)
+  const branch = session?.worktree?.status === 'active' ? session.worktree.branch : undefined
+  const where = branch ?? (session?.projectPath ? session.projectPath.split(/[\\/]/).pop() : undefined)
+  return (
+    <div className="workspace-single-title">
+      <strong>{session?.title || view.name}</strong>
+      {where ? <small>{where}</small> : null}
+    </div>
+  )
+}
+
+/** The panel control, at the right of the bar where the layout controls sit in
+ *  multi mode. Separate from the title so the spacer can sit between them. */
+function SinglePanelButton(): React.JSX.Element | null {
+  const workspace = useStore(appStore, (state) => state.projectWorkspace)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -1133,16 +1153,9 @@ function SinglePanelControls(): React.JSX.Element | null {
   const panelGroup = panelId ? groups.find((item) => item.id === panelId) : undefined
   const panelHasTabs = (panelGroup?.tabs.length ?? 0) > 0
   const sessionId = conversation.tabs.find((item) => item.kind === 'thread')?.sessionId
-  const session = sessions.find((item) => item.id === sessionId)
-  const branch = session?.worktree?.status === 'active' ? session.worktree.branch : undefined
-  const where = branch ?? (session?.projectPath ? session.projectPath.split(/[\\/]/).pop() : undefined)
 
   return (
     <>
-      <div className="workspace-single-title">
-        <strong>{session?.title || view.name}</strong>
-        {where ? <small>{where}</small> : null}
-      </div>
       <div className="workspace-single-panel-control" ref={ref}>
         <button
           className={`workspace-bar-button ${open ? 'active' : ''}`}
@@ -1298,8 +1311,9 @@ function WorkspaceBar(): React.JSX.Element {
           <PlusIcon size={13} />
         </button>
       </div>
-      {single ? <SinglePanelControls /> : null}
+      {single ? <SingleThreadTitle /> : null}
       <div className="workspace-bar-spacer" />
+      {single ? <SinglePanelButton /> : null}
       {undo ? (
         <button className="workspace-undo" onClick={undoWorkspaceChange} title="Undo the last close">
           {undo.label} — Undo
