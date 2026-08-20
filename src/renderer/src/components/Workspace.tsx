@@ -558,9 +558,12 @@ function dropPosition(event: React.DragEvent, element: HTMLElement): DropPositio
  *  is then the whole surface, so the things that only mean something beside
  *  another pane — splitting, and dropping to one side — are suppressed. Tabs
  *  themselves work exactly as they do in tiling. */
-function GroupView({ group, viewId, conversation = false }: {
+function GroupView({ group, viewId, conversation = false, panel = false }: {
   group: WorkspaceGroup
   viewId: string
+  /** The pane beside the conversation in single mode. It is created by the bar
+   *  button rather than by the user, so it must not greet them with a menu. */
+  panel?: boolean
   /** The pane that holds the thread itself in single mode. Its tab is the
    *  thread, so it stays one pane and its strip is not worth drawing. */
   conversation?: boolean
@@ -579,7 +582,10 @@ function GroupView({ group, viewId, conversation = false }: {
     return Boolean(session && (session.projectPath ?? session.directory ?? session.path))
   }
   const movable = Boolean(view && walkTabs(view.root).length > 1)
-  const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0)
+  // An empty pane opens its own add menu, which is right when the user made the
+  // pane. Single mode's panel is created for them by the bar button, which is
+  // opening its own menu at that moment — so the panel would show two.
+  const [menuOpen, setMenuOpen] = useState(group.tabs.length === 0 && !panel)
   const [menuRight, setMenuRight] = useState<number | null>(null)
   /** Set when the menu was opened from one thread's own + rather than the
    *  pane's, so it adds to that thread rather than whichever the pane shows. */
@@ -1094,7 +1100,13 @@ function WorkspaceNodeView({ node, viewId, single = false, conversationId }: {
   if (node.type === 'group') {
     return (
       <div className="workspace-node">
-        <GroupView key={node.id} group={node} viewId={viewId} conversation={single && node.id === conversationId} />
+        <GroupView
+          key={node.id}
+          group={node}
+          viewId={viewId}
+          conversation={single && node.id === conversationId}
+          panel={single && node.id !== conversationId}
+        />
       </div>
     )
   }
