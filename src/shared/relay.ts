@@ -216,14 +216,38 @@ export interface RemoteAccessStatus {
   /** Set while a pairing QR code is on screen. */
   pairing?: { code: string; expiresAt: number }
   devices: RemoteDevice[]
+  /** Keys currently in the room that never paired. Usually empty. */
+  unknown: UnknownDevice[]
 }
 
 export interface RemoteDevice {
+  /**
+   * The device's Ed25519 public key, base64url. This is the identity, not the
+   * peerId: a phone picks a fresh random peerId every time it pairs, so keying
+   * on it made one phone appear as a new device on each re-pair and made
+   * Forget revoke only that single pairing. A key is the same phone forever,
+   * so re-pairing updates this entry and Forget keeps it out for good.
+   */
   id: string
   label: string
   pairedAt: number
   lastSeenAt?: number
   online: boolean
+}
+
+/**
+ * A key seen in this desktop's room that has never completed pairing.
+ *
+ * Such a device can read nothing — every payload is sealed with a secret the
+ * relay never sees — but until now the desktop could not even tell it was
+ * there. Surfaced in settings so a room is inspectable, without a popup for
+ * what is usually a stale reconnect.
+ */
+export interface UnknownDevice {
+  /** Ed25519 public key, base64url. */
+  id: string
+  firstSeenAt: number
+  lastSeenAt: number
 }
 
 /**

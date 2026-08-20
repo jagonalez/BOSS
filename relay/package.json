@@ -7,7 +7,7 @@
   "main": "dist/server.js",
   "scripts": {
     "// sync": "The relay serves the same phone page the desktop does. Copying it in beats importing across trees, which made the compiled layout depend on where the build ran.",
-    "sync": "mkdir -p src/shared && cp ../src/shared/mobile-page.ts ../src/shared/pwa-assets.ts ../src/shared/identity.ts src/shared/",
+    "sync": "mkdir -p src/shared && while read -r f; do [ -n \"$f\" ] && cp \"../src/shared/$f\" src/shared/; done < shared-files.txt",
     "build": "npm run sync && tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "dev": "npm run build && node dist/server.js",

@@ -75,12 +75,29 @@ interface Attached {
   peerId: string
   side: 'desktop' | 'phone'
   alive: boolean
+  /** The key this socket proved it holds. Reported to the desktop as presence. */
+  publicKey: string
 }
 
 const attached = new WeakMap<WebSocket, Attached>()
 
 function send(socket: WebSocket, value: unknown): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(value))
+}
+
+/**
+ * Tell the desktop which phone key joined or left its room.
+ *
+ * Presence only. The relay is not deciding whether the phone belongs — it
+ * cannot know, and holding a list of paired devices would give it something
+ * worth stealing. It reports the key it verified and leaves the judgement to
+ * the desktop, which is the only side that knows.
+ */
+function notifyPhonePresence(deviceId: string, publicKey: string, peerId: string, online: boolean): void {
+  const room = rooms.route(deviceId, 'phone')
+  for (const desktop of room) {
+    send(desktop.socket, { type: online ? 'phone.online' : 'phone.offline', publicKey, peerId })
+  }
 }
 
 function notifyDesktopPresence(deviceId: string): void {
@@ -156,6 +173,7 @@ wss.on('connection', (socket, request) => {
     rooms.leave(state.deviceId, state.peerId)
     attached.delete(socket)
     if (state.side === 'desktop') notifyDesktopPresence(state.deviceId)
+    else notifyPhonePresence(state.deviceId, state.publicKey, state.peerId, false)
   })
 
   socket.on('error', () => {
@@ -225,14 +243,27 @@ async function admit(socket: WebSocket, frame: Record<string, unknown>, challeng
     result.displaced.socket.close(1000, 'replaced')
   }
 
-  attached.set(socket, { deviceId, peerId, side, alive: true })
+  attached.set(socket, { deviceId, peerId, side, alive: true, publicKey })
   process.stdout.write(`[relay] ${side} joined room ${deviceId.slice(0, 8)}… as ${peerId}\n`)
   send(socket, { type: 'welcome', deviceId, peerId, desktopOnline: rooms.desktopOnline(deviceId) })
-  if (side === 'desktop') notifyDesktopPresence(deviceId)
-  else send(socket, {
-    type: rooms.desktopOnline(deviceId) ? 'peer.online' : 'peer.offline',
-    desktopOnline: rooms.desktopOnline(deviceId)
-  })
+  if (side === 'desktop') {
+    notifyDesktopPresence(deviceId)
+    // A desktop that reconnects must learn who is already in its room.
+    for (const phone of rooms.phonesOf(deviceId)) {
+      const state = attached.get(phone.socket)
+      if (state) notifyPhonePresence(deviceId, state.publicKey, phone.peerId, true)
+    }
+  }
+  else {
+    send(socket, {
+      type: rooms.desktopOnline(deviceId) ? 'peer.online' : 'peer.offline',
+      desktopOnline: rooms.desktopOnline(deviceId)
+    })
+    // The desktop is the only party that can say whether this phone belongs
+    // here, so it must be told which key arrived. The relay states what it
+    // verified — nothing more — and keeps no list of its own.
+    notifyPhonePresence(deviceId, publicKey, peerId, true)
+  }
 }
 
 const heartbeat = setInterval(() => {

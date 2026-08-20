@@ -92,6 +92,57 @@ test.after(async () => {
   if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {})
 })
 
+
+/**
+ * A phone with its own keypair, doing the real QR handshake: answer the
+ * relay's challenge, then claim with the pairing secret.
+ *
+ * `keys` is passed back in to re-pair the SAME phone, which is the case that
+ * proves identity is the key and not the peerId.
+ */
+async function pairPhone(
+  payload: { r: string; d: string; s: string },
+  peerId: string,
+  keys?: { publicKey: object; privateKey: object }
+): Promise<{ reply: Record<string, unknown> | null; keys: { publicKey: object; privateKey: object }; socket: WebSocket }> {
+  const pair = keys ?? await signing.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])
+  const publicKey = new Uint8Array(await signing.subtle.exportKey('raw', pair.publicKey))
+  const pairingKey = await deriveKey(crypto, payload.s)
+  const socket = new WebSocket(`ws://127.0.0.1:${PORT}`)
+
+  const reply = new Promise<Record<string, unknown> | null>((resolve) => {
+    const timer = setTimeout(() => resolve(null), 6000)
+    socket.on('message', async (raw: unknown) => {
+      const frame = JSON.parse(String(raw)) as Record<string, unknown>
+      if (frame.type === 'challenge') {
+        const signature = new Uint8Array(await signing.subtle.sign(
+          { name: 'Ed25519' }, pair.privateKey,
+          challengeMessage(String(frame.nonce), payload.d, 'phone')
+        ))
+        socket.send(JSON.stringify({
+          type: 'hello', side: 'phone', deviceId: payload.d, peerId,
+          publicKey: toBase64Url(publicKey), signature: toBase64Url(signature), v: 1
+        }))
+        return
+      }
+      if (frame.type === 'welcome') {
+        socket.send(JSON.stringify({
+          sealed: await seal(crypto, pairingKey, { kind: 'claim', secret: payload.s, label: 'TestPhone' })
+        }))
+        return
+      }
+      if (typeof frame.sealed !== 'string') return
+      const message = await open(crypto, pairingKey, frame.sealed)
+      if (message?.kind === 'claimed') {
+        clearTimeout(timer)
+        resolve(message as unknown as Record<string, unknown>)
+      }
+    })
+  })
+
+  return { reply: await reply, keys: pair, socket }
+}
+
 liveTest('a phone pairs with a desktop by scanning its QR code', async () => {
   const desktop = new RelayClient(
     join(dir, 'remote-access.json'),
@@ -170,5 +221,77 @@ liveTest('a phone pairs with a desktop by scanning its QR code', async () => {
   assert.equal(after.pairing, undefined, 'a used pairing code must not stay valid')
 
   phone.close()
+  await desktop.stop()
+})
+
+liveTest('re-pairing the same phone updates its entry instead of adding another', async () => {
+  // The bug this guards: devices were keyed by peerId, which a phone picks
+  // fresh on every pairing. One phone scanning twice therefore appeared as two
+  // devices, and Revoke removed only one of them — leaving the other working.
+  // Identity is the public key, so the same phone is the same row.
+  const desktop = new RelayClient(
+    join(dir, 'repair.json'),
+    { handle: async () => [], onEvent: () => () => {} },
+    (url: string) => new WebSocket(url) as never
+  )
+  await desktop.handle({ type: 'remote.set', patch: { enabled: true, relayUrl: `ws://127.0.0.1:${PORT}` } })
+  for (let i = 0; i < 40 && desktop.status().state !== 'online'; i += 1) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
+
+  const first = decodePairing((await desktop.handle({ type: 'remote.pair' }) as { pairing: { code: string } }).pairing.code)
+  assert.ok(first)
+  const one = await pairPhone(first, 'peer-aaa')
+  assert.ok(one.reply, 'the first pairing must succeed')
+  assert.equal(desktop.status().devices.length, 1)
+  const pairedAt = desktop.status().devices[0].pairedAt
+  one.socket.close()
+
+  // The same phone scans again, with a DIFFERENT peerId, as a real one would.
+  const second = decodePairing((await desktop.handle({ type: 'remote.pair' }) as { pairing: { code: string } }).pairing.code)
+  assert.ok(second)
+  const again = await pairPhone(second, 'peer-bbb', one.keys)
+  assert.ok(again.reply, 'the same phone must be able to re-pair')
+
+  const devices = desktop.status().devices
+  assert.equal(devices.length, 1, 'one phone must not become two devices')
+  assert.equal(devices[0].pairedAt, pairedAt, 're-pairing keeps the original pairing date')
+
+  again.socket.close()
+  await desktop.stop()
+})
+
+liveTest('a forgotten phone cannot pair itself again', async () => {
+  // Revoke must be permanent. A forgotten phone still holds the room secret
+  // and can still reach the room, so without a block list it could re-pair
+  // itself the moment the user next showed a code.
+  const desktop = new RelayClient(
+    join(dir, 'blocked.json'),
+    { handle: async () => [], onEvent: () => () => {} },
+    (url: string) => new WebSocket(url) as never
+  )
+  await desktop.handle({ type: 'remote.set', patch: { enabled: true, relayUrl: `ws://127.0.0.1:${PORT}` } })
+  for (let i = 0; i < 40 && desktop.status().state !== 'online'; i += 1) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
+
+  const first = decodePairing((await desktop.handle({ type: 'remote.pair' }) as { pairing: { code: string } }).pairing.code)
+  assert.ok(first)
+  const phone = await pairPhone(first, 'peer-ccc')
+  assert.ok(phone.reply, 'pairing must succeed before it can be revoked')
+  const key = desktop.status().devices[0].id
+  phone.socket.close()
+
+  await desktop.handle({ type: 'remote.set', patch: { forgetDeviceId: key } })
+  assert.equal(desktop.status().devices.length, 0, 'the device is gone from the list')
+
+  // The same phone scans a fresh code. It must not get back in.
+  const second = decodePairing((await desktop.handle({ type: 'remote.pair' }) as { pairing: { code: string } }).pairing.code)
+  assert.ok(second)
+  const retry = await pairPhone(second, 'peer-ddd', phone.keys)
+  assert.equal(retry.reply, null, 'a forgotten phone must not be able to re-pair')
+  assert.equal(desktop.status().devices.length, 0, 'and must not reappear in the list')
+
+  retry.socket.close()
   await desktop.stop()
 })

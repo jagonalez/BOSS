@@ -17,7 +17,7 @@ import {
   type RemoteAccessStatus,
   type StoredDevice
 } from '../shared/relay'
-import { roomIdForKey, type SigningCrypto } from '../shared/identity'
+import { looksLikeKey, roomIdForKey, type SigningCrypto } from '../shared/identity'
 import { RelayIdentity } from './relay-identity'
 
 /**
@@ -104,6 +104,13 @@ interface RelayConfig {
   secret: string
   /** Paired phones, each with a hash of its own token so one can be revoked alone. */
   devices: StoredDevice[]
+  /**
+   * Public keys that were forgotten. A forgotten phone still holds the room
+   * secret and can still reach the room, so without this it could re-pair
+   * itself the moment a code was next on screen. Keyed by key, which is why
+   * the key had to become the identity.
+   */
+  blocked: string[]
 }
 
 /** Minimal shape of the `ws` client, so this module type-checks without the dependency present. */
@@ -134,6 +141,17 @@ export class RelayClient {
    *  numbers. See event-buffer.ts for the replay rules. */
   private readonly events = new EventBuffer(EVENT_BUFFER_SIZE)
   private pairing?: { secret: string; code: string; expiresAt: number; timer: NodeJS.Timeout }
+  /**
+   * Who is in the room right now, as the relay reports it: peerId → public key.
+   *
+   * The claim frame carries no key — it is sealed with the pairing secret and
+   * predates any of this — so the key a claiming phone proved to the relay is
+   * learned here and correlated by peerId. Cleared on disconnect, because
+   * presence is per-connection and must not outlive the socket.
+   */
+  private readonly present = new Map<string, string>()
+  /** Keys seen in the room that never paired. Surfaced in settings only. */
+  private readonly unknown = new Map<string, { firstSeenAt: number; lastSeenAt: number }>()
   /** Stopping must not trigger the reconnect loop. */
   private closing = false
 
@@ -167,14 +185,29 @@ export class RelayClient {
             enabled: Boolean(parsed.enabled),
             relayUrl: typeof parsed.relayUrl === 'string' && parsed.relayUrl ? parsed.relayUrl : DEFAULT_RELAY_URL,
             secret: parsed.secret,
-            devices: Array.isArray(parsed.devices) ? parsed.devices : []
+            // Devices written before identity moved to the public key are
+            // keyed by a random peerId, which no key will ever match. They
+            // would sit in the list forever showing offline, and Revoke would
+            // block a peerId that means nothing. Their pairings are dead
+            // anyway — the keypair change moved the room — so drop them and
+            // let the phone re-scan. A key is 43 base64url chars.
+            devices: (Array.isArray(parsed.devices) ? parsed.devices : []).filter(
+              (device) => looksLikeKey(device?.id)
+            ),
+            blocked: (Array.isArray(parsed.blocked) ? parsed.blocked : []).filter(looksLikeKey)
           }
         }
       }
     } catch {
       /* A damaged file falls through to a fresh secret below. */
     }
-    return { enabled: false, relayUrl: DEFAULT_RELAY_URL, secret: randomBytes(32).toString('base64url'), devices: [] }
+    return {
+      enabled: false,
+      relayUrl: DEFAULT_RELAY_URL,
+      secret: randomBytes(32).toString('base64url'),
+      devices: [],
+      blocked: []
+    }
   }
 
   private save(): void {
@@ -196,7 +229,10 @@ export class RelayClient {
       devices: this.config.devices.map(({ tokenHash: _tokenHash, ...device }) => ({
         ...device,
         online: this.state === 'online' && device.online
-      }))
+      })),
+      unknown: this.state === 'online'
+        ? [...this.unknown.entries()].map(([id, seen]) => ({ id, ...seen }))
+        : []
     }
   }
 
@@ -255,6 +291,11 @@ export class RelayClient {
       this.socket = null
       this.offEvents?.()
       this.offEvents = undefined
+      // Presence came from the relay over this socket. Without it we know
+      // nothing, and a device left showing "connected" would be a lie.
+      this.present.clear()
+      this.unknown.clear()
+      for (const device of this.config.devices) device.online = false
       if (this.closing || !this.config.enabled) {
         this.state = 'off'
         this.onChange?.()
@@ -288,6 +329,30 @@ export class RelayClient {
     }, delay)
     // A pending reconnect must not hold the app open at quit time.
     this.reconnectTimer.unref?.()
+  }
+
+  /**
+   * Record a phone the relay admitted to this room.
+   *
+   * A key we paired with is marked online. A key we have never paired with is
+   * held as an unknown sighting: it can read nothing, because every payload is
+   * sealed with a secret the relay never sees, but the user should be able to
+   * see that it is there. Settings only — no notification, because the usual
+   * cause is a stale reconnect from a phone that was forgotten.
+   */
+  private notePresence(publicKey: string, peerId: string): void {
+    this.present.set(peerId, publicKey)
+    const device = this.config.devices.find((d) => d.id === publicKey)
+    if (device) {
+      device.online = true
+      device.lastSeenAt = Date.now()
+      this.unknown.delete(publicKey)
+    } else {
+      const seen = this.unknown.get(publicKey)
+      const now = Date.now()
+      this.unknown.set(publicKey, { firstSeenAt: seen?.firstSeenAt ?? now, lastSeenAt: now })
+    }
+    this.onChange?.()
   }
 
   /** Answer the relay's challenge. The room id is derived locally from the
@@ -333,6 +398,17 @@ export class RelayClient {
     // Relay control frames carry no user content.
     if (typeof frame.type === 'string' && frame.type !== 'frame') {
       if (frame.type === 'error') this.lastError = String(frame.message ?? 'relay error')
+      if (frame.type === 'phone.online' && typeof frame.publicKey === 'string' && typeof frame.peerId === 'string') {
+        this.notePresence(frame.publicKey, frame.peerId)
+        return
+      }
+      if (frame.type === 'phone.offline' && typeof frame.peerId === 'string') {
+        this.present.delete(frame.peerId)
+        const device = this.config.devices.find((d) => d.id === frame.publicKey)
+        if (device) device.online = false
+        this.onChange?.()
+        return
+      }
       if (frame.type === 'welcome') {
         // Online only once the relay has accepted the signature. Reporting it
         // at socket-open would show a working connection to a relay that was
@@ -396,17 +472,36 @@ export class RelayClient {
       return
     }
 
+    // The key the claiming phone proved to the relay, learned from presence and
+    // correlated by peerId. Identity must be the key, not the peerId: a phone
+    // picks a fresh peerId at every pairing, so keying on it made one phone
+    // appear as a new device each time and made Forget revoke a single pairing
+    // rather than the phone.
+    const publicKey = this.present.get(peerId)
+    if (!publicKey) {
+      process.stderr.write('[relay] claim arrived from a peer the relay never announced\n')
+      return
+    }
+    if (this.config.blocked.includes(publicKey)) {
+      process.stderr.write('[relay] claim refused: this device was forgotten\n')
+      return
+    }
+
     // Each phone gets its own token, so revoking one does not sign out the rest.
     const token = randomBytes(24).toString('base64url')
+    const previous = this.config.devices.find((d) => d.id === publicKey)
     const device: StoredDevice = {
-      id: peerId,
+      id: publicKey,
       label: (message.label || 'Phone').slice(0, 40),
-      pairedAt: Date.now(),
+      // Re-pairing the same phone keeps its original pairing date: it is the
+      // same device, not a new one.
+      pairedAt: previous?.pairedAt ?? Date.now(),
       lastSeenAt: Date.now(),
       online: true,
       tokenHash: await hashToken(crypto, token)
     }
-    this.config.devices = [...this.config.devices.filter((d) => d.id !== peerId), device]
+    this.unknown.delete(publicKey)
+    this.config.devices = [...this.config.devices.filter((d) => d.id !== publicKey), device]
     this.save()
     // The phone still only holds the pairing secret, so this one reply must be
     // sealed with the pairing key. Everything after it uses the room key that
@@ -529,13 +624,22 @@ export class RelayClient {
         if (patch.relayUrl !== undefined && patch.relayUrl.trim()) this.config.relayUrl = patch.relayUrl.trim()
         if (patch.enabled !== undefined) this.config.enabled = patch.enabled
         if (patch.forgetDeviceId) {
-          this.config.devices = this.config.devices.filter((d) => d.id !== patch.forgetDeviceId)
+          // Block as well as remove. The phone still holds the room secret, so
+          // deleting the row alone would let it re-pair on the next code.
+          const id = patch.forgetDeviceId
+          this.config.devices = this.config.devices.filter((d) => d.id !== id)
+          if (!this.config.blocked.includes(id)) this.config.blocked = [...this.config.blocked, id]
+          this.unknown.delete(id)
         }
         if (patch.revokeAll) {
           // Rotating the secret moves this desktop to a new room, which signs
           // out every phone at once.
           this.config.secret = randomBytes(32).toString('base64url')
           this.config.devices = []
+          // A new room secret invalidates every old pairing anyway, so the
+          // block list has nothing left to protect and would only grow.
+          this.config.blocked = []
+          this.unknown.clear()
         }
         this.save()
         const shouldRestart = patch.enabled !== undefined || patch.relayUrl !== undefined || patch.revokeAll

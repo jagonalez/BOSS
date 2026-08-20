@@ -19,9 +19,22 @@ COPY relay/package.json relay/package-lock.json* ./
 RUN npm install
 COPY relay/tsconfig.json ./
 COPY relay/src ./src
-# Same copy `npm run sync` performs, done here because the image has no ../src.
-COPY src/shared/mobile-page.ts ./src/shared/mobile-page.ts
-COPY src/shared/pwa-assets.ts ./src/shared/pwa-assets.ts
+# Which of the desktop's shared files the relay needs, named in ONE place:
+# relay/shared-files.txt, read by both `npm run sync` and the line below.
+#
+# It used to be a list here AND in the sync script. When identity.ts joined the
+# script, this file kept its old two-file list, and the image compiled a
+# server.ts importing a module the container did not have. The deploy failed
+# on it.
+#
+# Copying all of src/shared instead does NOT work: the desktop's other shared
+# files import without file extensions, which this package's node16 resolution
+# rejects, and "include": ["src/**/*.ts"] compiles whatever is present.
+COPY relay/shared-files.txt ./
+COPY src/shared /tmp/desktop-shared
+RUN mkdir -p src/shared && while read -r f; do \
+      [ -n "$f" ] && cp "/tmp/desktop-shared/$f" src/shared/; \
+    done < shared-files.txt && rm -rf /tmp/desktop-shared
 RUN npx tsc -p tsconfig.json
 
 FROM node:22-alpine
