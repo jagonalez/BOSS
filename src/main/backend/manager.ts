@@ -1880,6 +1880,12 @@ export class BackendManager {
     const backend = await this.ensureStarted(binding.backendId)
     this.intentionalAborts.add(threadId)
     await backend.abort(binding.nativeSessionId)
+    // A run the user stopped is waiting for nothing, so a permission or
+    // question it was blocked on is no longer owed an answer. Those two kinds
+    // survive everything else on purpose — they outlive a run so the ask is
+    // not lost — which meant a stopped thread kept saying "Answer needed"
+    // forever, with no prompt left anywhere to answer.
+    this.clearThreadAttention(binding)
     // Settle the run here rather than waiting for the backend to say it
     // stopped. A backend that is interrupted may never send that event, and
     // the thread then stayed "busy" — which quietly diverted the next message

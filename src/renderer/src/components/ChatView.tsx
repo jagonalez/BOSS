@@ -1263,6 +1263,16 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
   const backendId = useStore(appStore, (s) => s.sessions.find((session) => session.id === effectiveId)?.backendId ?? 'opencode')
+  /** Where this thread works, named the way the bar names it: the branch when
+   *  the thread has a worktree, otherwise the project folder. Used only by the
+   *  empty state, to ask about somewhere concrete rather than in the abstract. */
+  const threadPlace = useStore(appStore, (s) => {
+    const session = s.sessions.find((item) => item.id === effectiveId)
+    if (!session) return undefined
+    if (session.worktree?.status === 'active' && session.worktree.branch) return session.worktree.branch
+    const path = session.projectPath ?? session.directory ?? session.path
+    return path ? path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) : undefined
+  })
   const historyCapabilities = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId)?.capabilities)
   const projects = useStore(appStore, (s) => s.projects)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1604,6 +1614,16 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
           </div>
         ) : null}
         <div className="messages" ref={scrollRef} onScroll={onScroll}>
+          {/* A thread with nothing in it yet showed a blank half-window above
+              the composer, which reads as something failing to load rather than
+              as a thread waiting for its first instruction. Naming where the
+              thread works makes the ask concrete. */}
+          {turns.length === 0 && !activity ? (
+            <div className="thread-start">
+              <h2>{threadPlace ? `What should we do in ${threadPlace}?` : 'What should we do?'}</h2>
+              <p>Describe the change you want, or ask about the code. {BACKEND_SHORT_LABELS[backendId]} works in this thread.</p>
+            </div>
+          ) : null}
           {(() => {
             let lastModel: string | undefined
             return turns.map((turn, i) => {
