@@ -5668,6 +5668,22 @@ body.workspace-dragging .workspace-tab-slot {
   word-break: break-word;
 }
 
+.chat-error-retry {
+  background: transparent;
+  border: 1px solid rgba(248, 81, 73, 0.45);
+  border-radius: var(--radius);
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 10px;
+  flex-shrink: 0;
+}
+
+.chat-error-retry:hover {
+  background: rgba(248, 81, 73, 0.12);
+}
+
 .chat-error-close {
   background: transparent;
   border: none;

@@ -1,4 +1,4 @@
-import { appStore, type Attachment } from '../state/AppState'
+import { appStore, type Attachment, type FailedSend } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import type { MenuCommand } from '@shared/ipc'
@@ -2193,11 +2193,25 @@ export function resolveModelKey(id: string, sessionId?: string): { providerID: s
   return undefined
 }
 
-export async function sendPrompt(text: string, sessionId?: string, attachments?: Attachment[]): Promise<void> {
+/** Record a send that never reached the backend, so the composer can offer a
+ *  retry that still carries the attachments. */
+function noteFailedSend(sessionID: string, text: string, attachments: Attachment[] | undefined, error: string): void {
+  const failed: FailedSend = { text, attachments: attachments ?? [], error }
+  appStore.setState((st) => ({ failedSendBySession: { ...st.failedSendBySession, [sessionID]: failed } }))
+}
+
+export function clearFailedSend(sessionID: string): void {
+  appStore.setState((st) => ({ failedSendBySession: { ...st.failedSendBySession, [sessionID]: undefined } }))
+}
+
+/** Returns true when the message reached the backend or was queued as a
+ *  follow-up, false when it failed and is being held for retry. The caller
+ *  must not clear the composer on false, or the text is gone for good. */
+export async function sendPrompt(text: string, sessionId?: string, attachments?: Attachment[]): Promise<boolean> {
   const cur = appStore.getState()
   const sessionID = sessionId ?? cur.activeSessionId
-  if (!sessionID) return
-  if (!text.trim() && (!attachments || attachments.length === 0)) return
+  if (!sessionID) return false
+  if (!text.trim() && (!attachments || attachments.length === 0)) return false
   const parts: unknown[] = []
   for (const a of attachments ?? []) {
     parts.push({ type: 'file', mime: a.mime, filename: a.name, url: a.dataUrl })
@@ -2208,29 +2222,37 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
   const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
   const options = { model: modelKey, agent, mode }
-  const queue = async (): Promise<void> => {
+  const queue = async (): Promise<boolean> => {
     try {
       const followUps = await OpenCode.addFollowUp(sessionID, text, attachments, options)
       appStore.setState((state) => ({
         followUps: { ...state.followUps, [sessionID]: followUps },
         lastError: null,
-        lastErrorBySession: { ...state.lastErrorBySession, [sessionID]: '' }
+        lastErrorBySession: { ...state.lastErrorBySession, [sessionID]: '' },
+        failedSendBySession: { ...state.failedSendBySession, [sessionID]: undefined }
       }))
+      return true
     } catch (error) {
-      setSessionError(sessionID, errorSummary(error))
+      const msg = errorSummary(error)
+      setSessionError(sessionID, msg)
+      // Queueing is the last resort for this text; if even that fails there is
+      // nowhere else for it to go, so hold it for retry.
+      noteFailedSend(sessionID, text, attachments, msg)
+      return false
     }
   }
   if (cur.streaming[sessionID] || cur.sessionBusy[sessionID]) {
-    await queue()
-    return
+    return await queue()
   }
   appStore.setState((st) => ({
     streaming: { ...st.streaming, [sessionID]: true },
     lastError: null,
     lastErrorBySession: { ...st.lastErrorBySession, [sessionID]: '' },
-    streamingLocked: { ...st.streamingLocked, [sessionID]: false }
+    streamingLocked: { ...st.streamingLocked, [sessionID]: false },
+    failedSendBySession: { ...st.failedSendBySession, [sessionID]: undefined }
   }))
   noteThreadSend(sessionID)
+  let sent = true
   try {
     await OpenCode.sendMessageAsync(sessionID, parts, options)
   } catch (err) {
@@ -2239,9 +2261,9 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     // stale busy state. The message is not lost — it goes where it would have
     // gone had this window been up to date.
     if (raw.includes(THREAD_BUSY_ERROR)) {
-      await queue()
+      const queued = await queue()
       await loadMessages(sessionID)
-      return
+      return queued
     }
     const isNetwork = /-> 0:|fetch failed|ECONNREFUSED/i.test(raw)
     const msg = isNetwork
@@ -2261,11 +2283,21 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     } else {
       setSessionError(sessionID, msg)
     }
+    // Every branch above only told the user something went wrong. The text
+    // itself still has to survive, or "please try again" asks them to retype
+    // what the composer already threw away.
+    noteFailedSend(sessionID, text, attachments, msg)
+    // The run never started, so no idle event is coming to turn this off. Left
+    // set, the thread reads as busy for ever and the next message the user
+    // typed would be diverted into the follow-up queue instead of sent.
+    appStore.setState((st) => ({ streaming: { ...st.streaming, [sessionID]: false } }))
+    sent = false
   }
   await loadMessages(sessionID)
   setTimeout(() => {
     void loadMessages(sessionID)
   }, 1200)
+  return sent
 }
 
 export async function updateFollowUp(threadId: string, followUpId: string, text: string): Promise<void> {

@@ -243,6 +243,13 @@ export class BackendManager {
   /** Threads BOSS just stopped on purpose, so the abort a backend reports for
    *  that stop is not shown as a failed turn. Cleared by the next run. */
   private readonly intentionalAborts = new Set<string>()
+  /** Threads whose stored transcript is ahead of the backend's native history.
+   *
+   *  Set when a send failed after BOSS had already recorded the message: the
+   *  backend never saw it, so its history must not be treated as the complete
+   *  truth. Cleared as soon as a run starts, because from then on the backend
+   *  is authoritative again. */
+  private readonly pruneSuspended = new Set<string>()
   private threadBus?: ThreadBus
   private images?: ImageStore
   private notifications?: NotificationRouter
@@ -1421,6 +1428,7 @@ export class BackendManager {
     // The images belonged to the transcript, so they go with it rather than
     // sitting in userData for a thread that no longer exists.
     this.images?.forget(threadId)
+    this.pruneSuspended.delete(threadId)
     this.bindings.delete(threadId)
     this.save()
     this.emit({ type: 'session.deleted', properties: { info: this.session(binding) }, backendId: binding.backendId })
@@ -1454,7 +1462,10 @@ export class BackendManager {
     }))
     if (!this.transcripts) return limit ? normalized.slice(-limit) : normalized
     this.transcripts.reconcile(this.transcriptSource(binding), normalized, {
-      pruneMissingMessages: !this.busyThreads.has(threadId)
+      // Pruning deletes for real, so it needs two things to be true: the thread
+      // is idle, and the backend's history is actually complete. A failed send
+      // breaks the second — BOSS recorded a message the backend never received.
+      pruneMissingMessages: !this.busyThreads.has(threadId) && !this.pruneSuspended.has(threadId)
     })
     return this.transcripts.messages(threadId, limit)
   }
@@ -1519,6 +1530,10 @@ export class BackendManager {
     // A new run cannot be excused by the last stop, so an abort error after
     // this point is the backend's own and reaches the user.
     this.intentionalAborts.delete(threadId)
+    // This send is reaching the backend, so whatever it stores from here is
+    // authoritative again. Left set, a single failed send would disable
+    // pruning for the life of the thread and let deleted messages linger.
+    this.pruneSuspended.delete(threadId)
     this.busyThreads.add(threadId)
     // Do not make visible activity depend on how quickly (or whether) a
     // backend echoes its native busy event. Native events will subsequently
@@ -1550,6 +1565,14 @@ export class BackendManager {
       // That reload is what deleted the message the user had just sent.
       if (error instanceof Error && error.message.includes(THREAD_BUSY_ERROR)) throw error
       this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
+      // The send failed, so whatever the backend has stored is what it had
+      // before this message — and clearing busy hands the next reload a licence
+      // to prune. Any throw that is not a busy refusal (network, auth,
+      // transport) reached here and deleted the message the user had just sent,
+      // because only the busy case returned above. Settle the run without
+      // arming the prune: the thread is idle, but its native history is not
+      // authoritative about a message it was never told about.
+      this.pruneSuspended.add(threadId)
       this.busyThreads.delete(threadId)
       this.emit({
         type: 'session.status',
@@ -1875,6 +1898,13 @@ export class BackendManager {
         properties: { sessionID: threadId, stopped: true },
         backendId: binding.backendId
       })
+      // Settling the run here means the idle handler never sees it: emit()
+      // fans out to renderers, it does not re-enter the backend event handler
+      // that normally drains the queue. Without this, a message the user typed
+      // while the run was still streaming — which sendPrompt queued because the
+      // thread was busy — sat in the queue until the next send or a restart,
+      // and looked to the user like it had disappeared.
+      void this.deliverNextFollowUp(threadId)
     }
   }
 

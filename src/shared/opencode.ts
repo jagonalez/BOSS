@@ -262,6 +262,24 @@ export type EventMessage =
   | { type: 'agent.updated' }
   | { type: 'unknown'; raw: string }
 
+/** Ids BOSS mints itself, for transcript entries no backend will ever report.
+ *
+ *  A steered message is folded into the run the backend is already doing, and
+ *  a tool image is produced by BOSS rather than by the model, so neither comes
+ *  back in a native history list. Anything reconciling BOSS's transcript
+ *  against that list has to know the difference: treating "the backend did not
+ *  mention it" as "it never existed" deletes the message the user just sent. */
+const LOCAL_MESSAGE_PREFIXES = ['steer-', 'assistant-tool-image-'] as const
+
+/** Whether this transcript entry was authored by BOSS rather than a backend.
+ *
+ *  Callers use it to exempt an entry from pruning. Prefix-matched because the
+ *  id is the only thing that survives into the store — the row does not record
+ *  who wrote it. */
+export function isLocallyAuthoredMessageId(messageId: string): boolean {
+  return LOCAL_MESSAGE_PREFIXES.some((prefix) => messageId.startsWith(prefix))
+}
+
 /** The tool a part called, wherever the backend put the name.
  *
  *  Opencode sends it as the part's own `tool` field. The backends that build

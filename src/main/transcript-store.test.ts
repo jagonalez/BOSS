@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -236,4 +236,83 @@ test('searches normalized transcript text and tool activity', () => {
     store.close()
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('reconciling an idle thread keeps a steered message the backend never reports', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    // What echoSteeredMessage writes: a bubble BOSS authored, with an id no
+    // backend will ever hand back in its native history.
+    store.recordMessage(source, {
+      id: 'steer-followup-1',
+      sessionID: source.nativeSessionId,
+      role: 'user',
+      time: { created: 1 }
+    })
+    store.recordPart(source, {
+      id: 'steer-followup-1-text',
+      type: 'text',
+      sessionID: source.nativeSessionId,
+      messageID: 'steer-followup-1',
+      text: 'the steered instruction'
+    })
+
+    // The thread goes idle and the backend reports a history without it.
+    store.reconcile(source, [
+      {
+        info: { id: 'native-turn', sessionID: source.nativeSessionId, role: 'assistant', time: { created: 2 } },
+        parts: [{ id: 'native-text', type: 'text', sessionID: source.nativeSessionId, messageID: 'native-turn', text: 'a reply' }]
+      }
+    ], { pruneMissingMessages: true })
+
+    const ids = store.messages(source.threadId).map((message) => message.info.id)
+    assert.ok(ids.includes('steer-followup-1'), 'the steered message must survive the prune')
+    assert.ok(ids.includes('native-turn'), 'the backend history is still reconciled in')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('reconciling still prunes a backend message that really did go away', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    store.recordMessage(source, {
+      id: 'native-old',
+      sessionID: source.nativeSessionId,
+      role: 'user',
+      time: { created: 1 }
+    })
+
+    store.reconcile(source, [
+      {
+        info: { id: 'native-kept', sessionID: source.nativeSessionId, role: 'assistant', time: { created: 2 } },
+        parts: []
+      }
+    ], { pruneMissingMessages: true })
+
+    const ids = store.messages(source.threadId).map((message) => message.info.id)
+    assert.ok(!ids.includes('native-old'), 'a compacted-away backend message is still pruned')
+    assert.ok(ids.includes('native-kept'))
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('the local-id prefixes match the shared definition', () => {
+  // transcript-store keeps its own copy so the node test runner can load it —
+  // a value import from @shared/* cannot resolve here. That copy is only safe
+  // while it agrees with the shared one, so pin them together: adding a prefix
+  // in one place and not the other would silently re-arm the delete.
+  const shared = readFileSync(join(import.meta.dirname, '..', 'shared', 'opencode.ts'), 'utf8')
+  const local = readFileSync(join(import.meta.dirname, 'transcript-store.ts'), 'utf8')
+  const prefixes = (text: string): string[] => {
+    const match = /const LOCAL_MESSAGE_PREFIXES = \[([^\]]*)\]/.exec(text)
+    assert.ok(match, 'expected a LOCAL_MESSAGE_PREFIXES declaration')
+    return [...match[1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]).sort()
+  }
+  assert.deepEqual(prefixes(local), prefixes(shared), 'the two prefix lists must stay identical')
 })

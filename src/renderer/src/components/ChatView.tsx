@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId } from '@shared/backend'
-import { abortRun, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, steerFollowUp, toggleAsr, updateFollowUp } from '../lib/actions'
+import { composerRecovery, retryPayload } from '../lib/send-recovery'
+import { abortRun, clearFailedSend, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, steerFollowUp, toggleAsr, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -715,7 +716,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     if (e.dataTransfer?.files?.length) void addFiles(Array.from(e.dataTransfer.files))
   }
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
     if (!text.trim() && attachments.length === 0) return
     if (!effectiveSession) {
       void newChatWithPrompt(text, attachments)
@@ -759,11 +760,30 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
       return
     }
     if (text.trim()) pushHistory(effectiveSession, text)
-    void sendPrompt(text, sessionId, attachments)
+    // Clear optimistically so the composer stays responsive while the send is
+    // in flight, then put the text back if it never landed. sendPrompt also
+    // records it as a failed send, which is what draws the retry banner — the
+    // restore here is so the user can simply press Enter again.
+    const pending = text
+    const pendingAttachments = attachments
     setText('')
     setAttachments([])
     setHistIdx(-1)
     setDraftBackup('')
+    // effectiveSession, not sessionId: the guard above and pushHistory both use
+    // it, and sending to a different thread than the composer validated would
+    // put the message in a thread the user was not looking at.
+    const ok = await sendPrompt(pending, effectiveSession ?? undefined, pendingAttachments)
+    if (!ok) {
+      // Only restore into an untouched composer. If the user started typing
+      // something else while the send was failing, overwriting it would lose
+      // that instead — the retry banner still holds the failed text.
+      // Read the live values, not this render's closure: `text` still holds the
+      // pre-clear string here, which would make every restore look unopposed.
+      setText((current) => composerRecovery(ok, pending, [], current, []).text)
+      const live = appStore.getState().attachments[effectiveSession] ?? []
+      setAttachments(composerRecovery(ok, '', pendingAttachments, '', live).attachments as Attachment[])
+    }
   }
 
   const stepHistory = (dir: 1 | -1): void => {
@@ -861,6 +881,25 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const lastError = useStore(appStore, (s) =>
     effectiveSession ? s.lastErrorBySession[effectiveSession] ?? s.lastError : s.lastError
   )
+  const failedSend = useStore(appStore, (s) => (effectiveSession ? s.failedSendBySession[effectiveSession] : undefined))
+
+  const retryFailedSend = async (): Promise<void> => {
+    if (!effectiveSession || !failedSend) return
+    // Take the text and its attachments from the failed record, not the
+    // composer: the user may have typed something else since, and the retry
+    // has to resend what actually failed — images included.
+    const payload = retryPayload(failedSend)
+    if (!payload) return
+    const { text: failedText, attachments: failedAttachments } = payload
+    clearFailedSend(effectiveSession)
+    const ok = await sendPrompt(failedText, effectiveSession, failedAttachments)
+    if (ok && text === failedText) {
+      // The restored copy in the composer has now been sent; drop it so the
+      // user is not looking at a message that is already on its way.
+      setText('')
+      setAttachments([])
+    }
+  }
 
   if (activeSession?.parentID) {
     return (
@@ -950,16 +989,30 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
         <div className="chat-error">
           <span className="chat-error-icon">!</span>
           <span className="chat-error-text">{lastError}</span>
+          {failedSend ? (
+            <button
+              className="chat-error-retry"
+              onClick={() => void retryFailedSend()}
+              title={
+                failedSend.attachments.length
+                  ? `Send this message again, with ${failedSend.attachments.length} attachment${failedSend.attachments.length === 1 ? '' : 's'}`
+                  : 'Send this message again'
+              }
+            >
+              Retry
+            </button>
+          ) : null}
           <button
             className="chat-error-close"
-            onClick={() =>
+            onClick={() => {
+              if (effectiveSession) clearFailedSend(effectiveSession)
               appStore.setState((st) => ({
                 lastError: null,
                 lastErrorBySession: effectiveSession
                   ? { ...st.lastErrorBySession, [effectiveSession]: '' }
                   : st.lastErrorBySession
               }))
-            }
+            }}
             title="Dismiss"
           >
             ×

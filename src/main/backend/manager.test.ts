@@ -56,3 +56,60 @@ test('a follow-up refused as busy stays queued and reports nothing', () => {
     'a busy refusal must leave the follow-up queued rather than reporting it'
   )
 })
+
+test('stopping a run delivers the message queued against it', () => {
+  // Interrupting a thread settles the run inside abort() rather than waiting
+  // for an idle event the backend may never send. But emit() only fans out to
+  // renderers — it does not re-enter the handler that normally drains the
+  // queue. So a message the user typed while the run was still streaming, which
+  // sendPrompt queued because the thread was busy, sat there after the stop and
+  // looked to the user like it had vanished.
+  const start = source.indexOf('async abort(threadId: string')
+  assert.ok(start > 0, 'expected an abort method')
+  const body = source.slice(start, source.indexOf('\n  async ', start + 10))
+  assert.ok(
+    body.includes('deliverNextFollowUp'),
+    'aborting must drain the follow-up queue, or a steered message is stranded'
+  )
+  assert.ok(
+    body.indexOf('busyThreads.delete') < body.indexOf('deliverNextFollowUp'),
+    'the thread must be clear of busy first, or delivery refuses itself'
+  )
+})
+
+test('a send that fails for any reason does not arm the transcript prune', () => {
+  // Pruning hard-deletes every stored message the backend does not report. A
+  // failed send means BOSS recorded a message the backend never received, so
+  // its history is not the whole truth — clearing busy without suspending the
+  // prune let the next reload delete the message the user had just sent. Only
+  // the busy refusal returned early, so every other throw (network, auth,
+  // transport) hit this.
+  const block = sendMessageCatch()
+  const suspend = block.indexOf('pruneSuspended.add')
+  assert.ok(suspend > 0, 'a failed send must suspend the prune')
+  assert.ok(
+    suspend < block.indexOf('busyThreads.delete'),
+    'the prune must be suspended before the thread is marked idle'
+  )
+})
+
+test('the prune requires both an idle thread and a trustworthy history', () => {
+  const start = source.indexOf('async messagesList(threadId: string')
+  assert.ok(start > 0, 'expected messagesList')
+  const body = source.slice(start, source.indexOf('\n  async ', start + 10))
+  assert.ok(
+    /pruneMissingMessages:\s*!this\.busyThreads\.has\(threadId\)\s*&&\s*!this\.pruneSuspended\.has\(threadId\)/.test(body),
+    'pruning must check pruneSuspended as well as busyThreads'
+  )
+})
+
+test('a send that reaches the backend restores pruning', () => {
+  // Left suspended, one failed send would disable pruning for the life of the
+  // thread and let genuinely-removed messages linger for ever.
+  const start = source.indexOf('async sendMessage(threadId: string')
+  const body = source.slice(start, source.indexOf('    try {', start))
+  assert.ok(
+    body.includes('pruneSuspended.delete'),
+    'starting a run must clear the suspension'
+  )
+})
