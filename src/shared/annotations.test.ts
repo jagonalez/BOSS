@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 // Node's type-stripping test runner requires explicit extensions.
 // @ts-expect-error Application code uses bundler resolution.
-import { MAX_QUOTE_LENGTH, annotationsPrompt, clampQuote, composeAnnotatedPrompt, createAnnotation, isAnnotatableSelection, remainingAnnotations, sideChatSeedPrompt, stripAnchors, type Annotation } from './annotations.ts'
+import { MAX_QUOTE_LENGTH, annotationsPrompt, clampQuote, composeAnnotatedPrompt, createAnnotation, remainingAnnotations, sideChatSeedPrompt, type Annotation } from './annotations.ts'
 
 const anchor = { messageId: 'msg-1', start: 4, end: 12 }
 
@@ -29,12 +29,6 @@ test('a quote at exactly the limit is not marked as cut', () => {
   const quote = clampQuote('x'.repeat(MAX_QUOTE_LENGTH))
   assert.equal(quote.length, MAX_QUOTE_LENGTH)
   assert.ok(!quote.endsWith('…'))
-})
-
-test('only a selection with visible text is worth annotating', () => {
-  assert.ok(isAnnotatableSelection('a passage'))
-  assert.ok(!isAnnotatableSelection('   \n  '), 'a mis-drag across a margin is not an annotation')
-  assert.ok(!isAnnotatableSelection(''))
 })
 
 test('a new annotation clamps its quote and remembers where it came from', () => {
@@ -94,32 +88,6 @@ test('typed text alone is untouched by the annotation machinery', () => {
   assert.equal(composeAnnotatedPrompt([], '  just a question  '), 'just a question')
 })
 
-test('sending drops anchors, because the rendering they point into is superseded', () => {
-  const annotations: Annotation[] = [
-    { id: 'a1', quote: 'one', note: 'first', anchor },
-    { id: 'a2', quote: 'two', note: 'second', anchor: { ...anchor, messageId: 'msg-2' } }
-  ]
-  const sent = stripAnchors(annotations)
-  assert.ok(
-    sent.every((item) => item.anchor === undefined),
-    'a sent annotation keeps no position'
-  )
-  assert.deepEqual(
-    sent.map((item) => [item.id, item.quote, item.note]),
-    [
-      ['a1', 'one', 'first'],
-      ['a2', 'two', 'second']
-    ],
-    'everything except the anchor survives'
-  )
-})
-
-test('stripping anchors does not mutate the drafts still on screen', () => {
-  const annotations: Annotation[] = [{ id: 'a1', quote: 'one', note: 'first', anchor }]
-  stripAnchors(annotations)
-  assert.deepEqual(annotations[0].anchor, anchor, 'the highlight is still anchored while composing')
-})
-
 test('a side chat seeded from a note points at the passage and carries the note', () => {
   const seed = sideChatSeedPrompt({ id: 'a1', quote: 'the claim', note: 'is this right?' })
   assert.ok(seed.includes('> the claim'))
@@ -155,5 +123,25 @@ test('clearing ids that are no longer present is harmless', () => {
   assert.deepEqual(
     remainingAnnotations(current, ['a1']).map((item) => item.id),
     ['a2']
+  )
+})
+
+test('a retry of a failed send does not quote the passage twice', () => {
+  // A failed send stores the text it composed, quotes and all. If the
+  // annotations were still pending, retrying would compose them onto a body
+  // that already contains them — two headings, the passage quoted twice.
+  const annotation: Annotation = { id: 'a1', quote: 'the claim', note: 'why?' }
+  const failedBody = composeAnnotatedPrompt([annotation], 'Expand on that.')
+
+  // What the send path must do: release the annotations it baked into the body.
+  const stillPending = remainingAnnotations([annotation], ['a1'])
+  assert.deepEqual(stillPending, [], 'the consumed annotation is no longer pending')
+
+  const retried = composeAnnotatedPrompt(stillPending, failedBody)
+  assert.equal(retried, failedBody, 'the retry sends exactly what failed')
+  assert.equal(
+    retried.split('> the claim').length - 1,
+    1,
+    'the passage appears once, not twice'
   )
 })

@@ -2342,6 +2342,10 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
       // Queueing is the last resort for this text; if even that fails there is
       // nowhere else for it to go, so hold it for retry.
       noteFailedSend(sessionID, body, attachments, msg)
+      // The held text already contains these quotes, so they have been
+      // consumed even though nothing was sent. Leaving them pending would
+      // compose them onto the retry a second time.
+      clearAnnotations(sessionID, consumedAnnotationIds)
       return false
     }
   }
@@ -2397,9 +2401,11 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     appStore.setState((st) => ({ streaming: { ...st.streaming, [sessionID]: false } }))
     sent = false
   }
-  // Both outcomes clear: on success the annotations are in the transcript, and
-  // on failure `noteFailedSend` holds the composed text, so keeping them would
-  // quote the same passage twice on retry.
+  // Whether or not the send landed, these quotes are accounted for: on success
+  // they are in the transcript, on failure `noteFailedSend` holds the composed
+  // text. Either way, leaving them pending would quote the passage twice on the
+  // next message. The queue paths above clear their own, since they return
+  // before reaching this.
   clearAnnotations(sessionID, consumedAnnotationIds)
   await loadMessages(sessionID)
   setTimeout(() => {

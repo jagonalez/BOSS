@@ -8820,3 +8820,12 @@ select:hover {
 .annotation-pill-remove:hover {
   color: var(--text);
 }
+
+/* The highlighted passage itself. Registered by AnnotationHighlights through
+   the CSS Custom Highlight API, so no element wraps the text and React's
+   markup is left alone. Only background and colour are honoured here — the
+   spec ignores box properties like padding and border-radius. */
+::highlight(boss-annotation) {
+  background-color: var(--accent-soft);
+  color: var(--text);
+}

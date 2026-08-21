@@ -14,6 +14,7 @@ import { BackendControls } from './BackendControls'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { turnCompletedAt } from '../lib/status'
 import { segmentTurn } from '../lib/part-runs'
+import { AnnotationHighlights } from './AnnotationHighlights'
 import { AnnotationPopover } from './AnnotationPopover'
 import { AnnotationRow } from './AnnotationRow'
 import { createAnnotation, type Annotation } from '@shared/annotations'
@@ -723,7 +724,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const submit = async (): Promise<void> => {
-    if (!text.trim() && attachments.length === 0) return
+    if (!text.trim() && attachments.length === 0 && annotations.length === 0) return
     if (!effectiveSession) {
       void newChatWithPrompt(text, attachments)
       setText('')
@@ -883,7 +884,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     el.style.height = `${next}px`
   }
 
-  const canSend = text.trim().length > 0 || attachments.length > 0
+  const canSend = text.trim().length > 0 || attachments.length > 0 || annotations.length > 0
   const lastError = useStore(appStore, (s) =>
     effectiveSession ? s.lastErrorBySession[effectiveSession] ?? s.lastError : s.lastError
   )
@@ -1322,6 +1323,7 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
     [visible, visibleCount, searchOpen, searchQuery]
   )
   const turns = useMemo(() => groupTurns(windowed), [windowed])
+  const annotationsForThread = useStore(appStore, (s) => (effectiveId ? s.annotations[effectiveId] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
   const lastTurnAssistants = turns[turns.length - 1]?.assistants ?? []
   const allParts = lastTurnAssistants.flatMap((m) => m.parts)
   const liveText = allParts.some((p) => p.type === 'text' && (p.text ?? '').trim().length > 0)
@@ -1624,6 +1626,13 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
             <button className="thread-search-button" type="button" onClick={() => moveSearchMatch(1)} disabled={searchMatchCount === 0} aria-label="Next match" title="Next match (Enter)">↓</button>
             <button className="thread-search-button close" type="button" onClick={closeSearch} aria-label="Close thread search" title="Close (Escape)">×</button>
           </div>
+        ) : null}
+        {effectiveId ? (
+          <AnnotationHighlights
+            annotations={annotationsForThread}
+            scrollRef={scrollRef}
+            revision={turns}
+          />
         ) : null}
         {effectiveId ? (
           <AnnotationPopover

@@ -60,6 +60,10 @@ export function anchorFromSelection(
   if (!messageId) return null
 
   const quote = range.toString()
+  // A whitespace-only drag across a margin is not something to annotate. Kept
+  // inline rather than shared: this module is unit-tested under Node's
+  // type-stripping runner, which resolves no bundler aliases, so only erasable
+  // `import type` may cross the @shared boundary here.
   if (!quote.trim()) return null
 
   const start = offsetWithin(root, range.startContainer, range.startOffset)

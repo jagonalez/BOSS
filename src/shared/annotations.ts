@@ -12,8 +12,8 @@
  * *rendered* text of a message, which is only meaningful while the message is
  * on screen in its current form; a streaming reply re-renders and the offsets
  * stop pointing at the same words. Keeping anchors to the composing window
- * means the drift never has time to matter. `stripAnchors` enforces that at the
- * boundary so a stored annotation cannot carry a stale position.
+ * means the drift never has time to matter — what leaves for the backend is
+ * plain prompt text, so no position outlives the message it was composed for.
  */
 
 /**
@@ -73,16 +73,6 @@ export function clampQuote(text: string): string {
   return `${tidied.slice(0, MAX_QUOTE_LENGTH).trimEnd()}…`
 }
 
-/**
- * True when a selection is worth offering the annotate affordance for.
- *
- * A collapsed range is a plain caret click, and a whitespace-only drag is
- * usually a mis-drag across a margin; neither is something to annotate.
- */
-export function isAnnotatableSelection(text: string): boolean {
-  return text.trim().length > 0
-}
-
 /** Build an annotation from a fresh selection. */
 export function createAnnotation(
   id: string,
@@ -91,17 +81,6 @@ export function createAnnotation(
   note = ''
 ): Annotation {
   return { id, quote: clampQuote(quote), note, anchor }
-}
-
-/**
- * Drop anchors from a set of annotations.
- *
- * Called at the send boundary. Once a message is on its way the offsets refer
- * to a rendering that is about to be superseded, so keeping them would only
- * preserve a position that no longer resolves.
- */
-export function stripAnchors(annotations: readonly Annotation[]): Annotation[] {
-  return annotations.map(({ id, quote, note }) => ({ id, quote, note }))
 }
 
 /**
