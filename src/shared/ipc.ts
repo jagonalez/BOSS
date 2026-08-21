@@ -169,6 +169,8 @@ export const IpcChannels = {
   OpenExternal: 'open-external',
   OpenPath: 'open-path',
   OpenInEditor: 'open-in-editor',
+  ProjectFileTree: 'project-files:tree',
+  ProjectFilePreview: 'project-files:preview',
   OptionalList: 'optional:list',
   OptionalDownload: 'optional:download',
   OptionalProgress: 'optional:progress',

@@ -9,6 +9,7 @@ import {
 } from '@shared/ipc'
 import type { OpenCodeServer } from './opencode-server'
 import type { ApiClient } from './api-client'
+import type { ProjectFiles } from './project-files'
 import type { EventStream } from './event-stream'
 import type { BrowseManager } from './browse'
 import type { OptionalDeps } from './optional-deps'
@@ -38,6 +39,7 @@ export interface IpcDeps {
   sites: SitesManager
   updates: UpdateChecker
   reviews: ReviewManager
+  projectFiles: ProjectFiles
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -71,6 +73,17 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.ServerGetInfo, () => deps.server.info)
 
   ipcMain.handle(IpcChannels.ApiRequest, (_e, req: ApiRequest) => deps.api.request(req))
+
+  // Read straight from disk rather than through opencode's HTTP server. The
+  // Files tab is a local directory listing; routing it through an optional
+  // 90 MB engine made it empty for anyone who had not installed one.
+  ipcMain.handle(IpcChannels.ProjectFileTree, (_e, body: { root: string; path?: string }) =>
+    deps.projectFiles.list(body.root, body.path ?? '')
+  )
+
+  ipcMain.handle(IpcChannels.ProjectFilePreview, (_e, body: { root: string; path: string }) =>
+    deps.projectFiles.preview(body.root, body.path) ?? null
+  )
 
   ipcMain.handle(IpcChannels.BackendRequest, (_e, req: BackendRequest) => deps.backends.handle(req))
 

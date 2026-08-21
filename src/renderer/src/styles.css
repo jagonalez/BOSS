@@ -8635,3 +8635,63 @@ select:hover {
   line-height: 1.5;
   font-size: 13px;
 }
+
+/* File preview — one file shown the way its type deserves. Everything used to
+   go through .code-view, so an image arrived as mojibake text. */
+.file-preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The checkerboard reads as "transparent" rather than "white", which matters
+   for icons and screenshots with alpha. */
+.file-preview-canvas {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-color: var(--bg-inset, rgba(0, 0, 0, 0.18));
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.12) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.12) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Contained rather than stretched: an 8px favicon blown up to pane width is
+   not a preview of anything. */
+.file-preview-canvas img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  image-rendering: auto;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+.file-preview-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: var(--bg-elevated, #fff);
+  min-height: 0;
+}
+
+.file-preview-markdown {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px;
+  min-height: 0;
+}
+
+.file-preview .code-view-wrap {
+  flex: 1;
+  min-height: 0;
+}

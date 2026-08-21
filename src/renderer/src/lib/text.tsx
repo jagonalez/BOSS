@@ -46,3 +46,21 @@ export function MessageText({ text }: { text: string }): React.JSX.Element {
     </div>
   )
 }
+
+/**
+ * A markdown *file*, rendered as its author wrote it.
+ *
+ * Deliberately not MessageText: hardBreaks() exists because agents write chat
+ * prose where a single newline means a new line. In a committed .md, a single
+ * newline is just a wrapped paragraph, and forcing breaks there would render
+ * every README ragged. Same components, no chat rewriting.
+ */
+export function MarkdownDocument({ text }: { text: string }): React.JSX.Element {
+  return (
+    <div className="md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  )
+}

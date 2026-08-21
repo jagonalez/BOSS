@@ -1,3 +1,4 @@
+import type { ProjectTreeNode, ProjectFilePreview } from './opencode'
 import type {
   ApiRequest,
   ApiResponse,
@@ -51,6 +52,10 @@ export interface BossApi {
   openExternal(url: string): Promise<boolean>
   openPath(path: string): Promise<boolean>
   openInEditor(path: string, line?: number): Promise<boolean>
+  /** The Files tab reads from disk in main, not through the opencode server,
+   *  so the tree and previews work on every backend. */
+  projectFileTree(root: string, path?: string): Promise<ProjectTreeNode[]>
+  projectFilePreview(root: string, path: string): Promise<ProjectFilePreview | null>
 
   optionalList(): Promise<OptionalComponentInfo[]>
   optionalDownload(id: OptionalComponentId): Promise<{ ok: boolean; error?: string }>
