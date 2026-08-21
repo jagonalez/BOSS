@@ -111,15 +111,19 @@ test('a result that arrives before the renderer listens is not lost', async ({ a
   const folder = await tempFolder('boss-cli-pending-')
 
   // `boss <folder>` that starts the app resolves before React mounts, so main
-  // holds the result for the renderer to collect. Simulated here by opening
-  // while the page is still loading, which is the state a cold start is in.
+  // holds the result for the renderer to collect. Reloading puts webContents
+  // back into isLoading, which is the condition main uses to decide the push
+  // cannot have been heard — the state a cold start is in.
   await electronApp.evaluate(({ app, BrowserWindow }, value) => {
     const window = BrowserWindow.getAllWindows()[0]
-    // Reloading puts webContents back into isLoading, the condition main uses
-    // to decide the push cannot have been heard.
     window.webContents.reload()
     app.emit('second-instance', {}, ['/BOSS', '--boss-open', value], '/')
   }, folder)
+
+  // The reload tears down the execution context, so evaluating into the old one
+  // races it. Wait for the fresh document before asking the page anything.
+  await appPage.waitForLoadState('domcontentloaded')
+  await appPage.waitForFunction(() => Boolean((window as unknown as { bossE2E?: unknown }).bossE2E))
 
   // Collected on mount rather than pushed, so it still lands.
   await expect.poll(() => projectList(appPage), { timeout: 15_000 }).toContain(folder)
