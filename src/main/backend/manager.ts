@@ -35,7 +35,7 @@ import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
 import type { ImageStore } from '../image-store'
 import type { NotificationRouter } from '../notification-router'
-import type { AgentToolImage } from '@shared/qa'
+import { toolResultImage, type AgentToolImage } from '@shared/qa'
 import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadResult, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 import { extractSummary, lastAssistantText } from '@shared/thread-result'
 import { fanOutTitle, fanOutViolation, type FanOutWorker } from '@shared/fan-out'
@@ -284,10 +284,48 @@ export class BackendManager {
     if (!binding || !this.images) return
     const stored = this.images.write(threadId, image.mimeType, image.data)
     if (!stored) return
+    this.emitImagePart(binding, tool, stored)
+  }
+
+  /** Move images out of a tool result and into parts of their own.
+   *
+   *  Claude reports a tool_result whose content can hold an image block, and
+   *  state.output is handed to the renderer verbatim — which stringified the
+   *  block and printed base64 where a picture belonged. The bytes go to the
+   *  store, an image part is emitted beside the tool call, and the output the
+   *  tool part keeps is the same content with the image block replaced by a
+   *  short note. Returns the part unchanged when there is nothing to move, so
+   *  the ordinary case costs one type check. */
+  private extractToolResultImages(binding: ThreadBinding, part: MessageWithParts['parts'][number]): MessageWithParts['parts'][number] {
+    if (part.type !== 'tool' || !this.images) return part
+    const output = part.state?.output
+    if (!Array.isArray(output)) return part
+    const tool = typeof part.state?.tool === 'string' ? part.state.tool : 'tool'
+    let changed = false
+    const rewritten = output.map((block) => {
+      const image = toolResultImage(block)
+      if (!image) return block
+      const stored = this.images?.write(binding.id, image.mimeType, image.data)
+      if (!stored) {
+        // A format the store will not take, or a disk that refused it. Say so
+        // rather than leaving the base64 to be printed as text.
+        changed = true
+        return { type: 'text', text: `[Image omitted: ${image.mimeType} could not be displayed.]` }
+      }
+      changed = true
+      this.emitImagePart(binding, tool, stored)
+      return { type: 'text', text: `[Image shown above: ${stored.mime}]` }
+    })
+    if (!changed) return part
+    return { ...part, state: { ...part.state, output: rewritten } }
+  }
+
+  /** Record and announce one stored image as a part of its own. */
+  private emitImagePart(binding: ThreadBinding, tool: string, stored: { url: string; mime: string }): void {
     const part: Part = {
       id: `tool-image-${randomUUID()}`,
       type: 'file',
-      sessionID: threadId,
+      sessionID: binding.id,
       messageID: `assistant-tool-image-${randomUUID()}`,
       state: { status: 'completed', name: tool, mime: stored.mime, url: stored.url }
     }
@@ -1142,6 +1180,15 @@ export class BackendManager {
           properties.info as MessageWithParts['info']
         )
       } else if ((eventType === 'message.part.updated' || eventType === 'message.part.created') && properties.part) {
+        // Images inside a tool result become their own parts before the
+        // transcript sees this one. Done here rather than in a backend because
+        // the store lives on the manager, and because a part arriving from any
+        // backend gets the same treatment. It also keeps the base64 out of
+        // SQLite: what is recorded below is the stripped part.
+        properties.part = this.extractToolResultImages(
+          binding,
+          properties.part as MessageWithParts['parts'][number]
+        )
         this.transcripts?.recordPart(
           this.transcriptSource(binding),
           properties.part as MessageWithParts['parts'][number]

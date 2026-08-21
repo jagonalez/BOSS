@@ -9,6 +9,10 @@ import { randomUUID } from 'node:crypto'
  *  the handler only ever answers with a file inside the image directory. */
 export const IMAGE_SCHEME = 'boss-image'
 
+/** Deliberately no import: this module is loaded by a test runner that does not
+ *  resolve the @shared alias, so the list is repeated rather than shared.
+ *  DISPLAYABLE_IMAGE_MIMES in shared/qa.ts must match it, and a test asserts
+ *  the two agree so the copy cannot drift unnoticed. */
 const EXTENSIONS: Record<string, string> = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
