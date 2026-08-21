@@ -279,9 +279,19 @@ export const PiMark = (p: IconProps): React.JSX.Element => (
   </Mark>
 )
 
+/** Lab has no brand to borrow, so like the pi glyph this is drawn: a flask,
+ *  which keeps a recognisable silhouette at tab size where a letter L would
+ *  read as a stray mark. */
+export const LabMark = (p: IconProps): React.JSX.Element => (
+  <Mark {...p}>
+    <path d="M9.6 3.5h4.8v2h-1.1v4.02c0 .42.11.83.32 1.19l4.53 7.79c.62 1.06-.15 2.4-1.38 2.4H7.23c-1.23 0-2-1.34-1.38-2.4l4.53-7.79c.21-.36.32-.77.32-1.19V5.5H9.6v-2Zm3.2 2H11.2v4.02c0 .77-.2 1.53-.59 2.2L9.4 14.1h5.2l-1.21-2.38a4.4 4.4 0 0 1-.59-2.2V5.5Z" />
+  </Mark>
+)
+
 export const BACKEND_MARKS: Record<string, (p: IconProps) => React.JSX.Element> = {
   claude: ClaudeMark,
   codex: CodexMark,
   opencode: OpenCodeMark,
-  pi: PiMark
+  pi: PiMark,
+  lab: LabMark
 }

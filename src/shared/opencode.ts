@@ -131,6 +131,35 @@ export interface FileContent {
   lineCount?: number
 }
 
+/** How the Files tab should show one file. Mirrors PreviewKind in
+ *  main/project-files.ts; the shapes are declared here because the renderer
+ *  cannot import from the main process. */
+export type ProjectPreviewKind = 'text' | 'image' | 'pdf' | 'binary'
+
+export interface ProjectTreeNode {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  ignored?: boolean
+  children?: ProjectTreeNode[]
+}
+
+export interface ProjectFilePreview {
+  path: string
+  /** Absolute path on disk, for handing to the OS or an editor. */
+  absolute: string
+  kind: ProjectPreviewKind
+  /** Set for image and pdf: the boss-file:// URL the renderer loads. */
+  url?: string
+  mime?: string
+  /** Set for text. */
+  content?: string
+  render?: 'code' | 'markdown' | 'html'
+  size: number
+  /** Why there is nothing to show, when there is nothing to show. */
+  note?: string
+}
+
 export interface FileStatus {
   path: string
   status: string
