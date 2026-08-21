@@ -12,6 +12,7 @@
     "postinstall": "node scripts/fix-pty-permissions.mjs",
     "start": "electron-vite preview",
     "build": "electron-vite build",
+    "lab": "node --experimental-strip-types bin/lab.ts",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "test:transcripts": "node --experimental-strip-types --test src/main/transcript-store.test.ts",

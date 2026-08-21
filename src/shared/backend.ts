@@ -1,4 +1,4 @@
-export const BACKEND_IDS = ['opencode', 'pi', 'codex', 'claude'] as const
+export const BACKEND_IDS = ['opencode', 'pi', 'codex', 'claude', 'lab'] as const
 export type BackendId = typeof BACKEND_IDS[number]
 
 export function isBackendId(value: string): value is BackendId {

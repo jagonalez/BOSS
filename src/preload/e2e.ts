@@ -113,6 +113,21 @@ const backends: BackendDescriptor[] = [
       { id: 'auto', label: 'Auto', description: 'Approve supported actions.' },
       { id: 'plan', label: 'Plan', description: 'Read-only planning.' }
     ]
+  },
+  {
+    id: 'lab',
+    label: 'Lab',
+    description: 'Lab test backend',
+    available: true,
+    healthy: true,
+    version: 'e2e',
+    capabilities: { ...capabilities, nativeFork: false, mcp: false },
+    modes: [
+      { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
+      { id: 'accept-edits', label: 'Accept edits', description: 'Accept file edits.' },
+      { id: 'auto', label: 'Auto', description: 'Approve supported actions.' },
+      { id: 'plan', label: 'Plan', description: 'Read-only planning.' }
+    ]
   }
 ]
 
@@ -126,7 +141,8 @@ const models: Record<BackendId, BackendModelDescriptor[]> = {
   claude: [
     { id: 'claude-opus-5', name: 'Claude Opus 5', provider: 'anthropic', variants: ['low', 'high'] },
     { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'anthropic', variants: ['low', 'high'] }
-  ]
+  ],
+  lab: [{ id: 'lab-e2e', name: 'Lab E2E', provider: 'lab' }]
 }
 
 const projectInfo: ProjectInfo = {
