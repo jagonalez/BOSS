@@ -4,5 +4,6 @@ export const BACKEND_SHORT_LABELS: Record<BackendId, string> = {
   opencode: 'OpenCode',
   pi: 'Pi',
   codex: 'Codex',
-  claude: 'Claude'
+  claude: 'Claude',
+  lab: 'Lab'
 }

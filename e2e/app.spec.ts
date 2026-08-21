@@ -165,6 +165,31 @@ test('a Claude thread can submit a message without a transport error', async ({ 
   await expect(appPage.locator('.chat-error')).toHaveCount(0)
 })
 
+async function configureLabDefaults(page: Parameters<typeof control>[0]): Promise<void> {
+  await openSettings(page)
+  await page.getByRole('button', { name: 'Agent defaults' }).click()
+  await page.locator('.settings-backend').filter({ hasText: 'Lab' }).click()
+  await page.getByRole('button', { name: 'Models & connections' }).click()
+
+  const row = page.locator('.settings-connection-row').filter({ hasText: 'Lab' })
+  await row.locator('.settings-model-picker-trigger').click()
+  await row.getByRole('button', { name: /Lab E2E/ }).click()
+}
+
+test('quick-create with Lab uses the drop-in backend and its default model', async ({ appPage }) => {
+  await configureLabDefaults(appPage)
+  await appPage.getByRole('button', { name: 'Done' }).click()
+  await control(appPage).then((item) => item.resetCalls())
+
+  await appPage.getByRole('tab', { name: /Chats/ }).click()
+  await appPage.getByRole('button', { name: 'New chat' }).click()
+  const created = await lastBackendCall(appPage, 'thread.create')
+  expect(created.request).toMatchObject({ backendId: 'lab', scope: 'global' })
+
+  await expect(appPage.getByRole('tab', { name: /^New lab thread/ })).toBeVisible()
+  await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Lab E2E' })).toBeVisible()
+})
+
 test('delegation sends the chosen backend, worktree placement, and target defaults', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
   await appPage.getByRole('button', { name: 'Done' }).click()

@@ -113,7 +113,8 @@ const backendMgr = new BackendManager({
   opencode: openCodeBackend,
   pi: createBackend('pi', { server, api, events }),
   codex: createBackend('codex', { server, api, events }),
-  claude: createBackend('claude', { server, api, events })
+  claude: createBackend('claude', { server, api, events }),
+  lab: createBackend('lab', { server, api, events })
 }, worktrees, backendAuth, transcripts)
 backendMgr.attachBinaryOverrides(backendBins)
 const threadBus = new ThreadBus(backendMgr)
