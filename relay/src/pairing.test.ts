@@ -295,3 +295,70 @@ liveTest('a forgotten phone cannot pair itself again', async () => {
   retry.socket.close()
   await desktop.stop()
 })
+
+liveTest('a thread too large for the relay still loads, trimmed', async () => {
+  // The bug, seen on a real phone: "some threads fail to load". A response
+  // over the relay's 512 KB cap did not merely fail — the relay closed the
+  // whole socket with 1009, taking every in-flight request with it, and the
+  // phone reconnected to a thread that never opened.
+  //
+  // Now the desktop trims the oldest messages until the frame fits, because
+  // the recent end of a transcript is the part worth reading.
+  const huge = Array.from({ length: 60 }, (_, i) => ({
+    id: `m${i}`,
+    role: i % 2 ? 'assistant' : 'user',
+    // 20 KB each: 60 of them is ~1.2 MB, comfortably over the cap.
+    parts: [{ type: 'text', text: 'x'.repeat(20_000) }]
+  }))
+
+  const desktop = new RelayClient(
+    join(dir, 'huge.json'),
+    { handle: async () => huge, onEvent: () => () => {} },
+    (url: string) => new WebSocket(url) as never
+  )
+  await desktop.handle({ type: 'remote.set', patch: { enabled: true, relayUrl: `ws://127.0.0.1:${PORT}` } })
+  for (let i = 0; i < 40 && desktop.status().state !== 'online'; i += 1) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
+
+  const payload = decodePairing((await desktop.handle({ type: 'remote.pair' }) as { pairing: { code: string } }).pairing.code)
+  assert.ok(payload)
+  const phone = await pairPhone(payload, 'peer-huge')
+  assert.ok(phone.reply, 'pairing must succeed first')
+
+  const roomKey = await deriveKey(crypto, String(phone.reply.secret))
+  const token = String(phone.reply.token)
+
+  const answer = new Promise<Record<string, unknown> | null>((resolve) => {
+    const timer = setTimeout(() => resolve(null), 8000)
+    phone.socket.on('message', async (raw: unknown) => {
+      const frame = JSON.parse(String(raw)) as Record<string, unknown>
+      if (typeof frame.sealed !== 'string') return
+      const message = await open(crypto, roomKey, frame.sealed)
+      if (message?.kind === 'response' && message.id === 'big') {
+        clearTimeout(timer)
+        resolve(message as unknown as Record<string, unknown>)
+      }
+    })
+  })
+
+  phone.socket.send(JSON.stringify({
+    sealed: await seal(crypto, roomKey, {
+      kind: 'request', id: 'big', token, request: { type: 'thread.messages', threadId: 't1', limit: 60 }
+    })
+  }))
+
+  const reply = await answer
+  assert.ok(reply, 'an oversized thread must still answer, not hang')
+  assert.equal(reply.ok, true, 'and it must answer with messages, not an error')
+  const list = reply.result as unknown[]
+  assert.ok(list.length < huge.length, 'the response must have been trimmed to fit')
+  assert.ok(list.length > 1, 'but must still carry the recent messages')
+
+  // The socket must have SURVIVED. That is the actual bug: a 1009 close took
+  // out every other request too.
+  assert.equal(phone.socket.readyState, 1, 'the relay must not have closed the connection')
+
+  phone.socket.close()
+  await desktop.stop()
+})
