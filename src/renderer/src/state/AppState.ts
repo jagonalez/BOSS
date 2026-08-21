@@ -15,6 +15,7 @@ import type {
   Todo
 } from '@shared/opencode'
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, QueuedFollowUp } from '@shared/backend'
+import type { Annotation } from '@shared/annotations'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -136,6 +137,9 @@ export interface AppState {
   failedSendBySession: Record<string, FailedSend | undefined>
   drafts: Record<string, string>
   attachments: Record<string, Attachment[]>
+  /** Highlights pending on each thread's composer. Cleared on send: an
+   *  annotation is a way to phrase one prompt, not a note kept on the thread. */
+  annotations: Record<string, Annotation[]>
   followUps: Record<string, QueuedFollowUp[]>
   history: Record<string, string[]>
   archived: string[]
@@ -238,6 +242,7 @@ export const initialState: AppState = {
   failedSendBySession: {},
   drafts: {},
   attachments: {},
+  annotations: {},
   followUps: {},
   history: {},
   archived: [],
