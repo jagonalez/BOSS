@@ -1,5 +1,6 @@
 import { app, BrowserWindow, protocol, session, shell } from 'electron'
 import { ImageStore, IMAGE_SCHEME } from './image-store'
+import { ProjectFiles, FILE_SCHEME } from './project-files'
 import { buildAppMenu } from './menu'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -70,7 +71,11 @@ if (e2e && process.env.BOSS_E2E_USER_DATA) {
 // transcript, and the renderer runs with webSecurity on, so file: is refused.
 // A scheme of BOSS's own keeps the reach to one directory.
 protocol.registerSchemesAsPrivileged([
-  { scheme: IMAGE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } }
+  { scheme: IMAGE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } },
+  // Project files the viewer shows as pictures or PDFs. Same reasoning as the
+  // image scheme: file: is refused under webSecurity, and a scheme of our own
+  // keeps the reach to the project directory named in the URL.
+  { scheme: FILE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: false } }
 ])
 
 const gotLock = app.requestSingleInstanceLock()
@@ -94,6 +99,7 @@ setBinaryOverrideSource(() => backendBins.all())
 
 const server = new OpenCodeServer()
 const api = new ApiClient(server)
+const projectFiles = new ProjectFiles()
 const events = new EventStream(server)
 const openCodeBackend = createBackend('opencode', { server, api, events })
 const backendAuth = new BackendAuth(resolveOpenCodeBin)
@@ -158,7 +164,7 @@ const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates, reviews }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates, reviews, projectFiles }
 }
 
 function registerIpcOnce(): void {
@@ -272,10 +278,15 @@ app.whenReady().then(() => {
   // Images a thread owns are served from disk under their own scheme, so
   // img-src has to admit it. Named rather than widened to file:, which would
   // let the renderer read anything on the machine.
-  const img = `img-src 'self' data: ${IMAGE_SCHEME}:;`
+  const img = `img-src 'self' data: ${IMAGE_SCHEME}: ${FILE_SCHEME}:;`
+  // A PDF is shown in an <iframe> handed to Electron's built-in viewer, which
+  // loads through the file scheme, so frame-src and object-src have to admit
+  // it. Named rather than widened to file:, which would let the renderer frame
+  // anything on the machine.
+  const frame = `frame-src 'self' ${FILE_SCHEME}:; object-src 'self' ${FILE_SCHEME}:;`
   const csp = isDev
-    ? `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; ${img} media-src 'self' data: blob:; font-src 'self' data:;`
-    : `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; ${img} media-src 'self' data: blob:; font-src 'self' data:;`
+    ? `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws:; ${img} ${frame} media-src 'self' data: blob:; font-src 'self' data:;`
+    : `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'none'; ${img} ${frame} media-src 'self' data: blob:; font-src 'self' data:;`
   // Answers only with a file inside the image directory; anything else is a
   // 404 rather than a read. The URL reaches here from the renderer, so the
   // store re-checks the resolved path rather than trusting it.
@@ -283,6 +294,18 @@ app.whenReady().then(() => {
     const found = images.read(request.url)
     if (!found) return new Response('Not found', { status: 404 })
     return new Response(found.data, { status: 200, headers: { 'Content-Type': found.mime } })
+  })
+
+  // Only image and PDF bytes are ever answered here, and only from inside the
+  // project the URL names — source files go through IPC as text instead, so
+  // this scheme cannot be turned into a general file read.
+  protocol.handle(FILE_SCHEME, async (request) => {
+    const found = projectFiles.read(request.url)
+    if (!found) return new Response('Not found', { status: 404 })
+    return new Response(found.data, {
+      status: 200,
+      headers: { 'Content-Type': found.mime, 'Content-Security-Policy': "default-src 'none'; object-src 'none'" }
+    })
   })
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {

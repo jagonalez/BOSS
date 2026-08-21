@@ -1,33 +1,49 @@
 # BOSS
 
-A Codex-style desktop client for [opencode](https://opencode.ai). Native-feeling chat, project context, and a resizable panel with Review, Files, Browser, and Terminal — all powered by an isolated `opencode serve` running locally.
+A Codex-style desktop client for coding agents. Native-feeling chat, project
+context, and a tiling workspace with Review, Files, Browser, and Terminal —
+running **opencode**, **Claude**, **Codex**, or **pi** against the same UI.
 
 ## Why
 
-Codex Desktop pairs a chat UI with an app-server that runs the coding agent. BOSS does the same with opencode: the Electron shell is a thin client over opencode's HTTP server, so the heavy lifting (agent, tools, LSP, MCP, permissions) is done by the same engine you trust in the terminal.
+Codex Desktop pairs a chat UI with an app-server that runs the coding agent.
+BOSS does the same, but is not married to one engine: each backend keeps its own
+sessions, models, and permission modes, and BOSS supervises them — several at
+once, in parallel worktrees, with the results reviewable side by side.
+
+Everything that does not need an agent is done locally: file browsing, diffs,
+git, speech. Tokens and credentials stay on the machine.
 
 ## Features
 
-- **Chat** — streamed conversations with opencode, model picker, thinking-mode toggle, permission prompts, abort/stop.
+- **Backends** — `opencode`, `claude`, `codex`, and `pi`, switchable per thread. Each carries its own models, reasoning effort, and permission modes (ask / auto / plan / accept-edits).
+- **Chat** — streamed conversations, model picker, thinking-mode toggle, permission prompts, abort/stop, queued follow-ups you can edit or steer mid-run.
 - **Voice** — local text-to-speech (Kokoro) and speech-to-text (Whisper), both running in-process via ONNX. Read assistant messages aloud, or dictate into the composer.
-- **Projects** — open any folder; BOSS restarts `opencode serve` in that directory and groups its chats under it. Sessions are grouped by their directory (opencode has no native chat-vs-project concept — we bucket them ourselves). The last project you had open is remembered and reopened on launch.
-- **Panel** (right side, resizable via the edge handle) — add any of these as closable tabs:
-  - **Review** — per-session diff of changed files (single instance only).
-  - **Files** — file tree + viewer for the current project.
+- **Projects** — open any folder; BOSS groups its threads under it. The last project you had open is remembered and reopened on launch.
+- **Worktrees** — give a thread its own git worktree so agents work in parallel without colliding. `.worktreeinclude` and `.worktreesetup` control what a fresh checkout gets (see below).
+- **Delegation & fan-out** — hand a subtask to another backend, or run the same task on several at once in separate worktrees and compare the diffs.
+- **Automations** — cron-scheduled agent runs with their own prompt, backend, workspace strategy, overlap policy, and run history.
+- **MCP** — connect stdio or HTTP servers with per-connection env, headers, and encrypted tokens; BOSS also exposes its own tools (browser, computer-use, thread bus, `publish_site`) to agents that support MCP.
+- **Workspace** — a tiling layout of splits and tabs, with named views you can switch between, drag-and-drop between panes, and undo:
+  - **Review** — diff of changed files across six scopes (working tree, staged, vs. a branch, per-commit, the open PR, and the review conversation), with inline comments that publish to GitHub.
+  - **Files** — file tree plus a viewer that shows each file as what it is: syntax-highlighted source, rendered Markdown, a live HTML preview, an image, or a PDF.
   - **Browser** — a real, fully-isolated browser (`WebContentsView` in its own session) for QA'ing local sites.
-  - **Terminal** — run shell commands against the project via the session.
-  - **Side chat** — a second, independent chat session.
+  - **Terminal** — a real PTY running your `$SHELL`.
+  - **Side chat** — a second, independent thread.
 - **Sites** — publish a folder of static files (or have the agent do it via the `publish_site` tool) and preview it instantly at a localhost URL in BOSS's built-in browser. Optionally deploy to Cloudflare Workers Static Assets for a public `*.workers.dev` URL.
-- **Security** — sandboxed renderer, context isolation, no node integration for remote content, `webviewTag` disabled, a narrow typed IPC surface, and the browse view runs in its own hardened session.
+- **Mobile** — a small PWA served over loopback (pair it with `tailscale serve`) for reviewing and steering threads from a phone. Deliberately narrow: threads, review, and automations only.
+- **Security** — sandboxed renderer, context isolation, no node integration for remote content, a narrow typed IPC surface, and the browse view in its own hardened session. Project files reach the UI through a scheme scoped to the open project, never `file:`.
 
 ## Architecture
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
 │ Electron main (src/main)                                       │
-│  • OpenCodeServer — spawns `opencode serve` on a random port   │
-│    with a generated password, health-checks, auto-restarts     │
-│  • EventStream — forwards opencode SSE to the renderer         │
+│  • BackendManager — opencode / claude / codex / pi adapters    │
+│  • OpenCodeServer — spawns `opencode serve` when that backend  │
+│    is in use: random port, generated password, auto-restart    │
+│  • ProjectFiles — reads the file tree and previews from disk   │
+│  • WorktreeManager — per-thread git worktrees                  │
 │  • SpeechManager — in-process TTS (Kokoro) + ASR (Whisper)      │
 │  • BrowseManager — isolated WebContentsView for the Browser    │
 │  • typed IPC (src/shared)                                      │
@@ -38,7 +54,36 @@ Codex Desktop pairs a chat UI with an app-server that runs the coding agent. BOS
 └───────────────────────────────────────────────────────────────┘
 ```
 
-The renderer never talks to opencode directly: every request goes through main-process IPC, so the server URL/password never leak to page content.
+The renderer never talks to a backend directly: every request goes through
+main-process IPC, so server URLs, passwords, and API tokens never reach page
+content.
+
+Reading files is deliberately *not* a backend call. The Files tab asks the main
+process, which reads the disk — so the tree and previews work the same on every
+backend, including ones with no file API of their own.
+
+## Files
+
+The **Files** tab is a plain file browser: a lazy-loading tree on the left, and
+a viewer that picks a presentation from the file's type rather than showing
+everything as text.
+
+| Type | Shown as |
+| --- | --- |
+| Source code | Syntax-highlighted, with line numbers |
+| `.md`, `.markdown`, `.mdx` | Rendered Markdown, with a **Source** toggle |
+| `.html`, `.htm` | A live preview in a sandboxed frame, with a **Source** toggle |
+| `.png`, `.jpg`, `.webp`, `.gif` | The image, on a checkerboard so transparency is visible |
+| `.pdf` | Inline, in Electron's PDF viewer |
+| Anything else binary | A note saying so, rather than mojibake |
+
+Reads happen in the main process, against the project directory, so this works
+on every backend — including ones with no file API. Paths are resolved and
+re-checked against the project root, so a path climbing out of it reads nothing.
+
+Two deliberate limits: files over 2 MB are not rendered as text (highlighting a
+huge log janks the UI), and `.svg` is shown as source rather than rendered,
+because an SVG is a document that can carry script.
 
 ## Sites
 
@@ -81,7 +126,10 @@ BOSS ships local speech built on [`@huggingface/transformers`](https://www.npmjs
 
 ## Getting started
 
-Prereqs: Node 20+, and `opencode` on your PATH (or bundle it — see below).
+Prereqs: Node 20+, plus at least one backend — `opencode`, `claude`, `codex`,
+or `pi` on your PATH. opencode can also be bundled (see below); the others are
+connected from **Settings → Backends**, which opens a terminal for their own
+login flow.
 
 ```bash
 npm install
@@ -165,7 +213,8 @@ ln -s "$BOSS_PROJECT_PATH/node_modules" node_modules
 
 ```
 src/
-  main/       Electron main process (server lifecycle, IPC, browse, computer-use, optional deps)
+  main/       Electron main process (backends, server lifecycle, IPC, project files,
+              worktrees, automations, browse, computer-use, optional deps)
   preload/    contextBridge typed API (window.boss)
   renderer/   React UI (sidebar, chat, panel tabs)
   shared/     IPC contracts + opencode API types (shared main/renderer)
@@ -174,7 +223,7 @@ scripts/      build/utility scripts (fetch-opencode)
 
 ## Roadmap
 
-- Real PTY terminal (currently one-shot commands via `/session/:id/shell`)
 - Loose "chats" not tied to a project (scratch directory)
-- v2: BOSS-owned project registry with one `opencode serve` per open project for parallel multi-project work
-- App icon, signing, auto-updates
+- Export a thread to Markdown, and share a read-only snapshot
+- A live context-window meter per thread (today: totals, budget caps, and a compaction notice)
+- Create a PR from the app (today: BOSS reads, comments on, and submits reviews for an existing one)
