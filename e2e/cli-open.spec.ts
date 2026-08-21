@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
-import type { BossApi } from '../src/shared/api'
 import type { ElectronApplication } from 'playwright'
 
 /** A temp folder BOSS will agree it is, once it canonicalises the path.
@@ -34,9 +33,16 @@ async function runBossCommand(app: ElectronApplication, folder: string, cwd = '/
   }, { folder, cwd })
 }
 
-/** BOSS's own record of which folders are projects. */
+/** BOSS's own record of which folders are projects, read from main.
+ *
+ *  Not boss.projectList(): the E2E preload stubs the project API with a fixture
+ *  so the suite never touches the user's real projects, and a fixture cannot
+ *  show what the `boss` command just recorded. bossE2E reaches the real
+ *  channel, which is the state these tests are about. */
 async function projectList(page: Page): Promise<string[]> {
-  return page.evaluate(() => (window as unknown as { boss: BossApi }).boss.projectList())
+  return page.evaluate(() => (window as unknown as {
+    bossE2E: { realProjectList(): Promise<string[]> }
+  }).bossE2E.realProjectList())
 }
 
 test('`boss <folder>` opens a folder BOSS has never seen, creating the project', async ({ appPage, electronApp }) => {
@@ -48,9 +54,10 @@ test('`boss <folder>` opens a folder BOSS has never seen, creating the project',
   await runBossCommand(electronApp, folder)
 
   // The project list is BOSS's own record of what a project is. A folder
-  // landing in it is precisely "a project was created for it".
+  // landing in it is precisely "a project was created for it". The renderer's
+  // reaction is not asserted here because the E2E preload stubs projectSet
+  // with a fixture, so the visible project would be the stub's, not this one.
   await expect.poll(() => projectList(appPage)).toContain(folder)
-  await expect(appPage.locator('.project-header')).toBeVisible()
 })
 
 test('`boss <folder>` on an existing project opens it without adding a duplicate', async ({ appPage, electronApp }) => {
