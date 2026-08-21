@@ -97,6 +97,32 @@ export interface ProjectInfo {
   healthy: boolean
 }
 
+/** What the `boss` command asked for, once main has acted on it.
+ *
+ *  `created` distinguishes a folder BOSS had never seen from one already in the
+ *  project list, which is the difference between "opened" and "added" in what
+ *  the renderer says about it. `problem` carries a folder that could not be
+ *  opened, so the app can say why rather than appearing to ignore the command. */
+export interface ProjectOpenedEvent {
+  project: ProjectInfo | null
+  created: boolean
+  problem?: string
+}
+
+/** Where the `boss` command is installed, and whether it is ours.
+ *
+ *  `conflict` means something else already owns the name on PATH — installing
+ *  over it would be taking a command that is not ours. */
+export interface CliStatus {
+  installed: boolean
+  path: string
+  target: string
+  conflict: boolean
+  /** Absent when the app cannot host the command, e.g. an unpackaged dev run. */
+  available: boolean
+  error?: string
+}
+
 export interface SiteInfo {
   id: string
   name: string
@@ -185,6 +211,15 @@ export const IpcChannels = {
   ProjectList: 'project:list',
   ProjectForget: 'project:forget',
   ProjectReorder: 'project:reorder',
+  /** A project the `boss` command opened. Main has already made it current;
+   *  the renderer is being told to show it. */
+  ProjectOpened: 'project:opened',
+  /** Collect a `boss` result that arrived before the renderer was listening. */
+  ProjectOpenedPending: 'project:opened-pending',
+  /** Whether the `boss` command is installed, and the request to install it. */
+  CliStatus: 'cli:status',
+  CliInstall: 'cli:install',
+  CliUninstall: 'cli:uninstall',
   TerminalCreate: 'terminal:create',
   TerminalWrite: 'terminal:write',
   TerminalResize: 'terminal:resize',

@@ -107,6 +107,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "resources/cli",
+        "to": "cli",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {

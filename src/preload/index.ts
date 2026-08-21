@@ -59,6 +59,12 @@ const boss: BossApi = {
   projectCurrent: () => ipcRenderer.invoke(IpcChannels.ProjectCurrent),
   projectSet: (path: string) => ipcRenderer.invoke(IpcChannels.ProjectSet, path),
   projectChoose: () => ipcRenderer.invoke(IpcChannels.ProjectChoose),
+  onProjectOpened: (cb) => subscribe(IpcChannels.ProjectOpened, cb),
+  projectOpenedPending: () => ipcRenderer.invoke(IpcChannels.ProjectOpenedPending),
+
+  cliStatus: () => ipcRenderer.invoke(IpcChannels.CliStatus),
+  cliInstall: () => ipcRenderer.invoke(IpcChannels.CliInstall),
+  cliUninstall: () => ipcRenderer.invoke(IpcChannels.CliUninstall),
 
   terminalCreate: (cwd?: string, cols?: number, rows?: number, authBackendId?: import('../shared/backend').BackendId) =>
     ipcRenderer.invoke(IpcChannels.TerminalCreate, { cwd, cols, rows, authBackendId }),
