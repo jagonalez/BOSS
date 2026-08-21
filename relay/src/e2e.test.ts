@@ -17,9 +17,22 @@ const crypto = webcrypto as never
 const PORT = 8899
 const RELAY_URL = `ws://127.0.0.1:${PORT}`
 
+/**
+ * Open a socket, buffering frames from the very first one.
+ *
+ * The relay speaks first, so a listener attached after 'open' resolves can
+ * miss the challenge — measured at 14 of 200 connections. That was a real
+ * race in this harness, not relay flakiness, and it made an unrelated test
+ * fail roughly one run in five.
+ */
 function connect(): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(RELAY_URL)
+    const buffered: Record<string, unknown>[] = []
+    ;(socket as unknown as { buffered: Record<string, unknown>[] }).buffered = buffered
+    socket.on('message', (raw: unknown) => {
+      buffered.push(JSON.parse(String(raw)) as Record<string, unknown>)
+    })
     socket.once('open', () => resolve(socket))
     socket.once('error', reject)
   })
@@ -28,6 +41,14 @@ function connect(): Promise<WebSocket> {
 /** Resolve with the next frame matching `match`, so unrelated presence frames do not race. */
 function next(socket: WebSocket, match: (frame: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
+    // Anything that already arrived counts. connect() buffers from the first
+    // frame, so a challenge delivered before this call is not lost.
+    const buffered = (socket as unknown as { buffered?: Record<string, unknown>[] }).buffered ?? []
+    const index = buffered.findIndex(match)
+    if (index !== -1) {
+      resolve(buffered.splice(index, 1)[0])
+      return
+    }
     const seen: string[] = []
     // Report what DID arrive. A bare timeout cannot tell a silent relay from
     // one that refused the handshake, and that cost real time here.

@@ -10,6 +10,7 @@ import {
   open,
   reconnectDelay,
   seal,
+  RELAY_MAX_FRAME_BYTES,
   RELAY_PROTOCOL_VERSION,
   type AesKey,
   type CryptoLike,
@@ -536,7 +537,29 @@ export class RelayClient {
         throw new Error(`"${request.type}" is not available over remote access.`)
       }
       const result = await this.host.handle(request)
-      await this.sendTo(peerId, { kind: 'response', id: message.id, ok: true, result: result ?? null })
+      if (await this.sendTo(peerId, { kind: 'response', id: message.id, ok: true, result: result ?? null })) return
+
+      // Too large for the relay. A transcript is a list, and the recent end is
+      // the part worth reading, so drop from the front until it fits rather
+      // than failing the whole thread. Anything that is not a list, or that
+      // will not shrink, gets a message the phone can render — otherwise the
+      // request times out with a blank screen, which is what the user saw.
+      // No marker message: the phone renders only messages with parts it knows,
+      // so a synthetic one is dropped silently and a wrongly-shaped one would
+      // be worse than nothing. Showing fewer messages is the honest outcome.
+      if (Array.isArray(result)) {
+        let kept = result as unknown[]
+        while (kept.length > 1) {
+          kept = kept.slice(Math.ceil(kept.length / 2))
+          if (await this.sendTo(peerId, { kind: 'response', id: message.id, ok: true, result: kept })) return
+        }
+      }
+      await this.sendTo(peerId, {
+        kind: 'response',
+        id: message.id,
+        ok: false,
+        error: 'This is too large to load over the relay. Open it on your desktop, or over Tailscale.'
+      })
     } catch (error) {
       await this.sendTo(peerId, {
         kind: 'response',
@@ -568,12 +591,26 @@ export class RelayClient {
 
   /** `to` undefined fans out to every paired phone; that is how events flow. */
   /** `key` overrides the room key, which only the pairing reply needs. */
-  private async sendTo(to: string | undefined, message: RelayMessage, key?: AesKey): Promise<void> {
+  /**
+   * Seal and send one frame, or report that it was too large to send.
+   *
+   * The relay closes the whole socket on an oversized frame (1009), so a
+   * single big thread did not merely fail to load — it dropped the connection
+   * and every request in flight with it, then the phone reconnected and the
+   * user saw a thread that never opened. Returns false so the caller can
+   * answer with something the phone can render.
+   */
+  private async sendTo(to: string | undefined, message: RelayMessage, key?: AesKey): Promise<boolean> {
     const socket = this.socket
     const sealWith = key ?? this.key
-    if (!socket || !sealWith || socket.readyState !== 1) return
+    if (!socket || !sealWith || socket.readyState !== 1) return false
     const sealed = await seal(crypto, sealWith, message)
-    socket.send(JSON.stringify({ sealed, to }))
+    const frame = JSON.stringify({ sealed, to })
+    // Measure the encoded bytes, not the string length: the relay's cap is on
+    // the wire payload, and multi-byte characters are common in transcripts.
+    if (Buffer.byteLength(frame) > RELAY_MAX_FRAME_BYTES) return false
+    socket.send(frame)
+    return true
   }
 
   private clearPairing(): void {
