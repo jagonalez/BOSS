@@ -8602,3 +8602,36 @@ select:hover {
   border-color: var(--accent);
   background: var(--surface-raised);
 }
+
+/* The first thing a brand-new thread says. It sits inside .messages rather
+   than replacing it, so the transcript keeps its scroll container and the
+   greeting simply scrolls away once the first turn arrives. Centred in the
+   pane the way the launcher is, but without the launcher's own composer:
+   the thread already has one below. */
+.thread-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1;
+  min-height: 180px;
+  text-align: center;
+  color: var(--text-faint);
+  padding: 24px;
+}
+
+.thread-start h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-muted);
+}
+
+.thread-start p {
+  margin: 0;
+  max-width: 420px;
+  line-height: 1.5;
+  font-size: 13px;
+}

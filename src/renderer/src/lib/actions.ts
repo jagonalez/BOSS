@@ -2423,12 +2423,20 @@ export async function openReviewFile(path: string, sessionId?: string): Promise<
   const workspace = currentWorkspace()
   if (!workspace) return
   const session = sessionId ? appStore.getState().sessions.find((item) => item.id === sessionId) : undefined
-  addWorkspaceTab(
-    activeWorkspaceView(workspace).focusedGroupId,
-    'review',
-    sessionId,
-    threadCheckout(session)
-  )
+  // In single mode the focused pane is the conversation itself, so opening the
+  // review there replaced the thread with a diff — and the conversation pane
+  // draws no tab strip, so there was no way back to it. A review is a resource
+  // like a terminal or a file tree, so it belongs beside the thread, in the
+  // panel, exactly where addResourceToSession puts one.
+  const single = appStore.getState().viewMode === 'single'
+  const view = activeWorkspaceView(workspace)
+  let groupId = view.focusedGroupId
+  if (single) {
+    ensurePanel(view.id)
+    const fresh = currentWorkspace()?.views.find((item) => item.id === view.id) ?? view
+    groupId = panelGroupId(fresh) ?? groupId
+  }
+  addWorkspaceTab(groupId, 'review', sessionId, threadCheckout(session))
 }
 
 export async function refreshProject(): Promise<void> {

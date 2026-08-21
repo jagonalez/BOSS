@@ -1145,14 +1145,35 @@ function SinglePanelButton(): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
+  /** Drop the panel again if nothing was put in it.
+   *
+   *  Read from the store rather than from this render: the pane may have been
+   *  created moments ago by this very button, and a tab may have just landed
+   *  in it, so the ids captured when the menu opened are not to be trusted. */
+  const discardEmptyPanel = React.useCallback((): void => {
+    const current = appStore.getState().projectWorkspace
+    const active = current?.views.find((item) => item.id === current.activeViewId)
+    if (!active) return
+    const panelId = panelGroupId(active)
+    if (!panelId) return
+    const panel = walkGroups(active.root).find((item) => item.id === panelId)
+    if (panel && panel.tabs.length === 0) closeWorkspaceGroup(panel.id)
+  }, [])
+
   useEffect(() => {
     if (!open) return
     const away = (event: MouseEvent): void => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false)
+      if (ref.current?.contains(event.target as Node)) return
+      setOpen(false)
+      // Dismissing the menu takes back the pane the button made to hold the
+      // choice. Without this, clicking away from the menu left an empty panel
+      // behind, and since an empty panel is invisible the button looked like
+      // it only ever added panes and never removed one.
+      discardEmptyPanel()
     }
     document.addEventListener('mousedown', away)
     return () => document.removeEventListener('mousedown', away)
-  }, [open])
+  }, [open, discardEmptyPanel])
 
   const view = workspace?.views.find((item) => item.id === workspace.activeViewId)
   if (!view) return null
@@ -1179,10 +1200,20 @@ function SinglePanelButton(): React.JSX.Element | null {
               requestCloseWorkspaceGroup(panelGroup)
               return
             }
+            // An empty panel with its menu already open means the last click
+            // opened it and this one is meant to take it back. Dropping the
+            // pane as well as the menu is what makes the button a toggle:
+            // otherwise a panel created here could only ever be added to, and
+            // a view kept a pane the user never chose anything for.
+            if (open) {
+              setOpen(false)
+              discardEmptyPanel()
+              return
+            }
             if (!panelId) ensurePanel(view.id)
-            setOpen((value) => !value)
+            setOpen(true)
           }}
-          title={panelHasTabs ? 'Close the panel' : 'Open a terminal, browser, files, or a side chat beside this thread'}
+          title={panelHasTabs ? 'Close the panel' : open ? 'Close the panel' : 'Open a terminal, browser, files, or a side chat beside this thread'}
         >
           <PanelIcon size={13} />
         </button>
