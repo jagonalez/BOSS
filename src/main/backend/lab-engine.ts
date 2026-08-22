@@ -199,7 +199,9 @@ export class LabEngine {
         headers: this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : undefined,
         signal: AbortSignal.timeout(3_000)
       })
-      return response.ok
+      const healthy = response.ok
+      if (response.body) await response.body.cancel().catch(() => {})
+      return healthy
     } catch {
       return false
     }

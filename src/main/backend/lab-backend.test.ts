@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
-import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -22,25 +20,20 @@ test('normaliseLabEndpoint rejects endpoints Lab cannot call safely', () => {
 })
 
 test('Lab health checks authenticate with the configured API key', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'boss-lab-health-'))
-  const server = createServer((request, response) => {
-    if (request.headers.authorization === 'Bearer test-key') {
-      response.writeHead(200, { 'Content-Type': 'application/json' })
-      response.end(JSON.stringify({ data: [] }))
-      return
-    }
-    response.writeHead(401)
-    response.end()
-  })
+  const originalFetch = globalThis.fetch
+  let requestUrl = ''
+  let authorization = ''
+  globalThis.fetch = (async (input, init) => {
+    requestUrl = String(input)
+    authorization = new Headers(init?.headers).get('authorization') ?? ''
+    return new Response(JSON.stringify({ data: [] }), { status: 200 })
+  }) as typeof fetch
   try {
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('Test server did not bind a port.')
     const engine = new LabEngine({
-      storeFile: join(directory, 'threads.json'),
-      configFile: join(directory, 'config.json'),
+      storeFile: join(tmpdir(), 'boss-lab-health-threads.json'),
+      configFile: join(tmpdir(), 'boss-lab-health-config.json'),
       config: {
-        baseUrl: `http://127.0.0.1:${address.port}/v1`,
+        baseUrl: 'https://models.example.test/v1',
         apiKey: 'test-key',
         defaultModel: 'test-model',
         contextChars: 1_000,
@@ -51,11 +44,9 @@ test('Lab health checks authenticate with the configured API key', async () => {
       gate: { request: async () => 'deny' }
     })
     assert.equal(await engine.checkHealth(), true)
+    assert.equal(requestUrl, 'https://models.example.test/v1/models')
+    assert.equal(authorization, 'Bearer test-key')
   } finally {
-    // fetch may leave an idle keep-alive socket in its global dispatcher. Do
-    // not let that socket keep Node's test runner alive on CI.
-    server.closeAllConnections()
-    await new Promise<void>((resolve) => server.close(() => resolve()))
-    rmSync(directory, { recursive: true, force: true })
+    globalThis.fetch = originalFetch
   }
 })
