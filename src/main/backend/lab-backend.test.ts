@@ -52,6 +52,9 @@ test('Lab health checks authenticate with the configured API key', async () => {
     })
     assert.equal(await engine.checkHealth(), true)
   } finally {
+    // fetch may leave an idle keep-alive socket in its global dispatcher. Do
+    // not let that socket keep Node's test runner alive on CI.
+    server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))
     rmSync(directory, { recursive: true, force: true })
   }
