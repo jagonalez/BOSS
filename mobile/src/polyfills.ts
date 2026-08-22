@@ -10,14 +10,21 @@
  * app stays runnable on a phone without a custom build.
  */
 // getRandomValues, which React Native lacks and @noble needs for every nonce.
-// Expo's own package rather than react-native-get-random-values: that one is a
-// third-party native module, and a single one of those makes the project
-// unloadable in Expo Go.
-import { polyfillWebCrypto } from 'expo-standard-web-crypto'
-
-polyfillWebCrypto()
+// expo-crypto directly rather than expo-standard-web-crypto: the latter pins
+// expo-crypto ^14 while SDK 54 ships 15, an unresolvable peer conflict that
+// broke `expo install` outright. expo-crypto is the same native implementation
+// without the stale wrapper.
+import { getRandomValues } from 'expo-crypto'
 
 declare const global: Record<string, unknown>
+
+if (typeof global.crypto !== 'object' || global.crypto === null) {
+  global.crypto = {}
+}
+const cryptoGlobal = global.crypto as { getRandomValues?: unknown }
+if (typeof cryptoGlobal.getRandomValues !== 'function') {
+  cryptoGlobal.getRandomValues = getRandomValues
+}
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 

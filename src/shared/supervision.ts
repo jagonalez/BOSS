@@ -27,18 +27,6 @@ export interface ThreadUsageTotals {
   toolCalls: number
 }
 
-/** Usage BOSS has observed for one backend subscription or selected agent.
- *
- * These are activity totals, not a provider's billing or rate-limit balance:
- * provider CLIs do not expose that consistently, while BOSS can report every
- * run it has actually supervised. */
-export interface UsageBreakdown {
-  backendId: BackendId
-  /** Omitted for the backend's standard agent. */
-  agentId?: string
-  usage: ThreadUsageTotals
-}
-
 export type LineageKind = 'fork' | 'clone' | 'relay' | 'delegate' | 'review' | 'fallback'
 
 export interface ThreadLineage {
@@ -89,10 +77,6 @@ export interface SupervisionSnapshot {
   generatedAt: number
   threads: SupervisedThread[]
   totals: ThreadUsageTotals
-  /** One row per backend subscription BOSS has used. */
-  usageByBackend: UsageBreakdown[]
-  /** One row per selected agent, including each backend's standard agent. */
-  usageByAgent: UsageBreakdown[]
 }
 
 export interface TranscriptSearchResult {
