@@ -33,6 +33,11 @@
       "expo-secure-store",
       "expo-camera",
       "expo-asset"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "8baa2f92-11f1-4152-b74e-4acd77ca59d2"
+      }
+    }
   }
 }
