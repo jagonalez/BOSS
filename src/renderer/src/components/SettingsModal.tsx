@@ -7,7 +7,7 @@ import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAut
 import { projectName } from './CommandCenter'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
-import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, SandboxSettings, ThreadTitleSettings } from '@shared/backend'
+import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, LabConnectionSettings, SandboxSettings, ThreadTitleSettings } from '@shared/backend'
 import type { WorktreeLocation, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
 import type { CollaborationPolicy } from '@shared/thread-bus'
@@ -449,6 +449,84 @@ function DefaultModelPicker({
   )
 }
 
+/** Lab owns its endpoint rather than delegating login to a provider CLI. The
+ * key field stays blank: its value never leaves main-process secure storage. */
+function LabConnectionForm({ onSaved }: { onSaved: () => Promise<void> }): React.JSX.Element {
+  const [connection, setConnection] = useState<LabConnectionSettings | null>(null)
+  const [baseUrl, setBaseUrl] = useState('')
+  const [model, setModel] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    void OpenCode.labConnection().then((settings) => {
+      setConnection(settings)
+      setBaseUrl(settings.baseUrl)
+      setModel(settings.model)
+    }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Could not load Lab settings.'))
+  }, [])
+
+  const save = async (clearApiKey = false): Promise<void> => {
+    setError(null)
+    setSaved(false)
+    setSaving(true)
+    try {
+      const settings = await OpenCode.setLabConnection({
+        baseUrl,
+        model,
+        ...(apiKey ? { apiKey } : {}),
+        ...(clearApiKey ? { clearApiKey: true } : {})
+      })
+      setConnection(settings)
+      setBaseUrl(settings.baseUrl)
+      setModel(settings.model)
+      setApiKey('')
+      await onSaved()
+      setSaved(true)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not save the Lab connection.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="lab-connection" aria-label="Lab connection">
+      <div className="lab-connection-heading">
+        <div>
+          <h3>Lab endpoint</h3>
+          <p>Connect Lab to any OpenAI-compatible API. BOSS adds <code>/v1</code> when the URL omits it.</p>
+        </div>
+        <div className="lab-connection-statuses">
+          <StatusBadge tone={connection?.healthy ? 'success' : 'danger'}>{connection?.healthy ? 'Endpoint ready' : 'Endpoint unavailable'}</StatusBadge>
+          <StatusBadge tone={connection?.apiKeyConfigured ? 'accent' : 'neutral'}>{connection?.apiKeyConfigured ? 'API key saved' : 'No API key saved'}</StatusBadge>
+        </div>
+      </div>
+      <div className="lab-connection-fields">
+        <label>
+          <span>Endpoint URL</span>
+          <input className="settings-input" aria-label="Lab endpoint URL" value={baseUrl} placeholder="http://localhost:11434/v1" spellCheck={false} onChange={(event) => setBaseUrl(event.target.value)} />
+        </label>
+        <label>
+          <span>Model</span>
+          <input className="settings-input" aria-label="Lab endpoint model" value={model} placeholder="qwen2.5-coder:latest" spellCheck={false} onChange={(event) => setModel(event.target.value)} />
+        </label>
+        <label>
+          <span>API key <em>optional for local endpoints</em></span>
+          <input className="settings-input" aria-label="Lab API key" type="password" value={apiKey} placeholder={connection?.apiKeyConfigured ? 'Saved securely — enter a replacement' : 'Paste a key to store securely'} autoComplete="new-password" onChange={(event) => setApiKey(event.target.value)} />
+        </label>
+      </div>
+      <div className="lab-connection-actions">
+        <Button size="small" disabled={saving || !connection} onClick={() => void save()}>{saving ? 'Testing…' : saved ? 'Saved' : 'Save & test'}</Button>
+        {connection?.apiKeyConfigured ? <Button size="small" variant="ghost" disabled={saving} onClick={() => void save(true)}>Clear saved key</Button> : null}
+        {error ? <StatusBadge tone="danger">{error}</StatusBadge> : null}
+      </div>
+    </section>
+  )
+}
+
 export function SettingsModal(): React.JSX.Element | null {
   const open = useStore(appStore, (s) => s.settingsOpen)
   const ttsVoice = useStore(appStore, (s) => s.ttsVoice)
@@ -734,11 +812,19 @@ export function SettingsModal(): React.JSX.Element | null {
                         </div>
 
                         <div className="settings-connection-actions">
-                          <Button size="small" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
-                            {hasCloudAccount ? 'Manage' : 'Add account'}
-                          </Button>
-                          <RestartBackendServer backend={backend} />
+                          {backend.id !== 'lab' ? (
+                            <>
+                              <Button size="small" disabled={!backend.available} onClick={() => openBackendLogin(backend.id)}>
+                                {hasCloudAccount ? 'Manage' : 'Add account'}
+                              </Button>
+                              <RestartBackendServer backend={backend} />
+                            </>
+                          ) : null}
                         </div>
+                        {backend.id === 'lab' ? <LabConnectionForm onSaved={async () => {
+                          await loadEngine()
+                          await refreshBackendModels()
+                        }} /> : null}
                       </div>
                     )
                   })}

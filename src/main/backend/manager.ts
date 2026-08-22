@@ -13,6 +13,8 @@ import type {
   BackendMessageOptions,
   BackendModeId,
   BackendModelPreference,
+  LabConnectionSettings,
+  LabConnectionUpdate,
   DelegatePlacement,
   QueuedFollowUp,
   QueuedFollowUpAttachment,
@@ -766,6 +768,21 @@ export class BackendManager {
     } catch {
       /* Defaults keep working in memory if persistence is unavailable. */
     }
+  }
+
+  private labConnection(): LabConnectionSettings {
+    const lab = this.backends.lab
+    if (!lab.labConnection) throw new Error('Lab connection settings are not available in this build.')
+    return lab.labConnection()
+  }
+
+  private async setLabConnection(settings: LabConnectionUpdate): Promise<LabConnectionSettings> {
+    const lab = this.backends.lab
+    if (!lab.setLabConnection) throw new Error('Lab connection settings are not available in this build.')
+    if ([...this.bindings.values()].some((binding) => binding.backendId === 'lab' && this.busyThreads.has(binding.id))) {
+      throw new Error('Wait for the running Lab thread to finish before changing its connection.')
+    }
+    return lab.setLabConnection(settings)
   }
 
   defaultModel(backendId: BackendId): BackendModelPreference | undefined {
@@ -2442,6 +2459,8 @@ export class BackendManager {
       case 'backend.list': return this.descriptors()
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
+      case 'lab.connection.get': return this.labConnection()
+      case 'lab.connection.set': return this.setLabConnection(request.settings)
       case 'thread.title.settings.get': return this.titleSettings()
       case 'thread.title.settings.set': return this.titleSettings({ autoNameFromFirstPrompt: request.autoNameFromFirstPrompt })
       case 'sandbox.settings.get': return this.sandbox()

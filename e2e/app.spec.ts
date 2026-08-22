@@ -187,6 +187,27 @@ async function configureLabDefaults(page: Parameters<typeof control>[0]): Promis
   await row.getByRole('button', { name: /Lab E2E/ }).click()
 }
 
+test('configures a Lab endpoint and key from Models & connections', async ({ appPage }) => {
+  await openSettings(appPage)
+  const row = appPage.locator('.settings-connection-row').filter({ hasText: 'Lab' })
+  const form = row.getByRole('region', { name: 'Lab connection' })
+  await expect(form).toBeVisible()
+
+  await form.getByLabel('Lab endpoint URL').fill('https://models.example.test')
+  await form.getByLabel('Lab endpoint model').fill('coding-model')
+  await form.getByLabel('Lab API key').fill('test-key')
+  await form.getByRole('button', { name: 'Save & test' }).click()
+
+  const call = await lastBackendCall(appPage, 'lab.connection.set')
+  expect(call.request).toEqual({
+    type: 'lab.connection.set',
+    settings: { baseUrl: 'https://models.example.test', model: 'coding-model', apiKey: 'test-key' }
+  })
+  await expect(form).toContainText('Endpoint ready')
+  await expect(form).toContainText('API key saved')
+  await expect(form.getByRole('button', { name: 'Clear saved key' })).toBeVisible()
+})
+
 test('quick-create with Lab uses the drop-in backend and its default model', async ({ appPage }) => {
   await configureLabDefaults(appPage)
   await appPage.getByRole('button', { name: 'Done' }).click()

@@ -92,6 +92,26 @@ export interface BackendModelPreference {
   mode?: BackendModeId
 }
 
+/** Connection details for Lab's OpenAI-compatible endpoint. The API key is
+ * deliberately never returned to the renderer; it is stored separately using
+ * Electron's secure credential storage. */
+export interface LabConnectionSettings {
+  baseUrl: string
+  model: string
+  apiKeyConfigured: boolean
+  /** Result of the most recent lightweight GET /models probe. */
+  healthy: boolean
+}
+
+export interface LabConnectionUpdate {
+  baseUrl: string
+  model: string
+  /** Omit to keep the existing key. */
+  apiKey?: string
+  /** Remove the securely stored key. */
+  clearApiKey?: boolean
+}
+
 export type { ThreadTitleSettings } from './thread-title'
 export type { SandboxSettings } from './sandbox'
 
@@ -163,6 +183,8 @@ export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'backend.auth.status' }
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
+  | { type: 'lab.connection.get' }
+  | { type: 'lab.connection.set'; settings: LabConnectionUpdate }
   | { type: 'thread.title.settings.get' }
   | { type: 'thread.title.settings.set'; autoNameFromFirstPrompt: boolean }
   | { type: 'sandbox.settings.get' }

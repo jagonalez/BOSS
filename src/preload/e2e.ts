@@ -7,6 +7,7 @@ import type {
   BackendModeId,
   BackendModelDescriptor,
   BackendModelPreference,
+  LabConnectionSettings,
   BackendRequest,
   QueuedFollowUp
 } from '../shared/backend'
@@ -215,6 +216,12 @@ export function installE2EApi(boss: BossApi): void {
   let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
   const messages: Record<string, MessageWithParts[]> = { 'thread-source': sourceMessages() }
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
+  let labConnection: LabConnectionSettings = {
+    baseUrl: 'http://localhost:11434/v1',
+    model: 'lab-e2e',
+    apiKeyConfigured: false,
+    healthy: true
+  }
   let modesBySession: Record<string, BackendModeId> = {}
   let followUps: Record<string, QueuedFollowUp[]> = {
     'thread-claude': [{
@@ -288,6 +295,15 @@ export function installE2EApi(boss: BossApi): void {
       case 'backend.defaults.set':
         defaults = structuredClone(request.defaults)
         return undefined
+      case 'lab.connection.get': return labConnection
+      case 'lab.connection.set':
+        labConnection = {
+          baseUrl: request.settings.baseUrl,
+          model: request.settings.model,
+          apiKeyConfigured: request.settings.clearApiKey ? false : Boolean(request.settings.apiKey) || labConnection.apiKeyConfigured,
+          healthy: true
+        }
+        return labConnection
       case 'thread.title.settings.get': return threadTitleSettings
       case 'thread.title.settings.set':
         threadTitleSettings = { autoNameFromFirstPrompt: request.autoNameFromFirstPrompt }

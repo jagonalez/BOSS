@@ -745,6 +745,79 @@ textarea {
   min-width: 0;
 }
 
+/* Lab is configured directly in BOSS instead of through a provider CLI, so
+   its connection form spans the row beneath the shared model controls. */
+.lab-connection {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.lab-connection-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lab-connection-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.lab-connection-heading h3 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.lab-connection-heading p {
+  margin: 3px 0 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.lab-connection-heading code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+.lab-connection-fields {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.4fr) minmax(145px, 1fr) minmax(180px, 1.2fr);
+  gap: 10px;
+}
+
+.lab-connection-fields label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lab-connection-fields label > span {
+  color: var(--text-faint);
+  font-size: var(--type-label);
+  font-weight: 600;
+}
+
+.lab-connection-fields em {
+  font-style: normal;
+  font-weight: 400;
+}
+
+.lab-connection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
 .settings-runtime-restart {
   display: flex;
   flex-direction: column;
@@ -1155,6 +1228,10 @@ textarea {
   }
 
   .settings-connection-row {
+    grid-template-columns: 1fr;
+  }
+
+  .lab-connection-fields {
     grid-template-columns: 1fr;
   }
 
@@ -3645,22 +3722,12 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .sidebar-section.projects,
-.sidebar-section.chats,
-.sidebar-section.review {
+.sidebar-section.chats {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
-}
-
-/* Review stacks one list per bucket, so the section itself does the scrolling
-   rather than each list. Left on the base .list rule the buckets would each
-   take flex: 1 of the panel and, with min-height: 0 letting them shrink past
-   their content, squeeze their rows shorter than the two lines of text inside
-   them — printing the thread title on top of its detail line. */
-.sidebar-section.review {
-  overflow-y: auto;
 }
 
 /* hidden must beat the flex display above it. */
@@ -3711,12 +3778,6 @@ body.workspace-dragging .workspace-tab-slot {
 .sidebar-section.projects .list,
 .sidebar-section.chats .list {
   flex: 1 1 auto;
-}
-
-/* Each bucket is as tall as its rows; the section above does the scrolling. */
-.sidebar-section.review .list {
-  flex: 0 0 auto;
-  overflow: visible;
 }
 
 .badge.compacting {
