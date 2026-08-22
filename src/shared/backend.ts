@@ -74,6 +74,8 @@ export interface BackendAuthStatus {
  * BOSS. `resetLabel` keeps provider-supplied timezone wording intact when a
  * CLI does not provide an epoch timestamp. */
 export interface SubscriptionUsageWindow {
+  /** Provider-defined bucket, such as the shared Codex pool or Spark. */
+  group?: string
   label: string
   usedPercent: number
   resetsAt?: number

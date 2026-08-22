@@ -24,6 +24,17 @@ function durationLabel(minutes: unknown, fallback: string): string {
   return `${minutes}-minute limit`
 }
 
+/** Read only the OpenCode Go credential from OpenCode's auth document. */
+export function openCodeGoApiKeyFromAuth(value: unknown): string | undefined {
+  const auth = record(value)
+  if (!auth) return undefined
+  for (const provider of ['opencode-go', 'opencode']) {
+    const key = record(auth[provider])?.key
+    if (typeof key === 'string' && key.trim()) return key.trim()
+  }
+  return undefined
+}
+
 /** Normalise the Codex app-server's account/rateLimits/read response. */
 export function codexUsageWindows(payload: unknown): { plan?: string; windows: SubscriptionUsageWindow[] } {
   const root = record(payload)
@@ -38,21 +49,39 @@ export function codexUsageWindows(payload: unknown): { plan?: string; windows: S
   for (const snapshot of snapshots) {
     plan ??= typeof snapshot.planType === 'string' ? snapshot.planType : undefined
     const name = typeof snapshot.limitName === 'string' ? snapshot.limitName : undefined
+    const limitId = typeof snapshot.limitId === 'string' ? snapshot.limitId : undefined
+    const group = name ?? (limitId === 'codex' ? 'Codex' : limitId)
     for (const [kind, rawWindow] of [['primary', snapshot.primary], ['secondary', snapshot.secondary]] as const) {
       const window = record(rawWindow)
       const usedPercent = percent(window?.usedPercent)
       if (usedPercent === undefined) continue
       const resetsAt = timestamp(window?.resetsAt)
-      const label = name
-        ? (kind === 'primary' ? name : `${name} (${kind})`)
-        : durationLabel(window?.windowDurationMins, kind === 'primary' ? 'Usage limit' : 'Additional usage limit')
-      const key = `${label}:${usedPercent}:${resetsAt ?? ''}`
+      const label = durationLabel(window?.windowDurationMins, kind === 'primary' ? 'Primary limit' : 'Secondary limit')
+      const key = `${group ?? ''}:${label}:${usedPercent}:${resetsAt ?? ''}`
       if (seen.has(key)) continue
       seen.add(key)
-      windows.push({ label, usedPercent, ...(resetsAt ? { resetsAt } : {}) })
+      windows.push({ ...(group ? { group } : {}), label, usedPercent, ...(resetsAt ? { resetsAt } : {}) })
     }
   }
   return { ...(plan ? { plan } : {}), windows }
+}
+
+/** Normalise OpenCode Go's authenticated /zen/go/v1/usage response. */
+export function openCodeGoUsageWindows(payload: unknown): SubscriptionUsageWindow[] {
+  const usage = record(record(payload)?.usage)
+  if (!usage) return []
+  const definitions = [
+    ['rolling', '5-hour limit'],
+    ['weekly', 'Weekly limit'],
+    ['monthly', 'Monthly limit']
+  ] as const
+  return definitions.flatMap(([key, label]) => {
+    const value = record(usage[key])
+    const usedPercent = percent(value?.percent)
+    const parsedReset = typeof value?.resetsAt === 'string' ? Date.parse(value.resetsAt) : NaN
+    if (usedPercent === undefined) return []
+    return [{ label, usedPercent, ...(Number.isFinite(parsedReset) ? { resetsAt: parsedReset } : {}) }]
+  })
 }
 
 /** Parse the human-readable, provider-owned result of Claude Code's /usage

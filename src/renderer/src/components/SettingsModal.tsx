@@ -17,7 +17,7 @@ import { McpSettings } from './McpSettings'
 import { MobileSettings } from './MobileSettings'
 import { ModelSelect, modelIsLocal } from './ModelSelect'
 
-type SettingsSection = 'agents' | 'connections' | 'mcp' | 'mobile' | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
+type SettingsSection = 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
 const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
   {
@@ -25,6 +25,7 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
     items: [
       { id: 'agents', label: 'Agent defaults' },
       { id: 'connections', label: 'Models & connections' },
+      { id: 'usage', label: 'Usage' },
       { id: 'mcp', label: 'MCP connections' },
       { id: 'mobile', label: 'Mobile access' }
     ]
@@ -52,28 +53,34 @@ function resetDescription(usage: BackendSubscriptionUsage['windows'][number]): s
   return 'Reset time unavailable'
 }
 
-function SubscriptionUsage({ usage }: { usage?: BackendSubscriptionUsage }): React.JSX.Element | null {
-  if (!usage) return null
+function formatPercent(value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)
+}
+
+function SubscriptionUsage({ usage }: { usage?: BackendSubscriptionUsage }): React.JSX.Element {
+  if (!usage) return <p className="settings-subscription-unavailable">Checking subscription limits…</p>
   if (usage.windows.length === 0) {
     return <p className="settings-subscription-unavailable">{usage.unavailableReason ?? 'Subscription limits unavailable.'}</p>
   }
+  const groups = [...new Set(usage.windows.map((window) => window.group ?? ''))]
   return (
-    <section className="settings-subscription-usage" aria-label="Subscription limits">
-      <div className="settings-subscription-heading">
-        <strong>Subscription limits</strong>
-        {usage.plan ? <small>{usage.plan}</small> : null}
-      </div>
-      {usage.windows.map((window) => {
-        const remaining = Math.max(0, 100 - window.usedPercent)
-        return (
-          <div className="settings-subscription-window" key={`${window.label}:${window.resetsAt ?? window.resetLabel ?? ''}`}>
-            <div><span>{window.label}</span><strong>{window.usedPercent}% used · {remaining}% left</strong></div>
-            <div className="settings-subscription-meter" aria-label={`${window.label}: ${remaining}% remaining`}><span style={{ width: `${window.usedPercent}%` }} /></div>
-            <small>{resetDescription(window)}</small>
-          </div>
-        )
-      })}
-    </section>
+    <div className="settings-subscription-usage">
+      {groups.map((group) => (
+        <div className="settings-subscription-group" key={group || 'default'}>
+          {group ? <h3>{group}</h3> : null}
+          {usage.windows.filter((window) => (window.group ?? '') === group).map((window) => {
+            const remaining = Math.max(0, 100 - window.usedPercent)
+            return (
+              <div className="settings-subscription-window" key={`${window.label}:${window.resetsAt ?? window.resetLabel ?? ''}`}>
+                <div><span>{window.label}</span><strong>{formatPercent(window.usedPercent)}% used · {formatPercent(remaining)}% left</strong></div>
+                <div className="settings-subscription-meter" aria-label={`${window.label}: ${formatPercent(remaining)}% remaining`}><span style={{ width: `${window.usedPercent}%` }} /></div>
+                <small>{resetDescription(window)}</small>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -124,6 +131,10 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   connections: {
     title: 'Models & connections',
     description: 'See what every agent can use, connect cloud accounts, and choose defaults for new threads.'
+  },
+  usage: {
+    title: 'Usage',
+    description: 'See how much remains in each provider subscription window and when it resets.'
   },
   mcp: {
     title: 'MCP connections',
@@ -700,7 +711,6 @@ export function SettingsModal(): React.JSX.Element | null {
                     <strong>Backends own their model access</strong>
                     <p>BOSS discovers the providers already configured in each agent. Local models stay on your machine; credentials remain in the backend's own store.</p>
                   </div>
-                  <Button size="small" onClick={() => void refreshSubscriptionUsage()}>Refresh limits</Button>
                 </div>
                 <section className="settings-connections-panel">
                   <div className="settings-connections-table-head" aria-hidden="true">
@@ -711,7 +721,6 @@ export function SettingsModal(): React.JSX.Element | null {
                   </div>
                   {backends.map((backend) => {
                     const auth = (backendAuth ?? []).find((item) => item.backendId === backend.id)
-                    const usage = subscriptionUsage.find((item) => item.backendId === backend.id)
                     const models = backendModels[backend.id] ?? []
                     const selected = defaultModels[backend.id]
                     const providers = [...new Set(models.map((model) => model.provider || backend.id))]
@@ -754,7 +763,6 @@ export function SettingsModal(): React.JSX.Element | null {
                             {hasCloudAccount ? <StatusBadge tone="accent">Cloud connected</StatusBadge> : null}
                           </div>
                           <p>{accessDetail}</p>
-                          <SubscriptionUsage usage={usage} />
                         </div>
 
                         <div className="settings-connection-model">
@@ -778,6 +786,41 @@ export function SettingsModal(): React.JSX.Element | null {
                       </div>
                     )
                   })}
+                </section>
+              </div>
+            ) : null}
+
+            {section === 'usage' ? (
+              <div className="settings-group-stack">
+                <div className="settings-usage-toolbar">
+                  <div>
+                    <strong>Provider-reported balances</strong>
+                    <p>These values come from each subscription provider, not from BOSS activity totals.</p>
+                  </div>
+                  <Button size="small" onClick={() => void refreshSubscriptionUsage()}>Refresh usage</Button>
+                </div>
+                <div className="settings-usage-grid">
+                  {(['opencode', 'codex', 'claude'] as const).map((backendId) => {
+                    const backend = backends.find((item) => item.id === backendId)
+                    const usage = subscriptionUsage.find((item) => item.backendId === backendId)
+                    const title = backendId === 'opencode' ? 'OpenCode Go' : backend?.label ?? backendId
+                    return (
+                      <section className="settings-usage-card" aria-label={`${title} usage`} key={backendId}>
+                        <header>
+                          <BackendBadge backendId={backendId} />
+                          <div>
+                            <h2>{title}</h2>
+                            {usage?.plan && usage.plan !== title ? <small>{usage.plan}</small> : null}
+                          </div>
+                        </header>
+                        <SubscriptionUsage usage={usage} />
+                      </section>
+                    )
+                  })}
+                </div>
+                <section className="settings-card settings-usage-note">
+                  <h2>Pi uses provider accounts</h2>
+                  <p>Pi has no subscription balance of its own. Its limits belong to the ChatGPT, Claude, OpenCode Go, or API provider credential selected for the model.</p>
                 </section>
               </div>
             ) : null}
