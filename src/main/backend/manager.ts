@@ -1518,7 +1518,7 @@ export class BackendManager {
     if (options?.model) binding.model = boundModel(options.model)
     binding.updatedAt = now()
     this.save()
-    this.transcripts?.beginRun(this.transcriptSource(binding))
+    this.transcripts?.beginRun(this.transcriptSource(binding), options?.agent)
     // Carried as a message part, not only in the context prompt: opencode and
     // pi have no system-prompt hook and drop that field entirely. A goal is the
     // task itself rather than a fact about the checkout, so it has to reach
@@ -2363,7 +2363,9 @@ export class BackendManager {
       tokenRuns: value.tokenRuns + thread.usage.tokenRuns,
       toolCalls: value.toolCalls + thread.usage.toolCalls
     }), { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 })
-    return { generatedAt: now(), threads, totals }
+    const usageByBackend = this.transcripts?.usageBreakdown('backend') ?? []
+    const usageByAgent = this.transcripts?.usageBreakdown('agent') ?? []
+    return { generatedAt: now(), threads, totals, usageByBackend, usageByAgent }
   }
 
   acknowledgeAttention(threadId: string): SupervisionSnapshot {

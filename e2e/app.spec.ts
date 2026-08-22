@@ -33,6 +33,17 @@ test('boots the real Electron renderer without covering it with a modal', async 
   })).toEqual({ count: 1, visible: false })
 })
 
+test('shows recorded usage for each subscription and agent', async ({ appPage }) => {
+  const usage = appPage.getByRole('region', { name: /Usage by subscription & agent/ })
+  await expect(usage).toBeVisible()
+  await expect(usage).toContainText('OpenCode')
+  await expect(usage).toContainText('8 runs · 1h · 37K tokens · 51 tools')
+  await expect(usage).toContainText('Default build agent')
+  await expect(usage).toContainText('6 runs · 50m · 32.5K tokens · 43 tools')
+  await expect(usage).toContainText('Claude Code')
+  await expect(usage).toContainText('Claude Code agent')
+})
+
 test('a deleted checkout returns a review snapshot without rejecting the IPC handler', async ({ appPage }) => {
   const checkout = '/tmp/boss-e2e/deleted-worktree'
   const snapshot = await appPage.evaluate(

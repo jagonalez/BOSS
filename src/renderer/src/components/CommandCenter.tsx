@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import type { SupervisedThread, SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
+import type { SupervisedThread, SupervisionSnapshot, ThreadUsageTotals, TranscriptSearchResult, UsageBreakdown } from '@shared/supervision'
 import { buildTaskTree, flattenTaskTree, type TaskNode } from '@shared/task-tree'
 import { useStore, appStore } from '../state/AppState'
 import { openProject, selectSession } from '../lib/actions'
 import { OpenCode } from '../lib/opencode'
 import { ChatIcon, ChevronIcon, SearchIcon } from './icons'
+import { BackendBadge } from './BackendControls'
 import { serviceDegradations } from '../lib/status'
 
 function timeAgo(timestamp?: number): string {
@@ -24,6 +25,20 @@ function duration(value: number): string {
 
 function compactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+
+function usageMetrics(usage: ThreadUsageTotals): string {
+  return [
+    `${usage.runs} run${usage.runs === 1 ? '' : 's'}`,
+    duration(usage.durationMs),
+    usage.tokens === undefined ? 'tokens not reported' : `${compactNumber(usage.tokens)} tokens`,
+    `${compactNumber(usage.toolCalls)} tools`
+  ].join(' · ')
+}
+
+function agentLabel(item: UsageBreakdown, backendLabel: string, agents: Array<{ id: string; description?: string }>): string {
+  if (!item.agentId) return `${backendLabel} agent`
+  return agents.find((agent) => agent.id === item.agentId)?.description ?? item.agentId
 }
 
 export function projectName(path: string): string {
@@ -144,6 +159,7 @@ export function CommandCenter(): React.JSX.Element {
   const serverHealthy = useStore(appStore, (state) => state.serverHealthy)
   const serverUrl = useStore(appStore, (state) => state.serverUrl)
   const backends = useStore(appStore, (state) => state.backends)
+  const agents = useStore(appStore, (state) => state.agents)
   const threadBus = useStore(appStore, (state) => state.threadBus)
   const [snapshot, setSnapshot] = useState<SupervisionSnapshot | null>(null)
   const [query, setQuery] = useState('')
@@ -228,6 +244,8 @@ export function CommandCenter(): React.JSX.Element {
   }, [snapshot, permissions, questions, errors, threadBus])
 
   const totals = snapshot?.totals
+  const usageByBackend = snapshot?.usageByBackend ?? []
+  const usageByAgent = snapshot?.usageByAgent ?? []
   return (
     <div className="command-center">
       <header className="command-header">
@@ -252,6 +270,46 @@ export function CommandCenter(): React.JSX.Element {
         </div>
         <div><strong>{compactNumber(totals?.toolCalls ?? 0)}</strong><span>tool calls</span></div>
       </div>
+
+      {usageByBackend.length > 0 ? (
+        <section className="command-usage" aria-labelledby="usage-heading">
+          <div className="command-section-head">
+            <div>
+              <h2 id="usage-heading">Usage by subscription &amp; agent</h2>
+              <p>Activity BOSS has recorded; provider plan balances are not available from every CLI.</p>
+            </div>
+            <span>{usageByBackend.length}</span>
+          </div>
+          <div className="command-usage-grid">
+            {usageByBackend.map((subscription) => {
+              const backend = backends.find((item) => item.id === subscription.backendId)
+              const backendLabel = backend?.label ?? subscription.backendId
+              const agentsForSubscription = usageByAgent.filter((item) => item.backendId === subscription.backendId)
+              return (
+                <article className="command-usage-card" key={subscription.backendId}>
+                  <div className="command-usage-subscription">
+                    <BackendBadge backendId={subscription.backendId} />
+                    <div>
+                      <strong>{backendLabel}</strong>
+                      <small>Subscription activity · {usageMetrics(subscription.usage)}</small>
+                    </div>
+                  </div>
+                  {agentsForSubscription.length > 0 ? (
+                    <div className="command-usage-agents">
+                      {agentsForSubscription.map((agent) => (
+                        <div className="command-usage-agent" key={`${agent.backendId}:${agent.agentId ?? 'default'}`}>
+                          <span>{agentLabel(agent, backendLabel, agents)}</span>
+                          <small>{usageMetrics(agent.usage)}</small>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <div className="command-usage-empty">No agent-level usage recorded yet.</div>}
+                </article>
+              )
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <div className="command-search">
         <SearchIcon size={15} />

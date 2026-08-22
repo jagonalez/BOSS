@@ -366,7 +366,16 @@ export function installE2EApi(boss: BossApi): void {
             running: false,
             usage: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
           })),
-          totals: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
+          totals: { runs: 12, durationMs: 4_560_000, tokens: 48_200, tokenRuns: 12, toolCalls: 73 },
+          usageByBackend: [
+            { backendId: 'opencode', usage: { runs: 8, durationMs: 3_600_000, tokens: 37_000, tokenRuns: 8, toolCalls: 51 } },
+            { backendId: 'claude', usage: { runs: 4, durationMs: 960_000, tokens: 11_200, tokenRuns: 4, toolCalls: 22 } }
+          ],
+          usageByAgent: [
+            { backendId: 'opencode', agentId: 'build', usage: { runs: 6, durationMs: 3_000_000, tokens: 32_500, tokenRuns: 6, toolCalls: 43 } },
+            { backendId: 'opencode', agentId: 'reviewer', usage: { runs: 2, durationMs: 600_000, tokens: 4_500, tokenRuns: 2, toolCalls: 8 } },
+            { backendId: 'claude', usage: { runs: 4, durationMs: 960_000, tokens: 11_200, tokenRuns: 4, toolCalls: 22 } }
+          ]
         }
       case 'supervision.search': return []
       case 'supervision.acknowledge': return backendRequest({ type: 'supervision.snapshot' })
