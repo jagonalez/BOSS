@@ -3645,12 +3645,22 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .sidebar-section.projects,
-.sidebar-section.chats {
+.sidebar-section.chats,
+.sidebar-section.review {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Review stacks one list per bucket, so the section itself does the scrolling
+   rather than each list. Left on the base .list rule the buckets would each
+   take flex: 1 of the panel and, with min-height: 0 letting them shrink past
+   their content, squeeze their rows shorter than the two lines of text inside
+   them — printing the thread title on top of its detail line. */
+.sidebar-section.review {
+  overflow-y: auto;
 }
 
 /* hidden must beat the flex display above it. */
@@ -3701,6 +3711,12 @@ body.workspace-dragging .workspace-tab-slot {
 .sidebar-section.projects .list,
 .sidebar-section.chats .list {
   flex: 1 1 auto;
+}
+
+/* Each bucket is as tall as its rows; the section above does the scrolling. */
+.sidebar-section.review .list {
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .badge.compacting {
