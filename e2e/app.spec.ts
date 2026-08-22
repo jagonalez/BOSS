@@ -463,8 +463,29 @@ test('a side chat forks the thread and opens seeded with the passage', async ({ 
   const fork = await lastBackendCall(appPage, 'thread.fork')
   expect(fork.request).toMatchObject({ threadId: 'thread-source' })
 
-  // The quote lands in the new thread's composer, not the parent's.
-  await expect(appPage.getByPlaceholder(/^Ask /)).toHaveValue(/> second result/)
+  // Two composers now, which is the point: the side chat opens alongside its
+  // parent rather than replacing it. Both live in the same group, so neither
+  // the placeholder nor the focused pane tells them apart — the draft does.
+  const composers = appPage.getByPlaceholder(/^Ask /)
+  await expect(composers).toHaveCount(2)
+
+  // Exactly one carries the quote and the other is empty: the seed goes to the
+  // side chat without disturbing the draft in the thread it came from. Counted
+  // rather than positional, since which composer renders first is a layout
+  // detail this contract does not depend on.
+  await expect
+    .poll(async () =>
+      composers.evaluateAll((nodes) => {
+        const values = nodes.map((node) => (node as HTMLTextAreaElement).value)
+        return {
+          seeded: values.filter((value) => value.includes('> second result')).length,
+          empty: values.filter((value) => value === '').length
+        }
+      })
+    )
+    .toEqual({ seeded: 1, empty: 1 })
+
+  // The passage went to the side chat, so nothing is left pending here.
   await expect(appPage.locator('.annotation-pill')).toHaveCount(0)
 })
 

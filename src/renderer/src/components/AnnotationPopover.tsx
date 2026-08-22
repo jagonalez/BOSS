@@ -35,6 +35,9 @@ export function AnnotationPopover({
   const [note, setNote] = useState<string | null>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  /** What the last pointerup landed on, so a deferred read can tell a fresh
+   *  selection from a press on the popover's own buttons. */
+  const lastPointerTarget = useRef<Node | null>(null)
 
   const dismiss = useCallback(() => {
     setPending(null)
@@ -52,6 +55,11 @@ export function AnnotationPopover({
       // While the note field is open the selection is deliberately left behind;
       // re-reading it here would close the editor the moment it takes focus.
       if (note !== null) return
+      // A pointerup on the popover itself is the user reaching for its buttons,
+      // not making a new selection. Pressing a button collapses the selection,
+      // so reading it here would find nothing and tear the popover down before
+      // the click that opens the note field ever landed.
+      if (popoverRef.current?.contains(lastPointerTarget.current)) return
       const found = anchorFromSelection(window.getSelection())
       if (!found) {
         setPending(null)
@@ -65,12 +73,32 @@ export function AnnotationPopover({
       setPending({ quote: found.quote, anchor: found.anchor, x: point.x, y: point.y })
     }
 
-    const onPointerUp = (): void => {
-      // Let the browser finish updating the selection before reading it.
-      requestAnimationFrame(read)
+    // Yield once so the browser has finished updating the selection, then read.
+    //
+    // A timeout rather than `requestAnimationFrame`: rAF is tied to painting,
+    // and a window that is hidden, minimised, or fully occluded may not paint
+    // for a long time — or at all. The popover has nothing to do with a frame
+    // being drawn, so waiting for one made it silently dead in exactly those
+    // cases, which is also why it never opened under the hidden E2E window.
+    const timers = new Set<ReturnType<typeof setTimeout>>()
+    const readSoon = (): void => {
+      const timer = setTimeout(() => {
+        timers.delete(timer)
+        read()
+      }, 0)
+      timers.add(timer)
+    }
+
+    const onPointerUp = (event: PointerEvent): void => {
+      lastPointerTarget.current = event.target as Node | null
+      readSoon()
     }
     const onKeyUp = (event: KeyboardEvent): void => {
-      if (event.shiftKey || event.key === 'Shift') requestAnimationFrame(read)
+      if (!event.shiftKey && event.key !== 'Shift') return
+      // Keyboard selection has no pointer behind it; a target left over from an
+      // earlier click would wrongly look like a press on the popover.
+      lastPointerTarget.current = null
+      readSoon()
     }
 
     document.addEventListener('pointerup', onPointerUp)
@@ -78,6 +106,10 @@ export function AnnotationPopover({
     return () => {
       document.removeEventListener('pointerup', onPointerUp)
       document.removeEventListener('keyup', onKeyUp)
+      // A pending read would otherwise land after the effect was torn down,
+      // reading a selection this listener no longer owns.
+      for (const timer of timers) clearTimeout(timer)
+      timers.clear()
     }
   }, [scrollRef, note])
 
