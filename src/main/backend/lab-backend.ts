@@ -122,6 +122,7 @@ export class LabBackend implements Backend {
   private healthy = false
   private readonly pendingPermissions = new Map<string, PendingPermission>()
   private readonly liveText = new Map<string, string>()
+  private readonly liveReasoning = new Map<string, string>()
   private threadBusHandler?: (call: ThreadBusToolCall) => Promise<unknown>
 
   constructor(options: LabBackendOptions = {}) {
@@ -329,6 +330,14 @@ export class LabBackend implements Backend {
         const text = `${this.liveText.get(messageId) ?? ''}${delta}`
         this.liveText.set(messageId, text)
         this.emit({ type: 'message.part.updated', part: { id: `${messageId}-text`, type: 'text', sessionID: _sessionId, messageID: messageId, text } })
+      },
+      onReasoningDelta: (_sessionId, messageId, delta) => {
+        // Reasoning streams the same way, as its own replaceable part — it is
+        // what the user watches during the long quiet rounds a reasoning model
+        // spends before its first token of answer.
+        const text = `${this.liveReasoning.get(messageId) ?? ''}${delta}`
+        this.liveReasoning.set(messageId, text)
+        this.emit({ type: 'message.part.updated', part: { id: `${messageId}-reasoning`, type: 'reasoning', sessionID: _sessionId, messageID: messageId, text } })
       },
       onToolPart: (_sessionId, part) => this.emit({ type: 'message.part.updated', part }),
       onTodos: (sessionId, todos) => this.emit({ type: 'session.todo.updated', sessionID: sessionId, todos }),

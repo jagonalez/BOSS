@@ -59,6 +59,9 @@ export class StreamText {
 
 export interface ChatStreamResult {
   content: string
+  /** Reasoning text streamed alongside the answer, under either provider
+   *  field name. Empty when the model did not reason. */
+  reasoning: string
   toolCalls: LabFunctionCall[]
   finishReason?: string
 }
@@ -74,6 +77,7 @@ export interface ChatStreamOptions {
    *  forever. Combined with `signal` if both are given. */
   timeoutMs?: number
   onText?: (delta: string) => void
+  onReasoning?: (delta: string) => void
   onToolCallDelta?: (delta: StreamedToolCallDelta) => void
   onFinishReason?: (reason: string) => void
 }
@@ -116,6 +120,7 @@ export async function streamChatCompletion(options: ChatStreamOptions): Promise<
   const accumulator = new ToolCallAccumulator()
   const textTracker = new StreamText()
   let content = ''
+  let reasoning = ''
 
   const handleData = (data: string): void => {
     const parsed = parseChatChunk(data)
@@ -124,6 +129,10 @@ export async function streamChatCompletion(options: ChatStreamOptions): Promise<
       const delta = textTracker.push(parsed.text)
       content += delta
       options.onText?.(delta)
+    }
+    if (parsed.reasoning) {
+      reasoning += parsed.reasoning
+      options.onReasoning?.(parsed.reasoning)
     }
     for (const delta of parsed.toolCalls ?? []) {
       accumulator.push(delta)
@@ -137,7 +146,7 @@ export async function streamChatCompletion(options: ChatStreamOptions): Promise<
     if (done) break
     const text = textDecoder.decode(value, { stream: true })
     for (const event of decoder.push(text)) {
-      if (event.type === 'done') return { content, toolCalls: accumulator.calls() }
+      if (event.type === 'done') return { content, reasoning, toolCalls: accumulator.calls() }
       handleData(event.data)
     }
   }
@@ -145,7 +154,7 @@ export async function streamChatCompletion(options: ChatStreamOptions): Promise<
   for (const event of decoder.flush()) {
     if (event.type === 'data') handleData(event.data)
   }
-  return { content, toolCalls: accumulator.calls() }
+  return { content, reasoning, toolCalls: accumulator.calls() }
 }
 
 /** Adapt an LLM server's model catalogue into BOSS model entries. Tries

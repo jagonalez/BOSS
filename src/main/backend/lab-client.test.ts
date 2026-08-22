@@ -105,6 +105,40 @@ test('streamChatCompletion returns reassembled tool calls', async () => {
   })
 })
 
+test('streamChatCompletion accumulates reasoning deltas alongside text', async () => {
+  const seenReasoning: string[] = []
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.write(chunk({ reasoning_content: 'think' }))
+    res.write(chunk({ reasoning_content: 'ing' }))
+    res.write(chunk({ content: 'answer' }, 'stop'))
+    res.write('data: [DONE]\n\n')
+    res.end()
+  }, async (baseUrl) => {
+    const result = await streamChatCompletion({
+      baseUrl,
+      model: 'm',
+      messages: [{ role: 'user', content: 'hi' }],
+      onReasoning: (delta) => seenReasoning.push(delta)
+    })
+    assert.equal(result.reasoning, 'thinking')
+    assert.equal(result.content, 'answer')
+    assert.deepEqual(seenReasoning, ['think', 'ing'])
+  })
+})
+
+test('streamChatCompletion returns empty reasoning when none streams', async () => {
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.write(chunk({ content: 'plain' }, 'stop'))
+    res.write('data: [DONE]\n\n')
+    res.end()
+  }, async (baseUrl) => {
+    const result = await streamChatCompletion({ baseUrl, model: 'm', messages: [] })
+    assert.equal(result.reasoning, '')
+  })
+})
+
 test('streamChatCompletion delivers live text and tool-call delta callbacks', async () => {
   const seenText: string[] = []
   const seenToolArgs: string[] = []

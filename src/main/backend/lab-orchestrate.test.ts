@@ -617,3 +617,113 @@ test('a thread tool call routes to the BOSS thread bus with the calling session 
     await fx.cleanup()
   }
 })
+
+test('reasoning streams through as its own persisted part', async () => {
+  const reasoningTurn = (res: ServerResponse): void => {
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'checking ' }, finish_reason: null }] })}\n\n`)
+    res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'the diff' }, finish_reason: null }] })}\n\n`)
+    res.write(textChunk('the answer'))
+    res.write(done())
+    res.end()
+  }
+
+  const fx = await fixture([reasoningTurn])
+  try {
+    const events: Array<{ type: string; part?: { type?: string; text?: string } }> = []
+    fx.backend.onEvent((event) => events.push(event as { type: string; part?: { type?: string; text?: string } }))
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'answer me' }], { mode: 'auto' })
+
+    const last = fx.readStore().messages(fx.sessionId).at(-1)
+    assert.equal(last?.info.role, 'assistant')
+    const reasoningPart = last?.parts.find((part) => part.type === 'reasoning')
+    assert.ok(reasoningPart, 'the reasoning should persist as a reasoning part')
+    assert.equal(reasoningPart.text, 'checking the diff')
+    // The answer is still there beside it.
+    assert.ok(last?.parts.some((part) => part.type === 'text' && part.text === 'the answer'))
+
+    // And it reached the renderer as replaceable part updates.
+    const reasoningEvents = events.filter((event) => event.type === 'message.part.updated' && event.part?.type === 'reasoning')
+    assert.ok(reasoningEvents.length >= 2)
+    assert.equal(reasoningEvents.at(-1)?.part?.text, 'checking the diff')
+  } finally {
+    await fx.cleanup()
+  }
+})
+
+test('an empty completion retries once and recovers', async () => {
+  const emptyTurn = (res: ServerResponse): void => {
+    res.write(done())
+    res.end()
+  }
+  const recoveredTurn = (res: ServerResponse): void => {
+    res.write(textChunk('recovered reply'))
+    res.write(done())
+    res.end()
+  }
+
+  const fx = await fixture([emptyTurn, recoveredTurn])
+  try {
+    const errors: string[] = []
+    fx.backend.onEvent((event) => {
+      if (event.type === 'session.error') errors.push(String((event as { error?: string }).error ?? ''))
+    })
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'hello' }], { mode: 'auto' })
+
+    // The blank round leaves nothing behind: one user message, one answer.
+    const messages = fx.readStore().messages(fx.sessionId)
+    assert.equal(messages.length, 2)
+    assert.equal(messages[1].parts[0].text, 'recovered reply')
+    assert.deepEqual(errors, [])
+  } finally {
+    await fx.cleanup()
+  }
+})
+
+test('a turn that never produces anything fails visibly instead of idling', async () => {
+  const emptyTurn = (res: ServerResponse): void => {
+    res.write(done())
+    res.end()
+  }
+
+  const fx = await fixture([emptyTurn, emptyTurn])
+  try {
+    const errors: Array<{ type: string; error?: string }> = []
+    fx.backend.onEvent((event) => errors.push(event as { type: string; error?: string }))
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'hello' }], { mode: 'auto' })
+
+    await poll(() => errors.find((event) => event.type === 'session.error'), Boolean)
+    const errorEvent = errors.find((event) => event.type === 'session.error')
+    assert.match(String(errorEvent?.error ?? ''), /empty response/i)
+  } finally {
+    await fx.cleanup()
+  }
+})
+
+test('a turn that did work but lost its final reply closes with a visible note', async () => {
+  const toolTurn = (res: ServerResponse): void => {
+    res.write(toolCallChunk({ id: 'bash-1', name: 'bash', arguments: '{"command":"echo hi"}' }))
+    res.write(done())
+    res.end()
+  }
+  const emptyTurn = (res: ServerResponse): void => {
+    res.write(done())
+    res.end()
+  }
+
+  const fx = await fixture([toolTurn, emptyTurn])
+  try {
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'run something' }], { mode: 'auto' })
+
+    await poll(() => fx.readStore().messages(fx.sessionId).at(-1), (last) =>
+      Boolean(last?.info.role === 'assistant' && last.parts.some((part) => part.type === 'text'))
+    )
+    const last = fx.readStore().messages(fx.sessionId).at(-1)
+    assert.equal(last?.info.role, 'assistant')
+    assert.ok(
+      last?.parts.some((part) => part.type === 'text' && part.text?.includes('ended its turn without a reply')),
+      'the transcript must show why the turn went quiet'
+    )
+  } finally {
+    await fx.cleanup()
+  }
+})
