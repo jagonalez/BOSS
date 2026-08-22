@@ -69,6 +69,18 @@ interface ThreadBinding {
   lineage?: SessionInfo['lineage']
   worktree?: WorktreeInfo
   followUps?: QueuedFollowUp[]
+  /** The assistant message an image part should attach itself to.
+   *
+   *  An image emitted as a part of its own still has to belong to a message,
+   *  and inventing an id for it puts it in a message that nothing else shares.
+   *  groupTurns only closes a turn on a user message, so such an orphan stays
+   *  in the open turn and is drawn again under every later reply until the
+   *  user speaks. Holding the last assistant message the backend reported
+   *  gives the image the same home as the tool that produced it.
+   *
+   *  Deliberately not persisted: it is only meaningful while a run is live,
+   *  and a reload rebuilds the transcript from the recorded parts anyway. */
+  lastAssistantMessageId?: string
   attention?: ThreadAttention
   policy?: TaskPolicy
   /** What the policy has already done for this thread. Separate from the
@@ -335,7 +347,10 @@ export class BackendManager {
         return { type: 'text', text: `[Image omitted: ${image.mimeType} could not be displayed.]` }
       }
       changed = true
-      this.emitImagePart(binding, tool, stored)
+      // The image came out of this tool part, so it belongs to the same
+      // message — no need to fall back to whichever assistant message is
+      // current.
+      this.emitImagePart(binding, tool, stored, typeof part.messageID === 'string' ? part.messageID : undefined)
       return { type: 'text', text: `[Image shown above: ${stored.mime}]` }
     })
     if (!changed) return part
@@ -343,12 +358,25 @@ export class BackendManager {
   }
 
   /** Record and announce one stored image as a part of its own. */
-  private emitImagePart(binding: ThreadBinding, tool: string, stored: { url: string; mime: string }): void {
+  private emitImagePart(binding: ThreadBinding, tool: string, stored: { url: string; mime: string }, messageId?: string): void {
+    // The message the image belongs to: the tool part's own when the image was
+    // lifted out of a tool result, otherwise the assistant message currently
+    // being written. A fresh id is the last resort rather than the default —
+    // it produces a message no other part shares, and since a turn is only
+    // closed by a user message, that orphan trails the open turn and is drawn
+    // again under every later reply until the user speaks.
+    const owner = messageId ?? binding.lastAssistantMessageId ?? `assistant-tool-image-${randomUUID()}`
+    // Named after the image it shows, not the moment it was emitted. The
+    // renderer replaces a part with the same id in the same message and appends
+    // anything else, so a random id made a re-reported image a second picture
+    // rather than the same one. The stored url is already unique per written
+    // image, which makes it the identity: emit the same image twice and the
+    // reader sees it once, while two different images stay two.
     const part: Part = {
-      id: `tool-image-${randomUUID()}`,
+      id: `tool-image-${stored.url}`,
       type: 'file',
       sessionID: binding.id,
-      messageID: `assistant-tool-image-${randomUUID()}`,
+      messageID: owner,
       state: { status: 'completed', name: tool, mime: stored.mime, url: stored.url }
     }
     this.transcripts?.recordPart(this.transcriptSource(binding), part)
@@ -1230,6 +1258,14 @@ export class BackendManager {
       if (part) properties.part = { ...part, sessionID: binding.id }
       if (messageInfo?.sessionID) properties.info = { ...messageInfo, sessionID: binding.id }
       if (eventType === 'message.updated' && properties.info) {
+        // Remember which assistant message is current so an image emitted as
+        // its own part can join it rather than a message of its own. Read from
+        // the same event the transcript records, so the id is one the renderer
+        // will group by and not a guess about the backend's naming.
+        const info = properties.info as MessageWithParts['info']
+        if (info.role === 'assistant' && typeof info.id === 'string' && info.id) {
+          binding.lastAssistantMessageId = info.id
+        }
         this.transcripts?.recordMessage(
           this.transcriptSource(binding),
           properties.info as MessageWithParts['info']
@@ -1252,6 +1288,10 @@ export class BackendManager {
       }
       if (eventType === 'session.status') {
         const status = (properties.status as { type?: string } | undefined)?.type
+        // A new run writes new messages, so the message an image should join is
+        // not known again until the backend reports one. Keeping the previous
+        // run's id would hang an image off a turn that has already been drawn.
+        if (status === 'busy') binding.lastAssistantMessageId = undefined
         if (status === 'busy' || status === 'retry') {
           if (!this.busyThreads.has(binding.id)) {
             this.transcripts?.beginRun(this.transcriptSource(binding))

@@ -171,3 +171,57 @@ test('a native steer the backend refuses leaves the message queued', () => {
     'a refused steer must fall back to sending the message as the next one'
   )
 })
+
+test('an image part joins a real message instead of one invented for it', () => {
+  // groupTurns closes a turn only on a user message, so an assistant message
+  // that nothing else shares never ends one: an image given a fresh messageID
+  // stayed in the open turn and was drawn again under every later reply until
+  // the user spoke. That is the repeated-screenshot report. The image has to
+  // land in the message that produced it.
+  const start = source.indexOf('private emitImagePart(')
+  assert.ok(start > 0, 'expected an emitImagePart method')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.ok(
+    !/messageID:\s*`assistant-tool-image-\$\{randomUUID\(\)\}`/.test(body),
+    'emitImagePart must not mint a message id as its default'
+  )
+  assert.ok(body.includes('messageID: owner'), 'the part should take the resolved owner')
+  assert.ok(
+    body.includes('messageId ?? binding.lastAssistantMessageId'),
+    'it should prefer the tool part\'s message, then the live assistant message'
+  )
+
+  // Lifting an image out of a tool result already knows the message: use it
+  // rather than falling back to whichever assistant message is current.
+  const extract = source.slice(source.indexOf('private extractToolResultImages('))
+  assert.ok(
+    /emitImagePart\(binding, tool, stored, typeof part\.messageID/.test(extract),
+    'a lifted image should be anchored to its own tool part'
+  )
+})
+
+test('a new run does not hang an image off the turn before it', () => {
+  // The anchor is only meaningful while the run that set it is live. Carrying
+  // it into the next run would attach a fresh image to a turn already drawn.
+  const status = source.slice(source.indexOf("if (eventType === 'session.status')"))
+  assert.ok(
+    /status === 'busy'\) binding\.lastAssistantMessageId = undefined/.test(status),
+    'a run going busy should clear the remembered message'
+  )
+})
+
+test('the same image reported twice is shown once, and two images stay two', () => {
+  // The renderer replaces a part carrying an id it already holds in that
+  // message and appends anything else, so a random id per emission turned one
+  // re-reported screenshot into a second picture. Naming the part after the
+  // stored image makes the identity the picture itself.
+  const body = source.slice(source.indexOf('private emitImagePart('))
+  assert.ok(
+    !/id:\s*`tool-image-\$\{randomUUID\(\)\}`/.test(body),
+    'an image part must not take a fresh id on every emission'
+  )
+  assert.ok(
+    body.includes('id: `tool-image-${stored.url}`'),
+    'the part id should follow the stored image, which is unique per written image'
+  )
+})

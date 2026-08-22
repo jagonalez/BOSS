@@ -102,3 +102,31 @@ test('a reloaded turn reports every message the user sent, not just the first', 
     'turnMessages should map every userMessage in the turn'
   )
 })
+
+test('a tool image becomes a content block rather than base64 in the text', () => {
+  // Codex hands an image back as the data URL BOSS sent it. Returning
+  // {text, images} put that URL somewhere neither the manager nor the renderer
+  // reads: the manager lifts an image only out of an array of content blocks,
+  // and the renderer stringifies an output it does not understand — so a
+  // screenshot arrived as a wall of base64 in the tool card. The block shape is
+  // the one Claude and MCP already use, which is what puts codex on the path
+  // that stores the bytes and shows the picture.
+  const start = source.indexOf('function dynamicToolOutput(')
+  assert.ok(start > 0, 'expected a dynamicToolOutput function')
+  const body = source.slice(start, source.indexOf('\n}', start))
+  assert.ok(
+    !/return\s*\{\s*text,\s*images\s*\}/.test(body),
+    'dynamicToolOutput must not return the shape nothing downstream reads'
+  )
+  assert.ok(
+    body.includes("{ type: 'text', text }"),
+    'the surviving text should be a text block'
+  )
+  assert.ok(body.includes('dataUrlImage('), 'an image should be split out of its data URL')
+
+  // The store is handed a mime and base64, so the data URL has to be taken
+  // apart rather than passed on whole.
+  const helper = source.slice(source.indexOf('function dataUrlImage('))
+  assert.ok(helper.includes("type: 'image'"), 'the block should be an image block')
+  assert.ok(/mimeType/.test(helper) && /data/.test(helper), 'it should carry mimeType and data')
+})
