@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate, McpTransport } from '@shared/mcp'
+import { formatArgs, parseArgs } from '@shared/mcp-args'
 import { OpenCode } from '../lib/opencode'
 import { refreshMcpConnections } from '../lib/actions'
 import { Button, StatusBadge, Select } from './ui'
@@ -91,11 +92,12 @@ function ConnectionForm({ initial, onClose }: { initial: FormState; onClose: () 
   const save = async (): Promise<void> => {
     setSaving(true)
     setError(null)
+    const args = parseArgs(form.args)
     const input: McpConnectionInput = {
       name: form.name,
       transport: form.transport,
       command: form.transport === 'stdio' ? form.command.trim() : undefined,
-      args: form.transport === 'stdio' && form.args.trim() ? form.args.trim().split(/\s+/) : undefined,
+      args: form.transport === 'stdio' && args.length ? args : undefined,
       env: form.transport === 'stdio' ? pairsToRecord(form.env) : undefined,
       url: form.transport === 'http' ? form.url.trim() : undefined,
       authToken: form.transport === 'http' ? form.authToken.trim() : undefined,
@@ -200,7 +202,7 @@ function ConnectionCard({ view, onEdit }: { view: McpConnectionView; onEdit: () 
   const [showTools, setShowTools] = useState(false)
   const { connection } = view
   const target = connection.transport === 'stdio'
-    ? [connection.command, ...(connection.args ?? [])].filter(Boolean).join(' ')
+    ? [connection.command, formatArgs(connection.args ?? [])].filter(Boolean).join(' ')
     : connection.url ?? ''
 
   const act = async (action: () => Promise<unknown>): Promise<void> => {
@@ -299,7 +301,7 @@ function ImportPanel({ onDone }: { onDone: () => void }): React.JSX.Element {
           <div className="command-session-main">
             <strong>{candidate.input.name}</strong>
             <small>{candidate.source} · {candidate.input.transport === 'stdio'
-              ? [candidate.input.command, ...(candidate.input.args ?? [])].join(' ')
+              ? [candidate.input.command, formatArgs(candidate.input.args ?? [])].filter(Boolean).join(' ')
               : candidate.input.url}</small>
           </div>
           <Button size="small" disabled={busy === candidate.input.name} onClick={() => void importCandidate(candidate)}>
@@ -356,7 +358,7 @@ export function McpSettings(): React.JSX.Element {
                   name: view.connection.name,
                   transport: view.connection.transport,
                   command: view.connection.command ?? '',
-                  args: (view.connection.args ?? []).join(' '),
+                  args: formatArgs(view.connection.args ?? []),
                   env: recordToPairs(view.connection.env),
                   url: view.connection.url ?? '',
                   authToken: view.connection.authToken ?? '',
