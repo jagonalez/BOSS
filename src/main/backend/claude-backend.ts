@@ -17,6 +17,7 @@ import { unpackedAsarPath } from './claude-executable'
 import { textFromParts } from './manager'
 import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
+import { toolLabel } from '@shared/tool-label'
 
 const requireFromMain = createRequire(import.meta.url)
 
@@ -89,7 +90,14 @@ function contentParts(sessionId: string, messageId: string, content: unknown): P
         type: 'tool' as const,
         sessionID: sessionId,
         messageID: messageId,
-        state: { status: 'running' as const, tool: String(item.name ?? 'tool'), input: item.input }
+        state: {
+          status: 'running' as const,
+          tool: String(item.name ?? 'tool'),
+          // Without a title the transcript heads every call with the tool's name, so a run of
+          // shell calls reads as "Bash" fifteen times. Codex already names its own this way.
+          title: toolLabel(String(item.name ?? ''), item.input),
+          input: item.input
+        }
       }]
     }
     if (item.type === 'tool_result') {
