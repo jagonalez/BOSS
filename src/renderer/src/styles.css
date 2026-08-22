@@ -11,11 +11,11 @@
   --text-faint: #8b94a1;
   --accent: #4f8cff;
   --accent-hover: #6ba1ff;
-  --accent-soft: rgba(79, 140, 255, 0.14);
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --green: #3fb950;
-  --green-soft: rgba(63, 185, 80, 0.14);
+  --green-soft: color-mix(in srgb, var(--green) 14%, transparent);
   --red: #f85149;
-  --red-soft: rgba(248, 81, 73, 0.14);
+  --red-soft: color-mix(in srgb, var(--red) 14%, transparent);
   --yellow: #d29922;
   --yellow-soft: rgba(187, 128, 9, 0.16);
   --purple: #8957e5;
@@ -134,7 +134,7 @@ textarea {
 .ui-button:disabled,
 .ui-icon-button:disabled,
 .ui-select:disabled { cursor: default; opacity: 0.46; }
-.ui-button-primary { border-color: color-mix(in srgb, var(--accent) 74%, var(--line-default)); color: #fff; background: var(--accent); }
+.ui-button-primary { border-color: color-mix(in srgb, var(--accent) 74%, var(--line-default)); color: var(--ink-on-accent); background: var(--accent); }
 .ui-button-primary:hover:not(:disabled) { border-color: var(--accent-hover); background: var(--accent-hover); }
 .ui-button-ghost { border-color: transparent; color: var(--text-muted); background: transparent; }
 .ui-button-danger { border-color: color-mix(in srgb, var(--red) 40%, var(--line-default)); color: var(--red); background: var(--red-soft); }
@@ -328,7 +328,7 @@ textarea {
   gap: 8px;
   width: 100%;
   background: var(--accent-soft);
-  border: 1px solid rgba(79, 140, 255, 0.35);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   color: var(--accent-hover);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
@@ -339,7 +339,7 @@ textarea {
 }
 
 .btn-new:hover {
-  background: rgba(79, 140, 255, 0.22);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .section-label {
@@ -1763,7 +1763,7 @@ textarea {
   border: 1px solid var(--line-default);
   border-radius: var(--radius);
   background: var(--surface-pane);
-  box-shadow: 0 15px 44px rgba(0, 0, 0, 0.42);
+  box-shadow: var(--shadow-lg);
 }
 
 .workspace-layout-menu button {
@@ -2244,7 +2244,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-menu);
   z-index: 200;
 }
 
@@ -2411,9 +2411,9 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .backend-badge.backend-opencode { color: var(--accent); }
-.backend-badge.backend-pi { color: #d4a75e; }
-.backend-badge.backend-codex { color: #77c7a4; }
-.backend-badge.backend-claude { color: #d8916f; }
+.backend-badge.backend-pi { color: var(--backend-pi); }
+.backend-badge.backend-codex { color: var(--backend-codex); }
+.backend-badge.backend-claude { color: var(--backend-claude); }
 
 .workspace-tab .backend-badge {
   height: 17px;
@@ -2581,7 +2581,7 @@ body.workspace-dragging .workspace-tab-slot {
   border: 1px solid var(--line-default);
   border-radius: var(--radius);
   background: var(--surface-pane);
-  box-shadow: 0 15px 44px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-lg);
 }
 
 .workspace-group.menu-anchored .workspace-add-menu {
@@ -3148,8 +3148,8 @@ body.workspace-dragging .workspace-tab-slot {
   margin: 2px 0 4px;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
-  color: var(--yellow, #b58900);
-  background: color-mix(in srgb, var(--yellow, #b58900) 12%, transparent);
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
   font-size: 12px;
 }
 
@@ -3242,7 +3242,7 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .automation-run.attention .automation-run-summary {
-  color: var(--yellow, #b58900);
+  color: var(--yellow);
 }
 
 .mcp-form,
@@ -3625,6 +3625,8 @@ body.workspace-dragging .workspace-tab-slot {
   grid-template-columns: 28% 1fr;
   min-height: 58px;
   overflow: hidden;
+  /* Neutral on purpose: this frames a swatch of every theme, so it cannot take its colour from
+     the theme currently applied without disappearing into one of them. */
   border: 1px solid rgba(127, 127, 127, 0.22);
   border-radius: 6px;
 }
@@ -3701,7 +3703,7 @@ body.workspace-dragging .workspace-tab-slot {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-menu);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -3785,7 +3787,7 @@ body.workspace-dragging .workspace-tab-slot {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-elevated);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-menu);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -3991,12 +3993,12 @@ body.workspace-dragging .workspace-tab-slot {
 
 .item .badge.fork {
   color: var(--purple);
-  background: rgba(137, 87, 229, 0.15);
+  background: color-mix(in srgb, var(--purple) 15%, transparent);
 }
 
 .item .badge.worktree {
   color: var(--green);
-  background: rgba(61, 184, 122, 0.14);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
 }
 
 .item .badge.worktree.removed {
@@ -4044,12 +4046,12 @@ body.workspace-dragging .workspace-tab-slot {
 
 .connection-state.connected {
   color: var(--green);
-  background: rgba(61, 184, 122, 0.14);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
 }
 
 .connection-state.not-connected {
   color: var(--yellow);
-  background: rgba(210, 153, 34, 0.14);
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
 }
 
 .item .badge.side {
@@ -4351,12 +4353,12 @@ body.workspace-dragging .workspace-tab-slot {
 
 .status-dot.ok {
   background: var(--green);
-  box-shadow: 0 0 6px rgba(63, 185, 80, 0.5);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--green) 50%, transparent);
 }
 
 .status-dot.bad {
   background: var(--red);
-  box-shadow: 0 0 6px rgba(248, 81, 73, 0.5);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--red) 50%, transparent);
 }
 
 .status-dot.pulse {
@@ -4482,23 +4484,23 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .attention-pill.permission {
-  color: #f5b83d;
-  border-color: rgba(245, 184, 61, 0.45);
+  color: var(--yellow);
+  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
 }
 
 .attention-pill.question {
-  color: #6fb3f5;
-  border-color: rgba(111, 179, 245, 0.45);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .attention-pill.error {
-  color: #f0656f;
-  border-color: rgba(240, 101, 111, 0.45);
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
 }
 
 .attention-pill.done {
   color: var(--accent-hover);
-  border-color: rgba(79, 140, 255, 0.45);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .attention-dot {
@@ -4509,15 +4511,15 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .attention-dot.permission {
-  background: #f5b83d;
+  background: var(--yellow);
 }
 
 .attention-dot.question {
-  background: #6fb3f5;
+  background: var(--accent);
 }
 
 .attention-dot.error {
-  background: #f0656f;
+  background: var(--red);
 }
 
 .attention-dot.done {
@@ -4720,7 +4722,7 @@ body.workspace-dragging .workspace-tab-slot {
   font-weight: 600;
   color: var(--accent-hover);
   background: var(--accent-soft);
-  border: 1px solid rgba(79, 140, 255, 0.25);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   padding: 2px 9px;
   border-radius: 999px;
   width: fit-content;
@@ -5098,11 +5100,11 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .step-card.running {
-  border-color: rgba(79, 140, 255, 0.35);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .step-card.failed {
-  border-color: rgba(248, 81, 73, 0.4);
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
 }
 
 .step-card-head {
@@ -5676,7 +5678,7 @@ body.workspace-dragging .workspace-tab-slot {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-menu);
   padding: 4px;
   z-index: 120;
   display: flex;
@@ -5866,6 +5868,7 @@ body.workspace-dragging .workspace-tab-slot {
   height: 18px;
   border-radius: 50%;
   border: none;
+  /* A scrim over the user's own image, which is not a themed surface. */
   background: rgba(0, 0, 0, 0.7);
   color: #fff;
   font-size: 12px;
@@ -5918,7 +5921,7 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .composer-mic.active {
-  color: #fff;
+  color: var(--ink-on-danger);
   background: var(--red);
   animation: mic-pulse 1.4s ease-in-out infinite;
 }
@@ -5931,10 +5934,10 @@ body.workspace-dragging .workspace-tab-slot {
 @keyframes mic-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.45);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 45%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(248, 81, 73, 0);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--red) 0%, transparent);
   }
 }
 
@@ -5945,7 +5948,7 @@ body.workspace-dragging .workspace-tab-slot {
   max-width: 780px;
   margin: 0 auto 10px;
   background: var(--red-soft);
-  border: 1px solid rgba(248, 81, 73, 0.35);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
   border-radius: var(--radius);
   padding: 8px 12px;
   font-size: 12.5px;
@@ -5957,7 +5960,7 @@ body.workspace-dragging .workspace-tab-slot {
   height: 18px;
   border-radius: 50%;
   background: var(--red);
-  color: #fff;
+  color: var(--ink-on-danger);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5973,7 +5976,7 @@ body.workspace-dragging .workspace-tab-slot {
 
 .chat-error-retry {
   background: transparent;
-  border: 1px solid rgba(248, 81, 73, 0.45);
+  border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
   border-radius: var(--radius);
   color: var(--red);
   font-size: 12px;
@@ -5984,7 +5987,7 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .chat-error-retry:hover {
-  background: rgba(248, 81, 73, 0.12);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
 }
 
 .chat-error-close {
@@ -6003,7 +6006,7 @@ body.workspace-dragging .workspace-tab-slot {
   gap: 12px;
   padding: 8px 16px;
   background: var(--yellow);
-  color: #1a1400;
+  color: var(--ink-on-warning);
   font-size: 12.5px;
   font-weight: 600;
   flex-shrink: 0;
@@ -6011,13 +6014,13 @@ body.workspace-dragging .workspace-tab-slot {
 
 .reverted-banner .btn-ghost {
   margin-left: auto;
-  color: #1a1400;
-  border-color: rgba(26, 20, 0, 0.4);
+  color: var(--ink-on-warning);
+  border-color: color-mix(in srgb, var(--ink-on-warning) 40%, transparent);
 }
 
 .reverted-banner .btn-ghost:hover {
-  color: #000;
-  border-color: #1a1400;
+  color: var(--ink-on-warning);
+  border-color: var(--ink-on-warning);
 }
 
 /* Pinned to the foot of the scroller, not to the end of the transcript. It
@@ -6144,7 +6147,7 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .todo-item.completed .todo-check {
-  color: var(--ok, #2fbf71);
+  color: var(--green);
 }
 
 .compaction-divider {
@@ -6303,7 +6306,7 @@ select:hover {
 
 .btn-send {
   background: var(--accent);
-  color: #fff;
+  color: var(--ink-on-accent);
   border: none;
   border-radius: 10px;
   padding: 8px;
@@ -6788,8 +6791,8 @@ select:hover {
 
 .git-review.stale {
   color: var(--yellow);
-  border-color: rgba(210, 153, 34, 0.4);
-  background: rgba(210, 153, 34, 0.1);
+  border-color: color-mix(in srgb, var(--yellow) 40%, transparent);
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
 }
 
 .git-scope {
@@ -7726,7 +7729,7 @@ select:hover {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-menu);
   padding: 4px;
   z-index: 120;
   display: flex;
@@ -7930,6 +7933,7 @@ select:hover {
 .modal-backdrop {
   position: fixed;
   inset: 0;
+  /* Dimming the app behind a modal, which is a scrim rather than a surface. */
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
   display: flex;
@@ -7951,7 +7955,7 @@ select:hover {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-xl);
 }
 
 .modal h3 {
@@ -8184,7 +8188,7 @@ select:hover {
 
 .btn-allow {
   background: var(--accent);
-  color: #fff;
+  color: var(--ink-on-accent);
   border: none;
   border-radius: var(--radius-sm);
   padding: 8px 16px;
@@ -8210,7 +8214,7 @@ select:hover {
   align-items: flex-start;
   gap: 8px;
   background: var(--red-soft);
-  border: 1px solid rgba(248, 81, 73, 0.35);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
   font-size: 13px;
@@ -8251,7 +8255,7 @@ select:hover {
   height: 16px;
   border-radius: 50%;
   background: var(--red);
-  color: #fff;
+  color: var(--ink-on-danger);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8266,7 +8270,7 @@ select:hover {
   align-items: center;
   gap: 4px;
   background: transparent;
-  border: 1px solid rgba(248, 81, 73, 0.35);
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
   color: var(--red);
   font-size: 12px;
   font-weight: 600;
@@ -8308,7 +8312,7 @@ select:hover {
   width: 100%;
   max-width: 780px;
   margin: 0 auto;
-  border: 1px solid rgba(245, 184, 61, 0.4);
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent);
   border-radius: var(--radius);
   background: var(--bg-elevated);
   padding: 10px 12px;
@@ -8328,7 +8332,7 @@ select:hover {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #f5b83d;
+  background: var(--yellow);
   flex-shrink: 0;
 }
 
@@ -8370,7 +8374,7 @@ select:hover {
   width: 100%;
   max-width: 780px;
   margin: 0 auto;
-  border: 1px solid rgba(129, 140, 248, 0.4);
+  border: 1px solid color-mix(in srgb, var(--purple) 40%, transparent);
   border-radius: var(--radius);
   background: var(--bg-elevated);
   padding: 10px 12px;
@@ -8584,8 +8588,8 @@ select:hover {
   height: 6px;
   flex: 0 0 6px;
   border-radius: 50%;
-  background: var(--warning, #d6a657);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--warning, #d6a657) 18%, transparent);
+  background: var(--yellow);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--yellow) 18%, transparent);
 }
 
 .update-banner {
@@ -8609,7 +8613,7 @@ select:hover {
   border-radius: var(--radius-sm);
   padding: 4px 12px;
   background: var(--accent);
-  color: #fff;
+  color: var(--ink-on-accent);
   font-size: var(--type-control);
   cursor: pointer;
 }
@@ -8645,7 +8649,7 @@ select:hover {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md, var(--radius-sm));
   background: var(--surface-raised, var(--surface-inset));
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.32);
+  box-shadow: var(--shadow-md);
   font-size: var(--type-control);
   color: var(--text-muted);
 }
@@ -8755,10 +8759,10 @@ select:hover {
    pixel while the label collapsed to an ellipsis around it. The colours are
    the ones the badge already used, so a mark that reads poorly at 13px still
    carries its backend as colour. */
-.workspace-tab-icon.backend-claude { color: #d8916f; }
-.workspace-tab-icon.backend-codex { color: #77c7a4; }
+.workspace-tab-icon.backend-claude { color: var(--backend-claude); }
+.workspace-tab-icon.backend-codex { color: var(--backend-codex); }
 .workspace-tab-icon.backend-opencode { color: var(--accent); }
-.workspace-tab-icon.backend-pi { color: #d4a75e; }
+.workspace-tab-icon.backend-pi { color: var(--backend-pi); }
 
 /* Drop the words before the close button. A tab you cannot read is a nuisance;
    a tab you cannot close is a trap, and the close was what got squeezed out
@@ -8807,7 +8811,7 @@ select:hover {
   border: 1px solid var(--line-default);
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-menu, 0 10px 30px rgb(0 0 0 / 0.35));
+  box-shadow: var(--shadow-menu);
 }
 
 .workspace-tab-overflow-filter {
@@ -8971,7 +8975,9 @@ select:hover {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background-color: var(--bg-inset, rgba(0, 0, 0, 0.18));
+  background-color: var(--bg-inset);
+  /* The checkerboard that means "transparent". Neutral grey reads on both a light and a dark
+     inset, and it is a convention rather than part of the palette. */
   background-image:
     linear-gradient(45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
     linear-gradient(-45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
@@ -8989,14 +8995,14 @@ select:hover {
   object-fit: contain;
   image-rendering: auto;
   border-radius: 4px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-sm);
 }
 
 .file-preview-frame {
   flex: 1;
   width: 100%;
   border: 0;
-  background: var(--bg-elevated, #fff);
+  background: var(--bg-elevated);
   min-height: 0;
 }
 
@@ -9025,7 +9031,7 @@ select:hover {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-menu);
   padding: 4px;
   /* Above `.ctx-menu` (200). Both are fixed and both aim at the cursor, so a
      right-click that opens the message menu over a live selection would
@@ -9098,7 +9104,7 @@ select:hover {
   height: 16px;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: var(--ink-on-accent);
   font-size: 10px;
   font-weight: 600;
 }

@@ -35,3 +35,29 @@ test('every theme gives diff text WCAG-readable contrast', () => {
     }
   }
 })
+
+test('every theme gives ink on a filled control WCAG-readable contrast', () => {
+  // A primary button, an allow button, a mic indicator and a revert banner all draw text on top of
+  // a filled accent, danger or warning. That ink used to be #fff for everyone, which failed on
+  // every theme whose accent is a pale blue — boss-dark's was 2.53:1 against a required 4.5.
+  for (const theme of THEMES) {
+    for (const [fill, ink, name] of [
+      [theme.colors.accent, theme.colors.accentInk, 'accent'],
+      [theme.colors.danger, theme.colors.dangerInk, 'danger'],
+      [theme.colors.warning, theme.colors.warningInk, 'warning']
+    ] as const) {
+      const ratio = contrast(ink, fill)
+      assert.ok(ratio >= 4.5, `${theme.id} ${name}: ink ${ink} on ${fill} is ${ratio.toFixed(2)}:1, want >= 4.5`)
+    }
+  }
+})
+
+test('every theme names a backend hue', () => {
+  // Badges and tabs drew the same agent in the same frozen hue, in two places. They now share a
+  // token, so a theme that wants its own must be able to say so.
+  for (const theme of THEMES) {
+    for (const hue of [theme.colors.backendClaude, theme.colors.backendCodex, theme.colors.backendPi]) {
+      assert.match(hue, /^#[0-9a-f]{6}$/i, `${theme.id} should name an opaque backend hue`)
+    }
+  }
+})
