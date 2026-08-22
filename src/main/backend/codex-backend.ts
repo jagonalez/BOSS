@@ -9,6 +9,7 @@ import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from '@shared/sandbox'
+import { toolLabel } from '@shared/tool-label'
 
 type RpcId = string | number
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
@@ -277,7 +278,8 @@ function itemPart(sessionId: string, messageId: string, item: CodexItem): Part |
       state: {
         status: item.status === 'failed' ? 'error' : item.status === 'completed' ? 'completed' : 'running',
         tool: item.name ?? 'tool',
-        title: item.name,
+        // The name alone repeats down the transcript; the argument is what tells two calls apart.
+        title: toolLabel(String(item.name ?? ''), item.input) ?? item.name,
         input: item.input
       }
     }
