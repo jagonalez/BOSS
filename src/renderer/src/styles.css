@@ -9014,7 +9014,11 @@ select:hover {
   border-radius: var(--radius-sm);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   padding: 4px;
-  z-index: 200;
+  /* Above `.ctx-menu` (200). Both are fixed and both aim at the cursor, so a
+     right-click that opens the message menu over a live selection would
+     otherwise bury this toolbar — `.ctx-menu` renders later in ChatView and
+     would win the tie. */
+  z-index: 210;
 }
 
 .annotation-action {

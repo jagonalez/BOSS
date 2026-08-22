@@ -17,7 +17,8 @@ import { segmentTurn } from '../lib/part-runs'
 import { AnnotationHighlights } from './AnnotationHighlights'
 import { AnnotationPopover } from './AnnotationPopover'
 import { AnnotationRow } from './AnnotationRow'
-import { createAnnotation, type Annotation } from '@shared/annotations'
+import { createAnnotation, type Annotation, type AnnotationAnchor } from '@shared/annotations'
+import { anchorFromSelection } from '../lib/annotation-anchor'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -1295,7 +1296,13 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
    *  the follow observer must not be torn down every time this flips, and it
    *  is decided by the user scrolling rather than by a render. */
   const followRef = useRef(true)
-  const [msgCtx, setMsgCtx] = useState<{ x: number; y: number; message: MessageWithParts } | null>(null)
+  const [msgCtx, setMsgCtx] = useState<{
+    x: number
+    y: number
+    message: MessageWithParts
+    /** The passage selected when the menu opened, if it sits in this message. */
+    selection: { quote: string; anchor: AnnotationAnchor } | null
+  } | null>(null)
   const msgCtxRef = useRef<HTMLDivElement>(null)
   const launcherProject = useStore(appStore, (s) => s.launcherProject)
 
@@ -1535,7 +1542,20 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
 
   const onMsgCtx = useCallback((e: React.MouseEvent, message: MessageWithParts): void => {
     e.preventDefault()
-    setMsgCtx({ x: e.clientX, y: e.clientY, message })
+    // Read the selection now, not when the item is clicked. Opening the menu
+    // moves focus and a later click on the item collapses the selection, so by
+    // then there is nothing left to annotate.
+    const found = anchorFromSelection(window.getSelection())
+    // Only offer the passage if it belongs to the message actually
+    // right-clicked; a selection left over in a different message would attach
+    // the note to words this menu does not describe.
+    const selection = found && found.anchor.messageId === message.info.id ? found : null
+    setMsgCtx({
+      x: e.clientX,
+      y: e.clientY,
+      message,
+      selection: selection ? { quote: selection.quote, anchor: selection.anchor } : null
+    })
   }, [])
 
   const menuText = msgCtx ? msgText(msgCtx.message) : ''
@@ -1708,6 +1728,24 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
               }}
             >
               Edit in new branch…
+            </button>
+          ) : null}
+          {/* The affordance people reach for first. The selection toolbar is
+              easy to miss, so the passage is annotatable from the menu too —
+              absent, rather than inert, when there is nothing selected here. */}
+          {msgCtx.selection ? (
+            <button
+              className="ctx-item"
+              onClick={() => {
+                const selected = msgCtx.selection
+                if (selected && effectiveId) {
+                  addAnnotation(effectiveId, selected.quote, selected.anchor, '')
+                  window.getSelection()?.removeAllRanges()
+                }
+                setMsgCtx(null)
+              }}
+            >
+              Annotate
             </button>
           ) : null}
           <button
