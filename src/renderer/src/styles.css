@@ -887,51 +887,103 @@ textarea {
   min-width: 0;
 }
 
-/* Lab is configured directly in BOSS instead of through a provider CLI, so
-   its connection form spans the row beneath the shared model controls. */
-.lab-connection {
+/* Lab owns API credentials directly, and may have several endpoints. */
+.lab-connections {
   display: flex;
   grid-column: 1 / -1;
   flex-direction: column;
   gap: 10px;
-  padding-top: 2px;
+  padding-top: 12px;
   border-top: 1px solid var(--line-subtle);
 }
 
-.lab-connection-heading {
+.lab-connections-heading,
+.lab-connection-card {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.lab-connection-statuses {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 5px;
-}
-
-.lab-connection-heading h3 {
+.lab-connections-heading h3 {
   margin: 0;
-  font-size: 12px;
+  color: var(--text);
+  font-size: 12.5px;
 }
 
-.lab-connection-heading p {
+.lab-connections-heading p,
+.lab-connection-help {
   margin: 3px 0 0;
   color: var(--text-faint);
   font-size: 11.5px;
   line-height: 1.45;
 }
 
-.lab-connection-heading code {
+.lab-connections-heading code,
+.lab-connection-help code,
+.lab-connection-card code {
   font-family: var(--font-mono);
   font-size: 0.95em;
 }
 
+.lab-connections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.lab-connection-card,
+.lab-connection-editor,
+.lab-connections-empty {
+  padding: 10px 11px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-pane);
+}
+
+.lab-connection-card-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.lab-connection-card-copy strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.lab-connection-card-copy code,
+.lab-connection-card-copy small,
+.lab-connections-empty {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lab-connection-statuses,
+.lab-connection-card-actions,
+.lab-connection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lab-connection-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface-pane));
+}
+
 .lab-connection-fields {
   display: grid;
-  grid-template-columns: minmax(190px, 1.4fr) minmax(145px, 1fr) minmax(180px, 1.2fr);
+  grid-template-columns: minmax(150px, 0.7fr) minmax(210px, 1.3fr) minmax(190px, 1fr);
   gap: 10px;
 }
 
@@ -953,11 +1005,13 @@ textarea {
   font-weight: 400;
 }
 
-.lab-connection-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
+.lab-connection-fields .lab-models-field {
+  grid-column: 1 / -1;
+}
+
+.lab-models-field textarea {
+  min-height: 54px;
+  resize: vertical;
 }
 
 .settings-runtime-restart {
@@ -1378,8 +1432,17 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .lab-connections-heading,
+  .lab-connection-card {
+    flex-direction: column;
+  }
+
   .lab-connection-fields {
     grid-template-columns: 1fr;
+  }
+
+  .lab-connection-fields .lab-models-field {
+    grid-column: auto;
   }
 
   .settings-runtime,

@@ -193,25 +193,38 @@ async function configureLabDefaults(page: Parameters<typeof control>[0]): Promis
   await row.getByRole('button', { name: /Lab E2E/ }).click()
 }
 
-test('configures a Lab endpoint and key from Models & connections', async ({ appPage }) => {
+test('adds a named Lab API, key, and model from Models & connections', async ({ appPage }) => {
   await openSettings(appPage)
   const row = appPage.locator('.settings-connection-row').filter({ hasText: 'Lab' })
-  const form = row.getByRole('region', { name: 'Lab connection' })
-  await expect(form).toBeVisible()
+  const connections = row.getByRole('region', { name: 'Lab API connections' })
+  await expect(connections).toBeVisible()
+  await connections.getByRole('button', { name: 'Add connection' }).click()
 
-  await form.getByLabel('Lab endpoint URL').fill('https://models.example.test')
-  await form.getByLabel('Lab endpoint model').fill('coding-model')
-  await form.getByLabel('Lab API key').fill('test-key')
-  await form.getByRole('button', { name: 'Save & test' }).click()
+  const editor = connections.getByRole('region', { name: 'Add Lab connection' })
+  await editor.getByLabel('Lab connection name').fill('Cloud test')
+  await editor.getByLabel('Lab endpoint URL').fill('https://models.example.test/v1')
+  await editor.getByLabel('Lab API key').fill('test-key')
+  await editor.getByLabel('Lab manual models').fill('coding-model')
+  await editor.getByRole('button', { name: 'Save & test' }).click()
 
-  const call = await lastBackendCall(appPage, 'lab.connection.set')
+  const call = await lastBackendCall(appPage, 'lab.connection.save')
   expect(call.request).toEqual({
-    type: 'lab.connection.set',
-    settings: { baseUrl: 'https://models.example.test', model: 'coding-model', apiKey: 'test-key' }
+    type: 'lab.connection.save',
+    connection: {
+      name: 'Cloud test',
+      baseUrl: 'https://models.example.test/v1',
+      manualModels: ['coding-model'],
+      apiKey: 'test-key'
+    }
   })
-  await expect(form).toContainText('Endpoint ready')
-  await expect(form).toContainText('API key saved')
-  await expect(form.getByRole('button', { name: 'Clear saved key' })).toBeVisible()
+  const card = connections.getByRole('article', { name: 'Cloud test Lab connection' })
+  await expect(card).toContainText('Ready')
+  await expect(card).toContainText('Key saved')
+  await expect(card).toContainText('coding-model')
+
+  await row.locator('.settings-model-picker-trigger').click()
+  await row.getByRole('button', { name: /coding-model/ }).click()
+  await expect(row.locator('.settings-model-picker-trigger')).toContainText('Cloud test')
 })
 
 test('quick-create with Lab uses the drop-in backend and its default model', async ({ appPage }) => {

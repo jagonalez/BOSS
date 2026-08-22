@@ -61,7 +61,7 @@ export function ModelSelect({
     : undefined
   const normalizedQuery = query.trim().toLowerCase()
   const visibleModels = normalizedQuery
-    ? models.filter((model) => `${model.name ?? ''} ${model.id} ${model.provider ?? backendId}`.toLowerCase().includes(normalizedQuery))
+    ? models.filter((model) => `${model.name ?? ''} ${model.id} ${model.providerName ?? model.provider ?? backendId}`.toLowerCase().includes(normalizedQuery))
     : models
   const grouped = new Map<string, BackendModelDescriptor[]>()
   for (const model of visibleModels) {
@@ -86,7 +86,7 @@ export function ModelSelect({
       >
         <span>
           <strong>{loading ? 'Loading models…' : selectedModel?.name || selected?.modelID || (models.length ? emptyLabel : 'No models available')}</strong>
-          {selected ? <small>{selected.providerID}{selectedModel && modelIsLocal(selectedModel, backendId) ? ' · Local' : ''}</small> : null}
+          {selected ? <small>{selectedModel?.providerName ?? selected.providerID}{selectedModel && modelIsLocal(selectedModel, backendId) ? ' · Local' : ''}</small> : null}
         </span>
         <span className="settings-model-picker-chevron">⌄</span>
       </button>
@@ -128,7 +128,7 @@ export function ModelSelect({
             }).map(([provider, items]) => (
               <div className="settings-model-provider" key={provider}>
                 <div className="settings-model-provider-heading">
-                  <span>{provider}</span>
+                  <span>{items[0]?.providerName ?? provider}</span>
                   {items.some((model) => modelIsLocal(model, backendId)) ? <em>Local</em> : null}
                 </div>
                 {[...items].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((model) => {

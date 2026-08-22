@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { chmodSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
-import type { BackendMessageOptions, BackendModeId, LabConnectionSettings, LabConnectionUpdate } from '@shared/backend'
+import type { BackendMessageOptions, BackendModeId, LabConnection, LabConnectionModel, LabConnectionsSettings, LabConnectionUpdate } from '@shared/backend'
 import type { EventMessage, FileContent, FileDiff, FileNode, MessageWithParts, SessionInfo, Todo } from '@shared/opencode'
 import type { ThreadBusToolCall } from '@shared/thread-bus'
 // @ts-expect-error Application builds use bundler resolution.
@@ -33,7 +33,18 @@ export interface LabBackendOptions {
   secretFile?: string
 }
 
+interface StoredLabConnection {
+  id: string
+  name: string
+  baseUrl: string
+  manualModels: string[]
+  models: LabConnectionModel[]
+}
+
 interface StoredLabConfig {
+  version?: number
+  connections?: StoredLabConnection[]
+  /** Version-one singleton fields, migrated as the stable default connection. */
   baseUrl?: string
   model?: string
 }
@@ -41,13 +52,19 @@ interface StoredLabConfig {
 function storedConfig(file: string): StoredLabConfig {
   try {
     const value = JSON.parse(readFileSync(file, 'utf8')) as StoredLabConfig
-    return {
-      ...(typeof value.baseUrl === 'string' ? { baseUrl: value.baseUrl } : {}),
-      ...(typeof value.model === 'string' ? { model: value.model } : {})
-    }
+    return value && typeof value === 'object' ? value : {}
   } catch {
     return {}
   }
+}
+
+function uniqueModels(models: LabConnectionModel[]): LabConnectionModel[] {
+  const byId = new Map<string, LabConnectionModel>()
+  for (const model of models) {
+    const id = model.id.trim()
+    if (id && !byId.has(id)) byId.set(id, { ...model, id })
+  }
+  return [...byId.values()]
 }
 
 export function normaliseLabEndpoint(value: string): string {
@@ -61,8 +78,9 @@ export function normaliseLabEndpoint(value: string): string {
     throw new Error('Lab endpoints must use http:// or https://.')
   }
   if (url.search || url.hash) throw new Error('The endpoint URL cannot include a query or fragment.')
+  // A host-only URL gets the conventional OpenAI root. Preserve an explicit
+  // path because gateways and compatibility layers often use a custom one.
   url.pathname = url.pathname.replace(/\/+$/, '') || '/v1'
-  if (!url.pathname.endsWith('/v1')) url.pathname = `${url.pathname}/v1`
   return url.toString().replace(/\/$/, '')
 }
 
@@ -96,7 +114,9 @@ export class LabBackend implements Backend {
   private readonly storeFile: string
   private readonly configFile: string
   private readonly secretFile: string
-  private config: LabEnvConfig
+  private readonly baseConfig: LabEnvConfig
+  private connections: LabConnection[]
+  private apiKeys: Record<string, string>
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
   private healthy = false
@@ -108,7 +128,9 @@ export class LabBackend implements Backend {
     this.storeFile = options.storeFile ?? userDataFile('lab-threads.json')
     this.configFile = options.configFile ?? userDataFile('lab-config.json')
     this.secretFile = options.secretFile ?? userDataFile('lab-api-key.bin')
-    this.config = this.connectionConfig()
+    this.baseConfig = configFromEnv()
+    this.apiKeys = this.savedApiKeys()
+    this.connections = this.loadConnections()
     this.engine = this.createEngine()
     void this.refreshHealth()
   }
@@ -117,7 +139,7 @@ export class LabBackend implements Backend {
     return new LabEngine({
       storeFile: this.storeFile,
       configFile: this.configFile,
-      config: this.config,
+      config: this.baseConfig,
       sink: this.sink(),
       gate: { request: (sessionId, call, args, signal) => this.requestPermission(sessionId, call, args, signal) },
       // The thread bus reaches Lab as external tools rather than over MCP: Lab
@@ -139,63 +161,156 @@ export class LabBackend implements Backend {
     })
   }
 
-  private savedApiKey(): string | undefined {
+  private savedApiKeys(): Record<string, string> {
     try {
       const { safeStorage } = nodeRequire('electron') as typeof import('electron')
-      if (!safeStorage.isEncryptionAvailable()) return undefined
-      return safeStorage.decryptString(readFileSync(this.secretFile)).trim() || undefined
-    } catch {
-      return undefined
-    }
-  }
-
-  private connectionConfig(): LabEnvConfig {
-    const environment = configFromEnv()
-    const stored = storedConfig(this.configFile)
-    return {
-      ...environment,
-      ...(stored.baseUrl ? { baseUrl: normaliseLabEndpoint(stored.baseUrl) } : {}),
-      ...(stored.model?.trim() ? { defaultModel: stored.model.trim() } : {}),
-      ...(this.savedApiKey() ? { apiKey: this.savedApiKey() } : {})
-    }
-  }
-
-  labConnection(): LabConnectionSettings {
-    return {
-      baseUrl: this.config.baseUrl,
-      model: this.config.defaultModel,
-      apiKeyConfigured: Boolean(this.config.apiKey),
-      healthy: this.healthy
-    }
-  }
-
-  async setLabConnection(settings: LabConnectionUpdate): Promise<LabConnectionSettings> {
-    const baseUrl = normaliseLabEndpoint(settings.baseUrl)
-    const model = settings.model.trim()
-    if (!model) throw new Error('Enter the model name to use with this endpoint.')
-    if (settings.apiKey !== undefined && settings.clearApiKey) {
-      throw new Error('Set a new API key or clear the saved key, not both.')
-    }
-    if (settings.apiKey !== undefined) {
-      const apiKey = settings.apiKey.trim()
-      if (!apiKey) throw new Error('Enter an API key or use Clear saved key.')
-      const { safeStorage } = nodeRequire('electron') as typeof import('electron')
-      if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this system.')
-      writeFileSync(this.secretFile, safeStorage.encryptString(apiKey), { mode: 0o600 })
-      chmodSync(this.secretFile, 0o600)
-    } else if (settings.clearApiKey) {
+      if (!safeStorage.isEncryptionAvailable()) return {}
+      const decrypted = safeStorage.decryptString(readFileSync(this.secretFile)).trim()
+      if (!decrypted) return {}
       try {
-        unlinkSync(this.secretFile)
-      } catch (error) {
+        const parsed = JSON.parse(decrypted) as Record<string, unknown>
+        return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim())))
+      } catch {
+        // PR #126 stored one raw key. Its singleton becomes the default profile.
+        return { default: decrypted }
+      }
+    } catch {
+      return {}
+    }
+  }
+
+  private saveApiKeys(): void {
+    const entries = Object.entries(this.apiKeys).filter(([, value]) => value.trim())
+    if (entries.length === 0) {
+      try { unlinkSync(this.secretFile) } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
+      return
     }
-    writeFileSync(this.configFile, JSON.stringify({ ...storedConfig(this.configFile), baseUrl, model }, null, 2), { mode: 0o600 })
-    this.engine.stop()
-    this.config = this.connectionConfig()
-    this.engine = this.createEngine()
-    await this.refreshHealth()
-    return this.labConnection()
+    const { safeStorage } = nodeRequire('electron') as typeof import('electron')
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this system.')
+    writeFileSync(this.secretFile, safeStorage.encryptString(JSON.stringify(Object.fromEntries(entries))), { mode: 0o600 })
+    chmodSync(this.secretFile, 0o600)
+  }
+
+  private loadConnections(): LabConnection[] {
+    const stored = storedConfig(this.configFile)
+    const configured = Array.isArray(stored.connections) ? stored.connections : []
+    if (Array.isArray(stored.connections)) {
+      return configured.flatMap((connection) => {
+        if (!connection || typeof connection.id !== 'string' || typeof connection.name !== 'string' || typeof connection.baseUrl !== 'string') return []
+        try {
+          const manualModels = Array.isArray(connection.manualModels) ? connection.manualModels.map(String).map((id) => id.trim()).filter(Boolean) : []
+          const models = Array.isArray(connection.models) ? uniqueModels(connection.models.filter((model) => model && typeof model.id === 'string')) : []
+          return [{
+            id: connection.id,
+            name: connection.name.trim() || 'Unnamed connection',
+            baseUrl: normaliseLabEndpoint(connection.baseUrl),
+            apiKeyConfigured: Boolean(this.apiKeys[connection.id]),
+            healthy: false,
+            manualModels,
+            models: uniqueModels([...models, ...manualModels.map((id) => ({ id, source: 'custom' as const }))])
+          }]
+        } catch {
+          return []
+        }
+      })
+    }
+    const baseUrl = normaliseLabEndpoint(stored.baseUrl ?? this.baseConfig.baseUrl)
+    const model = stored.model?.trim() || this.baseConfig.defaultModel
+    return [{
+      id: 'default',
+      name: 'Default',
+      baseUrl,
+      apiKeyConfigured: Boolean(this.apiKeys.default || this.baseConfig.apiKey),
+      healthy: false,
+      manualModels: [model],
+      models: [{ id: model, source: baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') ? 'local' : 'custom' }]
+    }]
+  }
+
+  private apiKeyFor(connectionId: string): string | undefined {
+    return this.apiKeys[connectionId] ?? (connectionId === 'default' ? this.baseConfig.apiKey : undefined)
+  }
+
+  private persistConnections(): void {
+    const connections: StoredLabConnection[] = this.connections.map(({ id, name, baseUrl, manualModels, models }) => ({
+      id, name, baseUrl, manualModels, models
+    }))
+    writeFileSync(this.configFile, JSON.stringify({ version: 2, connections }, null, 2), { mode: 0o600 })
+    chmodSync(this.configFile, 0o600)
+  }
+
+  labConnections(): LabConnectionsSettings {
+    return { connections: this.connections.map((connection) => ({ ...connection, manualModels: [...connection.manualModels], models: connection.models.map((model) => ({ ...model })), apiKeyConfigured: Boolean(this.apiKeyFor(connection.id)) })) }
+  }
+
+  async saveLabConnection(update: LabConnectionUpdate): Promise<LabConnectionsSettings> {
+    const name = update.name.trim()
+    if (!name) throw new Error('Enter a name for this connection.')
+    const baseUrl = normaliseLabEndpoint(update.baseUrl)
+    const id = update.id ?? randomUUID()
+    const existing = this.connections.find((connection) => connection.id === id)
+    if (update.id && !existing) throw new Error('That Lab connection no longer exists.')
+    if (this.connections.some((connection) => connection.id !== id && connection.name.toLowerCase() === name.toLowerCase())) {
+      throw new Error('Use a unique name for each Lab connection.')
+    }
+    if (update.apiKey !== undefined && update.clearApiKey) throw new Error('Set a new API key or clear the saved key, not both.')
+    if (update.apiKey !== undefined || update.clearApiKey) {
+      const previous = this.apiKeys[id]
+      try {
+        if (update.apiKey !== undefined) {
+          const apiKey = update.apiKey.trim()
+          if (!apiKey) throw new Error('Enter an API key or leave the field blank.')
+          this.apiKeys[id] = apiKey
+        } else {
+          delete this.apiKeys[id]
+        }
+        this.saveApiKeys()
+      } catch (error) {
+        if (previous === undefined) delete this.apiKeys[id]
+        else this.apiKeys[id] = previous
+        throw error
+      }
+    }
+    const manualModels = [...new Set(update.manualModels.map((model) => model.trim()).filter(Boolean))]
+    const endpoint = { baseUrl, apiKey: this.apiKeyFor(id) }
+    const discovered = await this.engine.listModels(endpoint)
+    const models = uniqueModels([
+      ...discovered.map(({ id: modelId, name: modelName, source }) => ({ id: modelId, name: modelName, source })),
+      ...manualModels.map((modelId) => ({ id: modelId, source: 'custom' as const }))
+    ])
+    const healthy = discovered.length > 0 || await this.engine.checkHealth(endpoint)
+    const connection: LabConnection = {
+      id, name, baseUrl,
+      apiKeyConfigured: Boolean(endpoint.apiKey),
+      healthy,
+      manualModels,
+      models
+    }
+    if (existing) this.connections = this.connections.map((item) => item.id === id ? connection : item)
+    else this.connections = [...this.connections, connection]
+    this.healthy = this.connections.some((item) => item.healthy)
+    this.persistConnections()
+    return this.labConnections()
+  }
+
+  async deleteLabConnection(connectionId: string): Promise<LabConnectionsSettings> {
+    if (!this.connections.some((connection) => connection.id === connectionId)) throw new Error('That Lab connection no longer exists.')
+    this.connections = this.connections.filter((connection) => connection.id !== connectionId)
+    this.healthy = this.connections.some((connection) => connection.healthy)
+    delete this.apiKeys[connectionId]
+    this.saveApiKeys()
+    this.persistConnections()
+    return this.labConnections()
+  }
+
+  private connection(connectionId?: string): LabConnection {
+    const selected = connectionId ? this.connections.find((item) => item.id === connectionId) : undefined
+    if (connectionId && connectionId !== 'lab' && !selected) throw new Error('This Lab API connection no longer exists. Choose another model in the thread toolbar.')
+    const connection = selected ?? this.connections[0]
+    if (!connection) throw new Error('Add a Lab API connection in Settings before starting a Lab thread.')
+    return connection
   }
 
   private sink(): EngineSink {
@@ -230,7 +345,13 @@ export class LabBackend implements Backend {
   }
 
   private async refreshHealth(): Promise<void> {
-    this.healthy = await this.engine.checkHealth()
+    const snapshot = [...this.connections]
+    const statuses = new Map(await Promise.all(snapshot.map(async (connection) => [connection.id, await this.engine.checkHealth({
+      baseUrl: connection.baseUrl,
+      apiKey: this.apiKeyFor(connection.id)
+    })] as const)))
+    this.connections = this.connections.map((connection) => ({ ...connection, healthy: statuses.get(connection.id) ?? connection.healthy }))
+    this.healthy = this.connections.some((connection) => connection.healthy)
   }
 
   async start(): Promise<void> {
@@ -240,6 +361,7 @@ export class LabBackend implements Backend {
 
   async stop(): Promise<void> {
     this.engine.stop()
+    this.connections = this.connections.map((connection) => ({ ...connection, healthy: false }))
     this.healthy = false
   }
 
@@ -300,12 +422,14 @@ export class LabBackend implements Backend {
 
   /* Messages */
   async sendMessage(sessionId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
+    const connection = this.connection(options?.model?.providerID)
     await this.engine.sendMessage(sessionId, textFromParts(parts), {
       mode: options?.mode,
-      model: options?.model?.modelID,
-      context: options?.context
+      model: options?.model?.modelID ?? connection.models[0]?.id,
+      context: options?.context,
+      baseUrl: connection.baseUrl,
+      apiKey: this.apiKeyFor(connection.id)
     })
-    void this.refreshHealth()
   }
 
   async abort(sessionId: string): Promise<void> {
@@ -403,12 +527,15 @@ export class LabBackend implements Backend {
 
   /* Models */
   async modelsList(): Promise<ModelInfo[]> {
-    const models = await this.engine.listModels()
-    if (models.length > 0) this.healthy = true
-    return models
+    return this.connections.flatMap((connection) => connection.models.map((model) => ({
+      ...model,
+      provider: connection.id,
+      providerName: connection.name
+    })))
   }
 
-  async modelSelect(_providerId: string, modelId: string): Promise<void> {
+  async modelSelect(providerId: string, modelId: string): Promise<void> {
+    this.connection(providerId)
     this.engine.selectModel(modelId)
   }
 
@@ -435,7 +562,8 @@ export class LabBackend implements Backend {
   async revert(_sessionId: string, _messageId: string): Promise<void> {}
   async unrevert(_sessionId: string): Promise<void> {}
   async compact(sessionId: string, model?: { providerID: string; modelID: string }): Promise<void> {
-    await this.engine.compact(sessionId, model?.modelID)
+    const connection = this.connection(model?.providerID)
+    await this.engine.compact(sessionId, model?.modelID, { baseUrl: connection.baseUrl, apiKey: this.apiKeyFor(connection.id) })
     this.emit({ type: 'session.compacted', sessionID: sessionId })
   }
 }
