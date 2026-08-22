@@ -78,8 +78,24 @@ jobs:
         if: steps.changed.outputs.run == '1'
 
       # Bundled binaries are gitignored, so the runner fetches them.
+      # The pin in package.json keys the cache: a hit skips both the releases
+      # API call and the download, so a nightly build does not depend on
+      # github.com being reachable at 09:00 UTC.
+      - name: Read the pinned opencode version
+        id: opencode
+        if: steps.changed.outputs.run == '1'
+        run: echo "version=$(node -p "require('./package.json').opencodeVersion")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        if: steps.changed.outputs.run == '1'
+        with:
+          path: resources/opencode
+          key: opencode-${{ runner.os }}-${{ runner.arch }}-${{ steps.opencode.outputs.version }}
+
       - run: npm run fetch:opencode
         if: steps.changed.outputs.run == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - run: npm run fetch:cua-driver
         if: steps.changed.outputs.run == '1'

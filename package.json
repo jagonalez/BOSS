@@ -4,6 +4,7 @@
   "version": "0.1.1",
   "description": "Configurable multi-backend desktop workspace for coding agents",
   "main": "./out/main/index.js",
+  "opencodeVersion": "v1.18.15",
   "author": "jeremy",
   "license": "MIT",
   "type": "module",
