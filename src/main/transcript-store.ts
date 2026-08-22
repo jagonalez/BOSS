@@ -4,7 +4,7 @@ import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { BackendId } from '@shared/backend'
 import type { MessageInfo, MessageWithParts, Part } from '@shared/opencode'
-import type { RunMetrics, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
+import type { RunMetrics, ThreadUsageTotals, TranscriptSearchResult, UsageBreakdown } from '@shared/supervision'
 
 interface TranscriptSource {
   threadId: string
@@ -37,6 +37,8 @@ interface PendingPart {
 type RunStatus = 'running' | 'completed' | 'error' | 'interrupted'
 
 interface RunRow {
+  backend_id: BackendId
+  agent_id: string | null
   status: RunStatus
   started_at: number
   finished_at: number | null
@@ -210,6 +212,7 @@ export class TranscriptStore {
         status TEXT NOT NULL,
         started_at INTEGER NOT NULL,
         finished_at INTEGER,
+        agent_id TEXT,
         tokens INTEGER,
         tool_calls INTEGER NOT NULL DEFAULT 0,
         token_baseline INTEGER NOT NULL DEFAULT 0,
@@ -247,7 +250,7 @@ export class TranscriptStore {
     else this.scheduleFlush()
   }
 
-  beginRun(source: TranscriptSource): void {
+  beginRun(source: TranscriptSource, agentId?: string): void {
     this.flush()
     this.transaction(() => {
       this.upsertThread(source)
@@ -260,11 +263,11 @@ export class TranscriptStore {
         this.database.prepare(`
           INSERT INTO transcript_run_history(
             run_id, thread_id, backend_id, native_session_id, status, started_at,
-            token_baseline, token_reports_baseline, tool_calls_baseline
-          ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)
+            agent_id, token_baseline, token_reports_baseline, tool_calls_baseline
+          ) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)
         `).run(
           randomUUID(), source.threadId, source.backendId, source.nativeSessionId, Date.now(),
-          baseline.tokens, baseline.tokenReports, baseline.toolCalls
+          agentId ?? null, baseline.tokens, baseline.tokenReports, baseline.toolCalls
         )
       }
       this.database.prepare(`
@@ -411,7 +414,7 @@ export class TranscriptStore {
   usage(threadId: string): { lastRun?: RunMetrics; totals: ThreadUsageTotals } {
     this.flush()
     const rows = this.database.prepare(`
-      SELECT status, started_at, finished_at, tokens, tool_calls,
+      SELECT backend_id, agent_id, status, started_at, finished_at, tokens, tool_calls,
              token_baseline, token_reports_baseline, tool_calls_baseline
       FROM transcript_run_history
       WHERE thread_id = ? ORDER BY started_at DESC, rowid DESC
@@ -436,6 +439,42 @@ export class TranscriptStore {
       } : undefined,
       totals
     }
+  }
+
+  /** Aggregate durable run history by subscription or agent. Old history that
+   * predates agent tracking remains useful and appears as the standard agent. */
+  usageBreakdown(by: 'backend' | 'agent'): UsageBreakdown[] {
+    this.flush()
+    const rows = this.database.prepare(`
+      SELECT backend_id, ${by === 'agent' ? 'agent_id,' : ''}
+             COUNT(*) AS runs,
+             SUM(MAX(0, COALESCE(finished_at, ?) - started_at)) AS duration_ms,
+             SUM(tokens) AS tokens,
+             SUM(tokens IS NOT NULL) AS token_runs,
+             SUM(tool_calls) AS tool_calls
+      FROM transcript_run_history
+      GROUP BY backend_id${by === 'agent' ? ', agent_id' : ''}
+      ORDER BY runs DESC, backend_id ASC${by === 'agent' ? ', agent_id ASC' : ''}
+    `).all(Date.now()) as unknown as Array<{
+      backend_id: BackendId
+      agent_id?: string | null
+      runs: number
+      duration_ms: number
+      tokens: number | null
+      token_runs: number
+      tool_calls: number
+    }>
+    return rows.map((row) => ({
+      backendId: row.backend_id,
+      ...(by === 'agent' && row.agent_id ? { agentId: row.agent_id } : {}),
+      usage: {
+        runs: row.runs,
+        durationMs: row.duration_ms,
+        ...(row.tokens !== null ? { tokens: row.tokens } : {}),
+        tokenRuns: row.token_runs,
+        toolCalls: row.tool_calls
+      }
+    }))
   }
 
   search(query: string, limit = 40): Array<Omit<TranscriptSearchResult, 'title' | 'projectPath'>> {
@@ -627,6 +666,7 @@ export class TranscriptStore {
       'PRAGMA table_info(transcript_run_history)'
     ).all() as unknown as Array<{ name: string }>).map((column) => column.name))
     const additions = [
+      ['agent_id', 'TEXT'],
       ['token_baseline', 'INTEGER NOT NULL DEFAULT 0'],
       ['token_reports_baseline', 'INTEGER NOT NULL DEFAULT 0'],
       ['tool_calls_baseline', 'INTEGER NOT NULL DEFAULT 0']

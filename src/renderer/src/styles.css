@@ -2548,6 +2548,89 @@ body.workspace-dragging .workspace-tab-slot {
   letter-spacing: 0.06em;
 }
 
+.command-usage {
+  max-width: 1040px;
+  margin: 0 auto 18px;
+  padding: 14px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-pane);
+}
+
+.command-usage .command-section-head {
+  justify-content: space-between;
+}
+
+.command-usage .command-section-head > div {
+  min-width: 0;
+}
+
+.command-usage .command-section-head p {
+  margin: 3px 0 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.command-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
+}
+
+.command-usage-card {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line-subtle);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--surface-raised);
+}
+
+.command-usage-subscription {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.command-usage-subscription > div,
+.command-usage-agent {
+  min-width: 0;
+}
+
+.command-usage-subscription strong,
+.command-usage-agent span {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.command-usage-subscription small,
+.command-usage-agent small,
+.command-usage-empty {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.command-usage-agents {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.command-usage-agent {
+  padding-left: 9px;
+  border-left: 2px solid var(--line-subtle);
+}
+
+.command-usage-empty {
+  margin: 10px 0 0;
+}
+
 .command-search {
   max-width: 1040px;
   height: 42px;
