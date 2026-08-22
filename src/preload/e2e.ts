@@ -285,6 +285,19 @@ export function installE2EApi(boss: BossApi): void {
       case 'backend.list': return backends
       case 'backend.auth.status':
         return backends.map((backend) => ({ backendId: backend.id, state: 'connected', detail: 'E2E fixture' }))
+      case 'backend.subscription-usage':
+        return [
+          { backendId: 'codex', plan: 'ChatGPT Plus', updatedAt: 1_800_000_000_000, windows: [
+            { label: '5-hour limit', usedPercent: 35, resetsAt: 1_800_000_000_000 },
+            { label: '7-day limit', usedPercent: 62, resetsAt: 1_800_050_000_000 }
+          ] },
+          { backendId: 'claude', plan: 'Claude Max', updatedAt: 1_800_000_000_000, windows: [
+            { label: 'Current session', usedPercent: 8, resetLabel: 'Aug 22 at 12:50pm (America/Edmonton)' }
+          ] },
+          { backendId: 'opencode', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'OpenCode can use many providers, so it cannot report one subscription balance.' },
+          { backendId: 'pi', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'Pi can use many providers, so it cannot report one subscription balance.' },
+          { backendId: 'lab', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'Lab API usage is not connected to a provider billing account.' }
+        ]
       case 'backend.defaults.set':
         defaults = structuredClone(request.defaults)
         return undefined
@@ -382,16 +395,7 @@ export function installE2EApi(boss: BossApi): void {
             running: false,
             usage: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
           })),
-          totals: { runs: 12, durationMs: 4_560_000, tokens: 48_200, tokenRuns: 12, toolCalls: 73 },
-          usageByBackend: [
-            { backendId: 'opencode', usage: { runs: 8, durationMs: 3_600_000, tokens: 37_000, tokenRuns: 8, toolCalls: 51 } },
-            { backendId: 'claude', usage: { runs: 4, durationMs: 960_000, tokens: 11_200, tokenRuns: 4, toolCalls: 22 } }
-          ],
-          usageByAgent: [
-            { backendId: 'opencode', agentId: 'build', usage: { runs: 6, durationMs: 3_000_000, tokens: 32_500, tokenRuns: 6, toolCalls: 43 } },
-            { backendId: 'opencode', agentId: 'reviewer', usage: { runs: 2, durationMs: 600_000, tokens: 4_500, tokenRuns: 2, toolCalls: 8 } },
-            { backendId: 'claude', usage: { runs: 4, durationMs: 960_000, tokens: 11_200, tokenRuns: 4, toolCalls: 22 } }
-          ]
+          totals: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
         }
       case 'supervision.search': return []
       case 'supervision.acknowledge': return backendRequest({ type: 'supervision.snapshot' })

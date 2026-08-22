@@ -14,7 +14,7 @@ import type {
   SessionMeta,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, QueuedFollowUp } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendSubscriptionUsage, QueuedFollowUp } from '@shared/backend'
 import type { Annotation } from '@shared/annotations'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
@@ -119,6 +119,7 @@ export interface AppState {
   engine: BackendId
   backends: BackendDescriptor[]
   backendAuth: BackendAuthStatus[]
+  subscriptionUsage: BackendSubscriptionUsage[]
   backendModels: Partial<Record<BackendId, BackendModelDescriptor[]>>
   backendModelsLoading: boolean
   defaultModels: Partial<Record<BackendId, BackendModelPreference>>
@@ -224,6 +225,7 @@ export const initialState: AppState = {
   engine: 'opencode',
   backends: [],
   backendAuth: [],
+  subscriptionUsage: [],
   backendModels: {},
   backendModelsLoading: false,
   defaultModels: {},

@@ -3,11 +3,11 @@ import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
 import type { ViewMode } from '@shared/workspace'
-import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { projectName } from './CommandCenter'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
-import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, SandboxSettings, ThreadTitleSettings } from '@shared/backend'
+import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendSubscriptionUsage, SandboxSettings, ThreadTitleSettings } from '@shared/backend'
 import type { WorktreeLocation, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
 import type { CollaborationPolicy } from '@shared/thread-bus'
@@ -45,6 +45,37 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
     ]
   }
 ]
+
+function resetDescription(usage: BackendSubscriptionUsage['windows'][number]): string {
+  if (usage.resetLabel) return `Resets ${usage.resetLabel}`
+  if (usage.resetsAt) return `Resets ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(usage.resetsAt)}`
+  return 'Reset time unavailable'
+}
+
+function SubscriptionUsage({ usage }: { usage?: BackendSubscriptionUsage }): React.JSX.Element | null {
+  if (!usage) return null
+  if (usage.windows.length === 0) {
+    return <p className="settings-subscription-unavailable">{usage.unavailableReason ?? 'Subscription limits unavailable.'}</p>
+  }
+  return (
+    <section className="settings-subscription-usage" aria-label="Subscription limits">
+      <div className="settings-subscription-heading">
+        <strong>Subscription limits</strong>
+        {usage.plan ? <small>{usage.plan}</small> : null}
+      </div>
+      {usage.windows.map((window) => {
+        const remaining = Math.max(0, 100 - window.usedPercent)
+        return (
+          <div className="settings-subscription-window" key={`${window.label}:${window.resetsAt ?? window.resetLabel ?? ''}`}>
+            <div><span>{window.label}</span><strong>{window.usedPercent}% used · {remaining}% left</strong></div>
+            <div className="settings-subscription-meter" aria-label={`${window.label}: ${remaining}% remaining`}><span style={{ width: `${window.usedPercent}%` }} /></div>
+            <small>{resetDescription(window)}</small>
+          </div>
+        )
+      })}
+    </section>
+  )
+}
 
 /** The layout choices, each drawn rather than described. A silhouette says
  *  what changes faster than a sentence does. */
@@ -458,6 +489,7 @@ export function SettingsModal(): React.JSX.Element | null {
   const defaultBackend = useStore(appStore, (s) => s.engine)
   const threadBus = useStore(appStore, (s) => s.threadBus)
   const backendAuth = useStore(appStore, (s) => s.backendAuth)
+  const subscriptionUsage = useStore(appStore, (s) => s.subscriptionUsage)
   const backendModels = useStore(appStore, (s) => s.backendModels ?? {})
   const backendModelsLoading = useStore(appStore, (s) => s.backendModelsLoading ?? false)
   const defaultModels = useStore(appStore, (s) => s.defaultModels ?? {})
@@ -480,6 +512,7 @@ export function SettingsModal(): React.JSX.Element | null {
     void OpenCode.sandboxSettings().then(setSandboxSettings).catch(() => {})
     void OpenCode.backendBinaries().then(setBackendBins).catch(() => {})
     void refreshBackendAuth()
+    void refreshSubscriptionUsage()
     void refreshBackendModels()
     void refreshQaDefault()
   }, [open])
@@ -667,6 +700,7 @@ export function SettingsModal(): React.JSX.Element | null {
                     <strong>Backends own their model access</strong>
                     <p>BOSS discovers the providers already configured in each agent. Local models stay on your machine; credentials remain in the backend's own store.</p>
                   </div>
+                  <Button size="small" onClick={() => void refreshSubscriptionUsage()}>Refresh limits</Button>
                 </div>
                 <section className="settings-connections-panel">
                   <div className="settings-connections-table-head" aria-hidden="true">
@@ -677,6 +711,7 @@ export function SettingsModal(): React.JSX.Element | null {
                   </div>
                   {backends.map((backend) => {
                     const auth = (backendAuth ?? []).find((item) => item.backendId === backend.id)
+                    const usage = subscriptionUsage.find((item) => item.backendId === backend.id)
                     const models = backendModels[backend.id] ?? []
                     const selected = defaultModels[backend.id]
                     const providers = [...new Set(models.map((model) => model.provider || backend.id))]
@@ -719,6 +754,7 @@ export function SettingsModal(): React.JSX.Element | null {
                             {hasCloudAccount ? <StatusBadge tone="accent">Cloud connected</StatusBadge> : null}
                           </div>
                           <p>{accessDetail}</p>
+                          <SubscriptionUsage usage={usage} />
                         </div>
 
                         <div className="settings-connection-model">

@@ -70,6 +70,25 @@ export interface BackendAuthStatus {
   accounts?: string[]
 }
 
+/** A quota window reported by a provider account, not activity inferred by
+ * BOSS. `resetLabel` keeps provider-supplied timezone wording intact when a
+ * CLI does not provide an epoch timestamp. */
+export interface SubscriptionUsageWindow {
+  label: string
+  usedPercent: number
+  resetsAt?: number
+  resetLabel?: string
+}
+
+export interface BackendSubscriptionUsage {
+  backendId: BackendId
+  plan?: string
+  windows: SubscriptionUsageWindow[]
+  /** Why a connected provider cannot currently expose a provider quota. */
+  unavailableReason?: string
+  updatedAt: number
+}
+
 export interface BackendModelDescriptor {
   id: string
   name?: string
@@ -162,6 +181,7 @@ export function isAbortError(value: unknown): boolean {
 export type BackendRequest =
   | { type: 'backend.list' }
   | { type: 'backend.auth.status' }
+  | { type: 'backend.subscription-usage' }
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
   | { type: 'thread.title.settings.get' }
   | { type: 'thread.title.settings.set'; autoNameFromFirstPrompt: boolean }
