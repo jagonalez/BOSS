@@ -287,15 +287,20 @@ export function installE2EApi(boss: BossApi): void {
         return backends.map((backend) => ({ backendId: backend.id, state: 'connected', detail: 'E2E fixture' }))
       case 'backend.subscription-usage':
         return [
+          { backendId: 'opencode', plan: 'OpenCode Go', updatedAt: 1_800_000_000_000, windows: [
+            { label: '5-hour limit', usedPercent: 12, resetsAt: 1_800_000_000_000 },
+            { label: 'Weekly limit', usedPercent: 34, resetsAt: 1_800_050_000_000 },
+            { label: 'Monthly limit', usedPercent: 56, resetsAt: 1_800_100_000_000 }
+          ] },
           { backendId: 'codex', plan: 'ChatGPT Plus', updatedAt: 1_800_000_000_000, windows: [
-            { label: '5-hour limit', usedPercent: 35, resetsAt: 1_800_000_000_000 },
-            { label: '7-day limit', usedPercent: 62, resetsAt: 1_800_050_000_000 }
+            { group: 'Codex', label: '5-hour limit', usedPercent: 35, resetsAt: 1_800_000_000_000 },
+            { group: 'Codex', label: '7-day limit', usedPercent: 62, resetsAt: 1_800_050_000_000 },
+            { group: 'GPT-5.3-Codex-Spark', label: '5-hour limit', usedPercent: 4, resetsAt: 1_800_025_000_000 }
           ] },
           { backendId: 'claude', plan: 'Claude Max', updatedAt: 1_800_000_000_000, windows: [
             { label: 'Current session', usedPercent: 8, resetLabel: 'Aug 22 at 12:50pm (America/Edmonton)' }
           ] },
-          { backendId: 'opencode', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'OpenCode can use many providers, so it cannot report one subscription balance.' },
-          { backendId: 'pi', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'Pi can use many providers, so it cannot report one subscription balance.' },
+          { backendId: 'pi', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'Pi has no subscription of its own; its limits belong to the provider accounts it uses.' },
           { backendId: 'lab', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'Lab API usage is not connected to a provider billing account.' }
         ]
       case 'backend.defaults.set':

@@ -1,6 +1,9 @@
 import { execFile, spawn } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { BackendAuthStatus, BackendId, BackendSubscriptionUsage } from '../shared/backend'
-import { claudeUsageWindows, codexUsageWindows } from './subscription-usage'
+import { claudeUsageWindows, codexUsageWindows, openCodeGoApiKeyFromAuth, openCodeGoUsageWindows } from './subscription-usage'
 
 export interface AuthLaunch {
   command: string
@@ -23,6 +26,51 @@ function run(command: string, args: string[], timeout = 8_000): Promise<{ code: 
 function stripAnsi(value: string): string {
   // eslint-disable-next-line no-control-regex
   return value.replace(/[\u001b\u009b][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*)?\u0007)|(?:(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g, '')
+}
+
+async function openCodeGoApiKey(): Promise<string | undefined> {
+  if (process.env.OPENCODE_API_KEY?.trim()) return process.env.OPENCODE_API_KEY.trim()
+  if (process.env.OPENCODE_AUTH_CONTENT) {
+    try {
+      const key = openCodeGoApiKeyFromAuth(JSON.parse(process.env.OPENCODE_AUTH_CONTENT))
+      if (key) return key
+    } catch { /* fall through to the normal credential store */ }
+  }
+  const dataRoot = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share')
+  try {
+    const key = openCodeGoApiKeyFromAuth(JSON.parse(await readFile(join(dataRoot, 'opencode', 'auth.json'), 'utf8')))
+    if (key) return key
+  } catch { /* Pi may own the provider credential instead. */ }
+
+  // Pi is a provider broker rather than a subscription. If Go was connected
+  // only in Pi, use its supported credential command without ever logging it.
+  const pi = await run('pi', ['auth', 'print-api-key', '--provider', 'opencode'])
+  return pi.code === 0 && pi.stdout.trim() ? pi.stdout.trim() : undefined
+}
+
+async function openCodeGoUsage(): Promise<{ windows: BackendSubscriptionUsage['windows']; unavailableReason?: string }> {
+  const apiKey = await openCodeGoApiKey()
+  if (!apiKey) return { windows: [], unavailableReason: 'Connect OpenCode Go in OpenCode or Pi to view its subscription limits.' }
+  try {
+    const response = await fetch('https://opencode.ai/zen/go/v1/usage', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000)
+    })
+    if (!response.ok) {
+      return {
+        windows: [],
+        unavailableReason: response.status === 403
+          ? 'This OpenCode credential does not have an active Go subscription.'
+          : 'OpenCode Go usage is temporarily unavailable.'
+      }
+    }
+    const windows = openCodeGoUsageWindows(await response.json())
+    return windows.length
+      ? { windows }
+      : { windows: [], unavailableReason: 'OpenCode Go did not report any usage windows.' }
+  } catch {
+    return { windows: [], unavailableReason: 'OpenCode Go usage is temporarily unavailable.' }
+  }
 }
 
 /** Read Codex's structured account limits without starting a thread or sending
@@ -155,7 +203,13 @@ export class BackendAuth {
 
   async subscriptionUsage(): Promise<BackendSubscriptionUsage[]> {
     const updatedAt = Date.now()
-    const [codex, claude] = await Promise.all([
+    const [openCodeGo, codex, claude] = await Promise.all([
+      (async (): Promise<BackendSubscriptionUsage> => ({
+        backendId: 'opencode',
+        plan: 'OpenCode Go',
+        ...await openCodeGoUsage(),
+        updatedAt
+      }))(),
       (async (): Promise<BackendSubscriptionUsage> => {
         const normalized = codexUsageWindows(await codexRateLimits())
         return normalized.windows.length
@@ -177,8 +231,8 @@ export class BackendAuth {
       })()
     ])
     return [
-      { backendId: 'opencode', windows: [], unavailableReason: 'OpenCode can use many providers, so it cannot report one subscription balance.', updatedAt },
-      { backendId: 'pi', windows: [], unavailableReason: 'Pi can use many providers, so it cannot report one subscription balance.', updatedAt },
+      openCodeGo,
+      { backendId: 'pi', windows: [], unavailableReason: 'Pi has no subscription of its own; its limits belong to the provider accounts it uses.', updatedAt },
       codex,
       claude,
       { backendId: 'lab', windows: [], unavailableReason: 'Lab API usage is not connected to a provider billing account.', updatedAt }

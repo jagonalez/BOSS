@@ -119,16 +119,21 @@ test('a backend server can be restarted from settings', async ({ appPage }) => {
   await expect(row.getByRole('button', { name: 'Restarted' })).toBeVisible()
 })
 
-test('shows provider subscription windows in Models & connections', async ({ appPage }) => {
+test('shows provider subscription windows on their own Usage page', async ({ appPage }) => {
   await openSettings(appPage)
-  await appPage.getByRole('button', { name: 'Refresh limits' }).click()
+  await expect(appPage.getByRole('button', { name: 'Refresh usage' })).toHaveCount(0)
+  await appPage.getByRole('button', { name: 'Usage', exact: true }).click()
+  await appPage.getByRole('button', { name: 'Refresh usage' }).click()
   expect((await lastBackendCall(appPage, 'backend.subscription-usage')).request).toEqual({ type: 'backend.subscription-usage' })
-  const codex = appPage.locator('.settings-connection-row').filter({ hasText: 'Codex' })
-  await expect(codex.getByRole('region', { name: 'Subscription limits' })).toContainText('35% used · 65% left')
-  await expect(codex.getByRole('region', { name: 'Subscription limits' })).toContainText('7-day limit')
-  const claude = appPage.locator('.settings-connection-row').filter({ hasText: 'Claude Code' })
-  await expect(claude.getByRole('region', { name: 'Subscription limits' })).toContainText('8% used · 92% left')
-  await expect(appPage.getByText('Usage by subscription & agent')).toHaveCount(0)
+  const openCode = appPage.getByRole('region', { name: 'OpenCode Go usage' })
+  await expect(openCode).toContainText('12% used · 88% left')
+  await expect(openCode).toContainText('Monthly limit')
+  const codex = appPage.getByRole('region', { name: 'Codex usage' })
+  await expect(codex).toContainText('35% used · 65% left')
+  await expect(codex).toContainText('GPT-5.3-Codex-Spark')
+  const claude = appPage.getByRole('region', { name: 'Claude Code usage' })
+  await expect(claude).toContainText('8% used · 92% left')
+  await expect(appPage.getByText('Pi has no subscription balance of its own.')).toBeVisible()
 })
 
 test('quick-create uses the configured backend and exposes its defaults on the new thread', async ({ appPage }) => {
