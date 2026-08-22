@@ -137,7 +137,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
     label: 'OpenCode',
     description: 'OpenCode server with native sessions, permissions, tools, and providers.',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false, reportsSteeredMessages: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
       { id: 'auto', label: 'Auto', description: 'approve supported actions automatically' },
@@ -148,14 +148,14 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Pi',
     description: 'Pi coding agent over its native JSONL RPC protocol.',
     command: 'pi',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [{ id: 'auto', label: 'Approved', description: 'Pi RPC runs with its approved tool policy' }]
   },
   codex: {
     label: 'Codex',
     description: 'Codex CLI through the supported app-server JSON-RPC protocol.',
     command: 'codex',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'request approval when Codex needs to leave its sandbox' },
       { id: 'auto', label: 'Auto', description: 'run inside the workspace sandbox without approval prompts' },
@@ -166,7 +166,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before tools that need approval' },
       { id: 'auto', label: 'Auto', description: 'let Claude decide which tool calls can run automatically' },
@@ -179,7 +179,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     description: 'From-scratch harness speaking OpenAI-compatible APIs to a local ollama or any cloud endpoint.',
     // No command: there is no CLI to resolve, so the backend is always
     // available regardless of PATH (mirrors how opencode has no command).
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before every file write or shell command' },
       { id: 'auto', label: 'Auto', description: 'run file writes and shell commands without asking' },
@@ -1758,12 +1758,13 @@ export class BackendManager {
         void this.deliverNextFollowUp(threadId)
         return [...(binding.followUps ?? [])]
       }
-      // Only for a backend that forgets it. Codex records the steered text as
-      // an item of the running turn and reports it on every reload, so echoing
-      // one here would leave the user looking at the same message twice.
-      if (!DEFINITIONS[binding.backendId].capabilities.reportsSteeredMessages) {
-        this.echoSteeredMessage(binding, item)
-      }
+      // Every backend, including the ones that report the steered text back.
+      // Waiting for a backend to echo the message meant the user watched their
+      // own words take a round trip before appearing — and when the backend
+      // never recorded them, the message was gone from the queue and absent
+      // from the transcript, because nothing had written it anywhere. Show it
+      // now; reconcile drops this copy once the backend reports its own.
+      this.echoSteeredMessage(binding, item)
       return this.removeFollowUp(threadId, followUpId)
     }
     this.promoteFollowUp(binding, followUpId)

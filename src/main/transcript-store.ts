@@ -360,7 +360,58 @@ export class TranscriptStore {
           new Set(message.parts.map((part) => part.id))
         )
       })
+      this.removeEchoedSteerMessages(source.threadId, messages)
     })
+  }
+
+  /** Drop a steered echo the backend has now reported as its own message.
+   *
+   *  The echo exists so the message appears the instant it is accepted rather
+   *  than after a round trip. A backend that folds the steered text into its
+   *  running turn reports that same text under its own id, and both are then
+   *  in the transcript — which is why the echo used to be skipped for those
+   *  backends, at the cost of the delay and of losing the message entirely
+   *  when the backend never recorded it. Keep the echo, and retire it here
+   *  once the authoritative copy arrives. */
+  private removeEchoedSteerMessages(threadId: string, messages: MessageWithParts[]): void {
+    const reported = new Set<string>()
+    for (const message of messages) {
+      if (message.info.role !== 'user') continue
+      if (isLocallyAuthoredMessageId(message.info.id)) continue
+      for (const part of message.parts) {
+        const key = narrativeKey(part)
+        if (key) reported.add(key)
+      }
+    }
+    if (!reported.size) return
+    const rows = this.database.prepare(`
+      SELECT message_id, part_id, data_json
+      FROM transcript_parts
+      WHERE thread_id = ? AND message_id LIKE 'steer-%'
+      ORDER BY position ASC, updated_at ASC
+    `).all(threadId) as unknown as Array<Required<StoredPartRow>>
+    const byMessage = new Map<string, { keys: Set<string>; texts: number }>()
+    for (const row of rows) {
+      const part = parseJson<Part>(row.data_json)
+      const key = part ? narrativeKey(part) : undefined
+      if (!key) continue
+      const entry = byMessage.get(row.message_id) ?? { keys: new Set<string>(), texts: 0 }
+      entry.keys.add(key)
+      entry.texts += 1
+      byMessage.set(row.message_id, entry)
+    }
+    for (const [messageId, entry] of byMessage) {
+      // Only when every text the echo carries is now reported. A partial match
+      // would delete an echo the backend had recorded only half of.
+      if (entry.texts !== entry.keys.size) continue
+      if (![...entry.keys].every((key) => reported.has(key))) continue
+      this.database.prepare(
+        'DELETE FROM transcript_parts WHERE thread_id = ? AND message_id = ?'
+      ).run(threadId, messageId)
+      this.database.prepare(
+        'DELETE FROM transcript_messages WHERE thread_id = ? AND message_id = ?'
+      ).run(threadId, messageId)
+    }
   }
 
   messages(threadId: string, limit?: number): MessageWithParts[] {

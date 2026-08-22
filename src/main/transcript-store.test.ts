@@ -289,6 +289,86 @@ test('reconciling an idle thread keeps a steered message the backend never repor
   }
 })
 
+test('a steered echo is retired once the backend reports the same message', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    // BOSS echoes every steered message now, so it renders the instant it is
+    // accepted rather than after the backend takes a round trip to report it.
+    store.recordMessage(source, {
+      id: 'steer-followup-1',
+      sessionID: source.nativeSessionId,
+      role: 'user',
+      time: { created: 1 }
+    })
+    store.recordPart(source, {
+      id: 'steer-followup-1-text',
+      type: 'text',
+      sessionID: source.nativeSessionId,
+      messageID: 'steer-followup-1',
+      text: 'the steered instruction'
+    })
+
+    // Codex folds the steered text into its running turn and reports it under
+    // its own id. Without the dedupe the user reads the same message twice.
+    store.reconcile(source, [
+      {
+        info: { id: 'codex-user-2', sessionID: source.nativeSessionId, role: 'user', time: { created: 2 } },
+        parts: [{ id: 'codex-user-2-text', type: 'text', sessionID: source.nativeSessionId, messageID: 'codex-user-2', text: 'the steered instruction' }]
+      }
+    ], { pruneMissingMessages: true })
+
+    const messages = store.messages(source.threadId)
+    const ids = messages.map((message) => message.info.id)
+    assert.ok(!ids.includes('steer-followup-1'), 'the echo must be retired once the backend reports it')
+    assert.ok(ids.includes('codex-user-2'), 'the backend copy is what remains')
+    const texts = messages.flatMap((message) => message.parts.map((part) => part.text))
+    assert.equal(
+      texts.filter((text) => text === 'the steered instruction').length,
+      1,
+      'the steered text must appear exactly once'
+    )
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('a steered echo survives when the backend reports a different message', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    store.recordMessage(source, {
+      id: 'steer-followup-1',
+      sessionID: source.nativeSessionId,
+      role: 'user',
+      time: { created: 1 }
+    })
+    store.recordPart(source, {
+      id: 'steer-followup-1-text',
+      type: 'text',
+      sessionID: source.nativeSessionId,
+      messageID: 'steer-followup-1',
+      text: 'the steered instruction'
+    })
+
+    // A backend that never recorded the steer reports only the earlier message.
+    // Retiring the echo here is exactly the swallow the echo exists to prevent.
+    store.reconcile(source, [
+      {
+        info: { id: 'codex-user-1', sessionID: source.nativeSessionId, role: 'user', time: { created: 2 } },
+        parts: [{ id: 'codex-user-1-text', type: 'text', sessionID: source.nativeSessionId, messageID: 'codex-user-1', text: 'something else entirely' }]
+      }
+    ], { pruneMissingMessages: true })
+
+    const ids = store.messages(source.threadId).map((message) => message.info.id)
+    assert.ok(ids.includes('steer-followup-1'), 'an unreported steer must keep its echo')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('reconciling still prunes a backend message that really did go away', () => {
   const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const path = join(directory, 'transcripts.sqlite')
