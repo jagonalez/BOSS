@@ -137,7 +137,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
     label: 'OpenCode',
     description: 'OpenCode server with native sessions, permissions, tools, and providers.',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false, reportsSteeredMessages: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
       { id: 'auto', label: 'Auto', description: 'approve supported actions automatically' },
@@ -148,14 +148,14 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Pi',
     description: 'Pi coding agent over its native JSONL RPC protocol.',
     command: 'pi',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [{ id: 'auto', label: 'Approved', description: 'Pi RPC runs with its approved tool policy' }]
   },
   codex: {
     label: 'Codex',
     description: 'Codex CLI through the supported app-server JSON-RPC protocol.',
     command: 'codex',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'request approval when Codex needs to leave its sandbox' },
       { id: 'auto', label: 'Auto', description: 'run inside the workspace sandbox without approval prompts' },
@@ -166,7 +166,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before tools that need approval' },
       { id: 'auto', label: 'Auto', description: 'let Claude decide which tool calls can run automatically' },
@@ -179,7 +179,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     description: 'From-scratch harness speaking OpenAI-compatible APIs to a local ollama or any cloud endpoint.',
     // No command: there is no CLI to resolve, so the backend is always
     // available regardless of PATH (mirrors how opencode has no command).
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before every file write or shell command' },
       { id: 'auto', label: 'Auto', description: 'run file writes and shell commands without asking' },
@@ -1734,28 +1734,63 @@ export class BackendManager {
     if (!item) throw new Error('Queued follow-up not found.')
     const backend = await this.ensureStarted(binding.backendId)
     if (!this.busyThreads.has(threadId)) {
-      binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]
+      this.promoteFollowUp(binding, followUpId)
       this.save()
       this.emitFollowUps(binding)
       await this.deliverNextFollowUp(threadId)
       return [...(binding.followUps ?? [])]
     }
     if (DEFINITIONS[binding.backendId].capabilities.steering === 'native' && backend.steer) {
-      await backend.steer(binding.nativeSessionId, this.followUpParts(item))
-      // Only for a backend that forgets it. Codex records the steered text as
-      // an item of the running turn and reports it on every reload, so echoing
-      // one here would leave the user looking at the same message twice.
-      if (!DEFINITIONS[binding.backendId].capabilities.reportsSteeredMessages) {
-        this.echoSteeredMessage(binding, item)
+      try {
+        await backend.steer(binding.nativeSessionId, this.followUpParts(item))
+      } catch (error) {
+        // The run ended between the click and this call, so there is no turn
+        // left to fold the text into. The backend never took the message, so
+        // dropping it here is what made it disappear: leave it queued and
+        // promoted, and deliver it as the next message instead. Any other
+        // failure is a real one and still reaches the user — but the follow-up
+        // stays queued either way, because the backend never accepted it.
+        const noTurn = error instanceof Error && /active turn|no longer/i.test(error.message)
+        this.promoteFollowUp(binding, followUpId)
+        this.save()
+        this.emitFollowUps(binding)
+        if (!noTurn) throw error
+        void this.deliverNextFollowUp(threadId)
+        return [...(binding.followUps ?? [])]
       }
+      // Every backend, including the ones that report the steered text back.
+      // Waiting for a backend to echo the message meant the user watched their
+      // own words take a round trip before appearing — and when the backend
+      // never recorded them, the message was gone from the queue and absent
+      // from the transcript, because nothing had written it anywhere. Show it
+      // now; reconcile drops this copy once the backend reports its own.
+      this.echoSteeredMessage(binding, item)
       return this.removeFollowUp(threadId, followUpId)
     }
-    binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]
+    this.promoteFollowUp(binding, followUpId)
     this.save()
     this.emitFollowUps(binding)
     this.intentionalAborts.add(threadId)
     await backend.abort(binding.nativeSessionId)
-    return [...binding.followUps]
+    return [...(binding.followUps ?? [])]
+  }
+
+  /** Move a steered follow-up ahead of everything not yet steered, but behind
+   *  the ones already steered. Promoting to index 0 was the bug: steering a
+   *  second message while the first was still waiting for its abort put the
+   *  second in front, and only followUps[0] is ever delivered — so the first
+   *  message sat behind it and the user watched it vanish. Steering twice now
+   *  sends both, in the order they were steered. */
+  private promoteFollowUp(binding: ThreadBinding, followUpId: string): void {
+    const list = [...(binding.followUps ?? [])]
+    const from = list.findIndex((followUp) => followUp.id === followUpId)
+    if (from < 0) return
+    const [item] = list.splice(from, 1)
+    item.steeredAt = item.steeredAt ?? now()
+    let to = 0
+    while (to < list.length && list[to].steeredAt !== undefined) to += 1
+    list.splice(to, 0, item)
+    binding.followUps = list
   }
 
   private async deliverNextFollowUp(threadId: string): Promise<void> {

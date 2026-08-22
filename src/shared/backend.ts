@@ -20,9 +20,6 @@ export interface BackendCapabilities {
   permissions: boolean
   nativeFork: boolean
   steering: 'native' | 'stop-and-redirect'
-  /** The backend records a steered message in its own transcript and reports it
-   *  on reload. BOSS must not echo one itself, or the message appears twice. */
-  reportsSteeredMessages: boolean
   branching: 'message' | 'thread' | 'context-copy'
   images: boolean
   mcp: boolean
@@ -45,6 +42,10 @@ export interface QueuedFollowUp {
   attachments: QueuedFollowUpAttachment[]
   options?: BackendMessageOptions
   createdAt: number
+  /** When the user steered this one to the front. Set only on a steered
+   *  follow-up, and what keeps two steers in the order they were made rather
+   *  than letting the second overtake the first. */
+  steeredAt?: number
 }
 
 export interface BackendDescriptor {
