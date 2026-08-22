@@ -18,6 +18,7 @@ import { Rooms } from './rooms.js'
 // started and died on a module that resolved but exported nothing.
 import { MOBILE_PAGE } from './shared/mobile-page.js'
 import { SERVICE_WORKER, WEB_MANIFEST } from './shared/pwa-assets.js'
+import { RELAY_MAX_FRAME_BYTES as MAX_FRAME_BYTES } from './shared/relay.js'
 import {
   challengeExpired,
   challengeMessage,
@@ -36,7 +37,6 @@ const crypto = webcrypto as unknown as SigningCrypto
 const PORT = Number(process.env.PORT ?? 8080)
 /** fly.io routes to the machine's internal address; override to bind narrowly. */
 const HOST = process.env.HOST ?? '0.0.0.0'
-const MAX_FRAME_BYTES = 512_000
 /** A socket that misses two heartbeats is gone; the phone reconnects. */
 const HEARTBEAT_MS = 30_000
 

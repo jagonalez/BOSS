@@ -8685,3 +8685,230 @@ select:hover {
   border-color: var(--accent);
   background: var(--surface-raised);
 }
+
+/* The first thing a brand-new thread says. It sits inside .messages rather
+   than replacing it, so the transcript keeps its scroll container and the
+   greeting simply scrolls away once the first turn arrives. Centred in the
+   pane the way the launcher is, but without the launcher's own composer:
+   the thread already has one below. */
+.thread-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1;
+  min-height: 180px;
+  text-align: center;
+  color: var(--text-faint);
+  padding: 24px;
+}
+
+.thread-start h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-muted);
+}
+
+.thread-start p {
+  margin: 0;
+  max-width: 420px;
+  line-height: 1.5;
+  font-size: 13px;
+}
+
+/* File preview — one file shown the way its type deserves. Everything used to
+   go through .code-view, so an image arrived as mojibake text. */
+.file-preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The checkerboard reads as "transparent" rather than "white", which matters
+   for icons and screenshots with alpha. */
+.file-preview-canvas {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-color: var(--bg-inset, rgba(0, 0, 0, 0.18));
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.12) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.12) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/* Contained rather than stretched: an 8px favicon blown up to pane width is
+   not a preview of anything. */
+.file-preview-canvas img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  image-rendering: auto;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+.file-preview-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: var(--bg-elevated, #fff);
+  min-height: 0;
+}
+
+.file-preview-markdown {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 24px;
+  min-height: 0;
+}
+
+.file-preview .code-view-wrap {
+  flex: 1;
+  min-height: 0;
+/* Annotations
+   ---------------------------------------------------------------------------
+   Highlighting a passage of an assistant reply raises a toolbar over the
+   selection, and the resulting note rides above the composer until it is sent. */
+
+.annotation-popover {
+  position: fixed;
+  /* Centred on the selection by the component, which supplies the midpoint. */
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  z-index: 200;
+}
+
+.annotation-action {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 5px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.annotation-action:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.annotation-note-input {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  padding: 5px 8px;
+  width: 240px;
+  outline: none;
+}
+
+.annotation-note-input:focus {
+  border-color: var(--accent);
+}
+
+/* Sits inside the composer box, above the textarea. Wraps rather than scrolls:
+   a hidden annotation is one the user forgets they are about to send. */
+.composer-annotations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+
+.annotation-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 4px 3px 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.annotation-pill-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* The quote is an identifier, not the content — one line, elided. The full
+   text is on the title attribute. */
+.annotation-pill-quote {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+}
+
+.annotation-pill-note {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.annotation-pill-note::before {
+  content: '— ';
+  color: var(--text-faint);
+}
+
+.annotation-pill-remove {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.annotation-pill-remove:hover {
+  color: var(--text);
+}
+
+/* The highlighted passage itself. Registered by AnnotationHighlights through
+   the CSS Custom Highlight API, so no element wraps the text and React's
+   markup is left alone. Only background and colour are honoured here — the
+   spec ignores box properties like padding and border-radius. */
+::highlight(boss-annotation) {
+  background-color: var(--accent-soft);
+  color: var(--text);
+}

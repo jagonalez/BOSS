@@ -10,6 +10,7 @@ import { pruneDeletedThreadCaches } from './thread-caches'
 import { startMicCapture } from './mic'
 import type { FanOutWorker } from '@shared/fan-out'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
+import { composeAnnotatedPrompt, createAnnotation, remainingAnnotations, sideChatSeedPrompt, type Annotation, type AnnotationAnchor } from '@shared/annotations'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import { threadIsWorking } from './status'
@@ -1339,7 +1340,7 @@ export async function loadEngine(): Promise<void> {
   }
   try {
     const saved = localStorage.getItem('boss.engine') as BackendId | null
-    if (saved && ['opencode', 'pi', 'codex', 'claude'].includes(saved)) appStore.setState({ engine: saved })
+    if (saved && ['opencode', 'pi', 'codex', 'claude', 'lab'].includes(saved)) appStore.setState({ engine: saved })
   } catch {
     /* ignore */
   }
@@ -2099,6 +2100,102 @@ export async function unrevertSession(sessionID: string): Promise<void> {
   await refreshFiles()
 }
 
+/**
+ * Attach a highlight to a thread's composer.
+ *
+ * The annotation is a draft: it shapes the next prompt and is cleared when that
+ * prompt is sent. Nothing is written to the transcript.
+ */
+export function addAnnotation(
+  sessionID: string,
+  quote: string,
+  anchor: AnnotationAnchor,
+  note = ''
+): Annotation {
+  const annotation = createAnnotation(`annotation-${crypto.randomUUID()}`, quote, anchor, note)
+  appStore.setState((s) => ({
+    annotations: { ...s.annotations, [sessionID]: [...(s.annotations[sessionID] ?? []), annotation] }
+  }))
+  return annotation
+}
+
+/** Revise the note on an existing highlight. */
+export function updateAnnotationNote(sessionID: string, id: string, note: string): void {
+  appStore.setState((s) => ({
+    annotations: {
+      ...s.annotations,
+      [sessionID]: (s.annotations[sessionID] ?? []).map((item) =>
+        item.id === id ? { ...item, note } : item
+      )
+    }
+  }))
+}
+
+export function removeAnnotation(sessionID: string, id: string): void {
+  appStore.setState((s) => ({
+    annotations: {
+      ...s.annotations,
+      [sessionID]: (s.annotations[sessionID] ?? []).filter((item) => item.id !== id)
+    }
+  }))
+}
+
+/**
+ * Drop the annotations a send consumed, leaving any added since.
+ *
+ * Clearing by id rather than emptying the thread's list matters because a send
+ * awaits the backend: anything highlighted while it was in flight belongs to
+ * the next prompt, and wiping the key would discard it before it was ever sent.
+ */
+export function clearAnnotations(sessionID: string, ids?: readonly string[]): void {
+  appStore.setState((s) => {
+    const current = s.annotations[sessionID]
+    if (!current?.length) return {}
+    const remaining = ids ? remainingAnnotations(current, ids) : []
+    if (remaining.length === current.length) return {}
+    const next = { ...s.annotations }
+    if (remaining.length > 0) next[sessionID] = remaining
+    else delete next[sessionID]
+    return { annotations: next }
+  })
+}
+
+/**
+ * Open a side chat about a highlighted passage.
+ *
+ * Forks rather than starting a fresh thread so the model already holds the
+ * conversation the passage came from — the seed prompt then only has to point
+ * at which part is under discussion. The fork also keeps the side chat from
+ * adding turns to the thread it came from, which is the point of taking a
+ * tangent somewhere else.
+ */
+export async function startSideChat(
+  sessionID: string,
+  annotation: Annotation
+): Promise<string | undefined> {
+  try {
+    const session = await OpenCode.fork(sessionID, annotation.anchor?.messageId)
+    copyThreadPreferences(sessionID, session.id)
+    upsertSessionMeta(session.id, {
+      kind: 'side',
+      forkedFrom: { sessionId: sessionID, messageId: annotation.anchor?.messageId }
+    })
+    await refreshSessions()
+    appStore.setState((s) => ({
+      drafts: { ...s.drafts, [session.id]: sideChatSeedPrompt(annotation) },
+      composerEpoch: s.composerEpoch + 1
+    }))
+    // Beside the thread it came from rather than replacing it: the point of a
+    // side chat is to take the tangent without losing your place in the
+    // conversation that prompted it.
+    if (!openSessionInWorkspace(session.id)) selectSession(session.id)
+    return session.id
+  } catch (error) {
+    setSessionError(sessionID, errorSummary(error))
+    return undefined
+  }
+}
+
 export async function forkFromMessage(sessionID: string, messageID?: string, draft?: string): Promise<void> {
   try {
     const session = await OpenCode.fork(sessionID, messageID)
@@ -2211,12 +2308,18 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   const cur = appStore.getState()
   const sessionID = sessionId ?? cur.activeSessionId
   if (!sessionID) return false
-  if (!text.trim() && (!attachments || attachments.length === 0)) return false
+  // Annotations are folded in here rather than at the composer so every caller
+  // — retry, command handlers, the launcher — carries them too. A highlight
+  // with a note is a complete message, so it also lifts the empty-text guard.
+  const pendingAnnotations = cur.annotations[sessionID] ?? []
+  const consumedAnnotationIds = pendingAnnotations.map((item) => item.id)
+  const body = composeAnnotatedPrompt(pendingAnnotations, text)
+  if (!body.trim() && (!attachments || attachments.length === 0)) return false
   const parts: unknown[] = []
   for (const a of attachments ?? []) {
     parts.push({ type: 'file', mime: a.mime, filename: a.name, url: a.dataUrl })
   }
-  if (text.trim()) parts.push({ type: 'text', text })
+  if (body.trim()) parts.push({ type: 'text', text: body })
   const model = modelForSession(sessionID)
   const mode = modeForSession(sessionID)
   const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
@@ -2224,20 +2327,25 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   const options = { model: modelKey, agent, mode }
   const queue = async (): Promise<boolean> => {
     try {
-      const followUps = await OpenCode.addFollowUp(sessionID, text, attachments, options)
+      const followUps = await OpenCode.addFollowUp(sessionID, body, attachments, options)
       appStore.setState((state) => ({
         followUps: { ...state.followUps, [sessionID]: followUps },
         lastError: null,
         lastErrorBySession: { ...state.lastErrorBySession, [sessionID]: '' },
         failedSendBySession: { ...state.failedSendBySession, [sessionID]: undefined }
       }))
+      clearAnnotations(sessionID, consumedAnnotationIds)
       return true
     } catch (error) {
       const msg = errorSummary(error)
       setSessionError(sessionID, msg)
       // Queueing is the last resort for this text; if even that fails there is
       // nowhere else for it to go, so hold it for retry.
-      noteFailedSend(sessionID, text, attachments, msg)
+      noteFailedSend(sessionID, body, attachments, msg)
+      // The held text already contains these quotes, so they have been
+      // consumed even though nothing was sent. Leaving them pending would
+      // compose them onto the retry a second time.
+      clearAnnotations(sessionID, consumedAnnotationIds)
       return false
     }
   }
@@ -2286,13 +2394,19 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     // Every branch above only told the user something went wrong. The text
     // itself still has to survive, or "please try again" asks them to retype
     // what the composer already threw away.
-    noteFailedSend(sessionID, text, attachments, msg)
+    noteFailedSend(sessionID, body, attachments, msg)
     // The run never started, so no idle event is coming to turn this off. Left
     // set, the thread reads as busy for ever and the next message the user
     // typed would be diverted into the follow-up queue instead of sent.
     appStore.setState((st) => ({ streaming: { ...st.streaming, [sessionID]: false } }))
     sent = false
   }
+  // Whether or not the send landed, these quotes are accounted for: on success
+  // they are in the transcript, on failure `noteFailedSend` holds the composed
+  // text. Either way, leaving them pending would quote the passage twice on the
+  // next message. The queue paths above clear their own, since they return
+  // before reaching this.
+  clearAnnotations(sessionID, consumedAnnotationIds)
   await loadMessages(sessionID)
   setTimeout(() => {
     void loadMessages(sessionID)
@@ -2423,12 +2537,20 @@ export async function openReviewFile(path: string, sessionId?: string): Promise<
   const workspace = currentWorkspace()
   if (!workspace) return
   const session = sessionId ? appStore.getState().sessions.find((item) => item.id === sessionId) : undefined
-  addWorkspaceTab(
-    activeWorkspaceView(workspace).focusedGroupId,
-    'review',
-    sessionId,
-    threadCheckout(session)
-  )
+  // In single mode the focused pane is the conversation itself, so opening the
+  // review there replaced the thread with a diff — and the conversation pane
+  // draws no tab strip, so there was no way back to it. A review is a resource
+  // like a terminal or a file tree, so it belongs beside the thread, in the
+  // panel, exactly where addResourceToSession puts one.
+  const single = appStore.getState().viewMode === 'single'
+  const view = activeWorkspaceView(workspace)
+  let groupId = view.focusedGroupId
+  if (single) {
+    ensurePanel(view.id)
+    const fresh = currentWorkspace()?.views.find((item) => item.id === view.id) ?? view
+    groupId = panelGroupId(fresh) ?? groupId
+  }
+  addWorkspaceTab(groupId, 'review', sessionId, threadCheckout(session))
 }
 
 export async function refreshProject(): Promise<void> {

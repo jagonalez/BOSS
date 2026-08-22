@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import type { FileNode } from '@shared/opencode'
-import { OpenCode } from '../lib/opencode'
+import type { ProjectTreeNode, ProjectFilePreview } from '@shared/opencode'
 import { ChevronIcon, FileIcon } from './icons'
-import { CodeView } from './CodeView'
+import { FilePreview } from './FilePreview'
 
 function baseName(path: string): string {
   const parts = path.replace(/\/+$/, '').split('/')
@@ -17,7 +16,7 @@ function FileNodeRow({
   onToggle,
   onSelect
 }: {
-  node: FileNode
+  node: ProjectTreeNode
   depth: number
   expanded: Set<string>
   onToggle: (path: string) => void
@@ -60,9 +59,9 @@ export function FilesTab({ contextPath }: { contextPath?: string }): React.JSX.E
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const gitRefresh = useStore(appStore, (s) => s.gitRefresh)
   const directory = contextPath || projectPath
-  const [files, setFiles] = useState<FileNode[] | null>(null)
+  const [files, setFiles] = useState<ProjectTreeNode[] | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [tabs, setTabs] = useState<Array<{ path: string; text: string }>>([])
+  const [tabs, setTabs] = useState<ProjectFilePreview[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
   const [treeWidth, setTreeWidth] = useState(280)
 
@@ -87,7 +86,7 @@ export function FilesTab({ contextPath }: { contextPath?: string }): React.JSX.E
     setTabs([])
     setActivePath(null)
     if (!directory) return
-    void OpenCode.fileTree('', directory).then(setFiles).catch(() => setFiles([]))
+    void window.boss.projectFileTree(directory).then(setFiles).catch(() => setFiles([]))
   }, [directory, gitRefresh])
 
   const toggle = async (path: string): Promise<void> => {
@@ -96,8 +95,8 @@ export function FilesTab({ contextPath }: { contextPath?: string }): React.JSX.E
       next.delete(path)
     } else {
       next.add(path)
-      const tree = await OpenCode.fileTree(path, directory).catch(() => [])
-      const update = (nodes: FileNode[]): FileNode[] =>
+      const tree = await window.boss.projectFileTree(directory, path).catch(() => [])
+      const update = (nodes: ProjectTreeNode[]): ProjectTreeNode[] =>
         nodes.map((node) =>
           node.path === path ? { ...node, children: tree } : { ...node, children: node.children ? update(node.children) : node.children }
         )
@@ -112,8 +111,9 @@ export function FilesTab({ contextPath }: { contextPath?: string }): React.JSX.E
       return
     }
     try {
-      const file = await OpenCode.fileContent(path, directory)
-      setTabs((prev) => [...prev, { path, text: file.content }])
+      const preview = await window.boss.projectFilePreview(directory, path)
+      if (!preview) return
+      setTabs((prev) => [...prev, preview])
       setActivePath(path)
     } catch {
       /* ignore */
@@ -174,7 +174,7 @@ export function FilesTab({ contextPath }: { contextPath?: string }): React.JSX.E
                 </div>
               ))}
             </div>
-            {active ? <CodeView text={active.text} path={active.path} /> : null}
+            {active ? <FilePreview key={active.path} preview={active} /> : null}
           </>
         ) : (
           <div className="empty">

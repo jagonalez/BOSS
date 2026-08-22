@@ -3,7 +3,7 @@ import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId } from '@shared/backend'
 import { composerRecovery, retryPayload } from '../lib/send-recovery'
-import { abortRun, clearFailedSend, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, steerFollowUp, toggleAsr, updateFollowUp } from '../lib/actions'
+import { abortRun, addAnnotation, clearFailedSend, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, startSideChat, steerFollowUp, toggleAsr, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -14,6 +14,10 @@ import { BackendControls } from './BackendControls'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { turnCompletedAt } from '../lib/status'
 import { segmentTurn } from '../lib/part-runs'
+import { AnnotationHighlights } from './AnnotationHighlights'
+import { AnnotationPopover } from './AnnotationPopover'
+import { AnnotationRow } from './AnnotationRow'
+import { createAnnotation, type Annotation } from '@shared/annotations'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -348,7 +352,7 @@ function MessageView({
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
       </div>
       <MessageError error={item.info.error} />
-      <div className="msg-body">
+      <div className="msg-body" data-message-id={isUser ? undefined : item.info.id}>
         {isUser ? (
           item.parts.map((part) => <PartView key={part.id} part={part} />)
         ) : (
@@ -370,7 +374,7 @@ function MessageView({
   )
 }
 
-function ModePicker({ backendId, sessionId }: { backendId: 'opencode' | 'pi' | 'codex' | 'claude'; sessionId?: string }): React.JSX.Element {
+function ModePicker({ backendId, sessionId }: { backendId: BackendId; sessionId?: string }): React.JSX.Element {
   // Main's copy first: it is what actually decides permissions.
   const mode = useStore(appStore, (s) =>
     (sessionId && s.sessions.find((item) => item.id === sessionId)?.mode)
@@ -538,6 +542,8 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
+const EMPTY_ANNOTATIONS: Annotation[] = []
+
 function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const asrTargetId = React.useId()
   const streaming = useStore(appStore, (s) => (sessionId ?? s.activeSessionId ? Boolean(s.streaming[sessionId ?? s.activeSessionId ?? '']) : false))
@@ -553,6 +559,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const supportsAttachments = backends.find((backend) => backend.id === backendId)?.capabilities.images ?? backendId === 'opencode'
   const composerEpoch = useStore(appStore, (s) => s.composerEpoch)
   const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? [] : []))
+  const annotations = useStore(appStore, (s) => (effectiveSession ? s.annotations[effectiveSession] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -717,7 +724,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   }
 
   const submit = async (): Promise<void> => {
-    if (!text.trim() && attachments.length === 0) return
+    if (!text.trim() && attachments.length === 0 && annotations.length === 0) return
     if (!effectiveSession) {
       void newChatWithPrompt(text, attachments)
       setText('')
@@ -877,7 +884,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     el.style.height = `${next}px`
   }
 
-  const canSend = text.trim().length > 0 || attachments.length > 0
+  const canSend = text.trim().length > 0 || attachments.length > 0 || annotations.length > 0
   const lastError = useStore(appStore, (s) =>
     effectiveSession ? s.lastErrorBySession[effectiveSession] ?? s.lastError : s.lastError
   )
@@ -1037,6 +1044,12 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             ))}
           </div>
         )}
+        {effectiveSession ? (
+          <AnnotationRow
+            annotations={annotations}
+            onRemove={(id) => removeAnnotation(effectiveSession, id)}
+          />
+        ) : null}
         <div className="composer-input">
           <textarea
             ref={textareaRef}
@@ -1234,7 +1247,7 @@ function TurnView({
             ) : null}
           </div>
           <MessageError error={lastAssistant.info.error} />
-          <div className="msg-body">
+          <div className="msg-body" data-message-id={lastAssistant.info.id}>
             {modelChanged && model ? <span className="model-chip">{model}</span> : null}
             {/* Stream order, so each card sits under the line that introduced
                 it. One card for the whole turn put a long run's calls far above
@@ -1263,6 +1276,16 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
   const backendId = useStore(appStore, (s) => s.sessions.find((session) => session.id === effectiveId)?.backendId ?? 'opencode')
+  /** Where this thread works, named the way the bar names it: the branch when
+   *  the thread has a worktree, otherwise the project folder. Used only by the
+   *  empty state, to ask about somewhere concrete rather than in the abstract. */
+  const threadPlace = useStore(appStore, (s) => {
+    const session = s.sessions.find((item) => item.id === effectiveId)
+    if (!session) return undefined
+    if (session.worktree?.status === 'active' && session.worktree.branch) return session.worktree.branch
+    const path = session.projectPath ?? session.directory ?? session.path
+    return path ? path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) : undefined
+  })
   const historyCapabilities = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId)?.capabilities)
   const projects = useStore(appStore, (s) => s.projects)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -1300,6 +1323,7 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
     [visible, visibleCount, searchOpen, searchQuery]
   )
   const turns = useMemo(() => groupTurns(windowed), [windowed])
+  const annotationsForThread = useStore(appStore, (s) => (effectiveId ? s.annotations[effectiveId] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
   const lastTurnAssistants = turns[turns.length - 1]?.assistants ?? []
   const allParts = lastTurnAssistants.flatMap((m) => m.parts)
   const liveText = allParts.some((p) => p.type === 'text' && (p.text ?? '').trim().length > 0)
@@ -1603,7 +1627,39 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
             <button className="thread-search-button close" type="button" onClick={closeSearch} aria-label="Close thread search" title="Close (Escape)">×</button>
           </div>
         ) : null}
+        {effectiveId ? (
+          <AnnotationHighlights
+            annotations={annotationsForThread}
+            scrollRef={scrollRef}
+            revision={turns}
+          />
+        ) : null}
+        {effectiveId ? (
+          <AnnotationPopover
+            scrollRef={scrollRef}
+            onAnnotate={(quote, anchor, note) => addAnnotation(effectiveId, quote, anchor, note)}
+            onSideChat={(quote, anchor) => {
+              // Built without touching the composer: a side chat carries the
+              // passage somewhere else, so pinning it to this thread's draft
+              // would leave a stray quote behind here.
+              void startSideChat(
+                effectiveId,
+                createAnnotation(`annotation-${crypto.randomUUID()}`, quote, anchor)
+              )
+            }}
+          />
+        ) : null}
         <div className="messages" ref={scrollRef} onScroll={onScroll}>
+          {/* A thread with nothing in it yet showed a blank half-window above
+              the composer, which reads as something failing to load rather than
+              as a thread waiting for its first instruction. Naming where the
+              thread works makes the ask concrete. */}
+          {turns.length === 0 && !activity ? (
+            <div className="thread-start">
+              <h2>{threadPlace ? `What should we do in ${threadPlace}?` : 'What should we do?'}</h2>
+              <p>Describe the change you want, or ask about the code. {BACKEND_SHORT_LABELS[backendId]} works in this thread.</p>
+            </div>
+          ) : null}
           {(() => {
             let lastModel: string | undefined
             return turns.map((turn, i) => {

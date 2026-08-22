@@ -176,6 +176,31 @@ test('a Claude thread can submit a message without a transport error', async ({ 
   await expect(appPage.locator('.chat-error')).toHaveCount(0)
 })
 
+async function configureLabDefaults(page: Parameters<typeof control>[0]): Promise<void> {
+  await openSettings(page)
+  await page.getByRole('button', { name: 'Agent defaults' }).click()
+  await page.locator('.settings-backend').filter({ hasText: 'Lab' }).click()
+  await page.getByRole('button', { name: 'Models & connections' }).click()
+
+  const row = page.locator('.settings-connection-row').filter({ hasText: 'Lab' })
+  await row.locator('.settings-model-picker-trigger').click()
+  await row.getByRole('button', { name: /Lab E2E/ }).click()
+}
+
+test('quick-create with Lab uses the drop-in backend and its default model', async ({ appPage }) => {
+  await configureLabDefaults(appPage)
+  await appPage.getByRole('button', { name: 'Done' }).click()
+  await control(appPage).then((item) => item.resetCalls())
+
+  await appPage.getByRole('tab', { name: /Chats/ }).click()
+  await appPage.getByRole('button', { name: 'New chat' }).click()
+  const created = await lastBackendCall(appPage, 'thread.create')
+  expect(created.request).toMatchObject({ backendId: 'lab', scope: 'global' })
+
+  await expect(appPage.getByRole('tab', { name: /^New lab thread/ })).toBeVisible()
+  await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Lab E2E' })).toBeVisible()
+})
+
 test('delegation sends the chosen backend, worktree placement, and target defaults', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
   await appPage.getByRole('button', { name: 'Done' }).click()
@@ -332,4 +357,166 @@ test('Claude Stop & redirect accepts the queued instruction without showing a fa
   })
   await expect(appPage.locator('.followup-item')).toHaveCount(0)
   await expect(appPage.locator('.chat-error')).toHaveCount(0)
+})
+
+/** Select a run of rendered text inside an assistant reply, the way a drag
+ *  does, and let the popover's pointerup listener see it. Playwright has no
+ *  API for a partial text selection, so the range is built in the page. */
+async function selectInAssistantReply(
+  page: Parameters<typeof control>[0],
+  phrase: string
+): Promise<void> {
+  await page.evaluate((needle) => {
+    const body = Array.from(document.querySelectorAll('.msg.assistant .msg-body'))
+      .find((element) => element.textContent?.includes(needle))
+    if (!body) throw new Error(`No assistant message containing ${needle}`)
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const index = node.textContent?.indexOf(needle) ?? -1
+      if (index < 0) continue
+      const range = document.createRange()
+      range.setStart(node, index)
+      range.setEnd(node, index + needle.length)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      return
+    }
+    throw new Error(`No text node containing ${needle}`)
+  }, phrase)
+  await page.dispatchEvent('.messages', 'pointerup')
+}
+
+test('annotating a passage quotes it back to the model with the note', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  await selectInAssistantReply(appPage, 'second result')
+  await appPage.getByRole('button', { name: 'Annotate' }).click()
+  await appPage.getByLabel('Annotation note').fill('Why this one?')
+  await appPage.getByLabel('Annotation note').press('Enter')
+
+  // The pill is the standing reminder that the next send carries a quote.
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(1)
+  await expect(appPage.locator('.annotation-pill-quote')).toHaveText('second result')
+
+  await control(appPage).then((item) => item.resetCalls())
+  const composer = appPage.getByPlaceholder(/^Ask /)
+  await composer.fill('Expand on that.')
+  await composer.press('Enter')
+
+  const call = await lastBackendCall(appPage, 'thread.send')
+  const text = (call.request as { parts: { type: string; text?: string }[] }).parts
+    .find((part) => part.type === 'text')?.text ?? ''
+  expect(text).toContain('> second result')
+  expect(text).toContain('Why this one?')
+  expect(text).toContain('Expand on that.')
+  expect(text.indexOf('> second result')).toBeLessThan(text.indexOf('Expand on that.'))
+
+  // Cleared on send: an annotation phrases one prompt, it does not stay on the
+  // thread and quote itself again on the next message.
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(0)
+})
+
+test('an annotation alone is a complete message', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  await selectInAssistantReply(appPage, 'second result')
+  await appPage.getByRole('button', { name: 'Annotate' }).click()
+  await appPage.getByLabel('Annotation note').fill('Say more.')
+  await appPage.getByLabel('Annotation note').press('Enter')
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(1)
+
+  await control(appPage).then((item) => item.resetCalls())
+  // Nothing typed: the empty composer must not veto the send.
+  await appPage.getByPlaceholder(/^Ask /).press('Enter')
+
+  const call = await lastBackendCall(appPage, 'thread.send')
+  const text = (call.request as { parts: { type: string; text?: string }[] }).parts
+    .find((part) => part.type === 'text')?.text ?? ''
+  expect(text).toContain('> second result')
+  expect(text).toContain('Say more.')
+})
+
+test('a removed annotation is not carried into the next prompt', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  await selectInAssistantReply(appPage, 'second result')
+  await appPage.getByRole('button', { name: 'Annotate' }).click()
+  await appPage.getByLabel('Annotation note').fill('Never mind.')
+  await appPage.getByLabel('Annotation note').press('Enter')
+  await appPage.getByRole('button', { name: 'Remove annotation 1' }).click()
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(0)
+
+  await control(appPage).then((item) => item.resetCalls())
+  const composer = appPage.getByPlaceholder(/^Ask /)
+  await composer.fill('Unrelated question.')
+  await composer.press('Enter')
+
+  const call = await lastBackendCall(appPage, 'thread.send')
+  const text = (call.request as { parts: { type: string; text?: string }[] }).parts
+    .find((part) => part.type === 'text')?.text ?? ''
+  expect(text).toBe('Unrelated question.')
+})
+
+test('a side chat forks the thread and opens seeded with the passage', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.resetCalls())
+
+  await selectInAssistantReply(appPage, 'second result')
+  await appPage.getByRole('button', { name: 'Side chat' }).click()
+
+  // Forked, not freshly created: the side chat inherits the conversation the
+  // passage came from, so the seed only has to point at it.
+  const fork = await lastBackendCall(appPage, 'thread.fork')
+  expect(fork.request).toMatchObject({ threadId: 'thread-source' })
+
+  // Two composers now, which is the point: the side chat opens alongside its
+  // parent rather than replacing it. Both live in the same group, so neither
+  // the placeholder nor the focused pane tells them apart — the draft does.
+  const composers = appPage.getByPlaceholder(/^Ask /)
+  await expect(composers).toHaveCount(2)
+
+  // Exactly one carries the quote and the other is empty: the seed goes to the
+  // side chat without disturbing the draft in the thread it came from. Counted
+  // rather than positional, since which composer renders first is a layout
+  // detail this contract does not depend on.
+  await expect
+    .poll(async () =>
+      composers.evaluateAll((nodes) => {
+        const values = nodes.map((node) => (node as HTMLTextAreaElement).value)
+        return {
+          seeded: values.filter((value) => value.includes('> second result')).length,
+          empty: values.filter((value) => value === '').length
+        }
+      })
+    )
+    .toEqual({ seeded: 1, empty: 1 })
+
+  // The passage went to the side chat, so nothing is left pending here.
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(0)
+})
+
+test('a selection spanning two messages offers no annotation', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  // Anchors are a single {messageId, start, end}; a range crossing a role
+  // boundary cannot be described by one, so the affordance stays away rather
+  // than silently annotating half of it.
+  await appPage.evaluate(() => {
+    const bodies = document.querySelectorAll('.msg .msg-body')
+    const range = document.createRange()
+    range.setStart(bodies[0], 0)
+    range.setEnd(bodies[bodies.length - 1], 0)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  })
+  await appPage.dispatchEvent('.messages', 'pointerup')
+
+  await expect(appPage.locator('.annotation-popover')).toHaveCount(0)
 })

@@ -173,6 +173,19 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
       { id: 'accept-edits', label: 'Edit automatically', description: 'approve file edits; prompt for other protected tools' },
       { id: 'plan', label: 'Plan', description: 'read-only planning mode' }
     ]
+  },
+  lab: {
+    label: 'Lab',
+    description: 'From-scratch harness speaking OpenAI-compatible APIs to a local ollama or any cloud endpoint.',
+    // No command: there is no CLI to resolve, so the backend is always
+    // available regardless of PATH (mirrors how opencode has no command).
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true, reportsSteeredMessages: false },
+    modes: [
+      { id: 'ask', label: 'Ask', description: 'prompt before every file write or shell command' },
+      { id: 'auto', label: 'Auto', description: 'run file writes and shell commands without asking' },
+      { id: 'accept-edits', label: 'Edit automatically', description: 'approve file edits; prompt for shell commands' },
+      { id: 'plan', label: 'Plan', description: 'read-only; no writes or shell' }
+    ]
   }
 }
 
@@ -1880,6 +1893,12 @@ export class BackendManager {
     const backend = await this.ensureStarted(binding.backendId)
     this.intentionalAborts.add(threadId)
     await backend.abort(binding.nativeSessionId)
+    // A run the user stopped is waiting for nothing, so a permission or
+    // question it was blocked on is no longer owed an answer. Those two kinds
+    // survive everything else on purpose — they outlive a run so the ask is
+    // not lost — which meant a stopped thread kept saying "Answer needed"
+    // forever, with no prompt left anywhere to answer.
+    this.clearThreadAttention(binding)
     // Settle the run here rather than waiting for the backend to say it
     // stopped. A backend that is interrupted may never send that event, and
     // the thread then stayed "busy" — which quietly diverted the next message
