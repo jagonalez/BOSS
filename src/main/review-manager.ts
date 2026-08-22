@@ -4,6 +4,8 @@ import type {
   AddReviewCommentInput,
   ChangeRequestFileDiff,
   ChangeRequestSummary,
+  CreateChangeRequestInput,
+  CreatedChangeRequest,
   ReviewComment,
   ReviewSnapshot,
   SubmitReviewEvent
@@ -224,5 +226,35 @@ export class ReviewManager {
     await context.provider.submitVerdict(context.repository, context.match, context.changeRequest, event, body)
     this.forgetChangeRequest(context.repository)
     return this.snapshot(context.repository.root)
+  }
+
+  /**
+   * Open a change request for the checkout's current branch.
+   *
+   * Unlike every other write here this cannot go through `providerContext`, which insists on a
+   * change request that already exists — the point of this call is that one does not.
+   */
+  async createChangeRequest(path: string, input: CreateChangeRequestInput): Promise<CreatedChangeRequest> {
+    const repository = await this.repository(path)
+    const selected = this.providerFor(repository)
+    if (!selected) throw new Error('No remote review provider is configured for this checkout.')
+    const { provider, match } = selected
+    if (!provider.summary.capabilities.createChangeRequest || !provider.createChangeRequest) {
+      throw new Error(`${provider.summary.label} cannot open a ${provider.summary.changeRequestLabel.toLowerCase()} from BOSS.`)
+    }
+    // Opening a second one for the same branch is the forge's error to give, but it reads as a
+    // failure rather than an answer, and the one that already exists is what the caller wanted.
+    const existing = await this.changeRequestFor(repository, selected)
+    if (existing?.url) {
+      throw new Error(`${provider.summary.changeRequestLabel} #${existing.id} is already open for ${repository.branch}: ${existing.url}`)
+    }
+    const baseBranch = input.baseBranch ?? (await provider.getDefaultBranch?.(repository, match))
+    const created = await provider.createChangeRequest(repository, match, {
+      ...input,
+      ...(baseBranch === undefined ? {} : { baseBranch })
+    })
+    // The cached "no change request here" answer is what this call just made untrue.
+    this.forgetChangeRequest(repository)
+    return created
   }
 }

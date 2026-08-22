@@ -24,7 +24,7 @@ import type {
 } from './ipc'
 import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
 import type { BackendRequest } from './backend'
-import type { AddReviewCommentInput, ChangeRequestFileDiff, ReviewComment, ReviewSnapshot, SubmitReviewEvent } from './review'
+import type { AddReviewCommentInput, ChangeRequestFileDiff, CreateChangeRequestInput, CreatedChangeRequest, ReviewComment, ReviewSnapshot, SubmitReviewEvent } from './review'
 
 export interface BossApi {
   platform(): string
@@ -114,6 +114,7 @@ export interface BossApi {
   reviewPublishComment(path: string, input: AddReviewCommentInput): Promise<ReviewSnapshot>
   reviewReply(path: string, commentId: string, body: string): Promise<ReviewSnapshot>
   reviewSubmit(path: string, event: SubmitReviewEvent, body: string): Promise<ReviewSnapshot>
+  reviewCreateChangeRequest(path: string, input: CreateChangeRequestInput): Promise<CreatedChangeRequest>
 
   ttsStatus(): Promise<TtsStatus>
   ttsSpeak(req: TtsSpeakRequest): Promise<TtsSpeakResult>

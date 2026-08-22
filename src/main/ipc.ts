@@ -333,6 +333,9 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.ReviewSubmit, (_event, body: { path: string; event: import('@shared/review').SubmitReviewEvent; body: string }) =>
     deps.reviews.submit(body.path, body.event, body.body)
   )
+  ipcMain.handle(IpcChannels.ReviewCreateChangeRequest, (_event, body: { path: string; input: import('@shared/review').CreateChangeRequestInput }) =>
+    deps.reviews.createChangeRequest(body.path, body.input)
+  )
 
   ipcMain.handle(IpcChannels.TtsStatus, () => deps.speech.ttsStatus())
 

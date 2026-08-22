@@ -35,6 +35,7 @@ import { TranscriptStore } from './transcript-store'
 import { UpdateChecker } from './updates'
 import { ReviewManager } from './review-manager'
 import { GitHubReviewProvider } from './github-review-provider'
+import { GitLabReviewProvider } from './gitlab-review-provider'
 import { restoreShellPath } from './shell-path'
 import { BinaryOverrides, setBinaryOverrideSource } from './backend-bin'
 
@@ -160,7 +161,8 @@ const speech = new SpeechManager()
 const sites = new SitesManager(() => backendMgr.currentProject || server.projectPath)
 const updates = new UpdateChecker()
 const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments.json'), [
-  new GitHubReviewProvider()
+  new GitHubReviewProvider(),
+  new GitLabReviewProvider()
 ])
 
 let ipcReady = false

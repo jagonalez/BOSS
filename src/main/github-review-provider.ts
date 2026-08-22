@@ -5,6 +5,8 @@ import type {
   ChangeRequestFileDiff,
   ChangeRequestReview,
   ChangeRequestSummary,
+  CreateChangeRequestInput,
+  CreatedChangeRequest,
   ReviewAuthor,
   ReviewComment,
   SubmitReviewEvent
@@ -12,7 +14,7 @@ import type {
 // The explicit extension keeps the source executable under Node's type-stripping test runner.
 import type { ReviewProvider, ReviewProviderMatch, ReviewRepository } from './review-provider.ts'
 // @ts-expect-error Application builds use bundler resolution.
-import { requiredCommand, runCommand } from './review-provider.ts'
+import { changeRequestNumberFromUrl, firstUrl, requiredCommand, runCommand } from './review-provider.ts'
 
 interface GhAuthor { login?: string; avatarUrl?: string }
 interface GhComment {
@@ -67,6 +69,34 @@ export function parseGitHubRemote(remote: string): string | undefined {
   const trimmed = remote.trim().replace(/\.git$/, '')
   const match = /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https?:\/\/github\.com\/)([^/]+\/[^/]+)$/i.exec(trimmed)
   return match?.[1]
+}
+
+/**
+ * The `gh pr create` invocation for one request, and the text to hand it on standard input.
+ *
+ * A body goes over stdin rather than in `--body`, because it is arbitrary prose: it can be longer
+ * than the operating system will carry as an argument, and `--body-file -` is what gh offers for
+ * reading one. A caller that wrote neither title nor body asks gh to `--fill` both from the
+ * commits on the branch, which is the one substitute that reads better than nothing.
+ */
+export function createChangeRequestArgs(
+  input: CreateChangeRequestInput,
+  headBranch: string
+): { args: string[]; stdin?: string } {
+  const title = input.title?.trim()
+  const body = input.body?.trim()
+  const args = ['pr', 'create', '--head', headBranch]
+  if (input.baseBranch) args.push('--base', input.baseBranch)
+  if (input.draft) args.push('--draft')
+  if (!title && !body) {
+    args.push('--fill')
+    return { args }
+  }
+  // gh prompts for whichever of the two it was not given, and a prompt in a spawned process hangs
+  // rather than fails, so both are always supplied once either one is.
+  args.push('--title', title || headBranch)
+  args.push('--body-file', '-')
+  return { args, stdin: body ?? '' }
 }
 
 export function splitGitHubPullRequestDiff(value: string): ChangeRequestFileDiff[] {
@@ -128,7 +158,8 @@ export class GitHubReviewProvider implements ReviewProvider {
       publishOverallComment: true,
       publishInlineComment: true,
       replyToComment: true,
-      submitVerdict: true
+      submitVerdict: true,
+      createChangeRequest: true
     }
   } as const
 
@@ -215,5 +246,22 @@ export class GitHubReviewProvider implements ReviewProvider {
     const args = ['pr', 'review', changeRequest.id, action]
     if (body.trim()) args.push('--body', body.trim())
     await requiredCommand('gh', args, repository.root)
+  }
+
+  async getDefaultBranch(repository: ReviewRepository): Promise<string | undefined> {
+    const result = await runCommand('gh', ['repo', 'view', '--json', 'defaultBranchRef', '--jq', '.defaultBranchRef.name'], repository.root)
+    const name = result.stdout.trim()
+    return result.code === 0 && name ? name : undefined
+  }
+
+  async createChangeRequest(repository: ReviewRepository, _match: ReviewProviderMatch, input: CreateChangeRequestInput): Promise<CreatedChangeRequest> {
+    const { args, stdin } = createChangeRequestArgs(input, repository.branch)
+    // gh answers with the URL of what it opened, which is the only part of the result that is
+    // stable enough to key on; the number is read back out of it.
+    const stdout = await requiredCommand('gh', args, repository.root, stdin)
+    const url = firstUrl(stdout)
+    if (!url) throw new Error(stdout.trim() || 'GitHub did not report a pull request URL.')
+    const number = changeRequestNumberFromUrl(url)
+    return { url, ...(number === undefined ? {} : { number }) }
   }
 }

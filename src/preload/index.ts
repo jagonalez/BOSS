@@ -94,6 +94,7 @@ const boss: BossApi = {
   reviewPublishComment: (path, input) => ipcRenderer.invoke(IpcChannels.ReviewPublishComment, { path, input }),
   reviewReply: (path, commentId, body) => ipcRenderer.invoke(IpcChannels.ReviewReply, { path, commentId, body }),
   reviewSubmit: (path, event, body) => ipcRenderer.invoke(IpcChannels.ReviewSubmit, { path, event, body }),
+  reviewCreateChangeRequest: (path, input) => ipcRenderer.invoke(IpcChannels.ReviewCreateChangeRequest, { path, input }),
 
   ttsStatus: () => ipcRenderer.invoke(IpcChannels.TtsStatus),
   ttsSpeak: (req) => ipcRenderer.invoke(IpcChannels.TtsSpeak, req),

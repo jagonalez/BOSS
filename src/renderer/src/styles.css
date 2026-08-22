@@ -6841,6 +6841,19 @@ select:hover {
   font-size: 12px;
 }
 
+/* The note carries an action once a provider can open a change request, so the sentence and the
+   button share a row and the button keeps its width when the sentence wraps. */
+.review-sync-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-sync-note button {
+  flex: none;
+}
+
 .review-sync-error {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 40%, var(--border-subtle));
