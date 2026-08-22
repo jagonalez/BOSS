@@ -10,14 +10,14 @@
     "backgroundColor": "#0b0d10",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "dev.boss.app",
+      "bundleIdentifier": "dev.boss.mobile",
       "infoPlist": {
         "NSCameraUsageDescription": "BOSS uses the camera once, to scan the pairing code shown on your desktop.",
         "ITSAppUsesNonExemptEncryption": true
       }
     },
     "android": {
-      "package": "dev.boss.app",
+      "package": "dev.boss.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#0b0d10",
         "foregroundImage": "./assets/android-icon-foreground.png",
