@@ -7,7 +7,7 @@ import type {
   BackendModeId,
   BackendModelDescriptor,
   BackendModelPreference,
-  LabConnectionSettings,
+  LabConnectionsSettings,
   BackendRequest,
   QueuedFollowUp
 } from '../shared/backend'
@@ -142,7 +142,7 @@ const models: Record<BackendId, BackendModelDescriptor[]> = {
     { id: 'claude-opus-5', name: 'Claude Opus 5', provider: 'anthropic', variants: ['low', 'high'] },
     { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'anthropic', variants: ['low', 'high'] }
   ],
-  lab: [{ id: 'lab-e2e', name: 'Lab E2E', provider: 'lab' }]
+  lab: [{ id: 'lab-e2e', name: 'Lab E2E', provider: 'lab-local', providerName: 'Local test' }]
 }
 
 const projectInfo: ProjectInfo = {
@@ -215,11 +215,16 @@ export function installE2EApi(boss: BossApi): void {
   let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
   const messages: Record<string, MessageWithParts[]> = { 'thread-source': sourceMessages() }
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
-  let labConnection: LabConnectionSettings = {
-    baseUrl: 'http://localhost:11434/v1',
-    model: 'lab-e2e',
-    apiKeyConfigured: false,
-    healthy: true
+  let labConnections: LabConnectionsSettings = {
+    connections: [{
+      id: 'lab-local',
+      name: 'Local test',
+      baseUrl: 'http://localhost:11434/v1',
+      apiKeyConfigured: false,
+      healthy: true,
+      manualModels: ['lab-e2e'],
+      models: [{ id: 'lab-e2e', name: 'Lab E2E', source: 'local' }]
+    }]
   }
   let modesBySession: Record<string, BackendModeId> = {}
   let followUps: Record<string, QueuedFollowUp[]> = {
@@ -312,15 +317,36 @@ export function installE2EApi(boss: BossApi): void {
       case 'backend.defaults.set':
         defaults = structuredClone(request.defaults)
         return undefined
-      case 'lab.connection.get': return labConnection
-      case 'lab.connection.set':
-        labConnection = {
-          baseUrl: request.settings.baseUrl,
-          model: request.settings.model,
-          apiKeyConfigured: request.settings.clearApiKey ? false : Boolean(request.settings.apiKey) || labConnection.apiKeyConfigured,
-          healthy: true
+      case 'lab.connections.get': return labConnections
+      case 'lab.connection.save': {
+        const current = request.connection.id
+          ? labConnections.connections.find((connection) => connection.id === request.connection.id)
+          : undefined
+        const id = request.connection.id ?? `lab-connection-${labConnections.connections.length + 1}`
+        const manualModels = request.connection.manualModels
+        const connection = {
+          id,
+          name: request.connection.name,
+          baseUrl: request.connection.baseUrl,
+          apiKeyConfigured: request.connection.clearApiKey ? false : Boolean(request.connection.apiKey) || current?.apiKeyConfigured || false,
+          healthy: true,
+          manualModels,
+          models: manualModels.map((modelId) => ({ id: modelId, name: modelId, source: 'custom' as const }))
         }
-        return labConnection
+        labConnections = { connections: current
+          ? labConnections.connections.map((item) => item.id === id ? connection : item)
+          : [...labConnections.connections, connection] }
+        models.lab = labConnections.connections.flatMap((item) => item.models.map((model) => ({
+          ...model,
+          provider: item.id,
+          providerName: item.name
+        })))
+        return labConnections
+      }
+      case 'lab.connection.delete':
+        labConnections = { connections: labConnections.connections.filter((connection) => connection.id !== request.connectionId) }
+        models.lab = labConnections.connections.flatMap((item) => item.models.map((model) => ({ ...model, provider: item.id, providerName: item.name })))
+        return labConnections
       case 'thread.title.settings.get': return threadTitleSettings
       case 'thread.title.settings.set':
         threadTitleSettings = { autoNameFromFirstPrompt: request.autoNameFromFirstPrompt }

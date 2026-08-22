@@ -96,6 +96,8 @@ export interface BackendModelDescriptor {
   id: string
   name?: string
   provider?: string
+  /** Human-readable provider label when the provider id is an opaque stable id. */
+  providerName?: string
   variants?: string[]
   source?: 'local' | 'cloud' | 'custom'
 }
@@ -114,20 +116,34 @@ export interface BackendModelPreference {
   mode?: BackendModeId
 }
 
-/** Connection details for Lab's OpenAI-compatible endpoint. The API key is
- * deliberately never returned to the renderer; it is stored separately using
- * Electron's secure credential storage. */
-export interface LabConnectionSettings {
+export interface LabConnectionModel {
+  id: string
+  name?: string
+  source?: 'local' | 'cloud' | 'custom'
+}
+
+/** One OpenAI-compatible API available to Lab. Keys deliberately never leave
+ * main; the renderer only learns whether a key is configured. */
+export interface LabConnection {
+  id: string
+  name: string
   baseUrl: string
-  model: string
   apiKeyConfigured: boolean
-  /** Result of the most recent lightweight GET /models probe. */
   healthy: boolean
+  manualModels: string[]
+  models: LabConnectionModel[]
+}
+
+export interface LabConnectionsSettings {
+  connections: LabConnection[]
 }
 
 export interface LabConnectionUpdate {
+  /** Omit when adding a connection. */
+  id?: string
+  name: string
   baseUrl: string
-  model: string
+  manualModels: string[]
   /** Omit to keep the existing key. */
   apiKey?: string
   /** Remove the securely stored key. */
@@ -206,8 +222,9 @@ export type BackendRequest =
   | { type: 'backend.auth.status' }
   | { type: 'backend.subscription-usage' }
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
-  | { type: 'lab.connection.get' }
-  | { type: 'lab.connection.set'; settings: LabConnectionUpdate }
+  | { type: 'lab.connections.get' }
+  | { type: 'lab.connection.save'; connection: LabConnectionUpdate }
+  | { type: 'lab.connection.delete'; connectionId: string }
   | { type: 'thread.title.settings.get' }
   | { type: 'thread.title.settings.set'; autoNameFromFirstPrompt: boolean }
   | { type: 'sandbox.settings.get' }

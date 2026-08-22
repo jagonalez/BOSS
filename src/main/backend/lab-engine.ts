@@ -105,8 +105,15 @@ function toolRunningPart(sessionId: string, messageId: string, call: LabFunction
 interface TurnContext {
   mode: BackendModeId
   model: string
+  baseUrl: string
+  apiKey?: string
   cwd: string
   signal: AbortSignal
+}
+
+export interface LabEndpointConfig {
+  baseUrl: string
+  apiKey?: string
 }
 
 /** The Lab agent harness: sessions, a streaming OpenAI-compatible chat client,
@@ -128,6 +135,7 @@ export class LabEngine {
   /** Messages steered into a session while its run is in flight. Folded into
    *  the model's history between tool-loop rounds. */
   private readonly pendingSteers = new Map<string, string[]>()
+  private readonly endpointBySession = new Map<string, LabEndpointConfig>()
   private readonly tools: LabToolFunction[]
   private selectedModel: string
 
@@ -168,7 +176,8 @@ export class LabEngine {
       controller: request.controller,
       signal: request.signal,
       emitStatus: false,
-      context: request.context
+      context: request.context,
+      ...this.endpointForChild(request.sessionId)
     }))
   }
 
@@ -183,6 +192,7 @@ export class LabEngine {
   stop(): void {
     for (const controller of this.running.values()) controller.abort()
     this.running.clear()
+    this.endpointBySession.clear()
     this.orchestrator.stop()
   }
 
@@ -190,13 +200,14 @@ export class LabEngine {
   disposeSession(sessionId: string): void {
     this.running.get(sessionId)?.abort()
     this.orchestrator.dispose(sessionId)
+    this.endpointBySession.delete(sessionId)
   }
 
-  async checkHealth(): Promise<boolean> {
+  async checkHealth(endpoint: LabEndpointConfig = this.config): Promise<boolean> {
     try {
-      const response = await fetch(`${this.config.baseUrl}/models`, {
+      const response = await fetch(`${endpoint.baseUrl}/models`, {
         method: 'GET',
-        headers: this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : undefined,
+        headers: endpoint.apiKey ? { Authorization: `Bearer ${endpoint.apiKey}` } : undefined,
         signal: AbortSignal.timeout(3_000)
       })
       const healthy = response.ok
@@ -207,8 +218,18 @@ export class LabEngine {
     }
   }
 
-  async listModels(): Promise<Array<{ id: string; name?: string; provider?: string; source?: 'local' | 'cloud' }>> {
-    return listModels(this.config.baseUrl, this.config.apiKey)
+  async listModels(endpoint: LabEndpointConfig = this.config): Promise<Array<{ id: string; name?: string; provider?: string; source?: 'local' | 'cloud' }>> {
+    return listModels(endpoint.baseUrl, endpoint.apiKey)
+  }
+
+  private endpointForChild(sessionId: string): LabEndpointConfig {
+    let parentId = this.store.get(sessionId).parentID
+    while (parentId) {
+      const endpoint = this.endpointBySession.get(parentId)
+      if (endpoint) return endpoint
+      parentId = this.store.get(parentId).parentID
+    }
+    return this.config
   }
 
   selectModel(modelId: string): void {
@@ -238,6 +259,8 @@ export class LabEngine {
     mode?: BackendModeId
     model?: string
     context?: string
+    baseUrl?: string
+    apiKey?: string
   }): Promise<RunOutcome> {
     if (this.running.has(sessionId)) throw new Error('Lab is already working on this thread.')
     const mode = options?.mode ?? this.modes.get(sessionId) ?? 'ask'
@@ -247,7 +270,12 @@ export class LabEngine {
     const record = this.store.get(sessionId)
     const cwd = record.directory || globalThis.process.cwd()
     const controller = new AbortController()
-    return this.runTurn({ sessionId, prompt, mode, model, cwd, controller, emitStatus: true, context: options?.context })
+    const endpoint = {
+      baseUrl: options?.baseUrl ?? this.config.baseUrl,
+      apiKey: options?.baseUrl ? options.apiKey : this.config.apiKey
+    }
+    this.endpointBySession.set(sessionId, endpoint)
+    return this.runTurn({ sessionId, prompt, mode, model, cwd, controller, emitStatus: true, context: options?.context, ...endpoint })
   }
 
   /** Interrupt a session's run. Gate prompts settle through the abort signal
@@ -278,13 +306,13 @@ export class LabEngine {
   /** Summarize the older turns of a session and replace them with one
    *  compaction message, keeping the newest messages intact. Long sessions stop
    *  drifting and the next request starts from a tighter context. */
-  async compact(sessionId: string, model?: string): Promise<void> {
+  async compact(sessionId: string, model?: string, endpoint: LabEndpointConfig = this.config): Promise<void> {
     const messages = this.store.messages(sessionId)
     if (messages.length <= COMPACT_KEEP_TAIL + 1) return
     const cutoff = messages.length - COMPACT_KEEP_TAIL
     const older = messages.slice(0, cutoff)
     const tail = messages.slice(cutoff)
-    const summary = await this.summarize(openAiMessagesFromHistory(older, COMPACTION_PROMPT), model)
+    const summary = await this.summarize(openAiMessagesFromHistory(older, COMPACTION_PROMPT), model, endpoint)
     const id = `compaction-${randomUUID()}`
     const compaction: MessageWithParts = {
       info: { id, sessionID: sessionId, role: 'assistant', time: { created: Date.now() } },
@@ -294,12 +322,12 @@ export class LabEngine {
     this.sink.onAssistantMessage(sessionId, compaction)
   }
 
-  private async summarize(history: LabChatMessage[], model?: string): Promise<string> {
+  private async summarize(history: LabChatMessage[], model?: string, endpoint: LabEndpointConfig = this.config): Promise<string> {
     const result = await streamChatCompletion({
-      baseUrl: this.config.baseUrl,
+      baseUrl: endpoint.baseUrl,
       model: model ?? this.selectedModel,
       messages: history,
-      apiKey: this.config.apiKey,
+      apiKey: endpoint.apiKey,
       signal: AbortSignal.timeout(120_000)
     })
     return result.content.trim()
@@ -384,6 +412,8 @@ export class LabEngine {
     signal?: AbortSignal
     emitStatus: boolean
     context?: string
+    baseUrl: string
+    apiKey?: string
   }): Promise<RunOutcome> {
     const userId = randomUUID()
     const userMessage: MessageWithParts = {
@@ -407,7 +437,7 @@ export class LabEngine {
       this.systemPrompt(options.cwd, `${options.context ?? ''}${note}`)
     )
     try {
-      await this.runAgentLoop(options.sessionId, messages, signal, { mode: options.mode, model: options.model, cwd: options.cwd, signal })
+      await this.runAgentLoop(options.sessionId, messages, signal, { mode: options.mode, model: options.model, baseUrl: options.baseUrl, apiKey: options.apiKey, cwd: options.cwd, signal })
       sink.onIdle(options.sessionId)
       return { status: 'completed' }
     } catch (error) {
@@ -501,11 +531,11 @@ export class LabEngine {
       }
       const assistantId = randomUUID()
       const turn = await streamChatCompletion({
-        baseUrl: this.config.baseUrl,
+        baseUrl: ctx.baseUrl,
         model: ctx.model,
         messages,
         tools: this.tools,
-        apiKey: this.config.apiKey,
+        apiKey: ctx.apiKey,
         signal,
         onText: (delta) => {
           this.sink.onTextDelta(sessionId, assistantId, delta)

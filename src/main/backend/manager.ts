@@ -13,7 +13,7 @@ import type {
   BackendMessageOptions,
   BackendModeId,
   BackendModelPreference,
-  LabConnectionSettings,
+  LabConnectionsSettings,
   LabConnectionUpdate,
   DelegatePlacement,
   QueuedFollowUp,
@@ -770,19 +770,37 @@ export class BackendManager {
     }
   }
 
-  private labConnection(): LabConnectionSettings {
-    const lab = this.backends.lab
-    if (!lab.labConnection) throw new Error('Lab connection settings are not available in this build.')
-    return lab.labConnection()
+  private assertLabIdle(): void {
+    if ([...this.bindings.values()].some((binding) => binding.backendId === 'lab' && this.busyThreads.has(binding.id))) {
+      throw new Error('Wait for running Lab threads to finish before changing API connections.')
+    }
   }
 
-  private async setLabConnection(settings: LabConnectionUpdate): Promise<LabConnectionSettings> {
+  private labConnections(): LabConnectionsSettings {
     const lab = this.backends.lab
-    if (!lab.setLabConnection) throw new Error('Lab connection settings are not available in this build.')
-    if ([...this.bindings.values()].some((binding) => binding.backendId === 'lab' && this.busyThreads.has(binding.id))) {
-      throw new Error('Wait for the running Lab thread to finish before changing its connection.')
+    if (!lab.labConnections) throw new Error('Lab API connections are not available in this build.')
+    return lab.labConnections()
+  }
+
+  private async saveLabConnection(connection: LabConnectionUpdate): Promise<LabConnectionsSettings> {
+    this.assertLabIdle()
+    const lab = this.backends.lab
+    if (!lab.saveLabConnection) throw new Error('Lab API connections are not available in this build.')
+    return lab.saveLabConnection(connection)
+  }
+
+  private async deleteLabConnection(connectionId: string): Promise<LabConnectionsSettings> {
+    this.assertLabIdle()
+    const lab = this.backends.lab
+    if (!lab.deleteLabConnection) throw new Error('Lab API connections are not available in this build.')
+    const settings = await lab.deleteLabConnection(connectionId)
+    this.loadDefaultModels()
+    if (this.defaultModels?.lab?.providerID === connectionId) {
+      const defaults = { ...this.defaultModels }
+      delete defaults.lab
+      this.setDefaultModels(defaults)
     }
-    return lab.setLabConnection(settings)
+    return settings
   }
 
   defaultModel(backendId: BackendId): BackendModelPreference | undefined {
@@ -2493,8 +2511,9 @@ export class BackendManager {
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'backend.subscription-usage': return this.backendAuth?.subscriptionUsage() ?? []
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
-      case 'lab.connection.get': return this.labConnection()
-      case 'lab.connection.set': return this.setLabConnection(request.settings)
+      case 'lab.connections.get': return this.labConnections()
+      case 'lab.connection.save': return this.saveLabConnection(request.connection)
+      case 'lab.connection.delete': return this.deleteLabConnection(request.connectionId)
       case 'thread.title.settings.get': return this.titleSettings()
       case 'thread.title.settings.set': return this.titleSettings({ autoNameFromFirstPrompt: request.autoNameFromFirstPrompt })
       case 'sandbox.settings.get': return this.sandbox()
