@@ -54,6 +54,14 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'thread.todos',
   'thread.permission',
   'thread.diff',
+  // Starting work, not just watching it. A paired phone can already send
+  // messages into a running agent, so it can already cause the machine to act;
+  // withholding these bought nothing and made the phone read-mostly.
+  'thread.create',
+  'thread.models',
+  'thread.mode.set',
+  'thread.rename',
+  'thread.delete',
   'automation.list',
   'automation.run',
   'automation.stop'

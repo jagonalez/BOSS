@@ -25,13 +25,14 @@ function tone(thread: ThreadRow): string {
   }
 }
 
-export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen }: {
+export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen, onNew }: {
   threads: ThreadRow[]
   /** The desktop is asleep or unreachable; say so rather than showing an empty list. */
   offline: boolean
   refreshing: boolean
   onRefresh(): void
   onOpen(threadId: string): void
+  onNew(): void
 }): React.JSX.Element {
   const sorted = sortThreads(threads)
   const waiting = sorted.filter((t) => t.attention?.kind === 'permission' || t.attention?.kind === 'question').length
@@ -87,11 +88,26 @@ export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen 
           )
         }}
       />
+      <Pressable style={styles.fab} onPress={onNew} accessibilityLabel="New thread">
+        <Text style={styles.fabText}>+</Text>
+      </Pressable>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 28,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: theme.accent,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  fabText: { color: theme.bg, fontSize: 30, fontWeight: '700', marginTop: -3 },
   fill: { flex: 1, backgroundColor: theme.bg },
   list: { padding: 12, paddingBottom: 40 },
   waiting: {

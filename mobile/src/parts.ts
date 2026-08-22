@@ -195,3 +195,52 @@ export function projectLabel(thread: ThreadRow): string {
   if (project && branch) return `${project} · ${branch}`
   return project ?? branch ?? ''
 }
+
+export interface ProjectGroup {
+  /** Absolute path, and the key the UI addresses this group by. */
+  path: string
+  name: string
+  threads: ThreadRow[]
+  /** Threads in this project that need a person. Drives the badge. */
+  waiting: number
+  running: number
+  updatedAt: number
+}
+
+/**
+ * Group threads by the project they run in.
+ *
+ * The desktop's project list lives on a separate IPC channel the relay does not
+ * carry, but every thread already reports its projectPath — so the phone can
+ * reconstruct the same grouping without any new protocol. Threads with no
+ * project (a scratch thread, or one whose checkout has gone) collect under a
+ * single group rather than vanishing.
+ */
+export function groupByProject(threads: ThreadRow[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>()
+  for (const thread of threads) {
+    const path = thread.projectPath ?? ''
+    let group = groups.get(path)
+    if (!group) {
+      group = {
+        path,
+        name: path ? path.split('/').filter(Boolean).pop() ?? path : 'No project',
+        threads: [],
+        waiting: 0,
+        running: 0,
+        updatedAt: 0
+      }
+      groups.set(path, group)
+    }
+    group.threads.push(thread)
+    if (thread.attention?.kind === 'permission' || thread.attention?.kind === 'question') group.waiting += 1
+    if (thread.running) group.running += 1
+    group.updatedAt = Math.max(group.updatedAt, thread.updatedAt ?? 0)
+  }
+  for (const group of groups.values()) group.threads = sortThreads(group.threads)
+  // Projects needing a person come first, then by recency — the same rule the
+  // thread list uses, applied a level up.
+  return [...groups.values()].sort((a, b) =>
+    (b.waiting > 0 ? 1 : 0) - (a.waiting > 0 ? 1 : 0) || b.updatedAt - a.updatedAt
+  )
+}
