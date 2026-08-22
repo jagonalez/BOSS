@@ -339,6 +339,14 @@ export async function refreshBackendAuth(): Promise<void> {
   }
 }
 
+export async function refreshSubscriptionUsage(): Promise<void> {
+  try {
+    appStore.setState({ subscriptionUsage: await OpenCode.backendSubscriptionUsage() })
+  } catch {
+    /* A provider's quota is optional; Settings shows normal account status. */
+  }
+}
+
 export async function refreshBackendModels(): Promise<void> {
   const backends = appStore.getState().backends
   appStore.setState({ backendModelsLoading: true })

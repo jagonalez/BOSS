@@ -182,7 +182,7 @@ test('keeps run history with backend-reported tokens and tool counts', () => {
   const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
   try {
-    store.beginRun(source, 'build')
+    store.beginRun(source)
     store.recordMessage(source, {
       id: 'assistant-one', sessionID: source.nativeSessionId, role: 'assistant', tokens: 321
     })
@@ -191,7 +191,7 @@ test('keeps run history with backend-reported tokens and tool counts', () => {
       messageID: 'assistant-one', state: { status: 'completed', tool: 'shell', output: 'ok' }
     })
     store.finishRun(source, 'completed')
-    store.beginRun(source, 'reviewer')
+    store.beginRun(source)
     store.recordMessage(source, {
       id: 'assistant-two', sessionID: source.nativeSessionId, role: 'assistant'
     })
@@ -203,20 +203,6 @@ test('keeps run history with backend-reported tokens and tool counts', () => {
     assert.equal(usage.totals.tokenRuns, 1)
     assert.equal(usage.totals.toolCalls, 1)
     assert.equal(usage.lastRun?.status, 'error')
-    assert.deepEqual(store.usageBreakdown('backend').map((item) => ({
-      ...item,
-      usage: { ...item.usage, durationMs: 0 }
-    })), [{
-      backendId: 'codex',
-      usage: { runs: 2, durationMs: 0, tokens: 321, tokenRuns: 1, toolCalls: 1 }
-    }])
-    assert.deepEqual(store.usageBreakdown('agent').map((item) => ({
-      ...item,
-      usage: { ...item.usage, durationMs: 0 }
-    })), [
-      { backendId: 'codex', agentId: 'build', usage: { runs: 1, durationMs: 0, tokens: 321, tokenRuns: 1, toolCalls: 1 } },
-      { backendId: 'codex', agentId: 'reviewer', usage: { runs: 1, durationMs: 0, tokenRuns: 0, toolCalls: 0 } }
-    ])
   } finally {
     store.close()
     rmSync(directory, { recursive: true, force: true })

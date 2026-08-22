@@ -12,7 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, SandboxSettings, ThreadCreationScope, ThreadTitleSettings } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, BackendSubscriptionUsage, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, SandboxSettings, ThreadCreationScope, ThreadTitleSettings } from '@shared/backend'
 import type { FanOutWorker } from '@shared/fan-out'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
@@ -117,6 +117,7 @@ function modelVariants(variants?: unknown): string[] {
 export const OpenCode = {
   listBackends: () => backendRequest<BackendDescriptor[]>({ type: 'backend.list' }),
   backendAuthStatus: () => backendRequest<BackendAuthStatus[]>({ type: 'backend.auth.status' }),
+  backendSubscriptionUsage: () => backendRequest<BackendSubscriptionUsage[]>({ type: 'backend.subscription-usage' }),
   setBackendDefaults: (defaults: Partial<Record<BackendId, BackendModelPreference>>) =>
     backendRequest<void>({ type: 'backend.defaults.set', defaults }),
   backendBinaries: () => backendRequest<Partial<Record<BackendId, string>>>({ type: 'backend.bin.get' }),

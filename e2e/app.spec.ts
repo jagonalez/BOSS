@@ -33,17 +33,6 @@ test('boots the real Electron renderer without covering it with a modal', async 
   })).toEqual({ count: 1, visible: false })
 })
 
-test('shows recorded usage for each subscription and agent', async ({ appPage }) => {
-  const usage = appPage.getByRole('region', { name: /Usage by subscription & agent/ })
-  await expect(usage).toBeVisible()
-  await expect(usage).toContainText('OpenCode')
-  await expect(usage).toContainText('8 runs · 1h · 37K tokens · 51 tools')
-  await expect(usage).toContainText('Default build agent')
-  await expect(usage).toContainText('6 runs · 50m · 32.5K tokens · 43 tools')
-  await expect(usage).toContainText('Claude Code')
-  await expect(usage).toContainText('Claude Code agent')
-})
-
 test('a deleted checkout returns a review snapshot without rejecting the IPC handler', async ({ appPage }) => {
   const checkout = '/tmp/boss-e2e/deleted-worktree'
   const snapshot = await appPage.evaluate(
@@ -128,6 +117,18 @@ test('a backend server can be restarted from settings', async ({ appPage }) => {
 
   expect((await lastBackendCall(appPage, 'backend.restart')).request).toMatchObject({ backendId: 'codex' })
   await expect(row.getByRole('button', { name: 'Restarted' })).toBeVisible()
+})
+
+test('shows provider subscription windows in Models & connections', async ({ appPage }) => {
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Refresh limits' }).click()
+  expect((await lastBackendCall(appPage, 'backend.subscription-usage')).request).toEqual({ type: 'backend.subscription-usage' })
+  const codex = appPage.locator('.settings-connection-row').filter({ hasText: 'Codex' })
+  await expect(codex.getByRole('region', { name: 'Subscription limits' })).toContainText('35% used · 65% left')
+  await expect(codex.getByRole('region', { name: 'Subscription limits' })).toContainText('7-day limit')
+  const claude = appPage.locator('.settings-connection-row').filter({ hasText: 'Claude Code' })
+  await expect(claude.getByRole('region', { name: 'Subscription limits' })).toContainText('8% used · 92% left')
+  await expect(appPage.getByText('Usage by subscription & agent')).toHaveCount(0)
 })
 
 test('quick-create uses the configured backend and exposes its defaults on the new thread', async ({ appPage }) => {
