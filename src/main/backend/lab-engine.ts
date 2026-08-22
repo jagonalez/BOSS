@@ -194,8 +194,14 @@ export class LabEngine {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.config.baseUrl}/models`, { method: 'GET', signal: AbortSignal.timeout(3_000) })
-      return response.ok
+      const response = await fetch(`${this.config.baseUrl}/models`, {
+        method: 'GET',
+        headers: this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : undefined,
+        signal: AbortSignal.timeout(3_000)
+      })
+      const healthy = response.ok
+      if (response.body) await response.body.cancel().catch(() => {})
+      return healthy
     } catch {
       return false
     }
@@ -209,7 +215,16 @@ export class LabEngine {
     if (!modelId) return
     this.selectedModel = modelId
     try {
-      writeFileSync(this.configFile, JSON.stringify({ model: this.selectedModel }, null, 2))
+      // The BOSS connection form owns the endpoint in this same lightweight
+      // config file. Preserve fields it wrote when a thread changes models.
+      let existing: Record<string, unknown> = {}
+      try {
+        const parsed = JSON.parse(readFileSync(this.configFile, 'utf8'))
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing = parsed as Record<string, unknown>
+      } catch {
+        /* first saved model */
+      }
+      writeFileSync(this.configFile, JSON.stringify({ ...existing, model: this.selectedModel }, null, 2))
     } catch {
       /* model still applies for this session */
     }

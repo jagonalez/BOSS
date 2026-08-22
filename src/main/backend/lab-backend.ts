@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { chmodSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
-import type { BackendMessageOptions, BackendModeId } from '@shared/backend'
+import type { BackendMessageOptions, BackendModeId, LabConnectionSettings, LabConnectionUpdate } from '@shared/backend'
 import type { EventMessage, FileContent, FileDiff, FileNode, MessageWithParts, SessionInfo, Todo } from '@shared/opencode'
 import type { ThreadBusToolCall } from '@shared/thread-bus'
 // @ts-expect-error Application builds use bundler resolution.
@@ -14,7 +15,7 @@ import { LabEngine, type EngineGate, type EngineSink } from './lab-engine.ts'
 import { permissionForTool } from './lab-tools.ts'
 import type { LabFunctionCall } from './lab-tool-call.ts'
 // @ts-expect-error Application builds use bundler resolution.
-import { configFromEnv } from './lab-config.ts'
+import { configFromEnv, type LabEnvConfig } from './lab-config.ts'
 
 // Electron is pulled in lazily so the backend can be constructed with explicit
 // file paths under the test runner (where the electron module is just a binary
@@ -29,6 +30,40 @@ function userDataFile(name: string): string {
 export interface LabBackendOptions {
   storeFile?: string
   configFile?: string
+  secretFile?: string
+}
+
+interface StoredLabConfig {
+  baseUrl?: string
+  model?: string
+}
+
+function storedConfig(file: string): StoredLabConfig {
+  try {
+    const value = JSON.parse(readFileSync(file, 'utf8')) as StoredLabConfig
+    return {
+      ...(typeof value.baseUrl === 'string' ? { baseUrl: value.baseUrl } : {}),
+      ...(typeof value.model === 'string' ? { model: value.model } : {})
+    }
+  } catch {
+    return {}
+  }
+}
+
+export function normaliseLabEndpoint(value: string): string {
+  let url: URL
+  try {
+    url = new URL(value.trim())
+  } catch {
+    throw new Error('Enter a valid http:// or https:// endpoint URL.')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('Lab endpoints must use http:// or https://.')
+  }
+  if (url.search || url.hash) throw new Error('The endpoint URL cannot include a query or fragment.')
+  url.pathname = url.pathname.replace(/\/+$/, '') || '/v1'
+  if (!url.pathname.endsWith('/v1')) url.pathname = `${url.pathname}/v1`
+  return url.toString().replace(/\/$/, '')
 }
 
 /** Same shape as the manager's helper, kept local so this module has no
@@ -57,7 +92,11 @@ interface PendingPermission {
  *  permission requests with the existing permission cards. */
 export class LabBackend implements Backend {
   readonly id = 'lab' as const
-  private readonly engine: LabEngine
+  private engine: LabEngine
+  private readonly storeFile: string
+  private readonly configFile: string
+  private readonly secretFile: string
+  private config: LabEnvConfig
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
   private healthy = false
@@ -66,10 +105,19 @@ export class LabBackend implements Backend {
   private threadBusHandler?: (call: ThreadBusToolCall) => Promise<unknown>
 
   constructor(options: LabBackendOptions = {}) {
-    this.engine = new LabEngine({
-      storeFile: options.storeFile ?? userDataFile('lab-threads.json'),
-      configFile: options.configFile ?? userDataFile('lab-config.json'),
-      config: configFromEnv(),
+    this.storeFile = options.storeFile ?? userDataFile('lab-threads.json')
+    this.configFile = options.configFile ?? userDataFile('lab-config.json')
+    this.secretFile = options.secretFile ?? userDataFile('lab-api-key.bin')
+    this.config = this.connectionConfig()
+    this.engine = this.createEngine()
+    void this.refreshHealth()
+  }
+
+  private createEngine(): LabEngine {
+    return new LabEngine({
+      storeFile: this.storeFile,
+      configFile: this.configFile,
+      config: this.config,
       sink: this.sink(),
       gate: { request: (sessionId, call, args, signal) => this.requestPermission(sessionId, call, args, signal) },
       // The thread bus reaches Lab as external tools rather than over MCP: Lab
@@ -89,7 +137,65 @@ export class LabBackend implements Backend {
         }
       }
     })
-    void this.refreshHealth()
+  }
+
+  private savedApiKey(): string | undefined {
+    try {
+      const { safeStorage } = nodeRequire('electron') as typeof import('electron')
+      if (!safeStorage.isEncryptionAvailable()) return undefined
+      return safeStorage.decryptString(readFileSync(this.secretFile)).trim() || undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private connectionConfig(): LabEnvConfig {
+    const environment = configFromEnv()
+    const stored = storedConfig(this.configFile)
+    return {
+      ...environment,
+      ...(stored.baseUrl ? { baseUrl: normaliseLabEndpoint(stored.baseUrl) } : {}),
+      ...(stored.model?.trim() ? { defaultModel: stored.model.trim() } : {}),
+      ...(this.savedApiKey() ? { apiKey: this.savedApiKey() } : {})
+    }
+  }
+
+  labConnection(): LabConnectionSettings {
+    return {
+      baseUrl: this.config.baseUrl,
+      model: this.config.defaultModel,
+      apiKeyConfigured: Boolean(this.config.apiKey),
+      healthy: this.healthy
+    }
+  }
+
+  async setLabConnection(settings: LabConnectionUpdate): Promise<LabConnectionSettings> {
+    const baseUrl = normaliseLabEndpoint(settings.baseUrl)
+    const model = settings.model.trim()
+    if (!model) throw new Error('Enter the model name to use with this endpoint.')
+    if (settings.apiKey !== undefined && settings.clearApiKey) {
+      throw new Error('Set a new API key or clear the saved key, not both.')
+    }
+    if (settings.apiKey !== undefined) {
+      const apiKey = settings.apiKey.trim()
+      if (!apiKey) throw new Error('Enter an API key or use Clear saved key.')
+      const { safeStorage } = nodeRequire('electron') as typeof import('electron')
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this system.')
+      writeFileSync(this.secretFile, safeStorage.encryptString(apiKey), { mode: 0o600 })
+      chmodSync(this.secretFile, 0o600)
+    } else if (settings.clearApiKey) {
+      try {
+        unlinkSync(this.secretFile)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+    }
+    writeFileSync(this.configFile, JSON.stringify({ ...storedConfig(this.configFile), baseUrl, model }, null, 2), { mode: 0o600 })
+    this.engine.stop()
+    this.config = this.connectionConfig()
+    this.engine = this.createEngine()
+    await this.refreshHealth()
+    return this.labConnection()
   }
 
   private sink(): EngineSink {

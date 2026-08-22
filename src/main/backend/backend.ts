@@ -1,4 +1,4 @@
-import type { BackendId, BackendMessageOptions, BackendModeId } from '@shared/backend'
+import type { BackendId, BackendMessageOptions, BackendModeId, LabConnectionSettings, LabConnectionUpdate } from '@shared/backend'
 import type { SandboxSettings } from '@shared/sandbox'
 import type { ThreadBusConnection, ThreadBusToolCall } from '@shared/thread-bus'
 
@@ -87,6 +87,12 @@ export interface Backend {
   /** Models */
   modelsList(): Promise<ModelInfo[]>
   modelSelect(providerId: string, modelId: string): Promise<void>
+
+  /** Lab is the only backend with an endpoint BOSS configures directly.
+   *  Keeping this optional avoids making every CLI-backed backend pretend to
+   *  have a connection form. */
+  labConnection?(): LabConnectionSettings
+  setLabConnection?(settings: LabConnectionUpdate): Promise<LabConnectionSettings>
 
   /** Thinking */
   thinkingGet(): Promise<ThinkingLevel>

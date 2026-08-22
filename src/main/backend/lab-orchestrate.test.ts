@@ -26,7 +26,11 @@ async function listen(server: Server): Promise<{ baseUrl: string; close: () => P
   const { port } = server.address() as AddressInfo
   return {
     baseUrl: `http://127.0.0.1:${port}/v1`,
-    close: () => new Promise((resolve) => server.close(() => resolve()))
+    close: async () => {
+      const closed = new Promise<void>((resolve) => server.close(() => resolve()))
+      server.closeAllConnections()
+      await closed
+    }
   }
 }
 
@@ -35,7 +39,7 @@ interface OrchestrationFixture {
   cwd: string
   backend: LabBackend
   sessionId: string
-  cleanup: () => void
+  cleanup: () => Promise<void>
 }
 
 function makeFixture(
@@ -56,15 +60,16 @@ function makeFixture(
   })
   return listen(server).then(({ baseUrl, close }) => {
     process.env.LAB_BASE_URL = baseUrl
-    const backend = new LabBackend({ storeFile, configFile })
+    const backend = new LabBackend({ storeFile, configFile, secretFile: join(dir, 'lab-api-key.bin') })
     return backend.sessionCreate('parent', cwd).then((session) => ({
       readStore: () => new LabSessionStore(storeFile),
       cwd,
       backend,
       sessionId: session.id,
-      cleanup: () => {
+      cleanup: async () => {
         process.env.LAB_BASE_URL = originalBaseUrl
-        void close()
+        await backend.stop()
+        await close()
         rmSync(dir, { recursive: true, force: true })
       }
     }))
@@ -191,7 +196,7 @@ test('a parent spawns a child, waits for it, and collects its summary', async ()
     assert.match(String(spawnPart.state?.output), /completed/)
     assert.match(String(spawnPart.state?.output), /child done: built the parser test suite/)
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -219,7 +224,7 @@ test('a parent in plan mode cannot spawn a sub-agent', async () => {
     // The child was never started.
     assert.equal(fx.readStore().childrenOf(fx.sessionId).length, 0)
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -245,7 +250,7 @@ test('aborting the parent cancels a running child', async () => {
     await poll(() => fx.readStore().childrenOf(fx.sessionId)[0]?.status, (status) => status === 'aborted')
     assert.equal(fx.readStore().childrenOf(fx.sessionId)[0]?.status, 'aborted')
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -311,7 +316,7 @@ test('a parent can fan out: spawn without waiting, then wait_subagent collects',
       return Boolean(last?.info.role === 'assistant' && last.parts.some((part) => part.text?.includes('all collected')))
     })
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -349,7 +354,7 @@ test('"always" answers a permission once and re-grants it on later ask-mode call
     assert.equal(bashParts.length, 2)
     assert.ok(bashParts.every((part) => part.state?.status === 'completed'))
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -364,10 +369,15 @@ test('start() reconciles children left marked running after a crash', async () =
 
     const originalBaseUrl = process.env.LAB_BASE_URL
     process.env.LAB_BASE_URL = 'http://127.0.0.1:1/v1'
-    const backend = new LabBackend({ storeFile, configFile: join(dir, 'lab-config.json') })
+    const backend = new LabBackend({
+      storeFile,
+      configFile: join(dir, 'lab-config.json'),
+      secretFile: join(dir, 'lab-api-key.bin')
+    })
     try {
       await backend.start()
     } finally {
+      await backend.stop()
       process.env.LAB_BASE_URL = originalBaseUrl
     }
     assert.equal(new LabSessionStore(storeFile).get(child.id).status, 'error')
@@ -397,7 +407,7 @@ test('the tool loop stops early when the model repeats the same call', async () 
     )
     assert.equal(fx.readStore().messages(fx.sessionId).filter((message) => message.info.role === 'assistant').length, 3)
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 test('the tool loop stops when the model only reads and never answers', async () => {
@@ -422,7 +432,7 @@ test('the tool loop stops when the model only reads and never answers', async ()
       `expected a read-only-loop error, got: ${JSON.stringify(events)}`
     )
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -452,7 +462,7 @@ test('the todos tool records the model task list and emits an update', async () 
     assert.ok(stored.every((todo) => todo.id.length > 0))
     assert.equal(todosEvents.length, 1)
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -482,7 +492,7 @@ test('compact summarizes older turns and keeps the newest', async () => {
     // The newest messages survived intact.
     assert.ok(messages.some((message) => message.info.role === 'user'))
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -525,7 +535,7 @@ test('steer folds a message into a running session between tool rounds', async (
     await send
     assert.equal(steeredSeen, true)
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -538,7 +548,7 @@ test('runCommand compacts and reports unknown commands', async () => {
     const unknown = await fx.backend.runCommand(fx.sessionId, 'nope', '')
     assert.match(unknown.parts[0].text ?? '', /Unknown command/)
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -568,7 +578,7 @@ test('diffGet, fileTree, and fileContent reflect the working tree', async () => 
     assert.ok(tree.some((node) => node.path === 'tracked.txt'))
     assert.equal((await fx.backend.fileContent('tracked.txt')).content, 'one\ntwo\n')
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })
 
@@ -604,6 +614,6 @@ test('a thread tool call routes to the BOSS thread bus with the calling session 
     assert.equal(busPart?.state?.status, 'completed')
     assert.match(String(busPart?.state?.output), /thread-2/)
   } finally {
-    fx.cleanup()
+    await fx.cleanup()
   }
 })

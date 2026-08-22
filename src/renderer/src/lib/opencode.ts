@@ -12,7 +12,7 @@ import type {
   SessionInfo,
   Todo
 } from '@shared/opencode'
-import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, BackendSubscriptionUsage, DelegatePlacement, QueuedFollowUp, QueuedFollowUpAttachment, SandboxSettings, ThreadCreationScope, ThreadTitleSettings } from '@shared/backend'
+import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, BackendSubscriptionUsage, DelegatePlacement, LabConnectionSettings, LabConnectionUpdate, QueuedFollowUp, QueuedFollowUpAttachment, SandboxSettings, ThreadCreationScope, ThreadTitleSettings } from '@shared/backend'
 import type { FanOutWorker } from '@shared/fan-out'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
@@ -120,6 +120,9 @@ export const OpenCode = {
   backendSubscriptionUsage: () => backendRequest<BackendSubscriptionUsage[]>({ type: 'backend.subscription-usage' }),
   setBackendDefaults: (defaults: Partial<Record<BackendId, BackendModelPreference>>) =>
     backendRequest<void>({ type: 'backend.defaults.set', defaults }),
+  labConnection: () => backendRequest<LabConnectionSettings>({ type: 'lab.connection.get' }),
+  setLabConnection: (settings: LabConnectionUpdate) =>
+    backendRequest<LabConnectionSettings>({ type: 'lab.connection.set', settings }),
   backendBinaries: () => backendRequest<Partial<Record<BackendId, string>>>({ type: 'backend.bin.get' }),
   setBackendBinary: (backendId: BackendId, path: string) =>
     backendRequest<Partial<Record<BackendId, string>>>({ type: 'backend.bin.set', backendId, path }),
