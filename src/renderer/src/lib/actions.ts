@@ -1,7 +1,7 @@
 import { appStore, type Attachment, type FailedSend } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
-import type { MenuCommand } from '@shared/ipc'
+import type { MenuCommand, ProjectInfo, ProjectOpenedEvent } from '@shared/ipc'
 import { disposeTerminalSession } from './terminal-sessions'
 import { disposeTabContentNode } from './tab-content-nodes'
 import { disposeBrowseGuest } from './browse-guests'
@@ -2566,39 +2566,68 @@ export async function refreshProject(): Promise<void> {
   }
 }
 
+/** Show a project that has just been opened.
+ *
+ *  Shared by the folder picker and the `boss` command, so a project opened from
+ *  a terminal lands on exactly the same screen as one picked in the app. */
+async function showOpenedProject(info: ProjectInfo): Promise<void> {
+  appStore.setState({
+    projectPath: info.path,
+    selectedCheckoutPath: info.checkoutPath,
+    projectCheckouts: info.checkouts,
+    activePage: 'project',
+    activeSessionId: null,
+    sessions: [],
+    diffs: null
+  })
+  await refreshSessions()
+  await refreshProjects()
+  // A linked worktree opens its repository, not a second project. Without
+  // saying so, picking a worktree looks like BOSS ignored the folder chosen.
+  if (info.checkoutPath && info.checkoutPath !== info.path) {
+    const branch = info.checkouts.find((checkout) => checkout.path === info.checkoutPath)?.branch
+    appStore.setState({
+      confirm: {
+        title: 'Opened as a checkout',
+        message: `${folderName(info.checkoutPath)} is a git worktree of ${folderName(info.path)}, so BOSS opened that project with ${branch ? `the ${branch} branch` : 'this worktree'} as the active checkout. Switch checkouts from the project header.`,
+        confirmLabel: 'Got it',
+        notice: true,
+        action: () => {}
+      }
+    })
+  }
+}
+
 export async function openProjectFolder(): Promise<void> {
   try {
     const path = await window.boss.projectChoose()
     if (!path) return
-    const info = await window.boss.projectSet(path)
-    appStore.setState({
-      projectPath: info.path,
-      selectedCheckoutPath: info.checkoutPath,
-      projectCheckouts: info.checkouts,
-      activePage: 'project',
-      activeSessionId: null,
-      sessions: [],
-      diffs: null
-    })
-    await refreshSessions()
-    await refreshProjects()
-    // A linked worktree opens its repository, not a second project. Without
-    // saying so, picking a worktree looks like BOSS ignored the folder chosen.
-    if (info.checkoutPath && info.checkoutPath !== info.path) {
-      const branch = info.checkouts.find((checkout) => checkout.path === info.checkoutPath)?.branch
-      appStore.setState({
-        confirm: {
-          title: 'Opened as a checkout',
-          message: `${folderName(info.checkoutPath)} is a git worktree of ${folderName(info.path)}, so BOSS opened that project with ${branch ? `the ${branch} branch` : 'this worktree'} as the active checkout. Switch checkouts from the project header.`,
-          confirmLabel: 'Got it',
-          notice: true,
-          action: () => {}
-        }
-      })
-    }
+    await showOpenedProject(await window.boss.projectSet(path))
   } catch (err) {
     console.error('open project folder:', err)
   }
+}
+
+/** Act on `boss <folder>`.
+ *
+ *  Main has already made the project current — it had to, to create it — so the
+ *  renderer's job is to show it and to surface a folder that could not be
+ *  opened, which would otherwise look like the command did nothing. */
+export function handleProjectOpened(event: ProjectOpenedEvent): void {
+  if (event.problem) {
+    appStore.setState({
+      confirm: {
+        title: 'Could not open that folder',
+        message: event.problem,
+        confirmLabel: 'Got it',
+        notice: true,
+        action: () => {}
+      }
+    })
+    return
+  }
+  if (!event.project?.path) return
+  void showOpenedProject(event.project)
 }
 
 function folderName(path: string): string {

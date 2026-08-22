@@ -5,6 +5,8 @@ import {
   IpcChannels,
   type ApiRequest,
   type PrivacyPane,
+  type ProjectInfo,
+  type ProjectOpenedEvent,
   type ServerInfo
 } from '@shared/ipc'
 import type { OpenCodeServer } from './opencode-server'
@@ -23,6 +25,7 @@ import type { BackendRequest } from '@shared/backend'
 import type { AsrTranscribeRequest, TtsSpeakRequest, UpdateChannel } from '@shared/ipc'
 import type { ReviewManager } from './review-manager'
 import { projectCheckouts } from './project-identity'
+import { cliStatus, installCli, uninstallCli } from './cli-command'
 import { loadState, saveState } from './state-store'
 import { orderedProjects } from '@shared/projects'
 
@@ -40,6 +43,39 @@ export interface IpcDeps {
   updates: UpdateChecker
   reviews: ReviewManager
   projectFiles: ProjectFiles
+  /** A `boss` command result that landed before the renderer could listen.
+   *  Collected once, on mount. */
+  takePendingCliOpen: () => ProjectOpenedEvent | null
+}
+
+/** Make a folder the active project, remembering it if it is a new one.
+ *
+ *  The only way a project is opened. The renderer reaches it through
+ *  `project:set`, and the `boss` command reaches it through `second-instance`,
+ *  so a folder opened from a terminal is canonicalised and recorded by exactly
+ *  the same rules as one picked in the app.
+ *
+ *  A linked worktree is a checkout within its repository project, not a second
+ *  project. Keep project navigation canonical while review/files/terminal
+ *  surfaces retain their own checkout-specific context paths. */
+export async function openProject(deps: IpcDeps, path: string): Promise<ProjectInfo> {
+  const scope = deps.backends.scopeFor(path)
+  await deps.backends.setProject(scope.projectPath)
+  // Record the project here rather than in OpenCodeServer.setProject, so a
+  // project opened without opencode is still remembered and still listed.
+  if (scope.projectPath) {
+    const known = loadState().projects ?? []
+    saveState({
+      projectPath: scope.projectPath,
+      projects: known.includes(scope.projectPath) ? known : [...known, scope.projectPath]
+    })
+  }
+  return {
+    path: scope.projectPath,
+    checkoutPath: scope.executionPath,
+    checkouts: projectCheckouts(scope.projectPath),
+    healthy: deps.server.info.healthy
+  }
 }
 
 export function registerIpc(deps: IpcDeps): void {
@@ -196,28 +232,7 @@ export function registerIpc(deps: IpcDeps): void {
     }
   })
 
-  ipcMain.handle(IpcChannels.ProjectSet, async (_e, path: string) => {
-    // A linked worktree is a checkout within its repository project, not a
-    // second project. Keep project navigation canonical while review/files/
-    // terminal surfaces retain their own checkout-specific context paths.
-    const scope = deps.backends.scopeFor(path)
-    await deps.backends.setProject(scope.projectPath)
-    // Record the project here rather than in OpenCodeServer.setProject, so a
-    // project opened without opencode is still remembered and still listed.
-    if (scope.projectPath) {
-      const known = loadState().projects ?? []
-      saveState({
-        projectPath: scope.projectPath,
-        projects: known.includes(scope.projectPath) ? known : [...known, scope.projectPath]
-      })
-    }
-    return {
-      path: scope.projectPath,
-      checkoutPath: scope.executionPath,
-      checkouts: projectCheckouts(scope.projectPath),
-      healthy: deps.server.info.healthy
-    }
-  })
+  ipcMain.handle(IpcChannels.ProjectSet, (_e, path: string) => openProject(deps, path))
 
   ipcMain.handle(IpcChannels.ProjectList, () =>
     (loadState().projects ?? []).filter((path) => existsSync(path))
@@ -235,6 +250,12 @@ export function registerIpc(deps: IpcDeps): void {
     saveState({ projects: next })
     return next
   })
+
+  ipcMain.handle(IpcChannels.ProjectOpenedPending, () => deps.takePendingCliOpen())
+
+  ipcMain.handle(IpcChannels.CliStatus, () => cliStatus())
+  ipcMain.handle(IpcChannels.CliInstall, () => installCli())
+  ipcMain.handle(IpcChannels.CliUninstall, () => uninstallCli())
 
   ipcMain.handle(IpcChannels.ProjectChoose, async () => {
     const result = await dialog.showOpenDialog({

@@ -11,7 +11,7 @@ import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescripto
 import type { WorktreeLocation, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy } from '@shared/qa'
 import type { CollaborationPolicy } from '@shared/thread-bus'
-import type { UpdateChannel, UpdateStatus } from '@shared/ipc'
+import type { CliStatus, UpdateChannel, UpdateStatus } from '@shared/ipc'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 import { McpSettings } from './McpSettings'
 import { MobileSettings } from './MobileSettings'
@@ -182,7 +182,59 @@ function UpdateSettings(): React.JSX.Element {
           </Button>
         </SettingsRow>
       </section>
+      <CliSettings />
     </div>
+  )
+}
+
+/** The `boss` shell command.
+ *
+ *  A symlink into the bundle rather than a copied script, so it keeps working
+ *  after an update replaces the app. The row states what is actually on disk —
+ *  installing is the only action here that changes anything. */
+function CliSettings(): React.JSX.Element {
+  const [status, setStatus] = useState<CliStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    void window.boss.cliStatus().then(setStatus).catch(() => {})
+  }, [])
+
+  function run(action: () => Promise<CliStatus>): void {
+    setBusy(true)
+    void action()
+      .then(setStatus)
+      .catch(() => {})
+      .finally(() => setBusy(false))
+  }
+
+  const description = status?.error
+    ? status.error
+    : !status?.available
+      ? 'A packaged copy of BOSS installs this. A development build has no stable location to point it at.'
+      : status.conflict
+        ? `Something else already owns ${status.path}. BOSS will not replace a command it did not install.`
+        : status.installed
+          ? `Installed at ${status.path}. Run \`boss .\` in any folder to open it as a project.`
+          : 'Run `boss .` in a terminal to open that folder as a BOSS project, creating the project if the folder is not one yet.'
+
+  return (
+    <section className="settings-card">
+      <SettingsRow title="The `boss` command" description={description}>
+        {status?.installed ? (
+          <Button onClick={() => run(() => window.boss.cliUninstall())} disabled={busy}>
+            {busy ? 'Removing…' : 'Remove'}
+          </Button>
+        ) : (
+          <Button
+            onClick={() => run(() => window.boss.cliInstall())}
+            disabled={busy || !status?.available || status?.conflict}
+          >
+            {busy ? 'Installing…' : 'Install'}
+          </Button>
+        )}
+      </SettingsRow>
+    </section>
   )
 }
 
