@@ -31,6 +31,21 @@ test('parseChatChunk surfaces finish_reason', () => {
   assert.deepEqual(parsed, { finishReason: 'tool_calls' })
 })
 
+test('parseChatChunk extracts DeepSeek-style reasoning_content deltas', () => {
+  const parsed = parseChatChunk('{"choices":[{"delta":{"reasoning_content":"checking the failing test"},"finish_reason":null}]}')
+  assert.deepEqual(parsed, { reasoning: 'checking the failing test' })
+})
+
+test('parseChatChunk extracts the alternate reasoning field name', () => {
+  const parsed = parseChatChunk('{"choices":[{"delta":{"reasoning":"reading the diff"},"finish_reason":null}]}')
+  assert.deepEqual(parsed, { reasoning: 'reading the diff' })
+})
+
+test('parseChatChunk keeps text and reasoning apart in one chunk', () => {
+  const parsed = parseChatChunk('{"choices":[{"delta":{"content":"answer","reasoning_content":"why"},"finish_reason":null}]}')
+  assert.deepEqual(parsed, { text: 'answer', reasoning: 'why' })
+})
+
 test('parseChatChunk handles a non-stream message fallback', () => {
   const chunk = {
     choices: [{

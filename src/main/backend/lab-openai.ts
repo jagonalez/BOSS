@@ -17,6 +17,12 @@ export interface LabChatMessage {
 
 interface ChatChoiceDelta {
   content?: string | null
+  /** Reasoning summaries, streamed under either name depending on the
+   *  provider: DeepSeek-style endpoints send `reasoning_content`, others
+   *  `reasoning`. Dropped today means minutes of silent "Thinking" while the
+   *  model streams its chain of thought. */
+  reasoning_content?: string | null
+  reasoning?: string | null
   tool_calls?: Array<{
     index: number
     id?: string | null
@@ -34,6 +40,7 @@ export interface LabChatChunk {
 
 export interface ParsedChatChunk {
   text?: string
+  reasoning?: string
   toolCalls?: StreamedToolCallDelta[]
   finishReason?: string
 }
@@ -53,6 +60,8 @@ export function parseChatChunk(json: string): ParsedChatChunk | undefined {
   const delta = choice.delta ?? choice.message
   let text: string | undefined
   if (typeof delta?.content === 'string') text = delta.content
+  const rawReasoning = delta?.reasoning_content ?? delta?.reasoning
+  const reasoning = typeof rawReasoning === 'string' && rawReasoning ? rawReasoning : undefined
   let toolCalls: StreamedToolCallDelta[] | undefined
   if (delta?.tool_calls) {
     // Some providers (DeepSeek via OpenCode Zen among them) send the id and
@@ -80,6 +89,7 @@ export function parseChatChunk(json: string): ParsedChatChunk | undefined {
   }
   return {
     ...(text !== undefined ? { text } : {}),
+    ...(reasoning !== undefined ? { reasoning } : {}),
     ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
     ...(choice.finish_reason ? { finishReason: choice.finish_reason } : {})
   }

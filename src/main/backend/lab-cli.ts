@@ -224,6 +224,7 @@ export async function runCli(args: CliArgs): Promise<number> {
     onUserMessage: () => {},
     onAssistantMessage: () => {},
     onTextDelta: (_sessionId, _messageId, delta) => process.stdout.write(delta),
+    onReasoningDelta: (_sessionId, _messageId, delta) => process.stdout.write(`\x1b[90m${delta}\x1b[0m`),
     onToolPart: (_sessionId, part) => {
       const tool = part.state?.tool
       if (!tool) return

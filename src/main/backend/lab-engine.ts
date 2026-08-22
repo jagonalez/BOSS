@@ -52,6 +52,7 @@ export interface EngineSink {
   onUserMessage(sessionId: string, message: MessageWithParts): void
   onAssistantMessage(sessionId: string, message: MessageWithParts): void
   onTextDelta(sessionId: string, messageId: string, text: string): void
+  onReasoningDelta(sessionId: string, messageId: string, text: string): void
   onToolPart(sessionId: string, part: Part): void
   onTodos(sessionId: string, todos: Todo[]): void
   onBusy(sessionId: string): void
@@ -85,6 +86,7 @@ const noopSink: EngineSink = {
   onUserMessage() {},
   onAssistantMessage() {},
   onTextDelta() {},
+  onReasoningDelta() {},
   onToolPart() {},
   onTodos() {},
   onBusy() {},
@@ -523,6 +525,11 @@ export class LabEngine {
     let previousSignature: string | undefined
     let repeatStreak = 0
     let readOnlyRounds = 0
+    /** Whether this turn has done anything the user can see: streamed text or
+     *  run a tool. Reasoning alone does not count — it is visible, but it is
+     *  not work. */
+    let producedOutput = false
+    let retriedEmptyRound = false
     for (let iteration = 0; iteration < this.config.maxToolIterations; iteration++) {
       const steers = this.pendingSteers.get(sessionId)
       if (steers?.length) {
@@ -530,6 +537,7 @@ export class LabEngine {
         this.pendingSteers.delete(sessionId)
       }
       const assistantId = randomUUID()
+      let reasoning = ''
       const turn = await streamChatCompletion({
         baseUrl: ctx.baseUrl,
         model: ctx.model,
@@ -539,6 +547,10 @@ export class LabEngine {
         signal,
         onText: (delta) => {
           this.sink.onTextDelta(sessionId, assistantId, delta)
+        },
+        onReasoning: (delta) => {
+          reasoning += delta
+          this.sink.onReasoningDelta(sessionId, assistantId, delta)
         }
       })
       if (process.env.LAB_DEBUG_TOOLCALLS === '1' && (turn.toolCalls.length > 0 || turn.finishReason === 'tool_calls')) {
@@ -553,6 +565,38 @@ export class LabEngine {
         time: { created: Date.now() }
       }
       const parts: Part[] = []
+      if (reasoning.trim()) {
+        parts.push({ id: `${assistantId}-reasoning`, type: 'reasoning', sessionID: sessionId, messageID: assistantId, text: reasoning })
+      }
+
+      // A round with no text and no tool calls is a degenerate completion —
+      // usually a gateway dropping the body. Retrying once recovers the
+      // transient case; otherwise the turn must end visibly instead of
+      // leaving the user staring at a spinner that already stopped meaning
+      // anything.
+      if (turn.toolCalls.length === 0 && !turn.content.trim()) {
+        if (!producedOutput && !retriedEmptyRound) {
+          retriedEmptyRound = true
+          continue
+        }
+        if (!producedOutput && !reasoning.trim()) throw new Error('The model returned an empty response.')
+        // The turn ended without an answer — either work happened earlier or
+        // thinking streamed. Persist what exists plus a closing note, so the
+        // transcript shows why the thread went quiet instead of idling in
+        // silence.
+        parts.push({
+          id: `${assistantId}-text`,
+          type: 'text',
+          sessionID: sessionId,
+          messageID: assistantId,
+          text: '[The model ended its turn without a reply.]'
+        })
+        this.store.upsertMessage(sessionId, { info, parts })
+        this.sink.onAssistantMessage(sessionId, { info, parts })
+        return
+      }
+      producedOutput = true
+
       const toolArgs: Record<string, unknown>[] = []
       if (turn.content) parts.push({ id: `${assistantId}-text`, type: 'text', sessionID: sessionId, messageID: assistantId, text: turn.content })
       for (const call of turn.toolCalls) {

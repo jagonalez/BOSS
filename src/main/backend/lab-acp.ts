@@ -62,6 +62,7 @@ export function createAcpEngine(write: AcpWrite, options: { storeFile?: string; 
       onUserMessage: () => {},
       onAssistantMessage: (_sessionId, message) => write({ type: 'assistant', message: { id: message.info.id, content: contentBlocks(message) } }),
       onTextDelta: (_sessionId, _messageId, delta) => write({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: delta } } }),
+      onReasoningDelta: (_sessionId, _messageId, _delta) => {},
       onToolPart: (_sessionId, part) => write({
         type: 'user',
         message: {
