@@ -47,6 +47,27 @@ export interface ReviewProviderCapabilities {
   publishInlineComment: boolean
   replyToComment: boolean
   submitVerdict: boolean
+  /** Whether this provider can open a change request, not only read one that already exists. */
+  createChangeRequest: boolean
+}
+
+/**
+ * What a caller has to say to open a change request. Title and body are optional together: a
+ * caller that has written neither asks the forge to fill them from the commits on the branch,
+ * which is the only thing it can do that reads better than an empty description.
+ */
+export interface CreateChangeRequestInput {
+  title?: string
+  body?: string
+  /** The branch the work merges into. Defaults to whatever the forge reports as the repository default. */
+  baseBranch?: string
+  draft?: boolean
+}
+
+export interface CreatedChangeRequest {
+  /** The forge's own number for it, when the forge reports one on create. */
+  number?: number
+  url: string
 }
 
 export interface ReviewProviderSummary {

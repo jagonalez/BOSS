@@ -145,6 +145,21 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
     description: THREAD_TOOL_DESCRIPTIONS.leaveWorktree,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false }
   },
+  {
+    type: 'function',
+    name: 'boss_git_create_change_request',
+    description: THREAD_TOOL_DESCRIPTIONS.createChangeRequest,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestTitle },
+        body: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBody },
+        baseBranch: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase },
+        draft: { type: 'boolean', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft }
+      },
+      additionalProperties: false
+    }
+  },
   ...QA_TOOL_DEFINITIONS.map((tool) => ({
     type: 'function',
     name: tool.name,

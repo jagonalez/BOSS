@@ -20,7 +20,8 @@ class FakeForgeProvider implements ReviewProvider {
       publishOverallComment: true,
       publishInlineComment: false,
       replyToComment: false,
-      submitVerdict: false
+      submitVerdict: false,
+      createChangeRequest: false
     }
   }
 

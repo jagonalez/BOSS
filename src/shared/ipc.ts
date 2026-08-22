@@ -238,6 +238,7 @@ export const IpcChannels = {
   ReviewPublishComment: 'review:publish-comment',
   ReviewReply: 'review:reply',
   ReviewSubmit: 'review:submit',
+  ReviewCreateChangeRequest: 'review:create-change-request',
   TtsStatus: 'tts:status',
   TtsSpeak: 'tts:speak',
   SpeechStatusChanged: 'speech:status-changed',

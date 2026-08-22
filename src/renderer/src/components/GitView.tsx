@@ -46,6 +46,8 @@ export function GitView({
   const [reviewSnapshot, setReviewSnapshot] = useState<ReviewSnapshot | null>(null)
   const [reviewLoading, setReviewLoading] = useState(false)
   const [reviewError, setReviewError] = useState('')
+  const [creatingChangeRequest, setCreatingChangeRequest] = useState(false)
+  const [createChangeRequestError, setCreateChangeRequestError] = useState('')
   const reviewRequest = useRef(0)
   const visibleComments = scope === 'change-request'
     ? [...(reviewSnapshot?.changeRequest?.comments ?? []), ...(reviewSnapshot?.localComments ?? [])]
@@ -63,6 +65,23 @@ export function GitView({
       if (request === reviewRequest.current) setReviewError(String((err as Error).message ?? err))
     } finally {
       if (request === reviewRequest.current) setReviewLoading(false)
+    }
+  }
+
+  async function createChangeRequest(): Promise<void> {
+    if (!projectPath || creatingChangeRequest) return
+    setCreatingChangeRequest(true)
+    setCreateChangeRequestError('')
+    try {
+      // Title and body are left to the forge, which fills them from the commits on the branch.
+      // Writing them here would mean a compose form, and the commits already say it.
+      await window.boss.reviewCreateChangeRequest(projectPath, {})
+      // The snapshot is what draws the row, and it has just become wrong.
+      await loadReview()
+    } catch (err) {
+      setCreateChangeRequestError(String((err as Error).message ?? err))
+    } finally {
+      setCreatingChangeRequest(false)
     }
   }
 
@@ -258,9 +277,18 @@ export function GitView({
       ) : null}
       {reviewSnapshot?.provider && !reviewSnapshot.changeRequest && reviewSnapshot.awaitingChangeRequest ? (
         <div className="review-sync-note">
-          No {reviewSnapshot.provider.label} pull request for this branch yet. Comments are saved here until you open one.
+          <span>
+            No {reviewSnapshot.provider.label} {reviewSnapshot.provider.changeRequestLabel.toLowerCase()} for this branch
+            yet. Comments are saved here until you open one.
+          </span>
+          {reviewSnapshot.provider.capabilities.createChangeRequest ? (
+            <button className="btn-ghost" disabled={creatingChangeRequest} onClick={() => void createChangeRequest()}>
+              {creatingChangeRequest ? 'Opening…' : `Open ${reviewSnapshot.provider.changeRequestLabel.toLowerCase()}`}
+            </button>
+          ) : null}
         </div>
       ) : null}
+      {createChangeRequestError ? <div className="review-sync-error">{createChangeRequestError}</div> : null}
       {reviewSnapshot?.provider && !reviewSnapshot.changeRequest && reviewSnapshot.syncError ? (
         <div className="review-sync-error">{reviewSnapshot.syncError} Remote publishing is unavailable for this checkout; local notes still work.</div>
       ) : null}
