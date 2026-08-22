@@ -13,8 +13,9 @@ import { ComputerUse } from './computer-use'
 import { PTYManager } from './pty-manager'
 import { SpeechManager } from './speech'
 import { SitesManager } from './sites'
-import { registerIpc, type IpcDeps } from './ipc'
-import { IpcChannels } from '@shared/ipc'
+import { openProject, registerIpc, type IpcDeps } from './ipc'
+import { openTargetMessage, openTargetProblem, parseOpenTarget } from './cli-open'
+import { IpcChannels, type ProjectOpenedEvent } from '@shared/ipc'
 import { loadState } from './state-store'
 import { BackendManager } from './backend/manager'
 import { createBackend } from './backend/factory'
@@ -165,7 +166,7 @@ const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates, reviews, projectFiles }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates, reviews, projectFiles, takePendingCliOpen }
 }
 
 function registerIpcOnce(): void {
@@ -264,12 +265,76 @@ app.on('web-contents-created', (_event, contents) => {
   })
 })
 
-app.on('second-instance', () => {
-  if (mainWindow) {
+app.on('second-instance', (_event, argv, workingDirectory) => {
+  // On macOS the app outlives its last window, so `boss` may reach an instance
+  // with nothing on screen. Rebuild the window rather than opening a project
+  // into a void — the same path 'activate' takes when the dock icon is clicked.
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    registerIpcOnce()
+    loadRenderer()
+  } else {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
   }
+  // `boss <folder>` run while BOSS is already up: the launch it started loses
+  // the single-instance lock and quits, handing us its argv on the way out.
+  // That is the whole mechanism — the command needs no port and no daemon.
+  void openFromCli(parseOpenTarget(argv, workingDirectory))
 })
+
+/** Open a folder the `boss` command named, and tell the renderer to show it.
+ *
+ *  Goes through the same openProject as the in-app folder picker, which is what
+ *  makes an unknown folder become a project: that function records any path it
+ *  has not seen. Nothing here decides whether the folder is a project, because
+ *  the answer is only ever "it is now". */
+async function openFromCli(target: string | null): Promise<void> {
+  if (!target) return
+  const problem = openTargetProblem(target)
+  if (problem) {
+    sendProjectOpened({ project: null, created: false, problem: openTargetMessage(target, problem) })
+    return
+  }
+  try {
+    // Read the list before opening, since opening is what adds it: this is the
+    // difference between "opened" and "added", and only knowable beforehand.
+    const known = loadState().projects ?? []
+    const project = await openProject(ipcDeps(), target)
+    sendProjectOpened({ project, created: Boolean(project.path) && !known.includes(project.path) })
+  } catch (error) {
+    sendProjectOpened({
+      project: null,
+      created: false,
+      problem: `BOSS could not open ${target}: ${error instanceof Error ? error.message : String(error)}`
+    })
+  }
+}
+
+/** The last `boss` result the renderer has not collected yet.
+ *
+ *  `boss <folder>` that starts the app resolves long before React mounts and
+ *  subscribes, and a send with no listener is simply lost. Holding it here lets
+ *  the renderer ask for it on mount, so the cold-start and already-running
+ *  cases end in the same place instead of the first one silently doing nothing. */
+let pendingCliOpen: ProjectOpenedEvent | null = null
+
+function sendProjectOpened(event: ProjectOpenedEvent): void {
+  // Held only while the page cannot have a listener yet. Once it is loaded the
+  // push is delivery enough, and keeping a copy would open the project twice —
+  // once now, once when the renderer collects on its next mount.
+  const loaded = Boolean(mainWindow) && !mainWindow!.isDestroyed() && !mainWindow!.webContents.isLoading()
+  pendingCliOpen = loaded ? null : event
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send(IpcChannels.ProjectOpened, event)
+}
+
+/** Hand over a result the renderer may have missed, and clear it. */
+function takePendingCliOpen(): ProjectOpenedEvent | null {
+  const event = pendingCliOpen
+  pendingCliOpen = null
+  return event
+}
 
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) {
@@ -329,7 +394,14 @@ app.whenReady().then(() => {
   registerIpcOnce()
   loadRenderer()
   const saved = loadState()
-  if (saved.projectPath) server.setInitialCwd(saved.projectPath)
+  // `boss <folder>` that started the app, rather than handing off to a running
+  // one. Its folder outranks the last-used project: it is what was just asked
+  // for, and starting the backend on it avoids opening one project to
+  // immediately switch away from it.
+  const launchTarget = parseOpenTarget(process.argv, process.cwd())
+  const cliProject = launchTarget && !openTargetProblem(launchTarget) ? launchTarget : null
+  const initialProject = cliProject ?? saved.projectPath
+  if (initialProject) server.setInitialCwd(initialProject)
   if (e2e) return
   void (async () => {
     await sites.start()
@@ -340,8 +412,11 @@ app.whenReady().then(() => {
     } catch (error) {
       process.stderr.write(`[thread-bus] ${error instanceof Error ? error.message : String(error)}\n`)
     }
-    await backendMgr.start(saved.projectPath)
+    await backendMgr.start(initialProject)
     sites.bind(openCodeBackend)
+    // After the backend is up, so the project it records is one it can serve.
+    // Registering it is what turns a folder BOSS has never seen into a project.
+    if (cliProject) await openFromCli(cliProject)
     await mcpHub.start()
     await automations.start()
     await webAccess.start()

@@ -1,6 +1,6 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import type { BossApi } from '../shared/api'
-import type { ApiRequest, ApiResponse, ProjectInfo } from '../shared/ipc'
+import { IpcChannels, type ApiRequest, type ApiResponse, type ProjectInfo } from '../shared/ipc'
 import type {
   BackendDescriptor,
   BackendId,
@@ -474,6 +474,13 @@ export function installE2EApi(boss: BossApi): void {
   } satisfies Partial<BossApi>)
 
   contextBridge.exposeInMainWorld('bossE2E', {
+    /** The project list main actually holds, not the stub above.
+     *
+     *  projectList/projectSet are stubbed so the suite never depends on the
+     *  user's real projects. That stub cannot show what the `boss` command
+     *  recorded, which is exactly what those tests are about, so this reaches
+     *  the real channel. Reading only — it creates nothing. */
+    realProjectList: (): Promise<string[]> => ipcRenderer.invoke(IpcChannels.ProjectList),
     calls: () => structuredClone(calls),
     sessions: () => structuredClone(sessions),
     defaults: () => structuredClone(defaults),

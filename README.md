@@ -20,6 +20,7 @@ git, speech. Tokens and credentials stay on the machine.
 - **Chat** — streamed conversations, model picker, thinking-mode toggle, permission prompts, abort/stop, queued follow-ups you can edit or steer mid-run.
 - **Voice** — local text-to-speech (Kokoro) and speech-to-text (Whisper), both running in-process via ONNX. Read assistant messages aloud, or dictate into the composer.
 - **Projects** — open any folder; BOSS groups its threads under it. The last project you had open is remembered and reopened on launch.
+- **`boss` command** — run `boss .` in a terminal to open that folder in BOSS, creating the project if the folder is not one yet. Install it from Settings → Updates; it symlinks into `/usr/local/bin`, so app updates do not break it. With BOSS already running the folder opens in that window, and opening a git worktree opens its repository with that checkout selected.
 - **Worktrees** — give a thread its own git worktree so agents work in parallel without colliding. `.worktreeinclude` and `.worktreesetup` control what a fresh checkout gets (see below).
 - **Delegation & fan-out** — hand a subtask to another backend, or run the same task on several at once in separate worktrees and compare the diffs.
 - **Automations** — cron-scheduled agent runs with their own prompt, backend, workspace strategy, overlap policy, and run history.

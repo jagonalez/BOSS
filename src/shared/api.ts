@@ -5,12 +5,14 @@ import type {
   AsrTranscribeRequest,
   AsrTranscribeResult,
   BrowseNavEvent,
+  CliStatus,
   ComputerUsePermissions,
   ComputerUseStatus,
   OptionalComponentId,
   OptionalComponentInfo,
   OptionalDownloadEvent,
   ProjectInfo,
+  ProjectOpenedEvent,
   ServerInfo,
   SiteInfo,
   CloudflareSettings,
@@ -76,6 +78,15 @@ export interface BossApi {
   projectCurrent(): Promise<ProjectInfo>
   projectSet(path: string): Promise<ProjectInfo>
   projectChoose(): Promise<string | null>
+  /** A project the `boss` command opened, pushed as it happens. */
+  onProjectOpened(cb: (event: ProjectOpenedEvent) => void): () => void
+  /** A `boss` result from before the renderer was listening, collected once. */
+  projectOpenedPending(): Promise<ProjectOpenedEvent | null>
+
+  /** The `boss` shell command. Install writes a symlink into /usr/local/bin. */
+  cliStatus(): Promise<CliStatus>
+  cliInstall(): Promise<CliStatus>
+  cliUninstall(): Promise<CliStatus>
 
   terminalCreate(cwd?: string, cols?: number, rows?: number, authBackendId?: import('./backend').BackendId): Promise<string>
   terminalWrite(id: string, data: string): Promise<boolean>

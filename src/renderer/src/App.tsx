@@ -31,6 +31,7 @@ import {
   noteThreadSettled,
   refreshStreaming,
   runMenuCommand,
+  handleProjectOpened,
   loadMode,
   loadThreadPreferences,
   loadAgent,
@@ -98,6 +99,17 @@ export function App(): React.JSX.Element {
   // The menu names an action and this runs it, so a shortcut and the button
   // that already existed reach the same code.
   useEffect(() => window.boss.onMenuCommand(runMenuCommand), [])
+
+  // `boss <folder>` in a terminal. Main has already opened the project; this
+  // brings the window to it. The pending collection covers the launch that
+  // started the app, which resolves before this component exists.
+  useEffect(() => {
+    const stop = window.boss.onProjectOpened(handleProjectOpened)
+    void window.boss.projectOpenedPending().then((event) => {
+      if (event) handleProjectOpened(event)
+    }).catch(() => {})
+    return stop
+  }, [])
 
   // Native views are composited over the window, not inside it, so a hidden
   // workspace would leave its browsers floating on top of whichever page is
