@@ -45,6 +45,10 @@ export interface QueuedFollowUp {
   attachments: QueuedFollowUpAttachment[]
   options?: BackendMessageOptions
   createdAt: number
+  /** When the user steered this one to the front. Set only on a steered
+   *  follow-up, and what keeps two steers in the order they were made rather
+   *  than letting the second overtake the first. */
+  steeredAt?: number
 }
 
 export interface BackendDescriptor {

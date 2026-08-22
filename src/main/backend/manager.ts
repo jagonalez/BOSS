@@ -1734,14 +1734,30 @@ export class BackendManager {
     if (!item) throw new Error('Queued follow-up not found.')
     const backend = await this.ensureStarted(binding.backendId)
     if (!this.busyThreads.has(threadId)) {
-      binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]
+      this.promoteFollowUp(binding, followUpId)
       this.save()
       this.emitFollowUps(binding)
       await this.deliverNextFollowUp(threadId)
       return [...(binding.followUps ?? [])]
     }
     if (DEFINITIONS[binding.backendId].capabilities.steering === 'native' && backend.steer) {
-      await backend.steer(binding.nativeSessionId, this.followUpParts(item))
+      try {
+        await backend.steer(binding.nativeSessionId, this.followUpParts(item))
+      } catch (error) {
+        // The run ended between the click and this call, so there is no turn
+        // left to fold the text into. The backend never took the message, so
+        // dropping it here is what made it disappear: leave it queued and
+        // promoted, and deliver it as the next message instead. Any other
+        // failure is a real one and still reaches the user — but the follow-up
+        // stays queued either way, because the backend never accepted it.
+        const noTurn = error instanceof Error && /active turn|no longer/i.test(error.message)
+        this.promoteFollowUp(binding, followUpId)
+        this.save()
+        this.emitFollowUps(binding)
+        if (!noTurn) throw error
+        void this.deliverNextFollowUp(threadId)
+        return [...(binding.followUps ?? [])]
+      }
       // Only for a backend that forgets it. Codex records the steered text as
       // an item of the running turn and reports it on every reload, so echoing
       // one here would leave the user looking at the same message twice.
@@ -1750,12 +1766,30 @@ export class BackendManager {
       }
       return this.removeFollowUp(threadId, followUpId)
     }
-    binding.followUps = [item, ...(binding.followUps ?? []).filter((followUp) => followUp.id !== followUpId)]
+    this.promoteFollowUp(binding, followUpId)
     this.save()
     this.emitFollowUps(binding)
     this.intentionalAborts.add(threadId)
     await backend.abort(binding.nativeSessionId)
-    return [...binding.followUps]
+    return [...(binding.followUps ?? [])]
+  }
+
+  /** Move a steered follow-up ahead of everything not yet steered, but behind
+   *  the ones already steered. Promoting to index 0 was the bug: steering a
+   *  second message while the first was still waiting for its abort put the
+   *  second in front, and only followUps[0] is ever delivered — so the first
+   *  message sat behind it and the user watched it vanish. Steering twice now
+   *  sends both, in the order they were steered. */
+  private promoteFollowUp(binding: ThreadBinding, followUpId: string): void {
+    const list = [...(binding.followUps ?? [])]
+    const from = list.findIndex((followUp) => followUp.id === followUpId)
+    if (from < 0) return
+    const [item] = list.splice(from, 1)
+    item.steeredAt = item.steeredAt ?? now()
+    let to = 0
+    while (to < list.length && list[to].steeredAt !== undefined) to += 1
+    list.splice(to, 0, item)
+    binding.followUps = list
   }
 
   private async deliverNextFollowUp(threadId: string): Promise<void> {

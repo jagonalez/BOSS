@@ -113,3 +113,61 @@ test('a send that reaches the backend restores pruning', () => {
     'starting a run must clear the suspension'
   )
 })
+
+test('steering twice keeps both messages, in the order they were steered', () => {
+  // Promoting a steered follow-up to index 0 was the bug behind the vanishing
+  // message. Only followUps[0] is ever delivered, so steering a second message
+  // while the first was still waiting for its abort put the second in front —
+  // and the first sat behind it, undelivered, looking to the user like it had
+  // been swallowed. A steered item must land after the ones already steered.
+  const start = source.indexOf('private promoteFollowUp(')
+  assert.ok(start > 0, 'expected a promoteFollowUp helper')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.ok(
+    body.includes('steeredAt'),
+    'promotion must record that the item was steered, or order cannot be kept'
+  )
+  assert.ok(
+    /while \(to < list\.length && list\[to\]\.steeredAt !== undefined\) to \+= 1/.test(body),
+    'a steered item must be inserted after the already-steered ones, not at index 0'
+  )
+})
+
+test('steering never rebuilds the queue with the item at the front', () => {
+  // The two spots that used to do this by hand are exactly where a second
+  // steer overtook the first. Both must go through promoteFollowUp.
+  const start = source.indexOf('async steerFollowUp(threadId: string')
+  assert.ok(start > 0, 'expected steerFollowUp')
+  const body = source.slice(start, source.indexOf('\n  /** Move a steered follow-up', start))
+  assert.ok(
+    !/binding\.followUps = \[item, \.\.\./.test(body),
+    'steering must not promote to index 0; that is what dropped the first message'
+  )
+  assert.equal(
+    body.split('this.promoteFollowUp(').length - 1,
+    3,
+    'every steer path (idle, native-steer failure, stop-and-redirect) must promote the same way'
+  )
+})
+
+test('a native steer the backend refuses leaves the message queued', () => {
+  // The run can end between the click and the call, and the backend then has
+  // no turn left to fold the text into and throws. Letting that throw escape
+  // dropped a message the backend had never accepted — the user saw it leave
+  // the queue and appear nowhere.
+  const start = source.indexOf('async steerFollowUp(threadId: string')
+  const body = source.slice(start, source.indexOf('\n  /** Move a steered follow-up', start))
+  const steer = body.indexOf('await backend.steer(')
+  assert.ok(steer > 0, 'expected a native steer call')
+  const guard = body.indexOf('} catch (error) {', steer)
+  assert.ok(guard > 0, 'a refused native steer must be caught, not left to escape')
+  const recovery = body.slice(guard)
+  assert.ok(
+    recovery.indexOf('promoteFollowUp') < recovery.indexOf('deliverNextFollowUp'),
+    'the refused message must be promoted before delivery is retried'
+  )
+  assert.ok(
+    recovery.includes('deliverNextFollowUp'),
+    'a refused steer must fall back to sending the message as the next one'
+  )
+})
