@@ -214,11 +214,33 @@ function dynamicToolOutput(item: CodexItem): unknown {
     .map((entry) => entry.text ?? '')
     .filter(Boolean)
     .join('\n')
+  // Content blocks, not a shape of our own. The manager lifts an image out of a
+  // tool result only when the output is an array of blocks it recognises, and
+  // the renderer stringifies whatever it cannot read — so returning {text,
+  // images} printed the data URL as a wall of base64 where the picture belonged.
+  // Emitting the same block shape Claude and MCP use puts codex on the path
+  // that already stores the bytes and shows them.
   const images = item.contentItems
     .filter((entry) => entry.type === 'inputImage' && entry.imageUrl)
-    .map((entry) => entry.imageUrl)
+    .map((entry) => dataUrlImage(entry.imageUrl))
+    .filter((image): image is { type: 'image'; mimeType: string; data: string } => Boolean(image))
   if (!images.length) return text
-  return { text, images }
+  return [...(text ? [{ type: 'text', text }] : []), ...images]
+}
+
+/** The mime and bytes inside a `data:` URL, or undefined if it is not one.
+ *
+ *  Codex hands an image back as the data URL BOSS itself sent, so the parts are
+ *  split out again here rather than passed on whole: the image store takes a
+ *  mime type and base64, and a URL that is not base64 is not something it can
+ *  write. */
+function dataUrlImage(url?: string): { type: 'image'; mimeType: string; data: string } | undefined {
+  if (!url) return undefined
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(url)
+  if (!match) return undefined
+  const [, mimeType, data] = match
+  if (!mimeType || !data) return undefined
+  return { type: 'image', mimeType, data }
 }
 
 function itemPart(sessionId: string, messageId: string, item: CodexItem): Part | null {
