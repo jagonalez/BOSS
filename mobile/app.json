@@ -13,7 +13,7 @@
       "bundleIdentifier": "dev.boss.app",
       "infoPlist": {
         "NSCameraUsageDescription": "BOSS uses the camera once, to scan the pairing code shown on your desktop.",
-        "NSMicrophoneUsageDescription": "BOSS records your voice so your desktop can transcribe it. Audio is encrypted and only your own machine can read it."
+        "ITSAppUsesNonExemptEncryption": true
       }
     },
     "android": {
@@ -31,9 +31,8 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-audio",
       "expo-camera",
-      "expo-notifications"
+      "expo-asset"
     ]
   }
 }
