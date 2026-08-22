@@ -72,6 +72,9 @@ export type ThreadBusAgentTool =
   | 'boss_threads_spawn_worktree'
   | 'boss_threads_use_worktree'
   | 'boss_threads_leave_worktree'
+  // Not a boss_threads_* tool: it acts on the caller's own checkout rather than reaching another
+  // thread, so it is not gated by the collaboration policy either.
+  | 'boss_git_create_change_request'
   | 'boss_mcp_list'
   | 'boss_mcp_call'
   | `mcp_${string}`
@@ -95,7 +98,12 @@ export const THREAD_TOOL_DESCRIPTIONS = {
   spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.',
   spawnWorktreeAgent: 'Agent backend for the child thread. Omit to reuse the current thread\'s agent.',
   leaveWorktree: 'Come off this thread\'s worktree and back to the project directory, once its work is committed or merged. Git refuses while anything is uncommitted or untracked, so nothing is lost by trying; the branch is kept either way.',
-  useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. It returns the new path: your working directory changes from your next message, not during this one, so do not start editing files in the new checkout until then. Fails harmlessly if this thread already has a worktree.'
+  useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. It returns the new path: your working directory changes from your next message, not during this one, so do not start editing files in the new checkout until then. Fails harmlessly if this thread already has a worktree.',
+  createChangeRequest: 'Open a pull request (GitHub) or merge request (GitLab) for the branch this thread is on. Use it instead of running `gh pr create` or `glab mr create` yourself: BOSS holds the credentials, so the shell you have cannot reach the forge. Commit and push first — this opens a request for what the branch already contains. Omit title and body to have the forge write both from the commits, which is usually right for a branch whose commits already read well.',
+  createChangeRequestTitle: 'Title for the request. Omit together with body to fill both from the commits.',
+  createChangeRequestBody: 'Description for the request, as Markdown. Omit together with title to fill both from the commits.',
+  createChangeRequestBase: 'Branch to merge into. Omit to use the repository default.',
+  createChangeRequestDraft: 'Open it as a draft.'
 } as const
 
 export interface ThreadBusToolCall {

@@ -54,3 +54,39 @@ test('setting a project policy names the project outright', () => {
   assert.ok(handler.includes('request.projectId'), 'the request should carry the target project')
   assert.ok(!handler.includes('this.currentScope'), 'setting a project policy must not use the current project')
 })
+
+test('opening a change request is answered before the collaboration gate', () => {
+  // The gate governs one thread reaching another. Opening a pull or merge request acts on the
+  // caller's own checkout, so a project with collaboration off must still be able to do it.
+  const gate = source.slice(source.indexOf('private async runAgentCall('), source.indexOf('private async send('))
+  const tool = gate.indexOf("tool === 'boss_git_create_change_request'")
+  const policy = gate.indexOf("if (policy === 'off')")
+  assert.ok(tool > 0, 'expected the change request tool to be dispatched in runAgentCall')
+  assert.ok(policy > 0, 'expected to find the collaboration gate')
+  assert.ok(tool < policy, 'the change request tool must be answered before the collaboration gate')
+})
+
+test('a change request is opened for the caller’s own checkout', () => {
+  // A thread on a worktree must open the request for that worktree's branch, not for whatever the
+  // project directory happens to have checked out.
+  const gate = source.slice(source.indexOf("tool === 'boss_git_create_change_request'"), source.indexOf("const policy = this.policy("))
+  assert.ok(gate.includes('caller.executionPath'), 'expected the caller’s execution path')
+  assert.ok(!gate.includes('projectPath'), 'the project path is not where the thread is working')
+})
+
+test('every backend that registers thread tools also registers the change request tool', () => {
+  // Each backend registers its own tool list, so a tool added only to the bus reaches no model.
+  for (const file of [
+    join(import.meta.dirname, 'backend', 'claude-backend.ts'),
+    join(import.meta.dirname, 'backend', 'codex-backend.ts'),
+    join(import.meta.dirname, 'backend', 'pi-backend.ts'),
+    join(import.meta.dirname, 'opencode-server.ts')
+  ]) {
+    const backend = readFileSync(file, 'utf8')
+    if (!backend.includes('boss_threads_leave_worktree')) continue
+    assert.ok(
+      backend.includes('boss_git_create_change_request'),
+      `${file} registers thread tools, so it should register the change request tool too`
+    )
+  }
+})

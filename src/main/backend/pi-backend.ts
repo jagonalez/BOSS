@@ -487,6 +487,18 @@ export default function (pi: ExtensionAPI) {
     execute: (_id, args, signal) => call("boss_threads_leave_worktree", args, signal)
   })
   pi.registerTool({
+    name: "boss_git_create_change_request",
+    label: "Open a pull or merge request",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequest)},
+    parameters: Type.Object({
+      title: Type.Optional(Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestTitle)} })),
+      body: Type.Optional(Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestBody)} })),
+      baseBranch: Type.Optional(Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase)} })),
+      draft: Type.Optional(Type.Boolean({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft)} }))
+    }),
+    execute: (_id, args, signal) => call("boss_git_create_change_request", args, signal)
+  })
+  pi.registerTool({
     name: "boss_mcp_list",
     label: "List BOSS MCP tools",
     description: "List external MCP tools available through BOSS connections. Pass tool to get one tool's full input schema before calling it.",

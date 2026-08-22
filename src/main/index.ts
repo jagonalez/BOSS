@@ -164,6 +164,9 @@ const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments
   new GitHubReviewProvider(),
   new GitLabReviewProvider()
 ])
+// A thread opens its own pull or merge request through the bus, so the forge is reached from here
+// rather than from the sandbox the agent's own shell runs in.
+threadBus.attachReviews(reviews)
 
 let ipcReady = false
 

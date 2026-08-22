@@ -20,6 +20,7 @@ import { projectScope } from './project-identity'
 import type { QaTools } from './qa-tools'
 import { MCP_TOOL_PREFIX } from '@shared/mcp'
 import type { McpHub } from './mcp-hub'
+import type { ReviewManager } from './review-manager'
 
 interface LegacyThreadBusState {
   version: 1
@@ -108,6 +109,7 @@ export class ThreadBus {
   private readonly deliveryLocks = new Set<string>()
   private qaTools?: QaTools
   private mcpHub?: McpHub
+  private reviews?: ReviewManager
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
@@ -119,6 +121,10 @@ export class ThreadBus {
 
   attachMcpHub(mcpHub: McpHub): void {
     this.mcpHub = mcpHub
+  }
+
+  attachReviews(reviews: ReviewManager): void {
+    this.reviews = reviews
   }
 
   qaStatus(threadId: string) {
@@ -293,6 +299,20 @@ export class ThreadBus {
         return this.mcpHub.callAgentTool(name, toolArgs)
       }
       return this.mcpHub.callAgentTool(tool, args)
+    }
+    // Opening a change request acts on the caller's own checkout rather than reaching another
+    // thread, so it is answered before the collaboration policy, which governs that reach.
+    if (tool === 'boss_git_create_change_request') {
+      if (!this.reviews) throw new Error('Review providers are not available.')
+      const title = stringArg(args, 'title')
+      const body = stringArg(args, 'body')
+      const baseBranch = stringArg(args, 'baseBranch')
+      return this.reviews.createChangeRequest(caller.executionPath, {
+        ...(title ? { title } : {}),
+        ...(body ? { body } : {}),
+        ...(baseBranch ? { baseBranch } : {}),
+        ...(booleanArg(args, 'draft', false) ? { draft: true } : {})
+      })
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
@@ -590,6 +610,20 @@ export class ThreadBus {
         name: 'boss_threads_leave_worktree',
         description: THREAD_TOOL_DESCRIPTIONS.leaveWorktree,
         inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      {
+        name: 'boss_git_create_change_request',
+        description: THREAD_TOOL_DESCRIPTIONS.createChangeRequest,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestTitle },
+            body: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBody },
+            baseBranch: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase },
+            draft: { type: 'boolean', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft }
+          },
+          additionalProperties: false
+        }
       },
       ...QA_TOOL_DEFINITIONS.map((tool) => ({
         name: tool.name,

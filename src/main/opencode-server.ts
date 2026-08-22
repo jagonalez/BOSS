@@ -210,6 +210,17 @@ export const leave_worktree = tool({
   execute(args, context) { return call("boss_threads_leave_worktree", args, context) }
 })
 
+export const git_create_change_request = tool({
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequest)},
+  args: {
+    title: tool.schema.string().optional().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestTitle)}),
+    body: tool.schema.string().optional().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestBody)}),
+    baseBranch: tool.schema.string().optional().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase)}),
+    draft: tool.schema.boolean().optional().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft)})
+  },
+  execute(args, context) { return call("boss_git_create_change_request", args, context) }
+})
+
 export const mcp_list = tool({
   description: "List external MCP tools available through BOSS connections. Pass tool to get one tool's full input schema before calling it.",
   args: {

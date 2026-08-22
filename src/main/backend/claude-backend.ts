@@ -554,6 +554,7 @@ export class ClaudeBackend implements Backend {
       'mcp__boss_thread_bus__boss_threads_spawn_worktree',
       'mcp__boss_thread_bus__boss_threads_use_worktree',
       'mcp__boss_thread_bus__boss_threads_leave_worktree',
+      'mcp__boss_thread_bus__boss_git_create_change_request',
       ...QA_TOOL_DEFINITIONS.map((tool) => `mcp__boss_thread_bus__${tool.name}`),
       ...(this.threadBus?.agentToolNames() ?? []).map((name) => `mcp__boss_thread_bus__${name}`)
     ]
