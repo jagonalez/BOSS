@@ -4182,6 +4182,12 @@ body.workspace-dragging .workspace-tab-slot {
   white-space: nowrap;
 }
 
+/* One line now, but not a cramped one: the row keeps roughly the height its second line used to
+   give it, so the list reads as spaced rather than merely shorter. */
+.session-row {
+  min-height: 34px;
+}
+
 .session-row .meta {
   padding-top: 2px;
 }
@@ -4239,22 +4245,20 @@ body.workspace-dragging .workspace-tab-slot {
   color: var(--text);
 }
 
-/* The backend, as a quiet chip rather than the first item in a line of dim text. It keeps the
-   hue the badge and the tab already use, so one agent reads the same everywhere. */
+/* The backend, as its own mark rather than a word: "OpenCode" spelled out takes width the title
+   needs, and the tabs already carry these marks for the same reason. Tinted, not filled — a chip
+   with a background on every row shouts louder than the titles it sits beside. */
 .session-backend {
   flex: none;
-  font-size: var(--type-label);
-  line-height: 1;
-  letter-spacing: 0.02em;
-  padding: 3px 6px;
-  border-radius: var(--radius-xs);
+  display: grid;
+  place-items: center;
   color: var(--text-faint);
-  background: color-mix(in srgb, var(--text-faint) 12%, transparent);
+  opacity: 0.85;
 }
 
-.session-backend.backend-claude { color: var(--backend-claude); background: color-mix(in srgb, var(--backend-claude) 14%, transparent); }
-.session-backend.backend-codex { color: var(--backend-codex); background: color-mix(in srgb, var(--backend-codex) 14%, transparent); }
-.session-backend.backend-pi { color: var(--backend-pi); background: color-mix(in srgb, var(--backend-pi) 14%, transparent); }
+.session-backend.backend-claude { color: var(--backend-claude); }
+.session-backend.backend-codex { color: var(--backend-codex); }
+.session-backend.backend-pi { color: var(--backend-pi); }
 
 .session-details {
   overflow: hidden;
