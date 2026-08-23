@@ -441,7 +441,8 @@ export function installE2EApi(boss: BossApi): void {
   const branchChanges: Record<string, string[]> = {
     conflict: ['src/edited.ts'],
     feature: ['src/feature-only.ts'],
-    main: []
+    main: [],
+    'origin/main': ['src/committed.ts']
   }
   const heldGitCommands = new Set<string>()
   const heldGitResolvers = new Map<string, Array<() => void>>()
@@ -477,19 +478,30 @@ export function installE2EApi(boss: BossApi): void {
         if (args.includes('--name-only')) {
           const range = args.find((arg) => arg.startsWith('HEAD..'))
           const target = range?.slice('HEAD..'.length)
+          const comparison = !target && args[1] && !args[1].startsWith('-') ? args[1] : undefined
           const paths = target
             ? branchChanges[target] ?? []
+            : comparison
+              ? branchChanges[comparison] ?? []
             : args.includes('--cached')
               ? gitState.staged
               : gitState.unstaged
           const separator = args.includes('-z') ? '\0' : '\n'
           return out(paths.length ? [...paths].sort().join(separator) + (args.includes('-z') ? '\0' : '') : '')
         }
-        if (args.includes('--cached')) return out(gitState.staged.length ? FILE_PATCH : '')
-        return out(FILE_PATCH)
+        if (args.includes('--no-index')) return { code: 1, stdout: FILE_PATCH, stderr: '' }
+        const separator = args.indexOf('--')
+        const file = separator >= 0 ? args[separator + 1] : undefined
+        if (args.includes('--cached')) return out(file && gitState.staged.includes(file) ? FILE_PATCH : '')
+        if (args[1] && !args[1].startsWith('-')) return out(file && branchChanges[args[1]]?.includes(file) ? FILE_PATCH : '')
+        return out(file && gitState.unstaged.includes(file) ? FILE_PATCH : '')
       }
       case 'branch':
-        return out(args.includes('--show-current') ? `${gitState.branch}\n` : [...gitState.branches].sort().join('\n') + '\n')
+        return out(args.includes('--show-current')
+          ? `${gitState.branch}\n`
+          : [...gitState.branches, ...(args.includes('--all') ? ['origin/HEAD', 'origin/main'] : [])].sort().join('\n') + '\n')
+      case 'symbolic-ref':
+        return out('origin/main\n')
       case 'log':
         return out('abc1234567 Initial commit\ndef2345678 Second commit\n')
       case 'rev-parse':
