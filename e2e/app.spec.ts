@@ -1082,7 +1082,7 @@ test('automatic compaction is visible while it runs and remains in the transcrip
 
   // Completion reloads native history. The marker must survive that reload and
   // revisiting the thread, or background compaction remains easy to miss.
-  await appPage.locator('.session-row').filter({ hasText: 'Claude thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
   await expect(notice).toHaveText('Context compacted automatically — earlier messages were summarized. 180K → 24K tokens.')
 })
