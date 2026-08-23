@@ -749,9 +749,9 @@ async function openReviewTab(page: Parameters<typeof control>[0]): Promise<void>
 test('the diff view toggles between unified and split and remembers it', async ({ appPage }) => {
   await openReviewTab(appPage)
 
-  // The fixture checkout holds one modified file whose middle line changed by
-  // a single word — enough to see both layouts and word-level marking.
-  const card = appPage.locator('.diff-card')
+  // Pick the tracked file: Working tree also includes the fixture's new,
+  // untracked file, which has its own card.
+  const card = appPage.locator('.diff-card').filter({ hasText: 'src/edited.ts' })
   await expect(card).toHaveCount(1)
   const view = card.locator('.diff-view')
   await expect(view).toHaveAttribute('data-mode', 'unified')
@@ -786,19 +786,44 @@ test('the diff view toggles between unified and split and remembers it', async (
 
 test('the whitespace toggle is offered on the diff toolbar and persists', async ({ appPage }) => {
   await openReviewTab(appPage)
-  await expect(appPage.locator('.diff-card')).toHaveCount(1)
+  await expect(appPage.locator('.diff-card')).toHaveCount(2)
 
   const whitespace = appPage.locator('.diff-whitespace-toggle')
   await expect(whitespace).toHaveText('Ignore whitespace')
+  await expect(whitespace).toHaveAttribute('aria-pressed', 'false')
   await whitespace.click()
-  await expect(whitespace).toHaveText('Whitespace hidden')
+  await expect(whitespace).toHaveAttribute('aria-pressed', 'true')
   await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffIgnoreWhitespace'))).toBe('1')
 
   // A freshly mounted diff reads the preference back.
   await appPage.reload()
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
   await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
-  await expect(appPage.locator('.diff-whitespace-toggle')).toHaveText('Whitespace hidden')
+  await expect(appPage.locator('.diff-whitespace-toggle')).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('review scopes expose untracked, staged, and committed branch changes in a responsive toolbar', async ({ appPage }) => {
+  await appPage.setViewportSize({ width: 760, height: 700 })
+  await openReviewTab(appPage)
+
+  const paths = appPage.locator('.diff-file-path')
+  await expect(paths).toHaveText(['src/edited.ts', 'scratch.ts'])
+
+  const scopes = appPage.getByRole('tablist', { name: 'Review scope' })
+  await scopes.getByRole('tab', { name: 'Staged' }).click()
+  await expect(paths).toHaveText(['src/staged.ts'])
+
+  await scopes.getByRole('tab', { name: 'Compare' }).click()
+  await expect(appPage.getByRole('combobox', { name: 'Compare against' })).toHaveValue('origin/main')
+  await expect(paths).toHaveText(['src/committed.ts'])
+
+  // The checkout controls live on their own semantic row and both toolbars
+  // contain their controls at a normal split-pane width instead of spilling
+  // over the review content.
+  await expect(appPage.getByRole('group', { name: 'Checkout branch' })).toBeVisible()
+  await expect(appPage.getByRole('group', { name: 'Diff options' })).toBeVisible()
+  await expect.poll(() => appPage.locator('.git-toolbar').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await expect.poll(() => appPage.locator('.diff-stack-head').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
 
 test('committing stages a chosen subset and commits only it', async ({ appPage }) => {
@@ -849,7 +874,7 @@ test('branch switching blocks conflicts and restores a targeted stash on a safe 
   await openReviewTab(appPage)
   const branch = appPage.getByRole('combobox', { name: 'Switch branch' })
   await expect(branch).toBeEnabled()
-  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+  await expect(branch).toHaveValue('main')
 
   // The fixture's conflict branch changes src/edited.ts, which is also dirty
   // locally. The guard must stop before checkout.
@@ -857,13 +882,13 @@ test('branch switching blocks conflicts and restores a targeted stash on a safe 
   const blocked = appPage.locator('.modal').filter({ hasText: "Can't switch to conflict" })
   await expect(blocked).toContainText('src/edited.ts')
   await blocked.getByRole('button', { name: 'Stay' }).click()
-  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+  await expect(branch).toHaveValue('main')
 
   await control(appPage).then((item) => item.resetCalls())
   await branch.selectOption('feature')
   const confirm = appPage.locator('.modal').filter({ hasText: 'Switch to feature?' })
   await confirm.getByRole('button', { name: 'Stash & switch' }).click()
-  await expect(appPage.locator('.git-branch-current')).toContainText('feature')
+  await expect(branch).toHaveValue('feature')
 
   const calls = await gitCalls(appPage)
   expect(calls).toContainEqual(['stash', 'push', '--include-untracked', '-m', 'BOSS branch switch'])
@@ -883,7 +908,7 @@ test('branch switching blocks conflicts and restores a targeted stash on a safe 
   await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['stash', 'push', '--include-untracked', '-m', 'manual existing stash']))
   await control(appPage).then((item) => item.resetCalls())
   await back.getByRole('button', { name: 'Stash & switch' }).click()
-  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+  await expect(branch).toHaveValue('main')
   const retryCalls = await gitCalls(appPage)
   expect(retryCalls.some((args) => args[0] === 'stash')).toBe(false)
   const existing = await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['rev-parse', '--verify', 'refs/stash']))

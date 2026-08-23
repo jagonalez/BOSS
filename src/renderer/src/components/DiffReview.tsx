@@ -195,7 +195,7 @@ export function DiffReview({
             <span className="add">+{totalAdds}</span> <span className="del">−{totalDels}</span>
           </span>
           {files.length > 0 && (
-            <>
+            <div className="diff-stack-actions" role="group" aria-label="Diff options">
               <div className="diff-mode-toggle" role="group" aria-label="Diff layout">
                 <button className={mode === 'unified' ? 'active' : ''} onClick={() => switchMode('unified')} title="One column, deletions above additions">Unified</button>
                 <button className={mode === 'split' ? 'active' : ''} onClick={() => switchMode('split')} title="Old and new side by side">Split</button>
@@ -204,13 +204,14 @@ export function DiffReview({
                 className={`btn-ghost diff-whitespace-toggle ${ignoreWs ? 'active' : ''}`}
                 onClick={() => switchIgnoreWs(!ignoreWs)}
                 title="Hide changes that only move space"
+                aria-pressed={ignoreWs}
               >
-                {ignoreWs ? 'Whitespace hidden' : 'Ignore whitespace'}
+                Ignore whitespace
               </button>
               <button className="btn-ghost" onClick={toggleAll}>
                 {allCollapsed ? 'Expand all' : 'Collapse all'}
               </button>
-            </>
+            </div>
           )}
         </div>
         <div className="diff-stack-body" ref={stackRef}>
