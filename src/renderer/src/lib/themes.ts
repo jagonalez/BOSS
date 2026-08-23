@@ -87,11 +87,34 @@ export interface ThemeDef {
   terminal: TerminalPalette
 }
 
+export type ThemeAppearance = 'system' | 'light' | 'dark'
+export type ResolvedThemeAppearance = Exclude<ThemeAppearance, 'system'>
+
+export interface ThemePreference {
+  family: string
+  appearance: ThemeAppearance
+}
+
+export interface ThemeFamily {
+  id: string
+  label: string
+  description: string
+  category: ThemeDef['category']
+  light: string
+  dark: string
+}
+
+export interface ThemeChangedDetail extends ThemePreference {
+  id: string
+  resolvedAppearance: ResolvedThemeAppearance
+}
+
 // Community palettes follow their upstream projects so BOSS, Highlight.js,
 // and xterm share one visual source of truth:
 // - Tokyo Night Moon: github.com/folke/tokyonight.nvim (Apache-2.0)
 // - Catppuccin: github.com/catppuccin/palette (MIT)
 // - Rosé Pine: github.com/rose-pine/palette (MIT)
+// - Solarized: github.com/altercation/solarized (MIT)
 export const THEMES: ThemeDef[] = [
   {
     id: 'boss-dark',
@@ -138,6 +161,28 @@ export const THEMES: ThemeDef[] = [
     }
   },
   {
+    id: 'tokyo-night-day',
+    label: 'Tokyo Night Day',
+    description: 'Clear, cool daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#e1e2e7', sidebar: '#d8dbe5', surface: '#f2f3f5', surfaceRaised: '#d0d5e3', inset: '#c9cddd', hover: '#d5d9e5', selected: '#c4c8da',
+      border: '#b4b8ca', borderStrong: '#9699a8', text: '#3760bf', textMuted: '#4c5c88', textSubtle: '#737aa2', accent: '#2868c7', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#1f55aa',
+      accentSoft: 'rgba(46, 125, 233, 0.13)', success: '#587539', successSoft: 'rgba(88, 117, 57, 0.13)', warning: '#8c6c3e', warningInk: '#ffffff', warningSoft: 'rgba(140, 108, 62, 0.13)',
+      danger: '#c21f52', dangerInk: '#ffffff', dangerSoft: 'rgba(194, 31, 82, 0.12)', purple: '#7847bd', cyan: '#007197', shadow: 'rgba(76, 92, 136, 0.22)',
+      diffAdditionBg: '#d8e5d1', diffAdditionGutter: '#bfd2b5', diffAdditionText: '#29421b', diffDeletionBg: '#f1d4dc', diffDeletionGutter: '#e5b6c4', diffDeletionText: '#65112c', diffHunkBg: '#ccd9ed', diffHunkText: '#244d8f'
+    },
+    syntax: {
+      foreground: '#3760bf', comment: '#737aa2', keyword: '#7847bd', string: '#587539', number: '#b15c00', title: '#2e7de9', variable: '#9854a8',
+      type: '#007197', literal: '#8c6c3e', meta: '#166775', addition: '#587539', deletion: '#c21f52'
+    },
+    terminal: {
+      black: '#0f0f14', red: '#c21f52', green: '#587539', yellow: '#8c6c3e', blue: '#2e7de9', magenta: '#7847bd', cyan: '#007197', white: '#9699a8',
+      brightBlack: '#6172b0', brightRed: '#f52a65', brightGreen: '#658c3d', brightYellow: '#b15c00', brightBlue: '#2e7de9', brightMagenta: '#9854f1', brightCyan: '#007197', brightWhite: '#3760bf'
+    }
+  },
+  {
     id: 'tokyo-night-moon',
     label: 'Tokyo Night Moon',
     description: 'Official Moon palette',
@@ -157,6 +202,28 @@ export const THEMES: ThemeDef[] = [
     terminal: {
       black: '#444a73', red: '#ff757f', green: '#c3e88d', yellow: '#ffc777', blue: '#82aaff', magenta: '#c099ff', cyan: '#86e1fc', white: '#c8d3f5',
       brightBlack: '#737aa2', brightRed: '#ff98a4', brightGreen: '#d5f3a6', brightYellow: '#ffdc97', brightBlue: '#a3bdff', brightMagenta: '#d2b6ff', brightCyan: '#b4f9f8', brightWhite: '#ffffff'
+    }
+  },
+  {
+    id: 'catppuccin-latte',
+    label: 'Catppuccin Latte',
+    description: 'Soft pastel daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#eff1f5', sidebar: '#e6e9ef', surface: '#ffffff', surfaceRaised: '#dce0e8', inset: '#e6e9ef', hover: '#dce0e8', selected: '#ccd0da',
+      border: '#ccd0da', borderStrong: '#9ca0b0', text: '#4c4f69', textMuted: '#6c6f85', textSubtle: '#8c8fa1', accent: '#1e66f5', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#1a56cf',
+      accentSoft: 'rgba(30, 102, 245, 0.12)', success: '#317521', successSoft: 'rgba(64, 160, 43, 0.12)', warning: '#985f00', warningInk: '#ffffff', warningSoft: 'rgba(223, 142, 29, 0.14)',
+      danger: '#d20f39', dangerInk: '#ffffff', dangerSoft: 'rgba(210, 15, 57, 0.11)', purple: '#8839ef', cyan: '#0d7374', shadow: 'rgba(76, 79, 105, 0.2)',
+      diffAdditionBg: '#dcebd7', diffAdditionGutter: '#bdd9b5', diffAdditionText: '#254a1e', diffDeletionBg: '#f5d8df', diffDeletionGutter: '#edb8c4', diffDeletionText: '#6d0b21', diffHunkBg: '#d8e3fa', diffHunkText: '#174ba9'
+    },
+    syntax: {
+      foreground: '#4c4f69', comment: '#8c8fa1', keyword: '#8839ef', string: '#317521', number: '#c55400', title: '#1e66f5', variable: '#a53689',
+      type: '#0d7374', literal: '#985f00', meta: '#5367bd', addition: '#317521', deletion: '#d20f39'
+    },
+    terminal: {
+      black: '#5c5f77', red: '#d20f39', green: '#317521', yellow: '#985f00', blue: '#1e66f5', magenta: '#8839ef', cyan: '#0d7374', white: '#bcc0cc',
+      brightBlack: '#7c7f93', brightRed: '#d20f39', brightGreen: '#317521', brightYellow: '#b36b00', brightBlue: '#1e66f5', brightMagenta: '#8839ef', brightCyan: '#179299', brightWhite: '#ffffff'
     }
   },
   {
@@ -182,6 +249,28 @@ export const THEMES: ThemeDef[] = [
     }
   },
   {
+    id: 'rose-pine-dawn',
+    label: 'Rosé Pine Dawn',
+    description: 'Warm, quiet daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#faf4ed', sidebar: '#f2e9e1', surface: '#fffaf3', surfaceRaised: '#f4ede8', inset: '#f2e9e1', hover: '#eee5df', selected: '#dfdad9',
+      border: '#dfdad9', borderStrong: '#b8b3bd', text: '#575279', textMuted: '#797593', textSubtle: '#9893a5', accent: '#286983', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#1f5368',
+      accentSoft: 'rgba(40, 105, 131, 0.12)', success: '#3d7680', successSoft: 'rgba(86, 148, 159, 0.13)', warning: '#a5650f', warningInk: '#ffffff', warningSoft: 'rgba(234, 157, 52, 0.14)',
+      danger: '#a94f69', dangerInk: '#ffffff', dangerSoft: 'rgba(180, 99, 122, 0.12)', purple: '#785f91', cyan: '#3d7680', shadow: 'rgba(87, 82, 121, 0.18)',
+      diffAdditionBg: '#deebe7', diffAdditionGutter: '#bed8d2', diffAdditionText: '#285159', diffDeletionBg: '#f1dce1', diffDeletionGutter: '#dfbdc7', diffDeletionText: '#6c2c3e', diffHunkBg: '#e1ddea', diffHunkText: '#58466d'
+    },
+    syntax: {
+      foreground: '#575279', comment: '#9893a5', keyword: '#785f91', string: '#8a5a11', number: '#a95755', title: '#286983', variable: '#a95570',
+      type: '#3d7680', literal: '#a5650f', meta: '#785f91', addition: '#3d7680', deletion: '#a94f69'
+    },
+    terminal: {
+      black: '#575279', red: '#a94f69', green: '#3d7680', yellow: '#a5650f', blue: '#286983', magenta: '#785f91', cyan: '#a95755', white: '#dfdad9',
+      brightBlack: '#797593', brightRed: '#b4637a', brightGreen: '#56949f', brightYellow: '#d38928', brightBlue: '#3e7c95', brightMagenta: '#907aa9', brightCyan: '#d7827e', brightWhite: '#fffaf3'
+    }
+  },
+  {
     id: 'rose-pine-moon',
     label: 'Rosé Pine Moon',
     description: 'Warm, quiet contrast',
@@ -204,9 +293,75 @@ export const THEMES: ThemeDef[] = [
     }
   },
   {
+    id: 'solarized-light',
+    label: 'Solarized Light',
+    description: 'Precision warm daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#fdf6e3', sidebar: '#eee8d5', surface: '#fffaf0', surfaceRaised: '#e8e2cf', inset: '#eee8d5', hover: '#e5deca', selected: '#d9e4df',
+      border: '#d5cfbd', borderStrong: '#a9a99d', text: '#586e75', textMuted: '#657b83', textSubtle: '#839496', accent: '#1476a8', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#0d5e88',
+      accentSoft: 'rgba(38, 139, 210, 0.12)', success: '#697a00', successSoft: 'rgba(133, 153, 0, 0.13)', warning: '#966f00', warningInk: '#ffffff', warningSoft: 'rgba(181, 137, 0, 0.13)',
+      danger: '#c32927', dangerInk: '#ffffff', dangerSoft: 'rgba(220, 50, 47, 0.11)', purple: '#6c71c4', cyan: '#167c75', shadow: 'rgba(88, 110, 117, 0.2)',
+      diffAdditionBg: '#e4e9c8', diffAdditionGutter: '#d1d9a6', diffAdditionText: '#3d4900', diffDeletionBg: '#f5d6cc', diffDeletionGutter: '#edb9aa', diffDeletionText: '#671916', diffHunkBg: '#d8e7eb', diffHunkText: '#185b78'
+    },
+    syntax: {
+      foreground: '#586e75', comment: '#839496', keyword: '#6c71c4', string: '#697a00', number: '#a33b11', title: '#1476a8', variable: '#b82c70',
+      type: '#167c75', literal: '#966f00', meta: '#6c71c4', addition: '#697a00', deletion: '#c32927'
+    },
+    terminal: {
+      black: '#073642', red: '#c32927', green: '#697a00', yellow: '#966f00', blue: '#1476a8', magenta: '#b82c70', cyan: '#167c75', white: '#eee8d5',
+      brightBlack: '#586e75', brightRed: '#dc322f', brightGreen: '#859900', brightYellow: '#b58900', brightBlue: '#268bd2', brightMagenta: '#d33682', brightCyan: '#2aa198', brightWhite: '#fdf6e3'
+    }
+  },
+  {
+    id: 'solarized-dark',
+    label: 'Solarized Dark',
+    description: 'Precision low-light palette',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#002b36', sidebar: '#00242d', surface: '#073642', surfaceRaised: '#124552', inset: '#001f27', hover: '#0d3e49', selected: '#164c58',
+      border: '#164753', borderStrong: '#3e6269', text: '#d3dedc', textMuted: '#a7b8b7', textSubtle: '#839496', accent: '#4aa3d8', accentInk: '#001820', backendClaude: '#d8916f', backendCodex: '#77c7a4', backendPi: '#d4a75e', accentHover: '#70b9e2',
+      accentSoft: 'rgba(38, 139, 210, 0.18)', success: '#9aae24', successSoft: 'rgba(133, 153, 0, 0.17)', warning: '#d5a719', warningInk: '#181100', warningSoft: 'rgba(181, 137, 0, 0.17)',
+      danger: '#ee5b58', dangerInk: '#210504', dangerSoft: 'rgba(220, 50, 47, 0.17)', purple: '#8c91dc', cyan: '#4bbab0', shadow: 'rgba(0, 20, 25, 0.74)',
+      diffAdditionBg: '#233f31', diffAdditionGutter: '#385842', diffAdditionText: '#e2edbf', diffDeletionBg: '#4a2929', diffDeletionGutter: '#673536', diffDeletionText: '#ffd9d5', diffHunkBg: '#193f50', diffHunkText: '#b7ddeb'
+    },
+    syntax: {
+      foreground: '#d3dedc', comment: '#839496', keyword: '#b0a7e8', string: '#b4c94b', number: '#ef8354', title: '#69b7e5', variable: '#ed70ad',
+      type: '#65c8be', literal: '#e3bd4b', meta: '#a5a9e8', addition: '#b4c94b', deletion: '#ee7774'
+    },
+    terminal: {
+      black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900', blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+      brightBlack: '#586e75', brightRed: '#ee5b58', brightGreen: '#9aae24', brightYellow: '#d5a719', brightBlue: '#4aa3d8', brightMagenta: '#df5a9a', brightCyan: '#4bbab0', brightWhite: '#fdf6e3'
+    }
+  },
+  {
+    id: 'high-contrast-light',
+    label: 'High Contrast Light',
+    description: 'Maximum daylight separation',
+    category: 'Accessibility',
+    appearance: 'light',
+    colors: {
+      canvas: '#ffffff', sidebar: '#f3f4f5', surface: '#ffffff', surfaceRaised: '#e7e9ec', inset: '#f0f1f3', hover: '#e2e5e8', selected: '#d3e5fa',
+      border: '#b6bbc1', borderStrong: '#59616a', text: '#000000', textMuted: '#343a40', textSubtle: '#606870', accent: '#005fc5', accentInk: '#ffffff', backendClaude: '#864127', backendCodex: '#176143', backendPi: '#735000', accentHover: '#004a9c',
+      accentSoft: 'rgba(0, 95, 197, 0.14)', success: '#126a2d', successSoft: 'rgba(18, 106, 45, 0.12)', warning: '#8a5b00', warningInk: '#ffffff', warningSoft: 'rgba(138, 91, 0, 0.13)',
+      danger: '#b10e1b', dangerInk: '#ffffff', dangerSoft: 'rgba(177, 14, 27, 0.11)', purple: '#6632a8', cyan: '#006b72', shadow: 'rgba(31, 35, 40, 0.24)',
+      diffAdditionBg: '#d6f2dc', diffAdditionGutter: '#a8dfb4', diffAdditionText: '#0b4319', diffDeletionBg: '#f9d9dc', diffDeletionGutter: '#efabb1', diffDeletionText: '#650710', diffHunkBg: '#d8eaff', diffHunkText: '#003f85'
+    },
+    syntax: {
+      foreground: '#111418', comment: '#606870', keyword: '#6632a8', string: '#126a2d', number: '#8a4700', title: '#005fc5', variable: '#961145',
+      type: '#006b72', literal: '#795000', meta: '#4c409f', addition: '#126a2d', deletion: '#b10e1b'
+    },
+    terminal: {
+      black: '#111418', red: '#b10e1b', green: '#126a2d', yellow: '#795000', blue: '#005fc5', magenta: '#6632a8', cyan: '#006b72', white: '#d7dade',
+      brightBlack: '#59616a', brightRed: '#d91b29', brightGreen: '#18893a', brightYellow: '#986600', brightBlue: '#0878ef', brightMagenta: '#8647cf', brightCyan: '#008b94', brightWhite: '#ffffff'
+    }
+  },
+  {
     id: 'high-contrast',
-    label: 'High Contrast',
-    description: 'Maximum separation',
+    label: 'High Contrast Dark',
+    description: 'Maximum low-light separation',
     category: 'Accessibility',
     appearance: 'dark',
     colors: {
@@ -227,10 +382,50 @@ export const THEMES: ThemeDef[] = [
   }
 ]
 
+export const THEME_FAMILIES: ThemeFamily[] = [
+  { id: 'boss', label: 'BOSS', description: 'Neutral and understated', category: 'BOSS', light: 'boss-light', dark: 'boss-dark' },
+  { id: 'tokyo-night', label: 'Tokyo Night', description: 'Cool city blues', category: 'Community', light: 'tokyo-night-day', dark: 'tokyo-night-moon' },
+  { id: 'catppuccin', label: 'Catppuccin', description: 'Soothing pastels', category: 'Community', light: 'catppuccin-latte', dark: 'catppuccin-mocha' },
+  { id: 'rose-pine', label: 'Rosé Pine', description: 'Warm, quiet contrast', category: 'Community', light: 'rose-pine-dawn', dark: 'rose-pine-moon' },
+  { id: 'solarized', label: 'Solarized', description: 'Precision colors for long sessions', category: 'Community', light: 'solarized-light', dark: 'solarized-dark' },
+  { id: 'high-contrast', label: 'High Contrast', description: 'Maximum separation', category: 'Accessibility', light: 'high-contrast-light', dark: 'high-contrast' }
+]
+
+const DEFAULT_PREFERENCE: ThemePreference = { family: 'boss', appearance: 'system' }
+const THEME_FAMILY_KEY = 'boss.themeFamily'
+const THEME_APPEARANCE_KEY = 'boss.themeAppearance'
+const LEGACY_THEME_KEY = 'boss.theme'
+
 function resolveTheme(id: string): ThemeDef {
-  // An unknown id falls back to the first theme, which is all a renamed one
-  // needed. Nothing has shipped, so those names only ever existed here.
   return THEMES.find((theme) => theme.id === id) ?? THEMES[0]
+}
+
+function resolveFamily(id: string): ThemeFamily {
+  return THEME_FAMILIES.find((family) => family.id === id) ?? THEME_FAMILIES[0]
+}
+
+function isAppearance(value: string | null): value is ThemeAppearance {
+  return value === 'system' || value === 'light' || value === 'dark'
+}
+
+function currentSystemAppearance(): ResolvedThemeAppearance {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  return 'dark'
+}
+
+export function themeForPreference(
+  preference: ThemePreference,
+  systemAppearance: ResolvedThemeAppearance = currentSystemAppearance()
+): ThemeDef {
+  const family = resolveFamily(preference.family)
+  const appearance = preference.appearance === 'system' ? systemAppearance : preference.appearance
+  return resolveTheme(family[appearance])
+}
+
+export function themeForFamily(familyId: string, appearance: ResolvedThemeAppearance): ThemeDef {
+  return resolveTheme(resolveFamily(familyId)[appearance])
 }
 
 function themeTokens(theme: ThemeDef): Record<`--${string}`, string> {
@@ -316,7 +511,8 @@ function syntaxCss(theme: ThemeDef): string {
 }
 
 export function getTheme(id?: string): ThemeDef {
-  return resolveTheme(id ?? document.documentElement.dataset.theme ?? 'boss-dark')
+  const applied = typeof document === 'undefined' ? undefined : document.documentElement.dataset.theme
+  return resolveTheme(id ?? applied ?? 'boss-dark')
 }
 
 export function getXtermTheme(id?: string): Record<string, string> {
@@ -331,9 +527,15 @@ export function getXtermTheme(id?: string): Record<string, string> {
   }
 }
 
-export function applyTheme(id: string): void {
-  const theme = resolveTheme(id)
+export function applyTheme(preference: ThemePreference): ThemeChangedDetail {
+  const normalized: ThemePreference = {
+    family: resolveFamily(preference.family).id,
+    appearance: isAppearance(preference.appearance) ? preference.appearance : DEFAULT_PREFERENCE.appearance
+  }
+  const theme = themeForPreference(normalized)
   document.documentElement.dataset.theme = theme.id
+  document.documentElement.dataset.themeFamily = normalized.family
+  document.documentElement.dataset.themeAppearance = normalized.appearance
   document.documentElement.style.colorScheme = theme.appearance
   for (const [name, value] of Object.entries(themeTokens(theme))) {
     document.documentElement.style.setProperty(name, value)
@@ -348,19 +550,53 @@ export function applyTheme(id: string): void {
   style.textContent = syntaxCss(theme)
 
   try {
-    localStorage.setItem('boss.theme', theme.id)
+    localStorage.setItem(THEME_FAMILY_KEY, normalized.family)
+    localStorage.setItem(THEME_APPEARANCE_KEY, normalized.appearance)
+    // Keep the resolved id for builds from before family/appearance were separate.
+    localStorage.setItem(LEGACY_THEME_KEY, theme.id)
   } catch {
     /* ignore */
   }
-  window.dispatchEvent(new CustomEvent('boss:theme-changed', { detail: { id: theme.id } }))
+  const detail: ThemeChangedDetail = {
+    ...normalized,
+    id: theme.id,
+    resolvedAppearance: theme.appearance
+  }
+  window.dispatchEvent(new CustomEvent('boss:theme-changed', { detail }))
+  return detail
 }
 
-export function loadTheme(): string {
+export function loadTheme(): ThemePreference {
   try {
-    const saved = localStorage.getItem('boss.theme')
-    if (saved) return resolveTheme(saved).id
+    const family = localStorage.getItem(THEME_FAMILY_KEY)
+    const appearance = localStorage.getItem(THEME_APPEARANCE_KEY)
+    if (family && isAppearance(appearance)) {
+      return { family: resolveFamily(family).id, appearance }
+    }
+
+    // Preserve the exact mode selected by versions that stored a variant id.
+    const legacyId = localStorage.getItem(LEGACY_THEME_KEY)
+    const legacyTheme = THEMES.find((theme) => theme.id === legacyId)
+    const legacyFamily = legacyTheme && THEME_FAMILIES.find(
+      (candidate) => candidate.light === legacyTheme.id || candidate.dark === legacyTheme.id
+    )
+    if (legacyTheme && legacyFamily) {
+      return { family: legacyFamily.id, appearance: legacyTheme.appearance }
+    }
   } catch {
     /* ignore */
   }
-  return 'boss-dark'
+  return { ...DEFAULT_PREFERENCE }
+}
+
+/** Reapply a system-following preference whenever the operating system changes. */
+export function watchSystemTheme(): () => void {
+  if (typeof window.matchMedia !== 'function') return () => {}
+  const media = window.matchMedia('(prefers-color-scheme: dark)')
+  const sync = (): void => {
+    const preference = loadTheme()
+    if (preference.appearance === 'system') applyTheme(preference)
+  }
+  media.addEventListener('change', sync)
+  return () => media.removeEventListener('change', sync)
 }
