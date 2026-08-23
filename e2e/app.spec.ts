@@ -587,7 +587,9 @@ test('an annotation can be removed from its own editor', async ({ appPage }) => 
   await expect(appPage.locator('.annotation-pill')).toHaveCount(1)
 
   await appPage.locator('.annotation-marker').click()
-  await appPage.getByRole('button', { name: 'Remove annotation' }).click()
+  // Scoped to the editor: the composer pill carries a remove button too, and
+  // this is asserting the transcript can undo an annotation on its own.
+  await appPage.locator('.annotation-editor').getByRole('button', { name: 'Remove annotation' }).click()
 
   // Gone from the transcript and the composer together: the highlight, its
   // marker, and the pending quote are one thing seen from three places.
