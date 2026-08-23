@@ -226,9 +226,14 @@ function SessionRow({
       <span className={`session-state ${compacting ? 'compacting' : busy ? 'busy' : 'idle'}`} title={compacting ? 'Compacting' : busy ? 'Agent is working' : 'Idle'}>
         <span />
       </span>
+      {/* One line, not two. The backend is the only detail worth scanning a list for, and it reads
+          as a colour beside the title; the model, the branch and the rest are what the hover card
+          is for, and repeating them here cost every row a second line of dim text. */}
       <span className="session-copy">
         <span className="name">{session.title || 'Untitled'}</span>
-        <span className="session-details">{details.join(' · ')}</span>
+      </span>
+      <span className={`session-backend backend-${session.backendId ?? 'opencode'}`} title={details.join(' · ')}>
+        {backend}
       </span>
       <span className="meta">{timeAgo(session.time?.updated)}</span>
     </div>
