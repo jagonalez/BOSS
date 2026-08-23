@@ -46,6 +46,15 @@ test('parseChatChunk keeps text and reasoning apart in one chunk', () => {
   assert.deepEqual(parsed, { text: 'answer', reasoning: 'why' })
 })
 
+test('parseChatChunk preserves OpenRouter reasoning_details blocks', () => {
+  const details = [
+    { type: 'reasoning.summary', summary: 'checking the call', id: 'r-1' },
+    { type: 'reasoning.encrypted', data: 'opaque-provider-state', id: 'r-2' }
+  ]
+  const parsed = parseChatChunk(JSON.stringify({ choices: [{ delta: { reasoning_details: details } }] }))
+  assert.deepEqual(parsed, { reasoningDetails: details })
+})
+
 test('parseChatChunk handles a non-stream message fallback', () => {
   const chunk = {
     choices: [{
@@ -116,6 +125,59 @@ test('openAiMessagesFromHistory round-trips a tool call and its result', () => {
     tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'bash', arguments: '{"command":"ls"}' } }]
   })
   assert.deepEqual(messages[2], { role: 'tool', tool_call_id: 'call-1', content: 'file.txt' })
+})
+
+test('openAiMessagesFromHistory returns stored reasoning_details with a tool call', () => {
+  const details = [{ type: 'reasoning.encrypted', data: 'opaque', id: 'r-1' }]
+  const history = [
+    {
+      info: { id: 'a', sessionID: 's', role: 'assistant' as const },
+      parts: [
+        {
+          id: 'a-r',
+          type: 'reasoning' as const,
+          sessionID: 's',
+          messageID: 'a',
+          text: 'checking...',
+          state: { metadata: { labReasoningDetails: details } }
+        },
+        {
+          id: 'call-1',
+          type: 'tool' as const,
+          sessionID: 's',
+          messageID: 'a',
+          state: { status: 'completed' as const, tool: 'read_file', input: { path: 'x' }, output: 'body' }
+        }
+      ]
+    }
+  ]
+  const messages = openAiMessagesFromHistory(history, 'sys')
+  assert.deepEqual(messages[1], {
+    role: 'assistant',
+    content: null,
+    reasoning_details: details,
+    tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"path":"x"}' } }]
+  })
+})
+
+test('openAiMessagesFromHistory returns string reasoning with a tool call', () => {
+  const history = [
+    {
+      info: { id: 'a', sessionID: 's', role: 'assistant' as const },
+      parts: [
+        { id: 'a-r', type: 'reasoning' as const, sessionID: 's', messageID: 'a', text: 'checking...' },
+        {
+          id: 'call-1',
+          type: 'tool' as const,
+          sessionID: 's',
+          messageID: 'a',
+          state: { status: 'completed' as const, tool: 'bash', input: { command: 'ls' }, output: 'file' }
+        }
+      ]
+    }
+  ]
+  const messages = openAiMessagesFromHistory(history, 'sys')
+  assert.equal(messages[1].reasoning_content, 'checking...')
 })
 
 test('openAiMessagesFromHistory drops unreachable reasoning parts', () => {

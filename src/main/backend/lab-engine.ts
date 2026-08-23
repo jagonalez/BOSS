@@ -585,7 +585,16 @@ export class LabEngine {
       }
       const parts: Part[] = []
       if (reasoning.trim()) {
-        parts.push({ id: `${assistantId}-reasoning`, type: 'reasoning', sessionID: sessionId, messageID: assistantId, text: reasoning })
+        parts.push({
+          id: `${assistantId}-reasoning`,
+          type: 'reasoning',
+          sessionID: sessionId,
+          messageID: assistantId,
+          text: reasoning,
+          ...(turn.reasoningDetails.length > 0
+            ? { state: { metadata: { labReasoningDetails: turn.reasoningDetails } } }
+            : {})
+        })
       }
 
       // A round with no text and no tool calls is a degenerate completion —
@@ -652,6 +661,9 @@ export class LabEngine {
       messages.push({
         role: 'assistant',
         content: turn.content || null,
+        ...(turn.reasoningDetails.length > 0
+          ? { reasoning_details: turn.reasoningDetails }
+          : turn.reasoning.trim() ? { reasoning_content: turn.reasoning } : {}),
         tool_calls: turn.toolCalls.map((call) => ({
           id: call.id,
           type: 'function',

@@ -13,7 +13,14 @@ export interface LabChatMessage {
   name?: string
   tool_call_id?: string
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
+  /** OpenRouter and several reasoning providers require these blocks to be
+   *  returned unchanged when an assistant tool call is continued. */
+  reasoning_details?: LabReasoningDetail[]
+  /** String-only compatibility shape used by DeepSeek-style endpoints. */
+  reasoning_content?: string
 }
+
+export type LabReasoningDetail = Record<string, unknown>
 
 interface ChatChoiceDelta {
   content?: string | null
@@ -23,6 +30,7 @@ interface ChatChoiceDelta {
    *  model streams its chain of thought. */
   reasoning_content?: string | null
   reasoning?: string | null
+  reasoning_details?: LabReasoningDetail[] | null
   tool_calls?: Array<{
     index: number
     id?: string | null
@@ -41,6 +49,7 @@ export interface LabChatChunk {
 export interface ParsedChatChunk {
   text?: string
   reasoning?: string
+  reasoningDetails?: LabReasoningDetail[]
   toolCalls?: StreamedToolCallDelta[]
   finishReason?: string
 }
@@ -62,6 +71,9 @@ export function parseChatChunk(json: string): ParsedChatChunk | undefined {
   if (typeof delta?.content === 'string') text = delta.content
   const rawReasoning = delta?.reasoning_content ?? delta?.reasoning
   const reasoning = typeof rawReasoning === 'string' && rawReasoning ? rawReasoning : undefined
+  const reasoningDetails = Array.isArray(delta?.reasoning_details)
+    ? delta.reasoning_details.filter((detail): detail is LabReasoningDetail => Boolean(detail) && typeof detail === 'object')
+    : undefined
   let toolCalls: StreamedToolCallDelta[] | undefined
   if (delta?.tool_calls) {
     // Some providers (DeepSeek via OpenCode Zen among them) send the id and
@@ -90,6 +102,7 @@ export function parseChatChunk(json: string): ParsedChatChunk | undefined {
   return {
     ...(text !== undefined ? { text } : {}),
     ...(reasoning !== undefined ? { reasoning } : {}),
+    ...(reasoningDetails && reasoningDetails.length > 0 ? { reasoningDetails } : {}),
     ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
     ...(choice.finish_reason ? { finishReason: choice.finish_reason } : {})
   }
@@ -135,9 +148,20 @@ export function openAiMessagesFromHistory(
       if (text.trim()) messages.push({ role: 'assistant', content: text })
       continue
     }
+    const reasoningParts = message.parts.filter((part) => part.type === 'reasoning')
+    const reasoning = reasoningParts.map((part) => part.text ?? '').filter(Boolean).join('\n')
+    const reasoningDetails = reasoningParts.flatMap((part) => {
+      const value = part.state?.metadata?.labReasoningDetails
+      return Array.isArray(value)
+        ? value.filter((detail): detail is LabReasoningDetail => Boolean(detail) && typeof detail === 'object')
+        : []
+    })
     messages.push({
       role: 'assistant',
       content: text.trim() ? text : null,
+      ...(reasoningDetails.length > 0
+        ? { reasoning_details: reasoningDetails }
+        : reasoning.trim() ? { reasoning_content: reasoning } : {}),
       tool_calls: toolParts.map((part) => ({
         id: part.id,
         type: 'function',

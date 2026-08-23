@@ -765,6 +765,50 @@ test('reasoning streams through as its own persisted part', async () => {
   }
 })
 
+test('structured reasoning is preserved unchanged across a tool-result round', async () => {
+  const details = [
+    { type: 'reasoning.summary', summary: 'read the requested file', id: 'r-1' },
+    { type: 'reasoning.encrypted', data: 'opaque-provider-state', id: 'r-2' }
+  ]
+  const bodies: Record<string, unknown>[] = []
+  const fx = await bodyFixture((index, body) => {
+    bodies.push(body)
+    if (index === 0) {
+      return (res) => {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { reasoning_details: details }, finish_reason: null }] })}\n\n`)
+        res.write(toolCallChunk({ id: 'read-1', name: 'read_file', arguments: '{"path":"note.txt"}' }))
+        res.write(done())
+        res.end()
+      }
+    }
+    return (res) => {
+      res.write(textChunk('finished'))
+      res.write(done())
+      res.end()
+    }
+  })
+  try {
+    writeFileSync(join(fx.cwd, 'note.txt'), 'the note')
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'read it' }], { mode: 'auto' })
+
+    const secondMessages = bodies[1].messages as Array<{
+      role?: string
+      reasoning_details?: Array<Record<string, unknown>>
+      tool_calls?: unknown[]
+    }>
+    const toolTurn = secondMessages.find((message) => message.role === 'assistant' && message.tool_calls?.length)
+    assert.deepEqual(toolTurn?.reasoning_details, details)
+
+    const reasoningPart = fx.readStore().messages(fx.sessionId)
+      .flatMap((message) => message.parts)
+      .find((part) => part.type === 'reasoning')
+    assert.equal(reasoningPart?.text, 'read the requested file')
+    assert.deepEqual(reasoningPart?.state?.metadata?.labReasoningDetails, details)
+  } finally {
+    await fx.cleanup()
+  }
+})
+
 test('an empty completion retries once and recovers', async () => {
   const emptyTurn = (res: ServerResponse): void => {
     res.write(done())
