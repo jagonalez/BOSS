@@ -67,6 +67,14 @@ test('Ctrl+F searches the active thread and moves between its matches', async ({
   await expect(search).toHaveCount(0)
 })
 
+test('shows an attached image and one copy of a response echoed under two message ids', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
+
+  await expect(appPage.getByRole('img', { name: 'duplicate-example.png' })).toBeVisible()
+  await expect(appPage.getByText('Critical find. Let me inspect it.')).toHaveCount(1)
+  await expect(appPage.locator('.step-card')).toHaveCount(2)
+})
+
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
 
@@ -631,9 +639,10 @@ test('pinning a thread keeps it first across a reload', async ({ appPage }) => {
   const sourceRow = rows.filter({ hasText: 'Source thread' })
   await expect(sourceRow).toBeVisible()
 
-  // Oldest of the three fixture threads, so it starts last: pinning must move
-  // it above the others, not merely keep its stored flag.
-  await expect(rows.last()).toContainText('Source thread')
+  // Mid-list among the fixture threads rather than newest, so pinning must
+  // move it above all of them, not merely keep its stored flag.
+  await expect(rows.first()).toContainText('Claude stop thread')
+  await expect(rows.last()).toContainText('Duplicate transcript')
   await sourceRow.getByRole('button', { name: 'Pin thread' }).click()
 
   expect((await lastBackendCall(appPage, 'thread.pin')).request).toEqual({

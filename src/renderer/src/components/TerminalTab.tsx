@@ -6,6 +6,8 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { useStore, appStore } from '../state/AppState'
 import type { BackendId } from '@shared/backend'
 import { getXtermTheme } from '../lib/themes'
+import { TYPOGRAPHY_CHANGED, loadTypography } from '../lib/typography'
+import { monoFontStack } from '@shared/typography'
 import { terminalSessions } from '../lib/terminal-sessions'
 import { attachClipboard } from '../lib/terminal-clipboard'
 
@@ -36,8 +38,8 @@ export function TerminalTab({
     let existing = terminalSessions.get(tabId)
     if (!existing) {
       const term = new Terminal({
-        fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
-        fontSize: 13,
+        fontFamily: monoFontStack(loadTypography().monoFont),
+        fontSize: loadTypography().terminalSize,
         lineHeight: 1.35,
         cursorBlink: true,
         theme: getXtermTheme(),
@@ -143,6 +145,15 @@ export function TerminalTab({
       live.term.options.theme = getXtermTheme()
     }
     window.addEventListener('boss:theme-changed', onThemeChanged)
+    // xterm sizes its own canvas, so a change here has to be handed to it and then re-fitted:
+    // the number of columns that fit depends on the size the glyphs were just redrawn at.
+    const onTypographyChanged = (): void => {
+      const typography = loadTypography()
+      live.term.options.fontFamily = monoFontStack(typography.monoFont)
+      live.term.options.fontSize = typography.terminalSize
+      fitNow()
+    }
+    window.addEventListener(TYPOGRAPHY_CHANGED, onTypographyChanged)
 
     // No dispose here. Unmounting means React moved this tab, which is
     // routine; the shell is disposed when the tab closes.
@@ -151,6 +162,7 @@ export function TerminalTab({
       ro.disconnect()
       window.removeEventListener('resize', fitNow)
       window.removeEventListener('boss:theme-changed', onThemeChanged)
+      window.removeEventListener(TYPOGRAPHY_CHANGED, onTypographyChanged)
       offData()
       offExit()
     }

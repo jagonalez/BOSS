@@ -22,7 +22,9 @@ import { createBackend } from './backend/factory'
 import { ThreadBus } from './thread-bus'
 import { WorktreeManager } from './worktree-manager'
 import { NotificationRouter } from './notification-router'
+import { AutomationHooks } from './automation-hooks'
 import { AutomationManager } from './automation-manager'
+import { TelegramBot } from './telegram-bot'
 import { McpHub } from './mcp-hub'
 import { WebAccess } from './web-access'
 import { RelayClient } from './relay-client'
@@ -133,6 +135,16 @@ const automations = new AutomationManager({
 }, backendMgr, worktrees)
 backendMgr.attachAutomations(automations)
 automations.attachNotifications(notifications)
+// GitHub webhooks are delivered to a loopback endpoint; exposing it to the
+// internet is the user's tunnel, exactly like the mobile page.
+const automationHooks = new AutomationHooks({ deliver: (id, token, event, body) => automations.deliverWebhook(id, token, event, body) })
+automations.setHookUrl((id, token) => automationHooks.buildUrl(id, token))
+const telegram = new TelegramBot(
+  join(app.getPath('userData'), 'telegram.json'),
+  join(app.getPath('userData'), 'telegram-token.bin'),
+  backendMgr
+)
+backendMgr.attachTelegram(telegram)
 const mcpHub = new McpHub(join(app.getPath('userData'), 'mcp-connections.json'))
 backendMgr.attachMcpHub(mcpHub)
 threadBus.attachMcpHub(mcpHub)
@@ -424,6 +436,8 @@ app.whenReady().then(() => {
     if (cliProject) await openFromCli(cliProject)
     await mcpHub.start()
     await automations.start()
+    await automationHooks.start()
+    await telegram.start()
     await webAccess.start()
     await relayClient.start()
     // A download reports progress and completion long after the check that
@@ -453,6 +467,8 @@ app.on('before-quit', () => {
   void webAccess.stop()
   void relayClient.stop()
   void automations.stop()
+  void automationHooks.stop()
+  void telegram.stop()
   void mcpHub.stop()
   void backendMgr.stop()
   void computerUse.dispose()
