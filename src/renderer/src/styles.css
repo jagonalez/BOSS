@@ -9415,3 +9415,207 @@ select:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
+
+/* Diff view modes and word-level marking */
+
+.diff-mode-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.diff-mode-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.diff-mode-toggle button + button {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.diff-mode-toggle button:hover {
+  color: var(--text);
+}
+
+.diff-mode-toggle button.active {
+  color: var(--surface-app);
+  background: var(--accent);
+}
+
+.diff-whitespace-toggle.active {
+  color: var(--accent);
+}
+
+.word-del,
+.word-add {
+  border-radius: 2px;
+}
+
+.word-del {
+  background: var(--diff-del-gutter);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.word-add {
+  background: var(--diff-add-gutter);
+}
+
+.diff-view.split {
+  padding: 10px 6px;
+}
+
+.diff-split-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.diff-split-row .diff-line.half {
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-line.half .ln {
+  width: 38px;
+  padding-right: 8px;
+}
+
+.diff-line.half.empty {
+  background: var(--bg-inset);
+  min-height: 19px;
+}
+
+.diff-line.hunk.span .lc {
+  color: var(--diff-hunk-text);
+  font-weight: 600;
+}
+
+/* Branch switcher */
+
+.git-branch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.git-branch-current {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.git-branch-current.busy {
+  opacity: 0.6;
+}
+
+.git-branch select {
+  max-width: 180px;
+}
+
+.git-branch select option.current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.git-branch-name {
+  width: 170px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+/* Commit dialog staging sections */
+
+.commit-section {
+  margin-bottom: 8px;
+}
+
+.commit-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 5px;
+}
+
+.commit-section-title small {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.commit-section .commit-files {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.commit-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.commit-file:hover {
+  background: var(--bg-hover);
+}
+
+.commit-file.staged .commit-file-path {
+  color: var(--text);
+}
+
+.commit-stage-toggle {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.commit-stage-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.commit-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.commit-file-kind {
+  color: var(--text-faint);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+}
+
+.commit-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 3px 6px;
+}

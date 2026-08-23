@@ -5,8 +5,9 @@ import { test as base, expect, type Page } from '@playwright/test'
 import { _electron as electron, type ElectronApplication } from 'playwright'
 
 export interface E2ECall {
-  channel: 'api' | 'backend'
-  request: Record<string, unknown>
+  channel: 'api' | 'backend' | 'git'
+  request?: Record<string, unknown>
+  args?: string[]
 }
 
 interface E2EControl {
@@ -15,6 +16,8 @@ interface E2EControl {
   defaults(): Promise<Record<string, Record<string, unknown>>>
   clipboardWrites(): Promise<string[]>
   resetCalls(): Promise<void>
+  holdGit(command: string): Promise<void>
+  releaseGit(command: string): Promise<void>
   failNextBackendRequest(type: string, message: string): Promise<void>
   emit(event: Record<string, unknown>): Promise<void>
   spawnThread(backendId: string, title: string): Promise<Record<string, unknown>>
@@ -28,6 +31,8 @@ export async function control(page: Page): Promise<E2EControl> {
     defaults: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.defaults()),
     clipboardWrites: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.clipboardWrites()),
     resetCalls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.resetCalls()),
+    holdGit: (command) => page.evaluate((value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.holdGit(value), command),
+    releaseGit: (command) => page.evaluate((value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.releaseGit(value), command),
     failNextBackendRequest: (type, message) => page.evaluate(
       (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.failNextBackendRequest(value.type, value.message),
       { type, message }
@@ -96,12 +101,22 @@ export const test = base.extend<Fixtures>({
 
 export { expect }
 
-export async function backendCalls(page: Page, type?: string): Promise<E2ECall[]> {
-  const calls = (await control(page).then((item) => item.calls())).filter((call) => call.channel === 'backend')
+type BackendCall = E2ECall & { request: Record<string, unknown> }
+
+export async function backendCalls(page: Page, type?: string): Promise<BackendCall[]> {
+  const calls = (await control(page).then((item) => item.calls())).filter(
+    (call): call is BackendCall => call.channel === 'backend' && Boolean(call.request)
+  )
   return type ? calls.filter((call) => call.request.type === type) : calls
 }
 
-export async function lastBackendCall(page: Page, type: string): Promise<E2ECall> {
+export async function lastBackendCall(page: Page, type: string): Promise<BackendCall> {
   await expect.poll(async () => (await backendCalls(page, type)).length).toBeGreaterThan(0)
   return (await backendCalls(page, type)).at(-1)!
+}
+
+/** Every git command the renderer ran, in order. */
+export async function gitCalls(page: Page): Promise<string[][]> {
+  const calls = (await control(page).then((item) => item.calls())).filter((call) => call.channel === 'git')
+  return calls.map((call) => call.args ?? [])
 }

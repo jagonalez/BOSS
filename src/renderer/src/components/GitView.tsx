@@ -1,7 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { parseGitDiff } from '../lib/diff'
-import { gitBranches, gitCommitFiles, gitCurrentBranch, gitDiffFiles, gitFileDiff, gitLog, gitShow } from '../lib/git'
+import {
+  gitBranches,
+  gitChangedBetween,
+  gitCheckout,
+  gitCommitFiles,
+  gitCreateBranch,
+  gitCurrentBranch,
+  gitDiffFiles,
+  gitFileDiff,
+  gitLog,
+  gitShow,
+  gitStatusFiles,
+  gitStashPop,
+  gitStashPush,
+  planBranchSwitch
+} from '../lib/git'
 import { markStaleReviews, runCheckoutReview } from '../lib/actions'
 import { DiffReview, type DiffFileData } from './DiffReview'
 import { ReviewIcon } from './icons'
@@ -37,6 +52,11 @@ export function GitView({
   const reviews = useStore(appStore, (s) => (activeSessionId ? s.sessionMeta[activeSessionId]?.reviews ?? [] : []))
   const [scope, setScope] = useState<Scope>('worktree')
   const [branches, setBranches] = useState<string[]>([])
+  const [current, setCurrent] = useState('')
+  const [branchBusy, setBranchBusy] = useState(false)
+  const [branchError, setBranchError] = useState('')
+  const [creatingBranch, setCreatingBranch] = useState(false)
+  const [newBranchName, setNewBranchName] = useState('')
   const [baseBranch, setBaseBranch] = useState('origin/main')
   const [commits, setCommits] = useState<Array<{ sha: string; msg: string }>>([])
   const [selectedCommit, setSelectedCommit] = useState<string | null>(null)
@@ -49,6 +69,8 @@ export function GitView({
   const [creatingChangeRequest, setCreatingChangeRequest] = useState(false)
   const [createChangeRequestError, setCreateChangeRequestError] = useState('')
   const reviewRequest = useRef(0)
+  const scopeRequest = useRef(0)
+  const branchBusyRef = useRef(false)
   const visibleComments = scope === 'change-request'
     ? [...(reviewSnapshot?.changeRequest?.comments ?? []), ...(reviewSnapshot?.localComments ?? [])]
     : reviewSnapshot?.localComments ?? []
@@ -91,25 +113,163 @@ export function GitView({
     void (async () => {
       if (!projectPath) return
       try {
-        const list = await gitBranches(projectPath)
-        const current = await gitCurrentBranch(projectPath)
-        setBranches([...list, current].filter(Boolean))
-        if (!list.includes('origin/main')) setBaseBranch(current || 'origin/main')
+        const [list, branch] = await Promise.all([gitBranches(projectPath), gitCurrentBranch(projectPath)])
+        setCurrent(branch)
+        setBranches([...list, branch].filter(Boolean))
+        if (!list.includes('origin/main')) setBaseBranch(branch || 'origin/main')
       } catch {
         setBranches([])
       }
     })()
   }, [projectPath])
 
+  const refreshBranchData = (): void => {
+    // The scope diff and the review snapshot both describe the checkout that
+    // just changed underneath them; the current branch drives loadScope.
+    void loadScope()
+    void loadReview()
+  }
+
+  async function branchSwitchPlan(target: string): Promise<ReturnType<typeof planBranchSwitch>> {
+    if (!projectPath) throw new Error('No checkout is available')
+    const files = await gitStatusFiles(projectPath)
+    const local = files
+      .filter((file) => !file.untracked)
+      .flatMap((file) => file.oldPath ? [file.oldPath, file.path] : [file.path])
+    const untracked = files.filter((file) => file.untracked).map((file) => file.path)
+    return planBranchSwitch(local, untracked, await gitChangedBetween(projectPath, `HEAD..${target}`))
+  }
+
+  async function performSwitch(target: string, expectedStash: boolean): Promise<void> {
+    let checkedOut = false
+    let stashOid: string | null = null
+    const latest = await branchSwitchPlan(target)
+    if (latest.action === 'block') {
+      throw new Error(`The checkout changed while this switch was pending. Conflicting paths: ${latest.conflicts?.join(', ')}`)
+    }
+    if (!expectedStash && latest.action !== 'direct') {
+      throw new Error('The working tree changed while the branch switch was being prepared. Choose the branch again to review the updated plan.')
+    }
+    const shouldStash = expectedStash && latest.action === 'stash'
+    try {
+      if (shouldStash) stashOid = await gitStashPush(projectPath)
+      try {
+        await gitCheckout(projectPath, target)
+        checkedOut = true
+      } catch (err) {
+        if (stashOid) {
+          try {
+            await gitStashPop(projectPath, stashOid)
+          } catch (restoreError) {
+            throw new Error(`${String((err as Error).message ?? err)} Restoring BOSS stash ${stashOid.slice(0, 12)} also failed: ${String((restoreError as Error).message ?? restoreError)}`)
+          }
+        }
+        throw err
+      }
+      // A no-op push returns no oid, so it must never pop the user's existing
+      // top stash. When a stash exists, resolve that captured commit exactly.
+      if (stashOid) await gitStashPop(projectPath, stashOid)
+      setCurrent(await gitCurrentBranch(projectPath))
+      refreshBranchData()
+    } catch (err) {
+      // Checkout may have succeeded before stash restoration failed. Reflect
+      // the actual branch and conflicted worktree instead of leaving old data.
+      if (checkedOut) {
+        try {
+          setCurrent(await gitCurrentBranch(projectPath))
+          refreshBranchData()
+        } catch { /* preserve the original switch error */ }
+      }
+      throw err
+    }
+  }
+
+  async function switchTo(target: string, stash: boolean): Promise<void> {
+    if (!projectPath || branchBusyRef.current) return
+    branchBusyRef.current = true
+    setBranchBusy(true)
+    setBranchError('')
+    try {
+      await performSwitch(target, stash)
+    } catch (err) {
+      setBranchError(String((err as Error).message ?? err))
+    } finally {
+      branchBusyRef.current = false
+      setBranchBusy(false)
+    }
+  }
+
+  async function requestSwitch(target: string): Promise<void> {
+    if (!projectPath || !target || target === current || branchBusyRef.current) return
+    branchBusyRef.current = true
+    setBranchBusy(true)
+    setBranchError('')
+    try {
+      const plan = await branchSwitchPlan(target)
+      if (plan.action === 'direct') {
+        await performSwitch(target, false)
+        return
+      }
+      if (plan.action === 'block') {
+        appStore.setState({
+          confirm: {
+            title: `Can't switch to ${target}`,
+            message: `These files differ on ${target} and also have local changes, so a stash would not survive the trip: ${plan.conflicts?.join(', ')}. Commit or stash them yourself first.`,
+            confirmLabel: 'Stay',
+            notice: true,
+            action: () => {}
+          }
+        })
+        return
+      }
+      appStore.setState({
+        confirm: {
+          title: `Switch to ${target}?`,
+          message: 'Your working tree has local changes. They will be stashed before the switch and restored after it.',
+          confirmLabel: 'Stash & switch',
+          action: () => void switchTo(target, true)
+        }
+      })
+    } catch (err) {
+      setBranchError(String((err as Error).message ?? err))
+    } finally {
+      branchBusyRef.current = false
+      setBranchBusy(false)
+    }
+  }
+
+  async function createBranch(): Promise<void> {
+    const name = newBranchName.trim()
+    if (!projectPath || !name || branchBusyRef.current) return
+    branchBusyRef.current = true
+    setBranchBusy(true)
+    setBranchError('')
+    try {
+      await gitCreateBranch(projectPath, name)
+      setCreatingBranch(false)
+      setNewBranchName('')
+      const [list, branch] = await Promise.all([gitBranches(projectPath), gitCurrentBranch(projectPath)])
+      setCurrent(branch)
+      setBranches([...list, branch].filter(Boolean))
+      refreshBranchData()
+    } catch (err) {
+      setBranchError(String((err as Error).message ?? err))
+    } finally {
+      branchBusyRef.current = false
+      setBranchBusy(false)
+    }
+  }
+
   useEffect(() => {
     if (scope !== 'commits' && scope !== 'conversation') void loadScope()
-  }, [projectPath, scope, baseBranch, gitRefresh, reviewSnapshot?.changeRequest?.headRefOid])
+  }, [projectPath, scope, baseBranch, current, gitRefresh, reviewSnapshot?.changeRequest?.headRefOid])
 
   useEffect(() => {
     if (activeSessionId) markStaleReviews(activeSessionId, projectPath)
   }, [activeSessionId, gitRefresh, projectPath])
 
   async function loadScope(): Promise<void> {
+    const request = ++scopeRequest.current
     setError('')
     setData([])
     if (!projectPath) return
@@ -137,11 +297,11 @@ export function GitView({
           /* skip unparseable */
         }
       }
-      setData(items)
+      if (request === scopeRequest.current) setData(items)
     } catch (err) {
-      setError(String((err as Error).message ?? err))
+      if (request === scopeRequest.current) setError(String((err as Error).message ?? err))
     }
-    setLoading(false)
+    if (request === scopeRequest.current) setLoading(false)
   }
 
   useEffect(() => {
@@ -246,6 +406,44 @@ export function GitView({
           </select>
         )}
         {projectPath && scope !== 'conversation' ? (
+          <div className="git-branch" title="Local branches">
+            <span className={`git-branch-current ${branchBusy ? 'busy' : ''}`}>⎇ {current || '—'}</span>
+            <select
+              aria-label="Switch branch"
+              value={current}
+              disabled={branchBusy || branches.length === 0}
+              onChange={(e) => void requestSwitch(e.target.value)}
+            >
+              {branches.map((b) => (
+                <option key={b} value={b} className={b === current ? 'current' : ''}>
+                  {b === current ? `${b} (current)` : b}
+                </option>
+              ))}
+            </select>
+            <button
+              className="btn-ghost git-branch-new"
+              onClick={() => setCreatingBranch((open) => !open)}
+              disabled={branchBusy}
+            >
+              + New
+            </button>
+            {creatingBranch ? (
+              <input
+                className="git-branch-name"
+                placeholder="New branch from HEAD"
+                value={newBranchName}
+                onChange={(e) => setNewBranchName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void createBranch()
+                  if (e.key === 'Escape') setCreatingBranch(false)
+                }}
+                autoFocus
+                spellCheck={false}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {projectPath && scope !== 'conversation' ? (
           <button
             className="btn-ghost"
             onClick={() => {
@@ -264,6 +462,7 @@ export function GitView({
           </button>
         ) : null}
       </div>
+      {branchError ? <div className="review-sync-error">{branchError}</div> : null}
       {reviews.length > 0 ? (
         <div className="git-reviews">
           <span className="git-reviews-title">Reviews</span>

@@ -17,6 +17,22 @@ import type { MessageWithParts, SessionInfo } from '../shared/opencode'
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
   | { channel: 'backend'; request: BackendRequest }
+  | { channel: 'git'; path: string; args: string[] }
+
+interface GitFixtureState {
+  branch: string
+  branches: string[]
+  staged: string[]
+  unstaged: string[]
+  untracked: string[]
+  stashes: Array<{
+    oid: string
+    staged: string[]
+    unstaged: string[]
+    untracked: string[]
+  }>
+  nextStash: number
+}
 
 const PROJECT = '/tmp/boss-e2e/project'
 const CHECKOUT = `${PROJECT}/checkout`
@@ -377,6 +393,155 @@ export function installE2EApi(boss: BossApi): void {
     calls.push({ channel: 'backend', request: structuredClone(request) })
   }
 
+  // A tiny deterministic repository standing in for `git` itself. Only the
+  // commands the review and commit surfaces issue are modelled; everything
+  // else answers empty so an unexpected call is visible in the recording.
+  let gitState: GitFixtureState = {
+    branch: 'main',
+    branches: ['conflict', 'feature', 'main'],
+    staged: ['src/staged.ts'],
+    unstaged: ['src/edited.ts'],
+    untracked: ['scratch.ts'],
+    stashes: [],
+    nextStash: 1
+  }
+  const branchChanges: Record<string, string[]> = {
+    conflict: ['src/edited.ts'],
+    feature: ['src/feature-only.ts'],
+    main: []
+  }
+  const heldGitCommands = new Set<string>()
+  const heldGitResolvers = new Map<string, Array<() => void>>()
+  const FILE_PATCH = [
+    '@@ -1,4 +1,4 @@',
+    ' const first = unchanged()',
+    '-const total = compute(a, b)',
+    '+const sum = compute(a, b)',
+    ' const last = unchanged()',
+    ' done()',
+    ''
+  ].join('\n')
+
+  const gitRunStub = async (path: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> => {
+    calls.push({ channel: 'git', path: structuredClone(path), args: structuredClone(args) })
+    const [command] = args
+    const out = (stdout = ''): { code: number; stdout: string; stderr: string } => ({ code: 0, stdout, stderr: '' })
+    const fail = (stderr: string): { code: number; stdout: string; stderr: string } => ({ code: 1, stdout: '', stderr })
+    if (heldGitCommands.has(command)) {
+      await new Promise<void>((resolve) => {
+        heldGitResolvers.set(command, [...(heldGitResolvers.get(command) ?? []), resolve])
+      })
+    }
+    switch (command) {
+      case 'status':
+        return out([
+          ...gitState.staged.map((file) => `M  ${file}`),
+          ...gitState.unstaged.map((file) => ` M ${file}`),
+          ...gitState.untracked.map((file) => `?? ${file}`),
+          ''
+        ].join(args.includes('-z') ? '\0' : '\n'))
+      case 'diff': {
+        if (args.includes('--name-only')) {
+          const range = args.find((arg) => arg.startsWith('HEAD..'))
+          const target = range?.slice('HEAD..'.length)
+          const paths = target
+            ? branchChanges[target] ?? []
+            : args.includes('--cached')
+              ? gitState.staged
+              : gitState.unstaged
+          const separator = args.includes('-z') ? '\0' : '\n'
+          return out(paths.length ? [...paths].sort().join(separator) + (args.includes('-z') ? '\0' : '') : '')
+        }
+        if (args.includes('--cached')) return out(gitState.staged.length ? FILE_PATCH : '')
+        return out(FILE_PATCH)
+      }
+      case 'branch':
+        return out(args.includes('--show-current') ? `${gitState.branch}\n` : [...gitState.branches].sort().join('\n') + '\n')
+      case 'log':
+        return out('abc1234567 Initial commit\ndef2345678 Second commit\n')
+      case 'rev-parse':
+        if (args.at(-1) === 'HEAD') return out('e2eheaddeadbeef\n')
+        if (args.at(-1) === 'refs/stash') return gitState.stashes[0] ? out(`${gitState.stashes[0].oid}\n`) : fail('unknown revision')
+        return out('')
+      case 'add': {
+        for (const file of args.slice(2)) {
+          gitState = {
+            ...gitState,
+            unstaged: gitState.unstaged.filter((f) => f !== file),
+            untracked: gitState.untracked.filter((f) => f !== file),
+            staged: gitState.staged.includes(file) ? gitState.staged : [...gitState.staged, file]
+          }
+        }
+        return out()
+      }
+      case 'restore': {
+        for (const file of args.slice(3)) {
+          if (!gitState.staged.includes(file)) continue
+          gitState = {
+            ...gitState,
+            staged: gitState.staged.filter((f) => f !== file),
+            unstaged: gitState.unstaged.includes(file) ? gitState.unstaged : [...gitState.unstaged, file]
+          }
+        }
+        return out()
+      }
+      case 'commit':
+        gitState = { ...gitState, staged: [] }
+        return out()
+      case 'push':
+        return out()
+      case 'stash': {
+        if (args[1] === 'push') {
+          if (gitState.staged.length + gitState.unstaged.length + gitState.untracked.length === 0) return out('No local changes to save\n')
+          const stash = {
+            oid: `e2estash${String(gitState.nextStash).padStart(4, '0')}`,
+            staged: [...gitState.staged],
+            unstaged: [...gitState.unstaged],
+            untracked: [...gitState.untracked]
+          }
+          gitState = {
+            ...gitState,
+            staged: [],
+            unstaged: [],
+            untracked: [],
+            stashes: [stash, ...gitState.stashes],
+            nextStash: gitState.nextStash + 1
+          }
+          return out('Saved working directory and index state\n')
+        }
+        if (args[1] === 'list') return out(gitState.stashes.map((stash) => stash.oid).join('\n') + (gitState.stashes.length ? '\n' : ''))
+        if (args[1] === 'pop') {
+          const match = /^stash@\{(\d+)\}$/.exec(args[2] ?? '')
+          const index = match ? Number(match[1]) : 0
+          const stash = gitState.stashes[index]
+          if (!stash) return fail('No stash entry found')
+          gitState = {
+            ...gitState,
+            staged: [...stash.staged],
+            unstaged: [...stash.unstaged],
+            untracked: [...stash.untracked],
+            stashes: gitState.stashes.filter((_, itemIndex) => itemIndex !== index)
+          }
+          return out()
+        }
+        return out()
+      }
+      case 'checkout': {
+        const target = args.includes('-b') ? args[args.indexOf('-b') + 1] : args[1]
+        if (target) {
+          gitState = {
+            ...gitState,
+            branch: target,
+            branches: gitState.branches.includes(target) ? gitState.branches : [...gitState.branches, target]
+          }
+        }
+        return out()
+      }
+      default:
+        return out()
+    }
+  }
+
   /** A real WAV the browser will actually play, so speakText() reaches its
    *  playing state without any audio hardware or network. Pure silence: the
    *  bytes after the header are all zero. */
@@ -731,6 +896,7 @@ export function installE2EApi(boss: BossApi): void {
 
   Object.assign(boss, {
     platform: () => 'darwin',
+    gitRun: gitRunStub,
     serverInfo: async () => ({ port: 0, url: 'e2e://boss', version: 'e2e', healthy: true }),
     onServerStatusChanged: () => () => {},
     apiRequest,
@@ -786,6 +952,12 @@ export function installE2EApi(boss: BossApi): void {
     defaults: () => structuredClone(defaults),
     clipboardWrites: () => structuredClone(clipboardWrites),
     resetCalls: () => { calls = [] },
+    holdGit: (command: string) => { heldGitCommands.add(command) },
+    releaseGit: (command: string) => {
+      heldGitCommands.delete(command)
+      for (const resolve of heldGitResolvers.get(command) ?? []) resolve()
+      heldGitResolvers.delete(command)
+    },
     failNextBackendRequest: (type: BackendRequest['type'], message: string) => {
       nextBackendFailure = { type, message }
     },

@@ -1,4 +1,4 @@
-import { backendCalls, control, expect, lastBackendCall, test } from './fixtures'
+import { backendCalls, control, expect, gitCalls, lastBackendCall, test } from './fixtures'
 import type { BossApi } from '../src/shared/api'
 
 async function openSettings(page: Parameters<typeof control>[0]): Promise<void> {
@@ -624,6 +624,157 @@ test('a selection spanning two messages offers no annotation', async ({ appPage 
   await appPage.dispatchEvent('.messages', 'pointerup')
 
   await expect(appPage.locator('.annotation-popover')).toHaveCount(0)
+})
+
+/** Open the review surface for the source thread's checkout. */
+async function openReviewTab(page: Parameters<typeof control>[0]): Promise<void> {
+  await page.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await page.locator('.workspace-tab-add-inline[title="Add a terminal, files or review to this thread"]').click()
+  await page.locator('.workspace-add-menu-item').filter({ hasText: 'Review' }).click()
+}
+
+test('the diff view toggles between unified and split and remembers it', async ({ appPage }) => {
+  await openReviewTab(appPage)
+
+  // The fixture checkout holds one modified file whose middle line changed by
+  // a single word — enough to see both layouts and word-level marking.
+  const card = appPage.locator('.diff-card')
+  await expect(card).toHaveCount(1)
+  const view = card.locator('.diff-view')
+  await expect(view).toHaveAttribute('data-mode', 'unified')
+
+  await expect(view.locator('.word-del')).toContainText('total')
+  await expect(view.locator('.word-add')).toContainText('sum')
+
+  const toggle = appPage.getByRole('group', { name: 'Diff layout' })
+  await toggle.getByRole('button', { name: 'Split' }).click()
+  await expect(view).toHaveAttribute('data-mode', 'split')
+
+  // Two gutters side by side inside the one file block: the modified pair sits
+  // on one row, old left and new right, each carrying its own word mark.
+  const row = view.locator('.diff-split-row:has(.word-del)').first()
+  await expect(row.locator('.diff-line.half')).toHaveCount(2)
+  await expect(row.locator('.diff-line.half.left')).toContainText('total')
+  await expect(row.locator('.diff-line.half.right')).toContainText('sum')
+  await expect(card.locator('.diff-line.hunk.span')).toHaveCount(1)
+
+  await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffMode'))).toBe('split')
+
+  // The choice survives leaving and re-entering the workspace: a fresh
+  // DiffReview reads it back when it mounts.
+  await appPage.reload()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
+  await expect(appPage.locator('.diff-view.split').first()).toBeVisible()
+
+  await appPage.getByRole('group', { name: 'Diff layout' }).getByRole('button', { name: 'Unified' }).click()
+  await expect(appPage.locator('.diff-view[data-mode="unified"]').first()).toBeVisible()
+})
+
+test('the whitespace toggle is offered on the diff toolbar and persists', async ({ appPage }) => {
+  await openReviewTab(appPage)
+  await expect(appPage.locator('.diff-card')).toHaveCount(1)
+
+  const whitespace = appPage.locator('.diff-whitespace-toggle')
+  await expect(whitespace).toHaveText('Ignore whitespace')
+  await whitespace.click()
+  await expect(whitespace).toHaveText('Whitespace hidden')
+  await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffIgnoreWhitespace'))).toBe('1')
+
+  // A freshly mounted diff reads the preference back.
+  await appPage.reload()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
+  await expect(appPage.locator('.diff-whitespace-toggle')).toHaveText('Whitespace hidden')
+})
+
+test('committing stages a chosen subset and commits only it', async ({ appPage }) => {
+  // The row labels projects by folder name; its title carries the full path.
+  const project = appPage.locator('.sidebar-section.projects .project-row[title="/tmp/boss-e2e/project"]')
+  await expect(project).toBeVisible()
+  await project.click({ button: 'right' })
+  await appPage.getByRole('button', { name: 'Commit & push…' }).click()
+
+  const dialog = appPage.locator('.modal')
+  const staged = dialog.locator('.commit-section.staged')
+  const unstaged = dialog.locator('.commit-section.unstaged')
+  await expect(staged).toContainText('src/staged.ts')
+  await expect(unstaged).toContainText('src/edited.ts')
+  await expect(unstaged).toContainText('scratch.ts')
+
+  // Nothing staged means nothing to commit: the buttons stand down, and the
+  // labels lose their counts.
+  await dialog.getByRole('button', { name: 'Unstage src/staged.ts' }).click()
+  await expect(dialog.getByRole('button', { name: 'Commit', exact: true })).toBeDisabled()
+
+  // Recording starts here, so everything below is asserted against the exact
+  // git traffic this test caused.
+  const e2e = await control(appPage)
+  await e2e.resetCalls()
+  await dialog.locator('.commit-input').fill('Just the scratch file')
+  await e2e.holdGit('add')
+  await dialog.getByRole('button', { name: 'Stage scratch.ts' }).click()
+  const commitButton = dialog.getByRole('button', { name: 'Commit (1)', exact: true })
+  // The optimistic row move must not let Commit or another toggle overtake the
+  // still-running git add.
+  await expect.poll(async () => gitCalls(appPage).then((calls) => calls.some((args) => args[0] === 'add'))).toBe(true)
+  await expect(commitButton).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Stage src/edited.ts' })).toBeDisabled()
+  await e2e.releaseGit('add')
+  await expect(commitButton).toBeEnabled()
+  await commitButton.click()
+
+  await expect(dialog.locator('.commit-output')).toContainText('Committed ✓')
+  // Exactly one targeted add — no sweep of everything with -A.
+  await expect.poll(async () => gitCalls(appPage).then((calls) => calls.filter((args) => args[0] === 'add'))).toEqual([['add', '--', 'scratch.ts']])
+  const calls = await gitCalls(appPage)
+  expect(calls).toContainEqual(['commit', '-m', 'Just the scratch file'])
+  expect(calls.some((args) => args.includes('-A'))).toBe(false)
+})
+
+test('branch switching blocks conflicts and restores a targeted stash on a safe branch', async ({ appPage }) => {
+  await openReviewTab(appPage)
+  const branch = appPage.getByRole('combobox', { name: 'Switch branch' })
+  await expect(branch).toBeEnabled()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+
+  // The fixture's conflict branch changes src/edited.ts, which is also dirty
+  // locally. The guard must stop before checkout.
+  await branch.selectOption('conflict')
+  const blocked = appPage.locator('.modal').filter({ hasText: "Can't switch to conflict" })
+  await expect(blocked).toContainText('src/edited.ts')
+  await blocked.getByRole('button', { name: 'Stay' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+
+  await control(appPage).then((item) => item.resetCalls())
+  await branch.selectOption('feature')
+  const confirm = appPage.locator('.modal').filter({ hasText: 'Switch to feature?' })
+  await confirm.getByRole('button', { name: 'Stash & switch' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('feature')
+
+  const calls = await gitCalls(appPage)
+  expect(calls).toContainEqual(['stash', 'push', '--include-untracked', '-m', 'BOSS branch switch'])
+  expect(calls).toContainEqual(['checkout', 'feature'])
+  expect(calls).toContainEqual(['stash', 'pop', 'stash@{0}'])
+
+  // Restoration is observable in the UI too: the feature checkout still has
+  // the same local working-tree change after the targeted stash is popped.
+  await expect(appPage.locator('.diff-card-path')).toContainText('src/edited.ts')
+
+  // Reproduce the confirmation-time race: after BOSS planned a stash switch,
+  // another Git client stashes the changes first. Revalidation must switch the
+  // now-clean tree directly and leave that pre-existing stash untouched.
+  await branch.selectOption('main')
+  const back = appPage.locator('.modal').filter({ hasText: 'Switch to main?' })
+  await expect(back).toBeVisible()
+  await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['stash', 'push', '--include-untracked', '-m', 'manual existing stash']))
+  await control(appPage).then((item) => item.resetCalls())
+  await back.getByRole('button', { name: 'Stash & switch' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+  const retryCalls = await gitCalls(appPage)
+  expect(retryCalls.some((args) => args[0] === 'stash')).toBe(false)
+  const existing = await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['rev-parse', '--verify', 'refs/stash']))
+  expect(existing.code).toBe(0)
 })
 
 test('a fenced code block in chat highlights and copies raw code', async ({ appPage }) => {

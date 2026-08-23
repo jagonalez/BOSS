@@ -54,10 +54,10 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { label: 'Push notifications', section: 'mobile', keywords: ['webhook', 'alert', 'away'] },
 
   // Telegram
-  { label: 'Telegram inbox', section: 'telegram', keywords: ['bot', 'messages', 'chat', 'botfather'] },
-  { label: 'Bot token', section: 'telegram', keywords: ['telegram', 'botfather', 'password', 'secret'] },
-  { label: 'Delivery thread', section: 'telegram', keywords: ['telegram', 'destination', 'routing', 'chat'] },
-  { label: 'Allowed chats', section: 'telegram', keywords: ['telegram', 'chat id', 'pair', 'allowlist'] },
+  { label: 'Telegram inbox', section: 'telegram', keywords: ['bot', 'message', 'messages', 'channel', 'chat', 'enable', 'botfather'] },
+  { label: 'Bot token', section: 'telegram', keywords: ['telegram', 'botfather', 'keychain', 'api', 'forget', 'password', 'secret'] },
+  { label: 'Deliver into thread', section: 'telegram', keywords: ['telegram', 'steer', 'queue', 'destination', 'routing', 'chat'] },
+  { label: 'Allowed chats', section: 'telegram', keywords: ['telegram', 'chat id', 'allowlist', 'who can write', 'pair'] },
 
   // Collaboration
   { label: 'Thread collaboration', section: 'collaboration', keywords: ['thread bus', 'message', 'discover', 'agents talking'] },
