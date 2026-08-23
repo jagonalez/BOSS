@@ -129,6 +129,9 @@ export function ThreadScreen({
 }): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const list = useRef<FlatList<Message>>(null)
+  /** Whether the view is parked at the newest message. Only then does new
+   *  content scroll; otherwise reading history fights the stream. */
+  const atTail = useRef(true)
 
   const send = (): void => {
     const text = draft.trim()
@@ -152,7 +155,20 @@ export function ThreadScreen({
         data={visible}
         keyExtractor={(m, i) => m.id ?? String(i)}
         contentContainerStyle={styles.list}
-        onContentSizeChange={() => list.current?.scrollToEnd({ animated: false })}
+        // Follow the tail only while the user is already at it.
+        //
+        // This used to scroll on EVERY content size change, and a streaming run
+        // changes it many times a second: the view was yanked to the bottom
+        // while you were reading further up, which reads as the text jittering.
+        onScroll={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
+          const fromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height
+          atTail.current = fromBottom < 80
+        }}
+        scrollEventThrottle={100}
+        onContentSizeChange={() => {
+          if (atTail.current) list.current?.scrollToEnd({ animated: false })
+        }}
         renderItem={({ item }) => {
           const role = item.info?.role === 'user' ? 'user' : 'assistant'
           const text = textOf(item)
