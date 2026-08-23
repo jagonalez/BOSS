@@ -1,10 +1,14 @@
 import type { OpenCodeServer } from '../opencode-server'
 import type { ApiClient } from '../api-client'
 import type { EventStream } from '../event-stream'
-import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
+import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel, ThreadTitleGenerationOptions } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, EventMessage } from '@shared/opencode'
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk'
+// Relative and explicit so this backend remains executable in Node's
+// type-stripping unit tests, which cannot resolve the @shared bundler alias.
+// @ts-expect-error Application builds use bundler resolution.
+import { canAutoNameThread } from '../../shared/thread-title.ts'
 
 /** Unwrap a generated client call.
  *
@@ -197,6 +201,19 @@ export class OpenCodeBackend implements Backend {
       query: { directory: this.directoryFor(id) }
     })
     return unwrap(res, 'session get') as unknown as SessionInfo
+  }
+
+  /** OpenCode starts its hidden small-model title agent on the first prompt.
+   *  Poll the session record so BOSS can wait for that result without adding a
+   *  second title request. The manager uses its local fallback on timeout. */
+  async generateTitle(sessionId: string, _parts: unknown[], options?: ThreadTitleGenerationOptions): Promise<string | undefined> {
+    const initial = options?.currentTitle?.trim()
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 400))
+      const title = (await this.sessionGet(sessionId)).title?.trim()
+      if (title && title !== initial && !canAutoNameThread(title)) return title
+    }
+    return undefined
   }
 
   /* Messages */

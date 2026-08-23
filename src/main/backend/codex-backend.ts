@@ -1,7 +1,7 @@
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
 import { resolveBackendBin } from '../backend-bin'
 import { randomUUID } from 'node:crypto'
-import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
+import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel, ThreadTitleGenerationOptions } from './backend'
 import { BACKEND_IDS, type BackendMessageOptions, type BackendModeId } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
@@ -14,6 +14,7 @@ import { compactionCompletedEvents } from './compaction-events'
 
 type RpcId = string | number
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+type TitleRun = { text: string; resolve: (value: string | undefined) => void; timer: NodeJS.Timeout }
 
 interface CodexThread {
   id: string
@@ -409,6 +410,7 @@ export class CodexBackend implements Backend {
   private loadedThreads = new Set<string>()
   private activeTurns = new Map<string, string>()
   private liveText = new Map<string, string>()
+  private titleRuns = new Map<string, TitleRun>()
   private manualCompactions = new Set<string>()
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
@@ -486,6 +488,7 @@ export class CodexBackend implements Backend {
     this.activeTurns.clear()
     this.liveText.clear()
     this.approvals.clear()
+    for (const [threadId] of this.titleRuns) this.finishTitleRun(threadId)
   }
 
   async setProject(path: string): Promise<void> {
@@ -618,6 +621,21 @@ export class CodexBackend implements Backend {
 
   private mapNotification(method: string, params: Record<string, unknown>): void {
     const sessionId = String(params.threadId ?? '')
+    const titleRun = this.titleRuns.get(sessionId)
+    if (titleRun) {
+      if (method === 'item/agentMessage/delta') {
+        titleRun.text += String(params.delta ?? '')
+      } else if (method === 'item/completed') {
+        const item = params.item as CodexItem | undefined
+        if (item?.type === 'agentMessage' && item.text) titleRun.text = item.text
+      } else if (method === 'turn/completed') {
+        const turn = params.turn as CodexTurn | undefined
+        this.finishTitleRun(sessionId, turn?.status === 'failed' ? undefined : titleRun.text)
+      } else if (method === 'error') {
+        this.finishTitleRun(sessionId)
+      }
+      return
+    }
     switch (method) {
       case 'turn/started': {
         const turn = params.turn as CodexTurn | undefined
@@ -733,6 +751,57 @@ export class CodexBackend implements Backend {
   async sessionGet(id: string): Promise<SessionInfo> {
     const result = await this.request('thread/read', { threadId: id, includeTurns: false }) as { thread: CodexThread }
     return threadInfo(result.thread)
+  }
+
+  private finishTitleRun(threadId: string, title?: string): void {
+    const run = this.titleRuns.get(threadId)
+    if (!run) return
+    clearTimeout(run.timer)
+    this.titleRuns.delete(threadId)
+    run.resolve(title?.trim() || undefined)
+    void this.request('thread/unsubscribe', { threadId }, 5_000).catch(() => {})
+  }
+
+  /** A tiny structured turn in an ephemeral thread gives Codex backends the
+   *  same semantic naming OpenCode gets from its built-in title agent. */
+  async generateTitle(_sessionId: string, parts: unknown[], options?: ThreadTitleGenerationOptions): Promise<string | undefined> {
+    const prompt = parts.flatMap((part) => {
+      if (!part || typeof part !== 'object') return []
+      const value = part as { type?: unknown; text?: unknown }
+      return value.type === 'text' && typeof value.text === 'string' ? [value.text] : []
+    }).join('\n').replace(/\s+/g, ' ').trim().slice(0, 1_600)
+    if (!prompt) return undefined
+
+    const started = await this.request('thread/start', {
+      cwd: this.directoryFor(_sessionId),
+      ephemeral: true,
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+      developerInstructions: 'Name the coding task in 2 to 5 specific words, at most 48 characters. Use a verb and the main subject. Do not copy conversational filler. Return only the requested JSON.'
+    }) as { thread?: CodexThread }
+    const threadId = started.thread?.id
+    if (!threadId) return undefined
+
+    return new Promise<string | undefined>((resolve) => {
+      const timer = setTimeout(() => this.finishTitleRun(threadId), 12_000)
+      timer.unref()
+      this.titleRuns.set(threadId, { text: '', resolve, timer })
+      const params: Record<string, unknown> = {
+        threadId,
+        input: [{ type: 'text', text: prompt }],
+        approvalPolicy: 'never',
+        sandboxPolicy: { type: 'readOnly', networkAccess: false },
+        effort: 'low',
+        outputSchema: {
+          type: 'object',
+          properties: { title: { type: 'string' } },
+          required: ['title'],
+          additionalProperties: false
+        }
+      }
+      if (options?.model?.modelID) params.model = options.model.modelID
+      void this.request('turn/start', params).catch(() => this.finishTitleRun(threadId))
+    })
   }
 
   private async ensureLoaded(id: string): Promise<void> {
