@@ -9265,3 +9265,258 @@ select:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
+
+/* ── Base font size & density ────────────────────────────────────────────────
+   Chosen in Settings → Appearance and applied as data attributes on the root.
+   Themes own colour; these re-point the type scale and control-height tokens
+   the stylesheet already draws from, so no component knows they exist.
+   Terminals keep their own script-measured font, and diffs their own mono
+   size — neither moves with these. */
+[data-ui-font-size='small'] {
+  --type-page-title: 22px;
+  --type-section-title: 14px;
+  --type-body: 12.5px;
+  --type-control: 12px;
+  --type-thread: 12px;
+  --type-meta: 10.5px;
+  --type-label: 10px;
+}
+
+[data-ui-font-size='large'] {
+  --type-page-title: 26px;
+  --type-section-title: 16.5px;
+  --type-body: 15px;
+  --type-control: 14px;
+  --type-thread: 14.5px;
+  --type-meta: 12px;
+  --type-label: 11px;
+}
+
+[data-ui-density='compact'] {
+  --control-h-lg: 30px;
+  --control-h: 26px;
+  --leading-body: 1.4;
+}
+
+/* ── Activity inbox ────────────────────────────────────────────────────────── */
+.inbox-anchor {
+  -webkit-app-region: no-drag;
+  position: relative;
+  display: flex;
+}
+
+.inbox-bell {
+  -webkit-app-region: no-drag;
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.inbox-bell:hover,
+.inbox-bell.has-unread {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.inbox-badge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--ink-on-accent);
+  pointer-events: none;
+}
+
+.inbox-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-menu);
+  z-index: 300;
+}
+
+.inbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 6px 14px;
+  position: sticky;
+  top: 0;
+  background: var(--surface-overlay);
+  font-size: var(--type-control);
+}
+
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 6px;
+}
+
+.inbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 7px 8px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.inbox-row:hover {
+  background: var(--surface-hover);
+}
+
+.inbox-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--text-faint);
+}
+
+.inbox-dot.warning { background: var(--yellow); }
+.inbox-dot.accent { background: var(--accent); }
+.inbox-dot.danger { background: var(--red); }
+.inbox-dot.success { background: var(--green); }
+
+.inbox-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inbox-row-title {
+  font-size: var(--type-control);
+  font-weight: 550;
+  color: var(--text);
+}
+
+.inbox-row-detail {
+  font-size: var(--type-meta);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-empty {
+  padding: 18px 10px 22px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+/* ── Command palette ───────────────────────────────────────────────────────── */
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  /* Dimming the app behind a modal, which is a scrim rather than a surface. */
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  /* Opens over anything, settings page included: it is how you reach settings. */
+  z-index: 1200;
+}
+
+.command-palette {
+  width: 520px;
+  max-width: calc(100vw - 48px);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.command-palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  outline: none;
+  border-bottom: 1px solid var(--line-subtle);
+  color: var(--text);
+  font-size: var(--type-section-title);
+  padding: 13px 16px;
+}
+
+.command-palette-input::placeholder {
+  color: var(--text-faint);
+}
+
+.command-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--type-control);
+}
+
+.command-palette-item.active {
+  background: var(--surface-selected);
+}
+
+.command-palette-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-palette-hint {
+  flex: none;
+  font-size: var(--type-meta);
+  color: var(--text-faint);
+}
+
+.command-palette-empty {
+  padding: 18px 12px 22px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}

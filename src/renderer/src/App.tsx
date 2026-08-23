@@ -14,6 +14,7 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { DelegateModal } from './components/DelegateModal'
 import { TaskPolicyModal } from './components/TaskPolicyModal'
 import { SettingsModal } from './components/SettingsModal'
+import { CommandPalette } from './components/CommandPalette'
 import { UpdateBanner } from './components/UpdateBanner'
 import {
   refreshAgents,
@@ -48,7 +49,10 @@ import {
   loadEngine,
   initializeWorkspaceState,
   loadProjectWorkspace,
-  setNativeViewsSuspended
+  setNativeViewsSuspended,
+  loadActivity,
+  loadAppearance,
+  recordActivity
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -71,7 +75,7 @@ export function App(): React.JSX.Element {
   const activePage = useStore(appStore, (s) => s.activePage)
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const sessions = useStore(appStore, (s) => s.sessions)
-  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget || s.policyTarget))
+  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget || s.policyTarget || s.paletteOpen))
 
   useEffect(() => {
     loadArchived()
@@ -84,6 +88,8 @@ export function App(): React.JSX.Element {
     loadEngine()
     initializeWorkspaceState()
     applyTheme(loadTheme())
+    loadActivity()
+    loadAppearance()
   }, [])
 
   // Views load once and stay. They belong to the app, not to a project, so
@@ -182,6 +188,7 @@ export function App(): React.JSX.Element {
           refreshStreaming(sid)
           if (wasStreaming && !appStore.getState().streaming[sid] && !document.hasFocus()) {
             setAttention('done')
+            recordActivity('done', sid || undefined)
           }
           break
         }
@@ -202,6 +209,13 @@ export function App(): React.JSX.Element {
           const patch = applyEvent(appStore.getState(), ev)
           if (Object.keys(patch).length > 0) appStore.setState(patch)
           setAttention('permission')
+          const askedProps = (ev.properties ?? {}) as { sessionID?: string }
+          recordActivity('permission', askedProps.sessionID)
+          break
+        }
+        case 'permission.replied': {
+          const repliedProps = (ev.properties ?? {}) as { sessionID?: string }
+          recordActivity('permission.answered', repliedProps.sessionID)
           break
         }
         case 'question.asked': {
@@ -211,6 +225,14 @@ export function App(): React.JSX.Element {
           // "Permission needed" here sent people looking for an approval
           // prompt that was never coming.
           setAttention('question')
+          const questionProps = (ev.properties ?? {}) as { sessionID?: string }
+          recordActivity('question', questionProps.sessionID)
+          break
+        }
+        case 'question.replied':
+        case 'question.rejected': {
+          const answeredProps = (ev.properties ?? {}) as { sessionID?: string }
+          recordActivity('question.answered', answeredProps.sessionID)
           break
         }
         case 'session.error': {
@@ -221,6 +243,7 @@ export function App(): React.JSX.Element {
             void loadMessages(props.sessionID)
           }
           setAttention('error')
+          recordActivity('error', props.sessionID)
           break
         }
         case 'message.updated':
@@ -382,6 +405,7 @@ export function App(): React.JSX.Element {
       <DelegateModal />
       <TaskPolicyModal />
       <SettingsModal />
+      <CommandPalette />
     </div>
   )
 }

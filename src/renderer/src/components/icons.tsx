@@ -295,3 +295,11 @@ export const BACKEND_MARKS: Record<string, (p: IconProps) => React.JSX.Element> 
   pi: PiMark,
   lab: LabMark
 }
+
+/** A bell, for the activity inbox. */
+export const BellIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="M6 9a6 6 0 0 1 12 0c0 4.2 1.3 5.7 2 6.5.4.4.1 1.5-.8 1.5H4.8c-.9 0-1.2-1.1-.8-1.5.7-.8 2-2.3 2-6.5Z" />
+    <path d="M10 20a2 2 0 0 0 4 0" />
+  </Svg>
+)

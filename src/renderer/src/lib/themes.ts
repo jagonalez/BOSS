@@ -364,3 +364,66 @@ export function loadTheme(): string {
   }
   return 'boss-dark'
 }
+
+/** Base font size and UI density, layered over the theme.
+ *
+ *  A theme owns colour; these own size and spacing. They are data attributes
+ *  on the root element that re-point the type scale and control-height tokens
+ *  styles.css already draws from, so nothing component-level has to know they
+ *  exist. Terminals are unaffected: xterm measures its own font in script. */
+export type UiFontSize = 'small' | 'default' | 'large'
+export type UiDensity = 'comfortable' | 'compact'
+
+const UI_FONT_SIZE_KEY = 'boss.uiFontSize'
+const UI_DENSITY_KEY = 'boss.uiDensity'
+
+const UI_FONT_SIZES: readonly UiFontSize[] = ['small', 'default', 'large']
+const UI_DENSITIES: readonly UiDensity[] = ['comfortable', 'compact']
+
+export function normalizeUiFontSize(value: unknown): UiFontSize {
+  return (UI_FONT_SIZES as readonly string[]).includes(value as string) ? (value as UiFontSize) : 'default'
+}
+
+export function normalizeUiDensity(value: unknown): UiDensity {
+  return (UI_DENSITIES as readonly string[]).includes(value as string) ? (value as UiDensity) : 'comfortable'
+}
+
+function setDatasetFlag(name: string, value: string | null): void {
+  if (value) document.documentElement.dataset[name] = value
+  else delete document.documentElement.dataset[name]
+}
+
+export function applyUiFontSize(size: UiFontSize): void {
+  // `default` clears the attribute so the stylesheet's own scale applies.
+  setDatasetFlag('uiFontSize', size === 'default' ? null : size)
+  try {
+    localStorage.setItem(UI_FONT_SIZE_KEY, size)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function applyUiDensity(density: UiDensity): void {
+  setDatasetFlag('uiDensity', density === 'compact' ? density : null)
+  try {
+    localStorage.setItem(UI_DENSITY_KEY, density)
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadUiFontSizePreference(): UiFontSize {
+  try {
+    return normalizeUiFontSize(localStorage.getItem(UI_FONT_SIZE_KEY))
+  } catch {
+    return 'default'
+  }
+}
+
+export function loadUiDensityPreference(): UiDensity {
+  try {
+    return normalizeUiDensity(localStorage.getItem(UI_DENSITY_KEY))
+  } catch {
+    return 'comfortable'
+  }
+}

@@ -35,6 +35,8 @@ import type { AsrStatus, TtsStatus } from '@shared/speech'
 import type { AppPage, Layout, ViewMode, Workspace, TerminalStartLocation } from '@shared/workspace'
 import { Store } from '../lib/store'
 import { errorSummary } from '../lib/errors'
+import type { ActivityFeedState } from '../lib/activity-feed'
+import type { UiDensity, UiFontSize } from '../lib/themes'
 
 export { useStore } from '../lib/store'
 
@@ -152,6 +154,14 @@ export interface AppState {
   chatOrder: string[]
   launcherProject: string | null
   attention: { kind: 'permission' | 'question' | 'done' | 'error'; ts: number } | null
+  /** Persistent history of attention-worthy events, capped and read-marked.
+   *  The ephemeral `attention` pill above is the nudge; this is the record. */
+  activity: ActivityFeedState
+  inboxOpen: boolean
+  /** Command palette overlay (Cmd+K). */
+  paletteOpen: boolean
+  uiFontSize: UiFontSize
+  uiDensity: UiDensity
   tts: TtsStatus
   asr: AsrStatus
   asrTargetId: string | null
@@ -256,6 +266,11 @@ export const initialState: AppState = {
   chatOrder: [],
   launcherProject: null,
   attention: null,
+  activity: { events: [], lastReadTs: 0 },
+  inboxOpen: false,
+  paletteOpen: false,
+  uiFontSize: 'default',
+  uiDensity: 'comfortable',
   tts: { available: false, ready: false, speaking: false },
   asr: { available: false, listening: false },
   asrTargetId: null,

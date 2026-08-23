@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import { THEMES, applyTheme, loadTheme } from '../lib/themes'
+import { THEMES, applyTheme, loadTheme, type UiDensity, type UiFontSize } from '../lib/themes'
 import { KOKORO_VOICES } from '@shared/speech'
 import type { ViewMode } from '@shared/workspace'
-import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setUiDensity, setUiFontSize, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { projectName } from './CommandCenter'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
@@ -655,6 +655,8 @@ export function SettingsModal(): React.JSX.Element | null {
   const computerUsePerms = useStore(appStore, (s) => s.computerUsePerms)
   const terminalStartLocation = useStore(appStore, (s) => s.terminalStartLocation)
   const viewMode = useStore(appStore, (s) => s.viewMode)
+  const uiFontSize = useStore(appStore, (s) => s.uiFontSize)
+  const uiDensity = useStore(appStore, (s) => s.uiDensity)
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
@@ -1196,6 +1198,41 @@ export function SettingsModal(): React.JSX.Element | null {
                     </div>
                   ))}
                 </div>
+              </section>
+              <section className="settings-card settings-card-list">
+                <div className="settings-card-heading">
+                  <div>
+                    <h2>Type &amp; density</h2>
+                    <p>How large the interface reads and how tightly controls pack. Colours stay with the theme.</p>
+                  </div>
+                </div>
+                <SettingsRow
+                  title="Base font size"
+                  description="Sizes the interface type everywhere. Terminals and diffs keep their own fixed sizing."
+                >
+                  <Select
+                    aria-label="Base font size"
+                    value={uiFontSize}
+                    onChange={(event) => setUiFontSize(event.target.value as UiFontSize)}
+                  >
+                    <option value="small">Small</option>
+                    <option value="default">Default</option>
+                    <option value="large">Large</option>
+                  </Select>
+                </SettingsRow>
+                <SettingsRow
+                  title="UI density"
+                  description="Compact tightens control heights and spacing to fit more on screen. Comfortable keeps the room to breathe."
+                >
+                  <Select
+                    aria-label="UI density"
+                    value={uiDensity}
+                    onChange={(event) => setUiDensity(event.target.value as UiDensity)}
+                  >
+                    <option value="comfortable">Comfortable</option>
+                    <option value="compact">Compact</option>
+                  </Select>
+                </SettingsRow>
               </section>
               </>
             ) : null}
