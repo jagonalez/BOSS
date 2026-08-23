@@ -2566,10 +2566,10 @@ export class BackendManager {
     return binding.policy
   }
 
-  searchTranscripts(query: string, limit?: number): TranscriptSearchResult[] {
+  searchTranscripts(query: string, limit?: number, threadId?: string): TranscriptSearchResult[] {
     this.load()
     if (!this.transcripts) return []
-    return this.transcripts.search(query, limit).flatMap((result) => {
+    return this.transcripts.search(query, limit, threadId).flatMap((result) => {
       const binding = this.bindings.get(result.threadId)
       return binding ? [{
         ...result,
@@ -2683,7 +2683,7 @@ export class BackendManager {
         return (await this.ensureStarted(id)).modelsList()
       }
       case 'supervision.snapshot': return this.supervisionSnapshot()
-      case 'supervision.search': return this.searchTranscripts(request.query, request.limit)
+      case 'supervision.search': return this.searchTranscripts(request.query, request.limit, request.threadId)
       case 'supervision.acknowledge': return this.acknowledgeAttention(request.threadId)
       case 'thread.archive': {
         const binding = this.binding(request.threadId)

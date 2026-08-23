@@ -1,5 +1,5 @@
 import React from 'react'
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native'
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native'
 import { attentionLabel, projectLabel, sortThreads, type ThreadRow } from './parts'
 import { theme } from './theme'
 
@@ -25,7 +25,24 @@ function tone(thread: ThreadRow): string {
   return kind === 'permission' || kind === 'question' ? theme.yellow : theme.faint
 }
 
-export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen, onNew }: {
+export interface TranscriptHit {
+  threadId: string
+  title: string
+  snippet: string
+  role: 'user' | 'assistant'
+}
+
+/** What the desktop's supervision.search returns, of which this app uses part. */
+export interface TranscriptSearchRow extends TranscriptHit {
+  messageId: string
+  projectPath: string
+  kind: 'message' | 'reasoning' | 'tool'
+  timestamp?: number
+}
+
+export function ThreadsScreen({
+  threads, offline, refreshing, onRefresh, onOpen, onNew, query, onQuery, hits, searching
+}: {
   threads: ThreadRow[]
   /** The desktop is asleep or unreachable; say so rather than showing an empty list. */
   offline: boolean
@@ -33,9 +50,23 @@ export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen,
   onRefresh(): void
   onOpen(threadId: string): void
   onNew(): void
+  query: string
+  onQuery(query: string): void
+  /** Matches from inside transcripts, which the desktop searches for us. */
+  hits: TranscriptHit[]
+  searching: boolean
 }): React.JSX.Element {
-  const sorted = sortThreads(threads)
+  const clean = query.trim().toLowerCase()
+  // Titles filter here because the rows are already on the phone; message text
+  // cannot, so it comes back from the desktop as `hits`.
+  const matching = clean
+    ? threads.filter((t) => `${t.title ?? ''} ${projectLabel(t) ?? ''}`.toLowerCase().includes(clean))
+    : threads
+  const sorted = sortThreads(matching)
   const waiting = sorted.filter((t) => t.attention?.kind === 'permission' || t.attention?.kind === 'question').length
+  // A thread already listed by title does not need a second card for its text.
+  const titled = new Set(sorted.map((t) => t.threadId))
+  const extra = clean ? hits.filter((h) => !titled.has(h.threadId)) : []
 
   return (
     <View style={styles.fill}>
@@ -45,6 +76,19 @@ export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen,
           <Text style={styles.bannerBody}>Open BOSS on your desktop to continue.</Text>
         </View>
       ) : null}
+      <View style={styles.search}>
+        <TextInput
+          style={styles.searchInput}
+          value={query}
+          onChangeText={onQuery}
+          placeholder="Search threads and messages"
+          placeholderTextColor={theme.faint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+        />
+      </View>
       {waiting ? (
         <Text style={styles.waiting}>
           {waiting} {waiting === 1 ? 'thread needs' : 'threads need'} you
@@ -58,7 +102,31 @@ export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen,
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />
         }
         ListEmptyComponent={
-          <Text style={styles.empty}>{offline ? '' : 'No threads yet.'}</Text>
+          <Text style={styles.empty}>
+            {offline ? '' : clean ? '' : 'No threads yet.'}
+          </Text>
+        }
+        ListFooterComponent={
+          clean ? (
+            <View>
+              {extra.length ? <Text style={styles.section}>In messages</Text> : null}
+              {extra.map((hit) => (
+                <Pressable
+                  key={`${hit.threadId}-${hit.snippet.slice(0, 24)}`}
+                  style={styles.card}
+                  onPress={() => onOpen(hit.threadId)}
+                >
+                  <Text style={styles.title} numberOfLines={1}>{hit.title || 'Untitled'}</Text>
+                  <Text style={styles.snippet} numberOfLines={2}>{hit.snippet}</Text>
+                </Pressable>
+              ))}
+              {!sorted.length && !extra.length ? (
+                <Text style={styles.empty}>
+                  {searching ? 'Searching…' : `Nothing matches “${query.trim()}”.`}
+                </Text>
+              ) : null}
+            </View>
+          ) : null
         }
         renderItem={({ item }) => {
           const project = projectLabel(item)
@@ -126,6 +194,27 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     gap: 4
   },
+  search: { paddingHorizontal: 12, paddingTop: 10 },
+  searchInput: {
+    backgroundColor: theme.inset,
+    borderWidth: 1,
+    borderColor: theme.line,
+    borderRadius: 10,
+    color: theme.text,
+    // 16px or larger, or iOS zooms the view when the field takes focus.
+    fontSize: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 9
+  },
+  section: {
+    color: theme.faint,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginTop: 4
+  },
+  snippet: { color: theme.muted, fontSize: 12.5, lineHeight: 17 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   title: { color: theme.text, fontSize: 15, fontWeight: '600', flex: 1 },

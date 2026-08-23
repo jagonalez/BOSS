@@ -276,7 +276,7 @@ export type BackendRequest =
   | { type: 'thread.compact'; threadId: string; model?: { providerID: string; modelID: string } }
   | { type: 'thread.models'; threadId?: string; backendId?: BackendId }
   | { type: 'supervision.snapshot' }
-  | { type: 'supervision.search'; query: string; limit?: number }
+  | { type: 'supervision.search'; query: string; limit?: number; threadId?: string }
   | { type: 'supervision.acknowledge'; threadId: string }
   /** Hide a thread from the default list, or bring it back. Recorded on the
    *  thread so every client agrees, rather than in one window's storage. */

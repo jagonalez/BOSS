@@ -108,6 +108,8 @@ function Thinking({ text }: { text: string }): React.JSX.Element {
 
 export function ThreadScreen({
   messages, busy, permission, sending, modes, mode, variants, variant,
+  models, modelId, onModel,
+  find, onFind, findHits, finding,
   onSend, onStop, onPermission, onMode, onVariant, onDelegate
 }: {
   messages: Message[]
@@ -120,6 +122,17 @@ export function ThreadScreen({
   /** Thinking levels the thread's model offers, when it offers any. */
   variants: string[]
   variant?: string
+  /** Models this thread's backend offers. Empty until they load, or when the
+   *  backend offers no choice. */
+  models: { id: string; name?: string }[]
+  modelId?: string
+  onModel(modelId: string): void
+  /** Find-in-thread. Text already on the phone filters locally; the desktop
+   *  searches the rest of the transcript, which the phone has not loaded. */
+  find: string
+  onFind(find: string): void
+  findHits: { messageId: string; snippet: string }[]
+  finding: boolean
   onSend(text: string): void
   onVariant(variant?: string): void
   onDelegate(): void
@@ -133,7 +146,9 @@ export function ThreadScreen({
    *  content scroll; otherwise reading history fights the stream. */
   const atTail = useRef(true)
   const [optionsOpen, setOptionsOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
   const modeLabel = modes.find((m) => m.id === mode)?.label
+  const modelLabel = models.find((m) => m.id === modelId)?.name ?? modelId
 
   const send = (): void => {
     const text = draft.trim()
@@ -142,16 +157,50 @@ export function ThreadScreen({
     onSend(text)
   }
 
-  const visible = messages.filter((m) => {
+  const rendered = messages.filter((m) => {
     const parts = m.parts ?? []
     return parts.some((p) => (p.type === 'text' && p.text?.trim()) || p.type === 'tool' || p.type === 'reasoning')
   })
+
+  // While finding, the transcript becomes the result list: the matches, in
+  // order, rather than a cursor stepping through a thread that keeps scrolling
+  // under it. A phone has no room for a match counter and jump arrows.
+  const needle = find.trim().toLowerCase()
+  const hitIds = new Set(findHits.map((h) => h.messageId))
+  const visible = needle
+    ? rendered.filter((m) => {
+        if (m.id && hitIds.has(m.id)) return true
+        return `${textOf(m)} ${reasoningOf(m) ?? ''}`.toLowerCase().includes(needle)
+      })
+    : rendered
 
   return (
     <KeyboardAvoidingView
       style={styles.fill}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      {findOpen ? (
+        <View style={styles.find}>
+          <TextInput
+            style={styles.findInput}
+            value={find}
+            onChangeText={onFind}
+            placeholder="Find in this thread"
+            placeholderTextColor={theme.faint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {needle ? (
+            <Text style={styles.findCount}>
+              {finding && !visible.length ? '…' : `${visible.length}`}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       <FlatList
         ref={list}
         data={visible}
@@ -169,8 +218,17 @@ export function ThreadScreen({
         }}
         scrollEventThrottle={100}
         onContentSizeChange={() => {
-          if (atTail.current) list.current?.scrollToEnd({ animated: false })
+          // Filtering to matches changes the content size, and following the
+          // tail then would jump you past the results you asked to see.
+          if (atTail.current && !needle) list.current?.scrollToEnd({ animated: false })
         }}
+        ListEmptyComponent={
+          needle ? (
+            <Text style={styles.findEmpty}>
+              {finding ? 'Searching…' : `Nothing in this thread matches “${find.trim()}”.`}
+            </Text>
+          ) : null
+        }
         renderItem={({ item }) => {
           const role = item.info?.role === 'user' ? 'user' : 'assistant'
           const text = textOf(item)
@@ -239,7 +297,7 @@ export function ThreadScreen({
           when asked. */}
       <Pressable style={styles.summary} onPress={() => setOptionsOpen((open) => !open)}>
         <Text style={styles.summaryText} numberOfLines={1}>
-          {[modeLabel, variant].filter(Boolean).join(' · ') || 'Options'}
+          {[modelLabel, modeLabel, variant].filter(Boolean).join(' · ') || 'Options'}
         </Text>
         <Text style={styles.chevron}>{optionsOpen ? '⌄' : '⌃'}</Text>
       </Pressable>
@@ -263,6 +321,41 @@ export function ThreadScreen({
             </View>
           ) : null}
 
+          {/* Like Thinking, the model rides on the next message rather than
+              being set on the thread. Switching keeps the history — every
+              backend resumes the session — but it does drop the prompt cache,
+              so the next turn can cost a little more. */}
+          {models.length ? (
+            <View style={styles.optionRow}>
+              <Text style={styles.optionLabel}>Model</Text>
+              {/* One scrolling line, not a wrapping grid like the rows above.
+                  Those have a handful of short options; a backend can list
+                  every model of every provider it knows, which wrapped would
+                  bury the composer under a wall of chips. */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.modelStrip}
+              >
+                {models.map((m) => (
+                  <Pressable
+                    key={m.id}
+                    onPress={() => onModel(m.id)}
+                    style={[styles.modeChip, m.id === modelId && styles.modeChipOn]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.modeText, m.id === modelId && styles.modeTextOn]}
+                    >
+                      {m.name ?? m.id}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
           {/* Thinking is not stored on the thread — it rides on each message —
               so this sets what the NEXT message asks for. */}
           {variants.length ? (
@@ -281,6 +374,13 @@ export function ThreadScreen({
               </View>
             </View>
           ) : null}
+
+          <Pressable
+            onPress={() => { setFindOpen((open) => !open); if (findOpen) onFind('') }}
+            style={styles.delegate}
+          >
+            <Text style={styles.delegateText}>{findOpen ? 'Close find' : 'Find in thread'}</Text>
+          </Pressable>
 
           <Pressable onPress={onDelegate} style={styles.delegate}>
             <Text style={styles.delegateText}>Delegate to a new thread</Text>
@@ -433,6 +533,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9
   },
+  modelStrip: { flexDirection: 'row', gap: 6, paddingRight: 12 },
+  find: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.line
+  },
+  findInput: {
+    flex: 1,
+    backgroundColor: theme.inset,
+    borderWidth: 1,
+    borderColor: theme.line,
+    borderRadius: 10,
+    color: theme.text,
+    // 16px or larger, or iOS zooms the view when the field takes focus.
+    fontSize: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  findCount: { color: theme.faint, fontSize: 13, fontWeight: '600', minWidth: 24, textAlign: 'right' },
+  findEmpty: { color: theme.faint, textAlign: 'center', paddingVertical: 40, paddingHorizontal: 24 },
   btnPrimary: { backgroundColor: theme.accent, borderColor: theme.accent },
   btnText: { color: theme.text, fontWeight: '600', fontSize: 13.5 },
   btnPrimaryText: { color: theme.bg, fontWeight: '700', fontSize: 13.5 },

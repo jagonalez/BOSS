@@ -514,7 +514,10 @@ export class TranscriptStore {
     }
   }
 
-  search(query: string, limit = 40): Array<Omit<TranscriptSearchResult, 'title' | 'projectPath'>> {
+  /** @param threadId Confine the search to one thread. Without it the LIMIT is
+   *  spent on whatever matched most recently anywhere, so a find-in-thread that
+   *  filtered afterwards would lose older matches to unrelated busy threads. */
+  search(query: string, limit = 40, threadId?: string): Array<Omit<TranscriptSearchResult, 'title' | 'projectPath'>> {
     this.flush()
     const clean = query.trim().toLowerCase()
     if (clean.length < 2) return []
@@ -527,8 +530,12 @@ export class TranscriptStore {
         ON m.thread_id = p.thread_id AND m.message_id = p.message_id
       JOIN transcript_threads t ON t.thread_id = p.thread_id
       WHERE lower(p.data_json) LIKE ? ESCAPE '\\'
+      ${threadId ? 'AND p.thread_id = ?' : ''}
       ORDER BY p.updated_at DESC LIMIT ?
-    `).all(pattern, Math.max(1, Math.min(limit, 100))) as unknown as SearchPartRow[]
+    `).all(...(threadId
+      ? [pattern, threadId, Math.max(1, Math.min(limit, 100))]
+      : [pattern, Math.max(1, Math.min(limit, 100))]
+    )) as unknown as SearchPartRow[]
     return rows.flatMap((row) => {
       const part = parseJson<Part>(row.data_json)
       const message = parseJson<MessageInfo>(row.message_json)

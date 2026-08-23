@@ -1,5 +1,15 @@
 import React, { useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from 'react-native'
 import { theme } from './theme'
 
 /** The slice of the desktop's BackendDescriptor this screen needs. */
@@ -58,6 +68,16 @@ export function NewThreadScreen({
   const model = models.find((m) => m.id === modelId)
   const canSend = Boolean(backendId) && prompt.trim().length > 0 && !sending
 
+  function create(): void {
+    if (!canSend) return
+    onCreate({
+      backendId,
+      prompt: prompt.trim(),
+      model: model ? { modelID: model.id, providerID: model.provider ?? '', variant } : undefined,
+      mode
+    })
+  }
+
   function pickBackend(id: string): void {
     setBackendId(id)
     // Models belong to a backend, so anything chosen for the previous one is
@@ -69,20 +89,16 @@ export function NewThreadScreen({
   }
 
   return (
-    <View style={styles.fill}>
+    // Without this the keyboard covers the composer on iOS, which is the very
+    // thing this screen exists to fill in.
+    <KeyboardAvoidingView
+      style={styles.fill}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <View style={styles.header}>
         <Pressable onPress={onCancel} hitSlop={8}><Text style={styles.cancel}>Cancel</Text></Pressable>
         <Text style={styles.title}>New thread</Text>
-        <Pressable
-          onPress={() => canSend && onCreate({
-            backendId,
-            prompt: prompt.trim(),
-            model: model ? { modelID: model.id, providerID: model.provider ?? '', variant } : undefined,
-            mode
-          })}
-          hitSlop={8}
-          disabled={!canSend}
-        >
+        <Pressable onPress={create} hitSlop={8} disabled={!canSend}>
           <Text style={[styles.start, !canSend && styles.disabled]}>{sending ? '…' : 'Start'}</Text>
         </Pressable>
       </View>
@@ -167,17 +183,32 @@ export function NewThreadScreen({
         ) : null}
 
         <Text style={styles.label}>First message</Text>
-        <TextInput
-          style={styles.input}
-          value={prompt}
-          onChangeText={setPrompt}
-          placeholder="What should it work on?"
-          placeholderTextColor={theme.faint}
-          multiline
-          autoFocus
-        />
+        {/* Send sits beside the field, not only in the header.
+            Every other composer in the app puts it here, so a header-only
+            Start made the one screen you meet first the one that broke the
+            rule — you had to go looking for the way to send. */}
+        <View style={styles.composer}>
+          <TextInput
+            style={styles.input}
+            value={prompt}
+            onChangeText={setPrompt}
+            placeholder="What should it work on?"
+            placeholderTextColor={theme.faint}
+            multiline
+            autoFocus
+          />
+          <Pressable
+            style={[styles.send, !canSend && styles.sendOff]}
+            onPress={create}
+            disabled={!canSend}
+          >
+            <Text style={[styles.sendText, !canSend && styles.sendTextOff]}>
+              {sending ? '…' : 'Start'}
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   )
 }
 
@@ -215,13 +246,27 @@ const styles = StyleSheet.create({
   chipTextOn: { color: theme.bg, fontWeight: '700' },
   hint: { color: theme.faint, fontSize: 13 },
   spinner: { alignSelf: 'flex-start' },
+  composer: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
   input: {
+    flex: 1,
     color: theme.text,
+    // 16px or larger, or iOS zooms the view when the field takes focus.
     fontSize: 16,
     backgroundColor: theme.inset,
     borderRadius: 12,
     padding: 12,
     minHeight: 120,
     textAlignVertical: 'top'
-  }
+  },
+  send: {
+    borderWidth: 1,
+    borderColor: theme.accent,
+    backgroundColor: theme.accent,
+    borderRadius: 9,
+    paddingHorizontal: 14,
+    paddingVertical: 9
+  },
+  sendOff: { backgroundColor: theme.inset, borderColor: theme.line },
+  sendText: { color: theme.bg, fontWeight: '700', fontSize: 13.5 },
+  sendTextOff: { color: theme.faint }
 })
