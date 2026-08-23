@@ -77,6 +77,8 @@ test('switching workspace layouts restores the views previously shown in each mo
 
   await chooseWorkspaceLayout(appPage, 'Multi-thread')
   await expect(projectViews.locator('.workspace-view-tab')).toHaveCount(1)
+})
+
 test('keeps a theme family while light, dark, and system appearance change', async ({ appPage }) => {
   await appPage.emulateMedia({ colorScheme: 'dark' })
   await openSettings(appPage)
