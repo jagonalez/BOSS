@@ -33,6 +33,14 @@
   --control-min: 26px;
   --control-h: 30px;
   --control-h-lg: 34px;
+  --control-pad-y: 7px;
+  --control-pad-y-lg: 9px;
+  --select-pad-y: 7px;
+  --settings-row-min: 64px;
+  --settings-row-pad-y: 14px;
+  --toolbar-pad-y: 10px;
+  --nav-row-pad-y: 10px;
+  --primary-nav-row-pad-y: 9px;
   --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --type-page-title: 24px;
@@ -64,6 +72,7 @@
   --line-strong: var(--border);
   --focus-ring: var(--accent);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --overlay-scrim: rgba(0, 0, 0, 0.6);
   /* macOS inset traffic lights. The OS draws them over the renderer at
      trafficLightPosition {x:16,y:16} (see src/main/index.ts), so layout must
      reserve room for them. The lights end at x=68: x:16 plus three 12px
@@ -142,8 +151,8 @@ textarea {
   cursor: pointer;
 }
 
-.ui-button-medium { min-height: var(--control-h-lg); padding: 9px 14px; font-size: var(--type-control); }
-.ui-button-small { min-height: var(--control-h); padding: 7px 12px; font-size: 12px; }
+.ui-button-medium { min-height: var(--control-h-lg); padding: var(--control-pad-y-lg) 14px; font-size: var(--type-control); }
+.ui-button-small { min-height: var(--control-h); padding: var(--control-pad-y) 12px; font-size: 12px; }
 .ui-button:hover:not(:disabled),
 .ui-icon-button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface-hover); }
 .ui-button:active:not(:disabled),
@@ -170,7 +179,7 @@ textarea {
 
 .ui-select {
   min-height: var(--control-h-lg);
-  padding: 7px 30px 7px 12px;
+  padding: var(--select-pad-y) 30px var(--select-pad-y) 12px;
   border-radius: 7px;
   font: inherit;
   font-size: var(--type-control);
@@ -202,8 +211,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 24px;
-  min-height: 64px;
-  padding: 14px 0;
+  min-height: var(--settings-row-min);
+  padding: var(--settings-row-pad-y) 0;
   border-bottom: 1px solid var(--line-subtle);
 }
 
@@ -627,7 +636,7 @@ textarea {
 
 .settings-sidebar button {
   width: 100%;
-  padding: 10px 12px;
+  padding: var(--nav-row-pad-y) 12px;
   border: 0;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -1626,7 +1635,7 @@ textarea {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 9px 11px;
+  padding: var(--primary-nav-row-pad-y) 11px;
   border: 0;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -4629,7 +4638,7 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 16px;
+  padding: var(--toolbar-pad-y) 16px;
   border-bottom: 1px solid var(--border-subtle);
   user-select: none;
   -webkit-app-region: drag;
@@ -9429,6 +9438,8 @@ select:hover {
 .file-preview .code-view-wrap {
   flex: 1;
   min-height: 0;
+}
+
 /* Annotations
    ---------------------------------------------------------------------------
    Highlighting a passage of an assistant reply raises a toolbar over the
@@ -9630,6 +9641,269 @@ select:hover {
 .annotation-note-remove:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* ── Base font size & density ────────────────────────────────────────────────
+   Chosen in Settings → Appearance and applied as data attributes on the root.
+   Themes own colour; these re-point the type scale and control-height tokens
+   the stylesheet already draws from, so no component knows they exist.
+   Terminals keep their own script-measured font, and diffs their own mono
+   size — neither moves with these. */
+[data-ui-font-size='small'] {
+  --type-page-title: 22px;
+  --type-section-title: 14px;
+  --type-body: 12.5px;
+  --type-control: 12px;
+  --type-thread: 12px;
+  --type-meta: 10.5px;
+  --type-label: 10px;
+}
+
+[data-ui-font-size='large'] {
+  --type-page-title: 26px;
+  --type-section-title: 16.5px;
+  --type-body: 15px;
+  --type-control: 14px;
+  --type-thread: 14.5px;
+  --type-meta: 12px;
+  --type-label: 11px;
+}
+
+[data-ui-density='compact'] {
+  --control-h-lg: 30px;
+  --control-h: 26px;
+  --control-pad-y: 3px;
+  --control-pad-y-lg: 5px;
+  --select-pad-y: 4px;
+  --settings-row-min: 52px;
+  --settings-row-pad-y: 8px;
+  --toolbar-pad-y: 6px;
+  --nav-row-pad-y: 7px;
+  --primary-nav-row-pad-y: 6px;
+  --leading-body: 1.4;
+}
+
+/* ── Activity inbox ────────────────────────────────────────────────────────── */
+.inbox-anchor {
+  -webkit-app-region: no-drag;
+  position: relative;
+  display: flex;
+}
+
+.inbox-bell {
+  -webkit-app-region: no-drag;
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.inbox-bell:hover,
+.inbox-bell.has-unread {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.inbox-badge {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--ink-on-accent);
+  pointer-events: none;
+}
+
+.inbox-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-menu);
+  z-index: 300;
+}
+
+.inbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 6px 14px;
+  position: sticky;
+  top: 0;
+  background: var(--surface-overlay);
+  font-size: var(--type-control);
+}
+
+.inbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px 6px;
+}
+
+.inbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 7px 8px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.inbox-row:hover {
+  background: var(--surface-hover);
+}
+
+.inbox-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--text-faint);
+}
+
+.inbox-dot.warning { background: var(--yellow); }
+.inbox-dot.accent { background: var(--accent); }
+.inbox-dot.danger { background: var(--red); }
+.inbox-dot.success { background: var(--green); }
+
+.inbox-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inbox-row-title {
+  font-size: var(--type-control);
+  font-weight: 550;
+  color: var(--text);
+}
+
+.inbox-row-detail {
+  font-size: var(--type-meta);
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-empty {
+  padding: 18px 10px 22px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+/* ── Command palette ───────────────────────────────────────────────────────── */
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  /* Dimming the app behind a modal, which is a scrim rather than a surface. */
+  background: var(--overlay-scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  /* Opens over anything, settings page included: it is how you reach settings. */
+  z-index: 1200;
+}
+
+.command-palette {
+  width: 520px;
+  max-width: calc(100vw - 48px);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.command-palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  outline: none;
+  border-bottom: 1px solid var(--line-subtle);
+  color: var(--text);
+  font-size: var(--type-section-title);
+  padding: 13px 16px;
+}
+
+.command-palette-input::placeholder {
+  color: var(--text-faint);
+}
+
+.command-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: var(--type-control);
+}
+
+.command-palette-item.active {
+  background: var(--surface-selected);
+}
+
+.command-palette-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-palette-hint {
+  flex: none;
+  font-size: var(--type-meta);
+  color: var(--text-faint);
+}
+
+.command-palette-empty {
+  padding: 18px 12px 22px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
 }
 
 /* Diff view modes and word-level marking */

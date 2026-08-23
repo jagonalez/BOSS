@@ -15,6 +15,7 @@ import { ConfirmModal } from './components/ConfirmModal'
 import { DelegateModal } from './components/DelegateModal'
 import { TaskPolicyModal } from './components/TaskPolicyModal'
 import { SettingsModal } from './components/SettingsModal'
+import { CommandPalette } from './components/CommandPalette'
 import { UpdateBanner } from './components/UpdateBanner'
 import {
   refreshAgents,
@@ -49,7 +50,10 @@ import {
   loadEngine,
   initializeWorkspaceState,
   loadProjectWorkspace,
-  setNativeViewsSuspended
+  setNativeViewsSuspended,
+  loadActivity,
+  loadAppearance,
+  recordActivity
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -72,7 +76,7 @@ export function App(): React.JSX.Element {
   const activePage = useStore(appStore, (s) => s.activePage)
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const sessions = useStore(appStore, (s) => s.sessions)
-  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget || s.policyTarget))
+  const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget || s.policyTarget || s.paletteOpen))
 
   useEffect(() => {
     loadArchived()
@@ -85,6 +89,8 @@ export function App(): React.JSX.Element {
     loadEngine()
     initializeWorkspaceState()
     applyTheme(loadTheme())
+    loadActivity()
+    loadAppearance()
     applyTypography(loadTypography())
     return watchSystemTheme()
   }, [])
@@ -154,7 +160,8 @@ export function App(): React.JSX.Element {
         appStore.setState({ serverHealthy: false })
         return
       }
-      const patch = applyEvent(appStore.getState(), ev)
+      const previousState = appStore.getState()
+      const patch = applyEvent(previousState, ev)
       if (Object.keys(patch).length > 0) appStore.setState(patch)
       switch (ev.type) {
         case 'session.updated':
@@ -189,6 +196,7 @@ export function App(): React.JSX.Element {
           refreshStreaming(sid)
           if (wasStreaming && !appStore.getState().streaming[sid] && !document.hasFocus()) {
             setAttention('done')
+            recordActivity('done', sid || undefined)
           }
           break
         }
@@ -206,18 +214,42 @@ export function App(): React.JSX.Element {
           // Main answers Auto and Plan requests against the thread's current
           // mode and never forwards them, so anything arriving here is a
           // request the user is meant to see.
-          const patch = applyEvent(appStore.getState(), ev)
-          if (Object.keys(patch).length > 0) appStore.setState(patch)
           setAttention('permission')
+          const askedProps = (ev.properties ?? {}) as { sessionID?: string }
+          recordActivity('permission', askedProps.sessionID)
+          break
+        }
+        case 'permission.replied': {
+          const repliedProps = (ev.properties ?? {}) as { sessionID?: string; permissionID?: string }
+          const pending = repliedProps.sessionID ? previousState.permissions[repliedProps.sessionID] : undefined
+          if (pending && (!repliedProps.permissionID || pending.id === repliedProps.permissionID)) {
+            recordActivity('permission.answered', repliedProps.sessionID)
+          }
           break
         }
         case 'question.asked': {
-          const patch = applyEvent(appStore.getState(), ev)
-          if (Object.keys(patch).length > 0) appStore.setState(patch)
           // A question wants an answer, not a yes/no on a tool call. Saying
           // "Permission needed" here sent people looking for an approval
           // prompt that was never coming.
           setAttention('question')
+          const questionProps = (ev.properties ?? {}) as { sessionID?: string }
+          recordActivity('question', questionProps.sessionID)
+          break
+        }
+        case 'question.replied': {
+          const answeredProps = (ev.properties ?? {}) as { sessionID?: string; requestID?: string }
+          const pending = answeredProps.sessionID ? previousState.questions[answeredProps.sessionID] : undefined
+          if (pending && (!answeredProps.requestID || pending.id === answeredProps.requestID)) {
+            recordActivity('question.answered', answeredProps.sessionID)
+          }
+          break
+        }
+        case 'question.rejected': {
+          const rejectedProps = (ev.properties ?? {}) as { sessionID?: string; requestID?: string }
+          const pending = rejectedProps.sessionID ? previousState.questions[rejectedProps.sessionID] : undefined
+          if (pending && (!rejectedProps.requestID || pending.id === rejectedProps.requestID)) {
+            recordActivity('question.rejected', rejectedProps.sessionID)
+          }
           break
         }
         case 'session.error': {
@@ -228,6 +260,7 @@ export function App(): React.JSX.Element {
             void loadMessages(props.sessionID)
           }
           setAttention('error')
+          recordActivity('error', props.sessionID)
           break
         }
         case 'message.updated':
@@ -391,6 +424,7 @@ export function App(): React.JSX.Element {
       <DelegateModal />
       <TaskPolicyModal />
       <SettingsModal />
+      <CommandPalette />
     </div>
   )
 }

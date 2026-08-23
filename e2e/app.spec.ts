@@ -756,6 +756,136 @@ test('a selection spanning two messages offers no annotation', async ({ appPage 
   await expect(appPage.locator('.annotation-popover')).toHaveCount(0)
 })
 
+test('the command palette opens from the keyboard and runs a command', async ({ appPage }) => {
+  await appPage.keyboard.press('Control+k')
+  const palette = appPage.getByRole('dialog', { name: 'Command palette' })
+  await expect(palette).toBeVisible()
+  const input = palette.getByRole('textbox', { name: 'Search commands' })
+  await expect(input).toBeFocused()
+
+  // The renderer shortcut and Electron menu accelerator both mean "open";
+  // receiving both must not toggle the palette closed again.
+  await appPage.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+  await appPage.keyboard.press('Escape')
+  await expect(palette).toHaveCount(0)
+  await appPage.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+
+  // Fuzzy, not substring: a dropped letter still finds the command.
+  await input.fill('sttngs')
+  await appPage.keyboard.press('Enter')
+
+  await expect(palette).toHaveCount(0)
+  await expect(appPage.locator('.settings-page')).toBeVisible()
+  await appPage.getByRole('button', { name: 'Done' }).click()
+  await expect(appPage.locator('.settings-page')).toHaveCount(0)
+
+  // Escape dismisses the palette itself; it must not reach the app-level
+  // handler that reads Escape as "abort the running thread".
+  await appPage.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+  await input.fill('nothing matches this query zzz')
+  await expect(palette.getByText('No matches.')).toBeVisible()
+  await appPage.keyboard.press('Escape')
+  await expect(appPage.locator('.command-palette')).toHaveCount(0)
+})
+
+test('an attention event raises an unread badge that mark-all-read clears', async ({ appPage }) => {
+  const bell = appPage.getByRole('button', { name: 'Activity' })
+  await expect(bell.locator('.inbox-badge')).toHaveCount(0)
+
+  await control(appPage).then((item) => item.emit({
+    type: 'permission.asked',
+    properties: {
+      id: 'permission-inbox',
+      sessionID: 'thread-source',
+      permission: 'shell',
+      patterns: ['npm test'],
+      metadata: { command: 'npm test' }
+    }
+  }))
+
+  await expect(bell.locator('.inbox-badge')).toHaveText('1')
+  await bell.click()
+  const panel = appPage.getByRole('dialog', { name: 'Activity' })
+  await expect(panel).toBeVisible()
+  const row = panel.locator('.inbox-row').filter({ hasText: 'Permission asked' })
+  await expect(row).toContainText('Source thread')
+  await expect(row).toContainText(/ago|just now/)
+
+  // Click-through opens the thread the event came from.
+  await row.click()
+  await expect(panel).toHaveCount(0)
+  await expect(appPage.locator('.workspace-tab.active').filter({ hasText: 'Source thread' })).toBeVisible()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'permission.replied',
+    properties: {
+      sessionID: 'thread-source',
+      permissionID: 'permission-inbox',
+      response: 'once'
+    }
+  }))
+  await expect(bell.locator('.inbox-badge')).toHaveText('2')
+
+  // Visiting leaves both events unread, so the badge stands until read.
+  await bell.click()
+  await expect(panel.locator('.inbox-row').filter({ hasText: 'Permission answered' })).toBeVisible()
+  await panel.getByRole('button', { name: 'Mark all read' }).click()
+  await expect(bell.locator('.inbox-badge')).toHaveCount(0)
+
+  // Main can forward the reply from an Auto/Plan permission whose request it
+  // intentionally swallowed. With no matching prompt in renderer state, that
+  // reply is not user activity and must not resurrect the badge.
+  await control(appPage).then((item) => item.emit({
+    type: 'permission.replied',
+    properties: {
+      sessionID: 'thread-source',
+      permissionID: 'permission-auto',
+      response: 'once'
+    }
+  }))
+  await expect(bell.locator('.inbox-badge')).toHaveCount(0)
+})
+
+test('a base font size choice survives a reload and can be undone', async ({ appPage }) => {
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await appPage.getByLabel('Base font size').selectOption('large')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-font-size', 'large')
+
+  await appPage.reload()
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await expect(appPage.getByLabel('Base font size')).toHaveValue('large')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-font-size', 'large')
+
+  await appPage.getByLabel('Base font size').selectOption('default')
+  await expect(appPage.locator('html')).not.toHaveAttribute('data-ui-font-size')
+})
+
+test('compact density reduces common chrome and survives a reload', async ({ appPage }) => {
+  const toolbar = appPage.locator('.toolbar')
+  const comfortableHeight = await toolbar.evaluate((element) => element.getBoundingClientRect().height)
+
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await appPage.getByLabel('UI density').selectOption('compact')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+  const compactHeight = await toolbar.evaluate((element) => element.getBoundingClientRect().height)
+  expect(compactHeight).toBeLessThan(comfortableHeight)
+
+  await appPage.reload()
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await expect(appPage.getByLabel('UI density')).toHaveValue('compact')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+
+  await appPage.getByLabel('UI density').selectOption('comfortable')
+  await expect(appPage.locator('html')).not.toHaveAttribute('data-ui-density')
+})
+
 async function exportCalls(appPage: Parameters<typeof control>[0]): Promise<Array<Record<string, unknown>>> {
   const calls = await (await control(appPage)).calls()
   return calls

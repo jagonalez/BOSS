@@ -2,6 +2,8 @@ import { appStore, type Attachment, type FailedSend } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
 import type { MenuCommand, ProjectInfo, ProjectOpenedEvent } from '@shared/ipc'
+import { activityReducer, loadActivityFeed, saveActivityFeed, type ActivityKind } from './activity-feed'
+import { applyUiDensity, applyUiFontSize, loadUiDensityPreference, loadUiFontSizePreference, type UiDensity, type UiFontSize } from './themes'
 import { disposeTerminalSession } from './terminal-sessions'
 import { disposeTabContentNode } from './tab-content-nodes'
 import { disposeBrowseGuest } from './browse-guests'
@@ -231,6 +233,9 @@ export function runMenuCommand(command: MenuCommand): void {
       if (pane && tabId) closeWorkspaceTab(pane.id, tabId)
       return
     }
+    case 'palette.open':
+      appStore.setState({ paletteOpen: true })
+      return
   }
 }
 
@@ -3049,4 +3054,63 @@ export async function openSiteInBrowser(url: string): Promise<void> {
   setTimeout(() => {
     void window.boss.browseNavigate(browseId, url)
   }, 120)
+}
+
+/** Record an attention-worthy moment in the inbox.
+ *
+ *  The pill is the nudge of the second; this is the record you come back to.
+ *  The thread's title is snapshotted so a row stays readable even after the
+ *  thread itself is gone. */
+export function recordActivity(kind: ActivityKind, sessionId?: string, detail?: string): void {
+  const state = appStore.getState()
+  const threadTitle = sessionId
+    ? state.sessions.find((session) => session.id === sessionId)?.title || undefined
+    : undefined
+  const latestTs = state.activity.events.reduce((latest, event) => Math.max(latest, event.ts), 0)
+  const next = activityReducer(state.activity, {
+    type: 'record',
+    event: {
+      id: crypto.randomUUID(),
+      kind,
+      ts: Math.max(Date.now(), state.activity.lastReadTs + 1, latestTs + 1),
+      sessionId,
+      threadTitle,
+      detail
+    }
+  })
+  if (next === state.activity) return
+  saveActivityFeed(next)
+  appStore.setState({ activity: next })
+}
+
+export function markAllActivityRead(): void {
+  const state = appStore.getState()
+  const next = activityReducer(state.activity, { type: 'markAllRead', ts: Date.now() })
+  if (next.lastReadTs === state.activity.lastReadTs) return
+  saveActivityFeed(next)
+  appStore.setState({ activity: next })
+}
+
+export function loadActivity(): void {
+  appStore.setState({ activity: loadActivityFeed() })
+}
+
+/** Load and apply the saved base font size and density. Call once at startup,
+ *  beside the theme. */
+export function loadAppearance(): void {
+  const uiFontSize = loadUiFontSizePreference()
+  const uiDensity = loadUiDensityPreference()
+  applyUiFontSize(uiFontSize)
+  applyUiDensity(uiDensity)
+  appStore.setState({ uiFontSize, uiDensity })
+}
+
+export function setUiFontSize(value: UiFontSize): void {
+  applyUiFontSize(value)
+  appStore.setState({ uiFontSize: value })
+}
+
+export function setUiDensity(value: UiDensity): void {
+  applyUiDensity(value)
+  appStore.setState({ uiDensity: value })
 }

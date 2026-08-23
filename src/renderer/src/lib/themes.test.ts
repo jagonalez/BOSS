@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { THEMES, THEME_FAMILIES, themeForPreference } from './themes.ts'
+import { THEMES, THEME_FAMILIES, normalizeUiDensity, normalizeUiFontSize, themeForPreference } from './themes.ts'
 
 function rgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '')
@@ -86,4 +86,13 @@ test('every theme names a backend hue', () => {
       assert.match(hue, /^#[0-9a-f]{6}$/i, `${theme.id} should name an opaque backend hue`)
     }
   }
+})
+
+test('appearance preferences fall back to their defaults on junk', () => {
+  assert.equal(normalizeUiFontSize('large'), 'large')
+  assert.equal(normalizeUiFontSize('enormous'), 'default')
+  assert.equal(normalizeUiFontSize(null), 'default')
+  assert.equal(normalizeUiDensity('compact'), 'compact')
+  assert.equal(normalizeUiDensity('cramped'), 'comfortable')
+  assert.equal(normalizeUiDensity(undefined), 'comfortable')
 })

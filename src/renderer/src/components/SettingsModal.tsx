@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import { THEME_FAMILIES, applyTheme, loadTheme, themeForPreference, themeForFamily, type ThemeAppearance, type ThemeChangedDetail } from '../lib/themes'
+import { THEME_FAMILIES, applyTheme, loadTheme, themeForPreference, themeForFamily, type ThemeAppearance, type ThemeChangedDetail, type UiDensity, type UiFontSize } from '../lib/themes'
 import { loadTypography, saveTypography, stepReadingSize, stepTerminalSize } from '../lib/typography'
 import { searchSettings, type SettingsMatch } from '../lib/settings-index'
 import { SearchIcon } from './icons'
 import { MONO_FONTS, READING_SIZE, TERMINAL_SIZE, UI_FONTS } from '@shared/typography'
 import { KOKORO_VOICES } from '@shared/speech'
 import type { ViewMode } from '@shared/workspace'
-import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setUiDensity, setUiFontSize, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { projectName } from './CommandCenter'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
@@ -675,6 +675,8 @@ export function SettingsModal(): React.JSX.Element | null {
   const computerUsePerms = useStore(appStore, (s) => s.computerUsePerms)
   const terminalStartLocation = useStore(appStore, (s) => s.terminalStartLocation)
   const viewMode = useStore(appStore, (s) => s.viewMode)
+  const uiFontSize = useStore(appStore, (s) => s.uiFontSize)
+  const uiDensity = useStore(appStore, (s) => s.uiDensity)
   const [section, setSection] = useState<SettingsSection>('connections')
   const [themePreference, setThemePreference] = useState(loadTheme)
   const [currentTheme, setCurrentTheme] = useState(() => themeForPreference(loadTheme()))
@@ -1287,8 +1289,8 @@ export function SettingsModal(): React.JSX.Element | null {
               <section className="settings-card settings-group-stack">
                 <div className="settings-card-heading">
                   <div>
-                    <h2>Type</h2>
-                    <p>Only the conversation and the terminal follow these. The rest of the window keeps the sizes it was designed at, so a larger reading size never moves a row.</p>
+                    <h2>Type &amp; density</h2>
+                    <p>Choose the app’s typefaces and scale, then tune reading, terminal and interface spacing independently.</p>
                   </div>
                 </div>
                 <SettingsRow title="Interface font" description="Used for everything except code, diffs and the terminal.">
@@ -1299,6 +1301,17 @@ export function SettingsModal(): React.JSX.Element | null {
                 <SettingsRow title="Monospace font" description="Code, diffs and the terminal. A face the machine does not have falls back to the system's own.">
                   <Select value={typography.monoFont} onChange={(event) => setTypography(saveTypography({ ...typography, monoFont: event.target.value }))}>
                     {MONO_FONTS.map((font) => <option key={font.id} value={font.id}>{font.label}</option>)}
+                  </Select>
+                </SettingsRow>
+                <SettingsRow title="Base font size" description="Sizes the app chrome. Conversation and terminal text keep their individual sizes.">
+                  <Select
+                    aria-label="Base font size"
+                    value={uiFontSize}
+                    onChange={(event) => setUiFontSize(event.target.value as UiFontSize)}
+                  >
+                    <option value="small">Small</option>
+                    <option value="default">Default</option>
+                    <option value="large">Large</option>
                   </Select>
                 </SettingsRow>
                 <SettingsRow title="Reading size" description={`How large a reply is drawn. ${typography.readingSize}px.`}>
@@ -1314,6 +1327,16 @@ export function SettingsModal(): React.JSX.Element | null {
                     <span>{typography.terminalSize}px</span>
                     <Button size="small" variant="ghost" disabled={typography.terminalSize >= TERMINAL_SIZE.max} onClick={() => setTypography(stepTerminalSize(1))}>+</Button>
                   </div>
+                </SettingsRow>
+                <SettingsRow title="UI density" description="Compact tightens controls and common navigation rows to fit more on screen.">
+                  <Select
+                    aria-label="UI density"
+                    value={uiDensity}
+                    onChange={(event) => setUiDensity(event.target.value as UiDensity)}
+                  >
+                    <option value="comfortable">Comfortable</option>
+                    <option value="compact">Compact</option>
+                  </Select>
                 </SettingsRow>
               </section>
               </>
