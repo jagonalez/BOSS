@@ -10,6 +10,7 @@ import { ProjectsScreen } from './src/ProjectsScreen'
 import { NewThreadScreen, type BackendOption, type ModelOption } from './src/NewThreadScreen'
 import { groupByProject, visibleThreads } from './src/parts'
 import { AutomationsScreen, type AutomationRow, type AutomationRunRow } from './src/AutomationsScreen'
+import { WorkScreen, type DiffFile, type Todo } from './src/WorkScreen'
 import { ThreadScreen, type PendingPermission, type ThreadMessage } from './src/ThreadScreen'
 import { RelayConnection, clearCredentials, loadCredentials, type RelayCredentials } from './src/relay'
 import { theme } from './src/theme'
@@ -50,11 +51,22 @@ export default function App(): React.JSX.Element {
   const [automations, setAutomations] = useState<AutomationRow[]>([])
   const [runs, setRuns] = useState<AutomationRunRow[]>([])
   const [automationBusy, setAutomationBusy] = useState<Record<string, boolean>>({})
+  // The plan-and-changes panel for the open thread.
+  const [showWork, setShowWork] = useState(false)
+  const [todos, setTodos] = useState<Todo[]>([])
+  const [diffFiles, setDiffFiles] = useState<DiffFile[]>([])
+  const [openFile, setOpenFile] = useState<string | undefined>()
+  const [fileBody, setFileBody] = useState<DiffFile | undefined>()
+  const [loadingWork, setLoadingWork] = useState(false)
+  const [loadingFile, setLoadingFile] = useState(false)
 
   const relay = useRef<RelayConnection | null>(null)
   // Read inside callbacks that outlive a render, so they never see a stale id.
   const openRef = useRef<string | null>(null)
   openRef.current = openThread
+  // Read inside the event handler, which outlives the render that set it.
+  const workRef = useRef(false)
+  workRef.current = showWork
 
   const refreshThreads = useCallback(async () => {
     const connection = relay.current
@@ -164,6 +176,44 @@ export default function App(): React.JSX.Element {
     }
   }, [refreshAutomations])
 
+  /** The agent's plan, and which files it has changed so far. */
+  const loadWork = useCallback(async (threadId: string) => {
+    const connection = relay.current
+    if (!connection) return
+    setLoadingWork(true)
+    try {
+      const [plan, changes] = await Promise.all([
+        connection.request<Todo[]>({ type: 'thread.todos', threadId }),
+        // summary: paths and counts only. The full reply carries every changed
+        // file's contents and does not fit in one relay frame.
+        connection.request<DiffFile[]>({ type: 'thread.diff', threadId, summary: true })
+      ])
+      setTodos(plan ?? [])
+      setDiffFiles(changes ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingWork(false)
+    }
+  }, [])
+
+  /** One file's contents, fetched only when it is opened. */
+  const loadFile = useCallback(async (threadId: string, path: string) => {
+    const connection = relay.current
+    if (!connection) return
+    setOpenFile(path)
+    setFileBody(undefined)
+    setLoadingFile(true)
+    try {
+      const found = await connection.request<DiffFile[]>({ type: 'thread.diff', threadId, path })
+      setFileBody(found?.[0])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingFile(false)
+    }
+  }, [])
+
   /** One event handler for both the live stream and a resume replay. */
   const applyEvent = useCallback((event: Record<string, unknown>) => {
     const props = (event.properties ?? {}) as Record<string, never>
@@ -196,7 +246,10 @@ export default function App(): React.JSX.Element {
     // re-rendering many times a second, which is what made the text jitter.
     // One refetch per burst shows the same result at a fraction of the work.
     if (type.startsWith('message.') && sid && sid === openRef.current) queueMessages(sid)
-  }, [queueMessages, refreshAutomations, refreshThreads])
+    // The plan changes as the agent works, so a panel left open should follow
+    // it. Guarded on the panel being open: nobody is watching otherwise.
+    if (type === 'session.idle' && sid && sid === openRef.current && workRef.current) void loadWork(sid)
+  }, [loadWork, queueMessages, refreshAutomations, refreshThreads])
 
   // Start the connection once, from whatever is in the Keychain.
   useEffect(() => {
@@ -323,11 +376,36 @@ export default function App(): React.JSX.Element {
       <SafeAreaView style={styles.fill}>
         <StatusBar barStyle="light-content" />
         <View style={styles.header}>
-          <Pressable onPress={() => setOpenThread(null)}>
-            <Text style={styles.back}>‹ Threads</Text>
+          <Pressable onPress={() => (showWork ? setShowWork(false) : setOpenThread(null))}>
+            <Text style={styles.back}>{showWork ? '‹ Chat' : '‹ Threads'}</Text>
           </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+          <Pressable
+            onPress={() => {
+              const next = !showWork
+              setShowWork(next)
+              setOpenFile(undefined)
+              if (next) void loadWork(threadId)
+            }}
+            hitSlop={8}
+          >
+            <Text style={[styles.back, showWork && styles.backOn]}>
+              {diffFiles.length ? `Work · ${diffFiles.length}` : 'Work'}
+            </Text>
+          </Pressable>
         </View>
+        {showWork ? (
+          <WorkScreen
+            todos={todos}
+            files={diffFiles}
+            openFile={openFile}
+            fileBody={fileBody}
+            loading={loadingWork}
+            loadingFile={loadingFile}
+            onOpenFile={(path) => void loadFile(threadId, path)}
+            onCloseFile={() => { setOpenFile(undefined); setFileBody(undefined) }}
+          />
+        ) : (
         <ThreadScreen
           messages={messages[threadId] ?? []}
           busy={Boolean(busy[threadId])}
@@ -393,6 +471,7 @@ export default function App(): React.JSX.Element {
             }).catch((e) => setError(e instanceof Error ? e.message : String(e)))
           }}
         />
+        )}
       </SafeAreaView>
     )
   }
@@ -560,6 +639,7 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.line
   },
   headerTitle: { color: theme.text, fontSize: 15, fontWeight: '600', flex: 1 },
+  backOn: { color: theme.accent, fontWeight: '700' },
   back: { color: theme.accent, fontSize: 15 },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.faint },
   statusOk: { backgroundColor: theme.green },
