@@ -1846,26 +1846,28 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
               Restore undone messages
             </button>
           ) : null}
-          <button
-            className="ctx-item"
-            onClick={() => {
-              const target = effectiveId
-              appStore.setState({
-                confirm: {
-                  title: 'Compact this thread?',
-                  message:
-                    'Earlier messages will be summarized and their full text will no longer be shown in the transcript. The agent continues from the summary.',
-                  confirmLabel: 'Compact',
-                  action: () => {
-                    if (target) void compactSession(target)
+          {historyCapabilities?.compact ? (
+            <button
+              className="ctx-item"
+              onClick={() => {
+                const target = effectiveId
+                appStore.setState({
+                  confirm: {
+                    title: 'Compact this thread?',
+                    message:
+                      'Earlier messages will be summarized and their full text will no longer be shown in the transcript. The agent continues from the summary.',
+                    confirmLabel: 'Compact',
+                    action: () => {
+                      if (target) void compactSession(target)
+                    }
                   }
-                }
-              })
-              setMsgCtx(null)
-            }}
-          >
-            Compact context…
-          </button>
+                })
+                setMsgCtx(null)
+              }}
+            >
+              Compact context…
+            </button>
+          ) : null}
         </div>
       )}
       {effectiveId ? <TodoList sessionId={effectiveId} /> : null}

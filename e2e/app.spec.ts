@@ -625,7 +625,8 @@ test('a fenced code block in chat highlights and copies raw code', async ({ appP
   await expect(block.locator('span.hljs-keyword')).toHaveText('const')
 
   // The label is the button text, which reads Copy before it flips to Copied.
-  const copy = block.getByRole('button', { name: 'Copy', exact: true })
+  const copy = block.locator('.code-copy')
+  await expect(copy).toHaveAccessibleName('Copy')
   await copy.click()
   await expect(copy).toHaveText(/Copied/)
 
@@ -657,6 +658,8 @@ test('compact asks before summarizing and then compacts the thread', async ({ ap
     type: 'thread.compact',
     threadId: 'thread-source'
   })
+  await expect(appPage.locator('.msg.assistant')).toHaveText('Compacted context summary.')
+  await expect(appPage.locator('.messages')).not.toContainText('second result')
 })
 
 test('undo to here reverts on an opencode thread and restores again', async ({ appPage }) => {
@@ -674,13 +677,58 @@ test('undo to here reverts on an opencode thread and restores again', async ({ a
     threadId: 'thread-source',
     messageId: 'source-search-agent'
   })
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
 
-  await more.click()
+  await appPage.locator('.msg.user .msg-more').click()
   await menu.getByRole('button', { name: 'Restore undone messages' }).click()
   expect((await lastBackendCall(appPage, 'thread.unrevert')).request).toMatchObject({
     type: 'thread.unrevert',
     threadId: 'thread-source'
   })
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+})
+
+test('history controls stay hidden when the backend cannot perform them', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Claude stop thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('Claude history controls are unavailable.')
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  const menu = appPage.locator('.ctx-menu')
+  await expect(menu.getByRole('button', { name: 'Undo to here' })).toHaveCount(0)
+  await expect(menu.getByRole('button', { name: 'Restore undone messages' })).toHaveCount(0)
+  await expect(menu.getByRole('button', { name: 'Compact context…' })).toHaveCount(0)
+})
+
+test('a failed undo leaves the transcript and restore state unchanged', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.failNextBackendRequest('thread.revert', 'Fixture revert failed.'))
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Undo to here' }).click()
+
+  await expect(appPage.locator('.chat-error')).toContainText('Fixture revert failed.')
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await expect(appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' })).toHaveCount(0)
+})
+
+test('a failed restore keeps the undone transcript restorable', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Undo to here' }).click()
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+  await control(appPage).then((item) => item.failNextBackendRequest('thread.unrevert', 'Fixture restore failed.'))
+
+  await appPage.locator('.msg.user .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' }).click()
+
+  await expect(appPage.locator('.chat-error')).toContainText('Fixture restore failed.')
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+  await appPage.locator('.msg.user .msg-more').click()
+  await expect(appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' })).toBeVisible()
 })
 
 test('reading a reply aloud swaps its speaker button for a stop control', async ({ appPage }) => {
@@ -709,4 +757,12 @@ test('retry resends the prompt that produced a finished reply', async ({ appPage
   const text = (call.request as { parts: { type: string; text?: string }[] }).parts
     .find((part) => part.type === 'text')?.text ?? ''
   expect(text).toBe('Search marker: first result.')
+  const file = (call.request as { parts: { type: string; mime?: string; filename?: string; url?: string }[] }).parts
+    .find((part) => part.type === 'file')
+  expect(file).toMatchObject({
+    type: 'file',
+    mime: 'image/png',
+    filename: 'source.png',
+    url: 'data:image/png;base64,AAAA'
+  })
 })

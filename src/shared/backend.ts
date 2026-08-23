@@ -30,6 +30,8 @@ export interface BackendCapabilities {
    *  Without it the transcript offers no undo, because pretending would drop
    *  nothing but report it dropped. */
   revert: boolean
+  /** The backend can replace earlier context with a summary. */
+  compact: boolean
 }
 
 export interface QueuedFollowUpAttachment {

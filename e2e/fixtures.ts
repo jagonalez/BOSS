@@ -15,6 +15,7 @@ interface E2EControl {
   defaults(): Promise<Record<string, Record<string, unknown>>>
   clipboardWrites(): Promise<string[]>
   resetCalls(): Promise<void>
+  failNextBackendRequest(type: string, message: string): Promise<void>
   emit(event: Record<string, unknown>): Promise<void>
   spawnThread(backendId: string, title: string): Promise<Record<string, unknown>>
 }
@@ -27,6 +28,10 @@ export async function control(page: Page): Promise<E2EControl> {
     defaults: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.defaults()),
     clipboardWrites: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.clipboardWrites()),
     resetCalls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.resetCalls()),
+    failNextBackendRequest: (type, message) => page.evaluate(
+      (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.failNextBackendRequest(value.type, value.message),
+      { type, message }
+    ),
     emit: (event) => page.evaluate((value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.emit(value), event),
     spawnThread: (backendId, title) => page.evaluate(
       (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.spawnThread(value.backendId, value.title),

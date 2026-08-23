@@ -2100,8 +2100,9 @@ export async function removeSessionWorktree(id: string): Promise<void> {
 export async function revertMessage(sessionID: string, messageID: string): Promise<void> {
   try {
     await OpenCode.revertMessage(sessionID, messageID)
-  } catch {
-    /* ignore */
+  } catch (error) {
+    setSessionError(sessionID, errorSummary(error))
+    return
   }
   const state = appStore.getState()
   const msgs = state.messages[sessionID] ?? []
@@ -2122,8 +2123,9 @@ export async function revertMessage(sessionID: string, messageID: string): Promi
 export async function unrevertSession(sessionID: string): Promise<void> {
   try {
     await OpenCode.unrevert(sessionID)
-  } catch {
-    /* ignore */
+  } catch (error) {
+    setSessionError(sessionID, errorSummary(error))
+    return
   }
   appStore.setState((s) => {
     const reverted = { ...s.reverted }

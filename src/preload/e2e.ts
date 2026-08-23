@@ -57,7 +57,8 @@ const capabilities = {
   interactiveQuestions: true,
   nativeAutoMode: true,
   // Only opencode implements revert in main; the others are no-ops there.
-  revert: false
+  revert: false,
+  compact: true
 }
 
 const backends: BackendDescriptor[] = [
@@ -108,7 +109,7 @@ const backends: BackendDescriptor[] = [
     available: true,
     healthy: true,
     version: 'e2e',
-    capabilities: { ...capabilities, nativeFork: false, steering: 'stop-and-redirect' },
+    capabilities: { ...capabilities, nativeFork: false, steering: 'stop-and-redirect', compact: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
       { id: 'accept-edits', label: 'Accept edits', description: 'Accept file edits.' },
@@ -201,7 +202,16 @@ function sourceMessages(): MessageWithParts[] {
   return [
     {
       info: { id: 'source-search-user', sessionID, role: 'user', time: { created: Date.now() - 50_000 } },
-      parts: [{ id: 'source-search-user-text', type: 'text', sessionID, messageID: 'source-search-user', text: 'Search marker: first result.' }]
+      parts: [
+        {
+          id: 'source-search-user-image',
+          type: 'file',
+          sessionID,
+          messageID: 'source-search-user',
+          state: { status: 'completed', name: 'source.png', mime: 'image/png', url: 'data:image/png;base64,AAAA' }
+        },
+        { id: 'source-search-user-text', type: 'text', sessionID, messageID: 'source-search-user', text: 'Search marker: first result.' }
+      ]
     },
     {
       info: { id: 'source-search-agent', sessionID, role: 'assistant', time: { created: Date.now() - 49_000, completed: Date.now() - 48_000 } },
@@ -215,12 +225,30 @@ function sourceMessages(): MessageWithParts[] {
   ]
 }
 
+function claudeMessages(): MessageWithParts[] {
+  const sessionID = 'thread-claude'
+  return [
+    {
+      info: { id: 'claude-user', sessionID, role: 'user', time: { created: Date.now() - 20_000 } },
+      parts: [{ id: 'claude-user-text', type: 'text', sessionID, messageID: 'claude-user', text: 'Can this thread compact or revert?' }]
+    },
+    {
+      info: { id: 'claude-agent', sessionID, role: 'assistant', time: { created: Date.now() - 19_000, completed: Date.now() - 18_000 } },
+      parts: [{ id: 'claude-agent-text', type: 'text', sessionID, messageID: 'claude-agent', text: 'Claude history controls are unavailable.' }]
+    }
+  ]
+}
+
 /** Replace external I/O while preserving the real Electron window, preload
  * boundary, React tree, localStorage, and user interactions. This module is
  * reachable only when the main process explicitly starts with BOSS_E2E=1. */
 export function installE2EApi(boss: BossApi): void {
   let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
-  const messages: Record<string, MessageWithParts[]> = { 'thread-source': sourceMessages() }
+  const messages: Record<string, MessageWithParts[]> = {
+    'thread-source': sourceMessages(),
+    'thread-claude': claudeMessages()
+  }
+  const revertedMessages: Record<string, MessageWithParts[]> = {}
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
   let labConnections: LabConnectionsSettings = {
     connections: [{
@@ -263,6 +291,7 @@ export function installE2EApi(boss: BossApi): void {
   const eventListeners = new Set<(data: string) => void>()
   const intentionallyStopped = new Set<string>()
   const busyThreads = new Set<string>()
+  let nextBackendFailure: { type: BackendRequest['type']; message: string } | null = null
 
   const recordBackend = (request: BackendRequest): void => {
     calls.push({ channel: 'backend', request: structuredClone(request) })
@@ -317,6 +346,11 @@ export function installE2EApi(boss: BossApi): void {
 
   const backendRequest = async (request: BackendRequest): Promise<unknown> => {
     recordBackend(request)
+    if (nextBackendFailure?.type === request.type) {
+      const failure = nextBackendFailure
+      nextBackendFailure = null
+      throw new Error(failure.message)
+    }
     // Kept structurally typed so this fixture still builds on branches from
     // before thread.mode.set was added to BackendRequest. On current main the
     // renderer sends this immediately when a running thread changes mode.
@@ -419,6 +453,35 @@ export function installE2EApi(boss: BossApi): void {
         return changed
       }
       case 'thread.messages': return messages[request.threadId] ?? []
+      case 'thread.revert': {
+        const current = messages[request.threadId] ?? []
+        const index = current.findIndex((message) => message.info.id === request.messageId)
+        if (index >= 0) {
+          revertedMessages[request.threadId] = current.slice(index)
+          messages[request.threadId] = current.slice(0, index)
+        }
+        return undefined
+      }
+      case 'thread.unrevert': {
+        const reverted = revertedMessages[request.threadId] ?? []
+        messages[request.threadId] = [...(messages[request.threadId] ?? []), ...reverted]
+        delete revertedMessages[request.threadId]
+        return undefined
+      }
+      case 'thread.compact': {
+        const sessionID = request.threadId
+        messages[sessionID] = [{
+          info: { id: `${sessionID}-compact-summary`, sessionID, role: 'assistant', time: { created: Date.now(), completed: Date.now() } },
+          parts: [{
+            id: `${sessionID}-compact-summary-text`,
+            type: 'text',
+            sessionID,
+            messageID: `${sessionID}-compact-summary`,
+            text: 'Compacted context summary.'
+          }]
+        }]
+        return undefined
+      }
       // Main allows one run per thread and refuses the rest, because only it
       // knows without a race. The renderer is expected to queue what it refuses
       // rather than drop it.
@@ -586,6 +649,9 @@ export function installE2EApi(boss: BossApi): void {
     defaults: () => structuredClone(defaults),
     clipboardWrites: () => structuredClone(clipboardWrites),
     resetCalls: () => { calls = [] },
+    failNextBackendRequest: (type: BackendRequest['type'], message: string) => {
+      nextBackendFailure = { type, message }
+    },
     /** Add a thread the way an agent's spawn does: created in main, carrying
      *  the model main resolved, and never passing through renderer state.
      *  Announced with the same event main sends, which is what makes the
