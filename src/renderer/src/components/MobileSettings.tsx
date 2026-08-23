@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import type { MobileAccessStatus } from '@shared/mobile'
 import type { RemoteAccessStatus } from '@shared/relay'
+import { appStore } from '../state/AppState'
 import { OpenCode } from '../lib/opencode'
 import { pairingQrDataUrl } from '../lib/qr'
 import { Button, SettingsRow, StatusBadge } from './ui'
@@ -141,7 +142,20 @@ function RemoteAccessSection(): React.JSX.Element {
             description={status.devices.length ? '' : 'No phones are paired yet.'}
           >
             {status.devices.length ? (
-              <Button size="small" variant="ghost" disabled={busy} onClick={() => void run(() => OpenCode.remoteSet({ revokeAll: true }))}>
+              <Button
+                size="small"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => appStore.setState({
+                  confirm: {
+                    title: status.devices.length === 1 ? 'Revoke the paired device?' : `Revoke all ${status.devices.length} paired devices?`,
+                    message: 'Each phone has to be paired again with a new code before it can reach BOSS.',
+                    confirmLabel: status.devices.length === 1 ? 'Revoke device' : 'Revoke all devices',
+                    destructive: true,
+                    action: () => void run(() => OpenCode.remoteSet({ revokeAll: true }))
+                  }
+                })}
+              >
                 Revoke all
               </Button>
             ) : null}
@@ -156,7 +170,20 @@ function RemoteAccessSection(): React.JSX.Element {
                 `key ${shortKey(device.id)}`
               ].filter(Boolean).join(' · ')}
             >
-              <Button size="small" variant="ghost" disabled={busy} onClick={() => void run(() => OpenCode.remoteSet({ forgetDeviceId: device.id }))}>
+              <Button
+                size="small"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => appStore.setState({
+                  confirm: {
+                    title: `Revoke ${device.label}?`,
+                    message: 'This phone has to be paired again with a new code before it can reach BOSS.',
+                    confirmLabel: 'Revoke device',
+                    destructive: true,
+                    action: () => void run(() => OpenCode.remoteSet({ forgetDeviceId: device.id }))
+                  }
+                })}
+              >
                 Revoke
               </Button>
             </SettingsRow>
@@ -304,7 +331,20 @@ export function MobileSettings(): React.JSX.Element {
                 <Button size="small" variant="ghost" onClick={() => window.boss.clipboardWrite(status.token)}>
                   Copy
                 </Button>
-                <Button size="small" variant="ghost" disabled={busy} onClick={() => void apply({ regenerateToken: true })}>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => appStore.setState({
+                    confirm: {
+                      title: 'Regenerate the access token?',
+                      message: 'Every phone using the current token is signed out, and each one has to be given the new token before it can reach BOSS again.',
+                      confirmLabel: 'Regenerate token',
+                      destructive: true,
+                      action: () => void apply({ regenerateToken: true })
+                    }
+                  })}
+                >
                   Regenerate
                 </Button>
               </div>
@@ -321,7 +361,20 @@ export function MobileSettings(): React.JSX.Element {
                 <Button size="small" variant="ghost" onClick={() => window.boss.clipboardWrite(status.viewerToken)}>
                   Copy
                 </Button>
-                <Button size="small" variant="ghost" disabled={busy} onClick={() => void apply({ regenerateViewerToken: true })}>
+                <Button
+                  size="small"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => appStore.setState({
+                    confirm: {
+                      title: 'Regenerate the read-only token?',
+                      message: 'Anyone you have shared the current token with loses access until you send them the new one.',
+                      confirmLabel: 'Regenerate token',
+                      destructive: true,
+                      action: () => void apply({ regenerateViewerToken: true })
+                    }
+                  })}
+                >
                   Regenerate
                 </Button>
               </div>
