@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -13,7 +14,9 @@ import {
 } from 'react-native'
 import {
   blocks,
+  spans,
   isError,
+  type Span,
   isRunning,
   reasoningOf,
   summarise,
@@ -46,14 +49,87 @@ function CodeBlock({ content, language }: { content: string; language?: string }
   )
 }
 
+/** One run and whatever is nested in it. Nested <Text> inherits, so a span
+ *  sets only what it changes and the size and colour around it carry through —
+ *  which is what makes bold code come out bold *and* monospaced. */
+function Run({ span }: { span: Span }): React.JSX.Element {
+  const inner = span.children
+    ? span.children.map((child, i) => <Run key={i} span={child} />)
+    : span.text
+
+  if (span.kind === 'code') return <Text style={styles.inlineCode}>{span.text}</Text>
+  if (span.kind === 'link') {
+    return (
+      <Text
+        style={styles.link}
+        onPress={() => { void Linking.openURL(span.href ?? span.text).catch(() => {}) }}
+      >
+        {inner}
+      </Text>
+    )
+  }
+  const style = span.kind === 'bold' ? styles.bold
+    : span.kind === 'italic' ? styles.italic
+    : span.kind === 'strike' ? styles.strike
+    : undefined
+  return <Text style={style}>{inner}</Text>
+}
+
+function Inline({ text }: { text: string }): React.JSX.Element {
+  return <>{spans(text).map((span, i) => <Run key={i} span={span} />)}</>
+}
+
 function Body({ text }: { text: string }): React.JSX.Element {
   return (
     <>
-      {blocks(text).map((block, i) =>
-        block.kind === 'code'
-          ? <CodeBlock key={i} content={block.content} language={block.language} />
-          : <Text key={i} style={styles.body} selectable>{block.content}</Text>
-      )}
+      {blocks(text).map((block, i) => {
+        if (block.kind === 'code') {
+          return <CodeBlock key={i} content={block.content} language={block.language} />
+        }
+        if (block.kind === 'rule') return <View key={i} style={styles.rule} />
+        if (block.kind === 'heading') {
+          // Three sizes for six levels: past h3 a phone has no room left to
+          // signal depth, and every deeper heading reads the same anyway.
+          return (
+            <Text
+              key={i}
+              style={[
+                styles.body,
+                [styles.h1, styles.h2, styles.h3][Math.min((block.level ?? 1) - 1, 2)]
+              ]}
+              selectable
+            >
+              <Inline text={block.content} />
+            </Text>
+          )
+        }
+        if (block.kind === 'quote') {
+          return (
+            <View key={i} style={styles.quote}>
+              <Text style={[styles.body, styles.quoteText]} selectable>
+                <Inline text={block.content} />
+              </Text>
+            </View>
+          )
+        }
+        if (block.kind === 'bullet' || block.kind === 'number') {
+          return (
+            <View key={i} style={[styles.item, { marginLeft: 10 + (block.indent ?? 0) * 14 }]}>
+              <Text style={[styles.body, styles.marker]}>
+                {block.kind === 'bullet' ? '•' : `${block.marker ?? ''}.`}
+              </Text>
+              <Text style={[styles.body, styles.itemText]} selectable>
+                <Inline text={block.content} />
+              </Text>
+            </View>
+          )
+        }
+        return (
+          <Text key={i} style={styles.body} selectable>
+            <Inline text={block.content} />
+          </Text>
+        )
+      })}
     </>
   )
 }
@@ -447,6 +523,33 @@ const styles = StyleSheet.create({
     marginBottom: 4
   },
   body: { color: theme.text, fontSize: 15, lineHeight: 22, marginBottom: 6 },
+  bold: { fontWeight: '700' },
+  italic: { fontStyle: 'italic' },
+  strike: { textDecorationLine: 'line-through', color: theme.muted },
+  link: { color: theme.accent, textDecorationLine: 'underline' },
+  inlineCode: {
+    color: theme.green,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    // Menlo runs large beside the body face, and there is no per-span
+    // background in React Native — colour and face carry the distinction.
+    fontSize: 13
+  },
+  h1: { fontSize: 20, fontWeight: '700', lineHeight: 27, marginTop: 8, marginBottom: 4 },
+  h2: { fontSize: 17.5, fontWeight: '700', lineHeight: 24, marginTop: 8, marginBottom: 4 },
+  h3: { fontSize: 15.5, fontWeight: '700', lineHeight: 22, marginTop: 6, marginBottom: 3 },
+  rule: { height: 1, backgroundColor: theme.line, marginVertical: 10 },
+  quote: {
+    borderLeftWidth: 3,
+    borderLeftColor: theme.line,
+    paddingLeft: 10,
+    marginVertical: 2
+  },
+  quoteText: { color: theme.muted, marginBottom: 2 },
+  item: { flexDirection: 'row', gap: 7, marginBottom: 2 },
+  // Fixed width so wrapped text lines up under itself rather than under the
+  // marker, and so 9. and 10. do not shift the column.
+  marker: { color: theme.muted, marginBottom: 0, minWidth: 16, textAlign: 'right' },
+  itemText: { flex: 1, marginBottom: 0 },
   userBody: { backgroundColor: theme.inset, borderRadius: 12, padding: 11 },
   code: {
     backgroundColor: theme.inset,
