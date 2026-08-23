@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http'
 import test from 'node:test'
 import type { AddressInfo } from 'node:net'
 // @ts-expect-error Application code uses bundler resolution.
-import { listModels, streamChatCompletion, StreamText } from './lab-client.ts'
+import { listModels, ReasoningTagSplitter, streamChatCompletion, StreamText } from './lab-client.ts'
 
 function withServer(
   handler: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void,
@@ -87,6 +87,29 @@ test('StreamText survives a leading whitespace-noise chunk', () => {
   assert.equal(tracker.value, 'The working tree')
 })
 
+test('ReasoningTagSplitter separates a fragmented leading think block', () => {
+  const splitter = new ReasoningTagSplitter()
+  assert.deepEqual(splitter.push('<thi'), {})
+  assert.deepEqual(splitter.push('nk>checking</thi'), { reasoning: 'checking' })
+  assert.deepEqual(splitter.push('nk>Answer'), { text: 'Answer' })
+  assert.deepEqual(splitter.flush(), {})
+})
+
+test('ReasoningTagSplitter supports thinking tags and keeps later literal tags', () => {
+  const tagged = new ReasoningTagSplitter()
+  assert.deepEqual(tagged.push('\n<thinking>plan</thinking>Final'), { reasoning: 'plan', text: 'Final' })
+
+  const prose = new ReasoningTagSplitter()
+  assert.deepEqual(prose.push('Use <think> in this example.'), { text: 'Use <think> in this example.' })
+})
+
+test('ReasoningTagSplitter flushes an unfinished leading block as reasoning', () => {
+  const splitter = new ReasoningTagSplitter()
+  assert.deepEqual(splitter.push('<think>still working'), { reasoning: 'still working' })
+  assert.deepEqual(splitter.push('</thi'), {})
+  assert.deepEqual(splitter.flush(), { reasoning: '</thi' })
+})
+
 test('streamChatCompletion returns reassembled tool calls', async () => {
   await withServer((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
@@ -124,6 +147,47 @@ test('streamChatCompletion accumulates reasoning deltas alongside text', async (
     assert.equal(result.reasoning, 'thinking')
     assert.equal(result.content, 'answer')
     assert.deepEqual(seenReasoning, ['think', 'ing'])
+  })
+})
+
+test('streamChatCompletion separates raw think tags split across content chunks', async () => {
+  const seenText: string[] = []
+  const seenReasoning: string[] = []
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.write(chunk({ content: '<thi' }))
+    res.write(chunk({ content: 'nk>read the files</thi' }))
+    res.write(chunk({ content: 'nk>Here is the answer.' }, 'stop'))
+    res.write('data: [DONE]\n\n')
+    res.end()
+  }, async (baseUrl) => {
+    const result = await streamChatCompletion({
+      baseUrl,
+      model: 'm',
+      messages: [],
+      onText: (delta) => seenText.push(delta),
+      onReasoning: (delta) => seenReasoning.push(delta)
+    })
+    assert.equal(result.reasoning, 'read the files')
+    assert.equal(result.content, 'Here is the answer.')
+    assert.deepEqual(seenText, ['Here is the answer.'])
+    assert.deepEqual(seenReasoning, ['read the files'])
+  })
+})
+
+test('streamChatCompletion preserves structured reasoning details without duplicating their display text', async () => {
+  const details = [{ type: 'reasoning.summary', summary: 'inspect first', id: 'r-1' }]
+  await withServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.write(chunk({ reasoning_content: 'inspect first', reasoning_details: details }))
+    res.write(chunk({ content: 'done' }, 'stop'))
+    res.write('data: [DONE]\n\n')
+    res.end()
+  }, async (baseUrl) => {
+    const result = await streamChatCompletion({ baseUrl, model: 'm', messages: [] })
+    assert.equal(result.reasoning, 'inspect first')
+    assert.deepEqual(result.reasoningDetails, details)
+    assert.equal(result.content, 'done')
   })
 })
 

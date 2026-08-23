@@ -159,6 +159,56 @@ test('shows an attached image and one copy of a response echoed under two messag
   await expect(appPage.locator('.step-card')).toHaveCount(2)
 })
 
+test('shows Lab reasoning separately from the final answer', async ({ appPage }) => {
+  const sessionID = 'thread-source'
+  const messageID = 'lab-reasoning-e2e'
+  const created = Date.now()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: messageID,
+        sessionID,
+        role: 'assistant',
+        model: { id: 'ox-alpha' },
+        time: { created, completed: created + 1 }
+      }
+    }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: `${messageID}-reasoning`,
+        type: 'reasoning',
+        sessionID,
+        messageID,
+        text: 'I should inspect Workspace.tsx before answering.'
+      }
+    }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: `${messageID}-text`,
+        type: 'text',
+        sessionID,
+        messageID,
+        text: 'The workspace selection is now fixed.'
+      }
+    }
+  }))
+
+  const reply = appPage.locator(`.msg-body[data-message-id="${messageID}"]`)
+  await expect(reply).toContainText('The workspace selection is now fixed.')
+  await expect(reply).not.toContainText('<think>')
+  await reply.locator('.thought-head').click()
+  await expect(reply.locator('.thought-body')).toContainText('I should inspect Workspace.tsx before answering.')
+})
+
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
 

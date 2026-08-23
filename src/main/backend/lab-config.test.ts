@@ -11,10 +11,15 @@ function withEnv(run: () => void): void {
   for (const key of Object.keys(process.env)) {
     if (key.startsWith('LAB_')) saved[key] = process.env[key]
   }
-  for (const key of Object.keys(saved)) delete process.env[key]
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('LAB_')) delete process.env[key]
+  }
   try {
     run()
   } finally {
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('LAB_')) delete process.env[key]
+    }
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
@@ -27,6 +32,7 @@ test('no profile defaults to the cloud tier', () => {
     const config = configFromEnv()
     assert.equal(config.tools, 'all')
     assert.equal(config.contextChars, 80_000)
+    assert.equal(config.maxToolIterations, 32)
   })
 })
 
@@ -36,6 +42,7 @@ test('local profile picks lean tools and a small context', () => {
     const config = configFromEnv()
     assert.equal(config.tools, 'core')
     assert.equal(config.contextChars, 12_000)
+    assert.equal(config.maxToolIterations, 32)
   })
 })
 
@@ -46,6 +53,7 @@ test('go profile points at OpenCode Zen with DeepSeek V4 Flash', () => {
     assert.equal(config.baseUrl, 'https://opencode.ai/zen/go/v1')
     assert.equal(config.defaultModel, 'deepseek-v4-flash')
     assert.equal(config.tools, 'all')
+    assert.equal(config.maxToolIterations, 32)
   })
 })
 
