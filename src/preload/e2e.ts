@@ -196,6 +196,7 @@ function initialOpenCodeStopSession(): SessionInfo {
 
 function sourceMessages(): MessageWithParts[] {
   const sessionID = 'thread-source'
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
   return [
     {
       info: { id: 'source-search-user', sessionID, role: 'user', time: { created: Date.now() - 50_000 } },
@@ -204,6 +205,30 @@ function sourceMessages(): MessageWithParts[] {
     {
       info: { id: 'source-search-agent', sessionID, role: 'assistant', time: { created: Date.now() - 49_000, completed: Date.now() - 48_000 } },
       parts: [{ id: 'source-search-agent-text', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Search marker: second result.' }]
+    },
+    {
+      info: { id: 'source-duplicate-user', sessionID, role: 'user', time: { created: Date.now() - 40_000 } },
+      parts: [
+        {
+          id: 'source-duplicate-image', type: 'file', sessionID, messageID: 'source-duplicate-user',
+          state: { status: 'completed', path: 'duplicate-example.png', name: 'duplicate-example.png', mime: 'image/png', url: image }
+        },
+        { id: 'source-duplicate-user-text', type: 'text', sessionID, messageID: 'source-duplicate-user', text: 'Here is the duplicate example.' }
+      ]
+    },
+    {
+      info: { id: 'source-live-agent', sessionID, role: 'assistant', time: { created: Date.now() - 39_000, completed: Date.now() - 38_000 } },
+      parts: [
+        { id: 'source-live-command', type: 'tool', sessionID, messageID: 'source-live-agent', state: { status: 'completed', tool: 'shell', input: { command: 'sed' } } },
+        { id: 'source-live-text', type: 'text', sessionID, messageID: 'source-live-agent', text: 'Critical find. Let me inspect it.' }
+      ]
+    },
+    {
+      info: { id: 'source-history-agent', sessionID, role: 'assistant', time: { created: Date.now() - 37_000, completed: Date.now() - 36_000 } },
+      parts: [
+        { id: 'source-history-text', type: 'text', sessionID, messageID: 'source-history-agent', text: 'Critical find. Let me inspect it.' },
+        { id: 'source-history-command', type: 'tool', sessionID, messageID: 'source-history-agent', state: { status: 'completed', tool: 'shell', input: { command: 'rg' } } }
+      ]
     }
   ]
 }

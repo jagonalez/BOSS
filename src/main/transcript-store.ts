@@ -142,6 +142,29 @@ function narrativeKey(part: Part): string | undefined {
   return text ? `${part.type}\u0000${text}` : undefined
 }
 
+/** Remove a backend's live/history echo without erasing an intentional repeat
+ *  in a later turn. Some backends give the streamed assistant message and the
+ *  finished history message different ids, so part- or message-id dedupe alone
+ *  cannot recognize that they are the same line. User messages are the turn
+ *  boundary: identical prose after the user speaks again is a new response. */
+function uniqueAssistantNarrative(messages: MessageWithParts[]): MessageWithParts[] {
+  let seen = new Set<string>()
+  return messages.map((message) => {
+    if (message.info.role === 'user') {
+      seen = new Set<string>()
+      return message
+    }
+    const parts = message.parts.filter((part) => {
+      const key = narrativeKey(part)
+      if (!key) return true
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    return parts.length === message.parts.length ? message : { ...message, parts }
+  })
+}
+
 /**
  * Durable, backend-neutral projection of the events BOSS has observed.
  *
@@ -445,10 +468,11 @@ export class TranscriptStore {
       partsByMessage.set(row.message_id, parts)
     }
 
-    return selected.flatMap((row) => {
+    const messages = selected.flatMap((row) => {
       const info = parseJson<MessageInfo>(row.data_json)
       return info ? [{ info, parts: partsByMessage.get(row.message_id) ?? [] }] : []
     })
+    return uniqueAssistantNarrative(messages)
   }
 
   hasMessages(threadId: string): boolean {

@@ -36,7 +36,14 @@ interface CodexItem {
   id: string
   type: string
   text?: string
-  content?: Array<{ type?: string; text?: string }>
+  content?: Array<{
+    type?: string
+    text?: string
+    url?: string
+    imageUrl?: string
+    image_url?: string
+    path?: string
+  }>
   command?: string
   cwd?: string
   status?: string
@@ -205,8 +212,35 @@ function threadInfo(thread: CodexThread): SessionInfo {
   }
 }
 
-function userText(content?: CodexItem['content']): string {
-  return (content ?? []).filter((item) => item.type === 'text').map((item) => item.text ?? '').join('\n')
+function userParts(sessionId: string, messageId: string, content?: CodexItem['content']): Part[] {
+  const text = (content ?? [])
+    .filter((item) => item.type === 'text' || item.type === 'inputText' || item.type === 'input_text')
+    .map((item) => item.text ?? '')
+    .filter(Boolean)
+    .join('\n')
+  const parts: Part[] = text
+    ? [{ id: `${messageId}-text`, type: 'text', sessionID: sessionId, messageID: messageId, text }]
+    : []
+  for (const [index, item] of (content ?? []).entries()) {
+    if (item.type !== 'image' && item.type !== 'inputImage' && item.type !== 'input_image') continue
+    const url = item.url ?? item.imageUrl ?? item.image_url
+    if (!url) continue
+    const mime = /^data:([^;,]+)/.exec(url)?.[1] ?? 'image/png'
+    parts.push({
+      id: `${messageId}-image-${index}`,
+      type: 'file',
+      sessionID: sessionId,
+      messageID: messageId,
+      state: {
+        status: 'completed',
+        path: item.path ?? `image-${index + 1}`,
+        name: item.path ?? `image-${index + 1}`,
+        mime,
+        url
+      }
+    })
+  }
+  return parts
 }
 
 function userInputs(parts: unknown[]): Array<Record<string, unknown>> {
@@ -343,7 +377,7 @@ function turnMessages(sessionId: string, turn: CodexTurn): MessageWithParts[] {
     const id = user.id
     messages.push({
       info: { id, sessionID: sessionId, role: 'user', time: { created: turn.startedAt ? turn.startedAt * 1000 : undefined } },
-      parts: [{ id: `${id}-text`, type: 'text', sessionID: sessionId, messageID: id, text: userText(user.content) }]
+      parts: userParts(sessionId, id, user.content)
     })
   }
   const assistantItems = (turn.items ?? []).filter((item) => item.type !== 'userMessage' && item.type !== 'hookPrompt')
@@ -604,7 +638,9 @@ export class CodexBackend implements Backend {
         const messageId = item.type === 'userMessage' ? item.id : `assistant-${String(params.turnId ?? '')}`
         if (item.type === 'userMessage') {
           this.emit({ type: 'message.updated', message: { id: messageId, sessionID: sessionId, role: 'user', time: { created: Number(params.startedAtMs ?? Date.now()) } } })
-          this.emit({ type: 'message.part.updated', part: { id: `${messageId}-text`, type: 'text', sessionID: sessionId, messageID: messageId, text: userText(item.content) } })
+          for (const part of userParts(sessionId, messageId, item.content)) {
+            this.emit({ type: 'message.part.updated', part })
+          }
         } else {
           this.emit({ type: 'message.updated', message: { id: messageId, sessionID: sessionId, role: 'assistant', time: { created: Number(params.startedAtMs ?? Date.now()) } } })
           const part = itemPart(sessionId, messageId, item)
