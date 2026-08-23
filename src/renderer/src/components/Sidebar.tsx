@@ -33,7 +33,7 @@ import {
   showPage,
   toggleArchive
 } from '../lib/actions'
-import { ChatIcon, ChevronIcon, ExternalIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -187,9 +187,9 @@ function SessionRow({
   const compacting = useStore(appStore, (s) => Boolean(s.compacting[session.id]))
   const preferredModel = useStore(appStore, (s) => s.modelsBySession[session.id])
   const model = preferredModel ?? session.model?.id
-  const backend = BACKEND_SHORT_LABELS[session.backendId ?? 'opencode']
+  const BackendMark = BACKEND_MARKS[session.backendId ?? 'opencode'] ?? ChatIcon
   const details = [
-    backend,
+    BACKEND_SHORT_LABELS[session.backendId ?? 'opencode'],
     model?.split('/').pop(),
     session.worktree?.status === 'active' ? session.worktree.branch : undefined,
     session.worktree?.status === 'removed' ? 'Worktree cleaned' : undefined,
@@ -226,9 +226,15 @@ function SessionRow({
       <span className={`session-state ${compacting ? 'compacting' : busy ? 'busy' : 'idle'}`} title={compacting ? 'Compacting' : busy ? 'Agent is working' : 'Idle'}>
         <span />
       </span>
+      {/* One line, not two. The model, the branch and the run state are what the hover card is
+          for; repeating them under every title cost the list a second line of dim text.
+          The backend rides along as its own mark rather than as a word, for the same reason the
+          tabs carry one: "OpenCode" spelled out takes width the title needs. */}
       <span className="session-copy">
+        <span className={`session-backend backend-${session.backendId ?? 'opencode'}`} title={details.join(' · ')}>
+          <BackendMark size={13} />
+        </span>
         <span className="name">{session.title || 'Untitled'}</span>
-        <span className="session-details">{details.join(' · ')}</span>
       </span>
       <span className="meta">{timeAgo(session.time?.updated)}</span>
     </div>

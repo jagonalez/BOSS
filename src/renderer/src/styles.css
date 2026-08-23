@@ -20,8 +20,19 @@
   --yellow-soft: rgba(187, 128, 9, 0.16);
   --purple: #8957e5;
   --cyan: #39c5cf;
-  --radius: 10px;
-  --radius-sm: 7px;
+  /* Corner radii, as a scale rather than a value picked per component. The old pair sat a step
+     tighter than the platform draws its own controls, which is most of what made the window read
+     as a utility rather than an app. */
+  --radius: 12px;
+  --radius-sm: 9px;
+  --radius-xs: 6px;
+  --radius-pill: 999px;
+  /* Hit targets. macOS asks for 28pt before a control is comfortable to hit; the smallest here is
+     the floor for anything clickable, and toolbar controls take the larger one. A control gets its
+     height from padding wherever it can, so text that grows is not clipped by a fixed box. */
+  --control-min: 26px;
+  --control-h: 30px;
+  --control-h-lg: 34px;
   --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --type-page-title: 24px;
@@ -125,8 +136,8 @@ textarea {
   cursor: pointer;
 }
 
-.ui-button-medium { min-height: 34px; padding: 7px 13px; font-size: var(--type-control); }
-.ui-button-small { min-height: 29px; padding: 5px 10px; font-size: 12px; }
+.ui-button-medium { min-height: var(--control-h-lg); padding: 9px 14px; font-size: var(--type-control); }
+.ui-button-small { min-height: var(--control-h); padding: 7px 12px; font-size: 12px; }
 .ui-button:hover:not(:disabled),
 .ui-icon-button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface-hover); }
 .ui-button:active:not(:disabled),
@@ -152,8 +163,8 @@ textarea {
 .ui-icon-button-small { width: 26px; height: 26px; }
 
 .ui-select {
-  min-height: 34px;
-  padding: 5px 30px 5px 10px;
+  min-height: var(--control-h-lg);
+  padding: 7px 30px 7px 12px;
   border-radius: 7px;
   font: inherit;
   font-size: var(--type-control);
@@ -1474,7 +1485,7 @@ textarea {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 8px 9px;
+  padding: 9px 11px;
   border: 0;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -1668,11 +1679,11 @@ textarea {
 }
 
 .workspace-view-close {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
-  flex: 0 0 16px;
+  flex: 0 0 24px;
   margin-left: auto;
   border-radius: 4px;
   color: var(--text-faint);
@@ -2249,11 +2260,11 @@ textarea {
 }
 
 .workspace-tab-close {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
-  flex: 0 0 16px;
+  flex: 0 0 24px;
   margin-left: auto;
   border-radius: 4px;
   opacity: 0;
@@ -3939,7 +3950,7 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 7px 8px;
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-muted);
@@ -4171,6 +4182,12 @@ body.workspace-dragging .workspace-tab-slot {
   white-space: nowrap;
 }
 
+/* One line now, but not a cramped one: the row keeps roughly the height its second line used to
+   give it, so the list reads as spaced rather than merely shorter. */
+.session-row {
+  min-height: 34px;
+}
+
 .session-row .meta {
   padding-top: 2px;
 }
@@ -4212,8 +4229,8 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   min-width: 0;
   flex: 1;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 8px;
 }
 
 .session-copy .name {
@@ -4227,6 +4244,21 @@ body.workspace-dragging .workspace-tab-slot {
 .session-row:hover .session-copy .name {
   color: var(--text);
 }
+
+/* The backend, as its own mark rather than a word: "OpenCode" spelled out takes width the title
+   needs, and the tabs already carry these marks for the same reason. Tinted, not filled — a chip
+   with a background on every row shouts louder than the titles it sits beside. */
+.session-backend {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  opacity: 0.85;
+}
+
+.session-backend.backend-claude { color: var(--backend-claude); }
+.session-backend.backend-codex { color: var(--backend-codex); }
+.session-backend.backend-pi { color: var(--backend-pi); }
 
 .session-details {
   overflow: hidden;
@@ -4587,8 +4619,8 @@ body.workspace-dragging .workspace-tab-slot {
 
 .thread-search-button {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   place-items: center;
   padding: 0;
   border: 0;
@@ -5547,8 +5579,8 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 6px;
   background: var(--bg-inset);
   color: var(--text-faint);
@@ -5864,8 +5896,8 @@ body.workspace-dragging .workspace-tab-slot {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: none;
   /* A scrim over the user's own image, which is not a themed surface. */
@@ -6198,8 +6230,8 @@ body.workspace-dragging .workspace-tab-slot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 4px;
   color: var(--text-faint);
   cursor: pointer;
@@ -6308,15 +6340,16 @@ select:hover {
   background: var(--accent);
   color: var(--ink-on-accent);
   border: none;
-  border-radius: 10px;
+  /* Round, like the platform draws a send affordance, rather than a rounded square. */
+  border-radius: var(--radius-pill);
   padding: 8px;
   font-size: 13px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   align-self: end;
   flex: 0 0 36px;
   transition: background 0.12s ease, opacity 0.12s ease;
@@ -6639,7 +6672,7 @@ select:hover {
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
   color: var(--text);
-  padding: 8px 9px;
+  padding: 9px 11px;
   font: 12.5px/1.45 var(--font-ui);
 }
 
@@ -8128,7 +8161,7 @@ select:hover {
   border-radius: var(--radius-sm);
   background: var(--bg-inset);
   color: var(--text);
-  padding: 8px 9px;
+  padding: 9px 11px;
   font: inherit;
 }
 
@@ -8161,8 +8194,8 @@ select:hover {
 }
 
 .policy-order {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
   border-radius: 50%;

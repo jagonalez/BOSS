@@ -82,3 +82,13 @@ test('the tab strip does not put the backend name beside the title', () => {
   assert.ok(!label.includes('<BackendBadge'), 'the tab shows the backend as a mark, not as a text badge')
   assert.ok(label.includes('tabMark('), 'the tab icon is the backend mark')
 })
+
+test('a thread row names its backend with a mark, not a word', () => {
+  // The tabs learned this first: "OpenCode" spelled out cost about 55px of a 92px tab. A sidebar
+  // row has the same problem — the width goes to the title, which is the part being scanned for.
+  const source = readFileSync(join(import.meta.dirname, '..', 'components', 'Sidebar.tsx'), 'utf8')
+  const row = source.slice(source.indexOf('function SessionRow'), source.indexOf('const RESOURCE_LABELS'))
+
+  assert.ok(row.includes('BACKEND_MARKS['), 'the row should resolve a backend mark')
+  assert.ok(!/>\s*\{backend\}\s*</.test(row), 'the row should not print the backend as its own word')
+})
