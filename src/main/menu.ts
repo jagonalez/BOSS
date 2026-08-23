@@ -71,6 +71,7 @@ export function buildAppMenu(): void {
         { label: 'New Thread', accelerator: 'CmdOrCtrl+N', click: () => send('thread.new') },
         { label: 'New Chat', accelerator: 'CmdOrCtrl+Shift+N', click: () => send('thread.new-global') },
         { label: 'New View', accelerator: 'CmdOrCtrl+Alt+N', click: () => send('view.new') },
+        { label: 'Command Palette…', accelerator: 'CmdOrCtrl+K', click: () => send('palette.open') },
         { type: 'separator' },
         { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', click: () => send('tab.close') },
         ...(mac ? [] : [

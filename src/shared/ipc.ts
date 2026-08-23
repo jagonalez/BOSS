@@ -279,3 +279,4 @@ export type MenuCommand =
   | 'settings.open'
   | 'pane.split-horizontal'
   | 'pane.split-vertical'
+  | 'palette.open'
