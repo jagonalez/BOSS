@@ -166,6 +166,20 @@ function initialSession(): SessionInfo {
   }
 }
 
+function initialDuplicateSession(): SessionInfo {
+  return {
+    id: 'thread-duplicate',
+    backendId: 'opencode',
+    nativeSessionId: 'native-duplicate',
+    projectId: 'boss-e2e',
+    projectPath: PROJECT,
+    executionPath: CHECKOUT,
+    title: 'Duplicate transcript',
+    time: { created: Date.now() - 55_000, updated: Date.now() - 3_000 },
+    model: { id: 'gpt-5.6', provider: 'openai' }
+  }
+}
+
 function initialClaudeSession(): SessionInfo {
   return {
     id: 'thread-claude',
@@ -208,12 +222,46 @@ function sourceMessages(): MessageWithParts[] {
   ]
 }
 
+function duplicateMessages(): MessageWithParts[] {
+  const sessionID = 'thread-duplicate'
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  return [
+    {
+      info: { id: 'source-duplicate-user', sessionID, role: 'user', time: { created: Date.now() - 40_000 } },
+      parts: [
+        {
+          id: 'source-duplicate-image', type: 'file', sessionID, messageID: 'source-duplicate-user',
+          state: { status: 'completed', path: 'duplicate-example.png', name: 'duplicate-example.png', mime: 'image/png', url: image }
+        },
+        { id: 'source-duplicate-user-text', type: 'text', sessionID, messageID: 'source-duplicate-user', text: 'Here is the duplicate example.' }
+      ]
+    },
+    {
+      info: { id: 'source-live-agent', sessionID, role: 'assistant', time: { created: Date.now() - 39_000, completed: Date.now() - 38_000 } },
+      parts: [
+        { id: 'source-live-command', type: 'tool', sessionID, messageID: 'source-live-agent', state: { status: 'completed', tool: 'shell', input: { command: 'sed' } } },
+        { id: 'source-live-text', type: 'text', sessionID, messageID: 'source-live-agent', text: 'Critical find. Let me inspect it.' }
+      ]
+    },
+    {
+      info: { id: 'source-history-agent', sessionID, role: 'assistant', time: { created: Date.now() - 37_000, completed: Date.now() - 36_000 } },
+      parts: [
+        { id: 'source-history-text', type: 'text', sessionID, messageID: 'source-history-agent', text: 'Critical find. Let me inspect it.' },
+        { id: 'source-history-command', type: 'tool', sessionID, messageID: 'source-history-agent', state: { status: 'completed', tool: 'shell', input: { command: 'rg' } } }
+      ]
+    }
+  ]
+}
+
 /** Replace external I/O while preserving the real Electron window, preload
  * boundary, React tree, localStorage, and user interactions. This module is
  * reachable only when the main process explicitly starts with BOSS_E2E=1. */
 export function installE2EApi(boss: BossApi): void {
-  let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
-  const messages: Record<string, MessageWithParts[]> = { 'thread-source': sourceMessages() }
+  let sessions = [initialSession(), initialDuplicateSession(), initialClaudeSession(), initialOpenCodeStopSession()]
+  const messages: Record<string, MessageWithParts[]> = {
+    'thread-source': sourceMessages(),
+    'thread-duplicate': duplicateMessages()
+  }
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
   let labConnections: LabConnectionsSettings = {
     connections: [{

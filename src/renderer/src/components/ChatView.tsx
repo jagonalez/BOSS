@@ -1167,7 +1167,10 @@ function uniqueNarrativeParts(parts: Part[]): Part[] {
     if (part.type !== 'text' && part.type !== 'reasoning') return true
     const text = (part.text ?? part.state?.text ?? '').replace(/\s+/g, ' ').trim()
     if (!text) return true
-    const key = `${part.messageID}\u0000${part.type}\u0000${text}`
+    // `parts` is one assistant turn. A backend can assign its live and history
+    // copies different message ids, so including messageID here preserved the
+    // exact duplicate this helper exists to remove.
+    const key = `${part.type}\u0000${text}`
     if (seen.has(key)) return false
     seen.add(key)
     return true

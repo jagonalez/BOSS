@@ -14,8 +14,7 @@ import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
 import { unpackedAsarPath } from './claude-executable'
-import { textFromParts } from './manager'
-import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, parseClaudeQuestions } from './claude-protocol'
+import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
 import { toolLabel } from '@shared/tool-label'
 
@@ -327,15 +326,14 @@ export class ClaudeBackend implements Backend {
     // dropped the message instead of queueing it.
     if (this.runs.has(sessionId)) throw new Error(THREAD_BUSY_ERROR)
     const record = this.record(sessionId)
-    // What Claude is sent, which carries an attached image as a block rather
-    // than describing it. The transcript echo below stays text: main records
-    // the image part itself, so repeating it here would show it twice.
+    // What Claude is sent carries an attached image as a block; the durable
+    // transcript below keeps the corresponding file part so the user sees the
+    // same attachment after a reload.
     const content = claudeMessageContent(parts)
-    const prompt = textFromParts(parts)
     const userId = randomUUID()
     this.upsert(sessionId, {
       info: { id: userId, sessionID: sessionId, role: 'user', time: { created: Date.now() } },
-      parts: [{ id: `${userId}-text`, type: 'text', sessionID: sessionId, messageID: userId, text: prompt }]
+      parts: claudeTranscriptParts(parts, sessionId, userId)
     })
 
     const hasHistory = record.messages.some((message) => message.info.role === 'assistant')
