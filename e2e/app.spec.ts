@@ -274,6 +274,15 @@ test('delegation sends the chosen backend, worktree placement, and target defaul
       mode: 'auto'
     }
   })
+  const handoff = await control(appPage).then((item) => item.contextHandoff())
+  const currentTask = handoff.indexOf('CURRENT TASK — AUTHORITATIVE')
+  const history = handoff.indexOf('HISTORICAL TRANSCRIPT — REFERENCE ONLY')
+  const staleRequest = handoff.indexOf('> Spin up a Codex thread to review this PR.')
+  expect(currentTask).toBeGreaterThanOrEqual(0)
+  expect(history).toBeGreaterThan(currentTask)
+  expect(handoff).toContain('Delegated task: Audit the E2E workflow and report gaps.')
+  expect(staleRequest).toBeGreaterThan(history)
+  expect(handoff.lastIndexOf('Follow only CURRENT TASK above.')).toBeGreaterThan(staleRequest)
   await expect(appPage.locator('.delegate-modal')).toHaveCount(0)
 })
 

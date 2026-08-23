@@ -13,6 +13,7 @@ import type {
 } from '../shared/backend'
 import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
 import type { MessageWithParts, SessionInfo } from '../shared/opencode'
+import { contextHandoffPacket, delegatedContextInstruction } from '../shared/context-handoff'
 
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
@@ -272,6 +273,10 @@ function sourceMessages(): MessageWithParts[] {
         // code the reader may want to copy, with a language tag to highlight by.
         { id: 'source-search-agent-code', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Here is how to count:\n```ts\nconst answer = 42\nconsole.log(answer)\n```' }
       ]
+    },
+    {
+      info: { id: 'source-stale-user', sessionID, role: 'user', time: { created: Date.now() - 47_000 } },
+      parts: [{ id: 'source-stale-user-text', type: 'text', sessionID, messageID: 'source-stale-user', text: 'Spin up a Codex thread to review this PR.' }]
     }
   ]
 }
@@ -367,6 +372,7 @@ export function installE2EApi(boss: BossApi): void {
     }]
   }
   let calls: RecordedCall[] = []
+  let lastContextHandoff = ''
   let nextExportError: string | undefined
   let holdNextPin = false
   let releasePin: (() => void) | undefined
@@ -828,7 +834,19 @@ export function installE2EApi(boss: BossApi): void {
         intentionallyStopped.add(request.threadId)
         return followUps[request.threadId]
       case 'thread.clone':
-      case 'thread.delegate': return createThread(request.backendId, request.type === 'thread.delegate' ? 'Delegated worker' : 'Continued thread')
+      case 'thread.delegate': {
+        const source = sessions.find((session) => session.id === request.threadId)
+        lastContextHandoff = contextHandoffPacket({
+          sourceThread: source?.title ?? request.threadId,
+          sourceBackend: source?.backendId ?? 'opencode',
+          project: source?.projectId === 'global' ? 'Global chat' : source?.projectPath ?? '',
+          instruction: request.type === 'thread.delegate'
+            ? delegatedContextInstruction(request.instruction.trim())
+            : request.instruction,
+          messages: messages[request.threadId] ?? []
+        })
+        return createThread(request.backendId, request.type === 'thread.delegate' ? 'Delegated worker' : 'Continued thread')
+      }
       case 'thread.fork':
       case 'thread.worktree.create': return createThread(sessions.find((session) => session.id === request.threadId)?.backendId ?? 'opencode', 'Forked thread')
       case 'thread.relay': return sessions.find((session) => session.id === request.targetThreadId)
@@ -1026,8 +1044,12 @@ export function installE2EApi(boss: BossApi): void {
     calls: () => structuredClone(calls),
     sessions: () => structuredClone(sessions),
     defaults: () => structuredClone(defaults),
+    contextHandoff: () => lastContextHandoff,
     clipboardWrites: () => structuredClone(clipboardWrites),
-    resetCalls: () => { calls = [] },
+    resetCalls: () => {
+      calls = []
+      lastContextHandoff = ''
+    },
     failNextExport: (message: string) => { nextExportError = message },
     holdNextPin: () => { holdNextPin = true },
     releasePin: () => { releasePin?.() },

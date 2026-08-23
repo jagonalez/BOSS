@@ -53,6 +53,7 @@ import {
 } from '@shared/task-policy'
 import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
 import { backendVersionWarning } from '@shared/backend-version'
+import { contextHandoffPacket, delegatedContextInstruction } from '@shared/context-handoff'
 
 interface ThreadBinding {
   id: string
@@ -255,20 +256,6 @@ function textFromParts(parts: unknown[]): string {
     })
     .filter(Boolean)
     .join('\n')
-}
-
-function transcript(messages: MessageWithParts[], maxChars = 48_000): string {
-  const rendered = messages.slice(-30).map((message) => {
-    const body = message.parts
-      .filter((part) => part.type === 'text')
-      .map((part) => part.text ?? '')
-      .filter(Boolean)
-      .join('\n')
-    return `${message.info.role === 'user' ? 'USER' : 'ASSISTANT'}:\n${body}`
-  }).filter((item) => !item.endsWith(':\n'))
-  let result = rendered.join('\n\n')
-  if (result.length > maxChars) result = `[…earlier context omitted…]\n\n${result.slice(-maxChars)}`
-  return result
 }
 
 export class BackendManager {
@@ -2080,16 +2067,14 @@ export class BackendManager {
     const messages = await sourceBackend.messagesList(source.nativeSessionId)
     const diffs = await sourceBackend.diffGet(source.nativeSessionId).catch(() => [])
     const diffSummary = diffs.slice(0, 30).map((diff) => `- ${diff.path}: ${diff.status ?? 'changed'}`).join('\n')
-    return [
-      '[BOSS CONTEXT HANDOFF]',
-      `Source thread: ${source.title ?? sourceThreadId}`,
-      `Source backend: ${source.backendId}`,
-      `Project: ${source.projectId === 'global' ? 'Global chat' : source.projectPath}`,
-      instruction ? `User instruction: ${instruction}` : 'Continue from this context. First summarize your understanding, then wait for or follow the user’s latest request.',
-      diffSummary ? `Changed files reported by the source backend:\n${diffSummary}` : '',
-      'Conversation transcript:',
-      transcript(messages)
-    ].filter(Boolean).join('\n\n')
+    return contextHandoffPacket({
+      sourceThread: source.title ?? sourceThreadId,
+      sourceBackend: source.backendId,
+      project: source.projectId === 'global' ? 'Global chat' : source.projectPath,
+      instruction,
+      diffSummary,
+      messages
+    })
   }
 
   async clone(threadId: string, backendId: BackendId, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
@@ -2119,11 +2104,7 @@ export class BackendManager {
     const task = instruction.trim()
     if (!task) throw new Error('Describe the task to delegate.')
     const source = this.binding(threadId)
-    const packet = await this.contextPacket(threadId, [
-      'You are a delegated worker. Complete the task below autonomously.',
-      'Keep your work scoped to the task. Report the result, relevant files, verification, and any blockers when finished.',
-      `Delegated task: ${task}`
-    ].join('\n'))
+    const packet = await this.contextPacket(threadId, delegatedContextInstruction(task))
     const shortTask = task.replace(/\s+/g, ' ').slice(0, 56)
     const title = `Delegate · ${shortTask}${task.length > 56 ? '…' : ''}`
     let created: SessionInfo

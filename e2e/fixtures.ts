@@ -14,6 +14,7 @@ interface E2EControl {
   calls(): Promise<E2ECall[]>
   sessions(): Promise<Array<Record<string, unknown>>>
   defaults(): Promise<Record<string, Record<string, unknown>>>
+  contextHandoff(): Promise<string>
   clipboardWrites(): Promise<string[]>
   resetCalls(): Promise<void>
   failNextExport(message: string): Promise<void>
@@ -32,6 +33,7 @@ export async function control(page: Page): Promise<E2EControl> {
     calls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.calls()),
     sessions: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.sessions()),
     defaults: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.defaults()),
+    contextHandoff: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.contextHandoff()),
     clipboardWrites: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.clipboardWrites()),
     resetCalls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.resetCalls()),
     failNextExport: (message) => page.evaluate(
