@@ -2616,7 +2616,15 @@ export class BackendManager {
       }
       case 'thread.diff': {
         const binding = this.binding(request.threadId)
-        return (await this.ensureStarted(binding.backendId)).diffGet(binding.nativeSessionId, request.messageId)
+        const diffs = await (await this.ensureStarted(binding.backendId))
+          .diffGet(binding.nativeSessionId, request.messageId)
+        if (request.summary) {
+          // Paths and counts only. The desktop never asks for this; a phone
+          // must, because the full reply does not fit in one relay frame.
+          return diffs.map(({ content: _c, original: _o, after: _a, before: _b, ...rest }) => rest)
+        }
+        if (request.path) return diffs.filter((diff) => diff.path === request.path)
+        return diffs
       }
       case 'thread.fork': return this.fork(request.threadId, request.messageId)
       case 'thread.revert': {
