@@ -2093,11 +2093,31 @@ export class BackendManager {
     const source = this.binding(threadId)
     const packet = await this.contextPacket(threadId, instruction)
     const title = `${source.title ?? 'Untitled'} · ${DEFINITIONS[backendId].label}`
-    const created = await this.sessionCreate(backendId, title, {
-      kind: 'clone',
+    // Continue where the source left off, not wherever the app happens to be
+    // pointed. sessionCreate resolves the *current* scope, so a clone of a
+    // worktree thread used to land on the project root with no worktree — the
+    // handed-off thread lost the branch it was continuing, and with it the
+    // pull request every review surface looks up from the checkout.
+    const lineage = {
+      kind: 'clone' as const,
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
-    }, source.projectId === 'global' ? 'global' : 'current')
+    }
+    const created = source.projectId === 'global'
+      ? await this.sessionCreate(backendId, title, lineage, 'global')
+      : await this.sessionCreateInScope(
+        backendId,
+        {
+          projectId: source.projectId,
+          projectPath: source.projectPath,
+          executionPath: source.executionPath
+        },
+        title,
+        lineage,
+        // Only a live checkout carries over. A reaped worktree would hand the
+        // clone a path that is no longer there.
+        source.worktree?.status === 'active' ? source.worktree : undefined
+      )
     await this.sendMessage(
       created.id,
       [{ type: 'text', text: packet }],

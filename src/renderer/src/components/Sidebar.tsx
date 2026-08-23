@@ -554,15 +554,14 @@ export function Sidebar(): React.JSX.Element {
     e.preventDefault()
     e.stopPropagation()
     setCtx({ x: e.clientX, y: e.clientY, session })
-    // Surface the pull request the thread's worktree branch has open, the same
-    // lookup the hover card does, so the menu can remind the user what the
-    // thread produced. Only worktree threads get one: a thread on the main
-    // checkout is usually on the default branch, where a pull request would be
-    // surprising. Resolved asynchronously and merged back by thread id so a
-    // fetch for one thread never paints a later menu.
+    // Surface the pull request the thread's checkout has open, the same lookup
+    // the hover card does, so the menu can remind the user what the thread
+    // produced. Any live checkout qualifies: the snapshot resolves the branch
+    // with git, so gating on the thread's stored worktree only hid pull
+    // requests that were really there. Resolved asynchronously and merged back
+    // by thread id so a fetch for one thread never paints a later menu.
     const path = session.executionPath ?? session.projectPath ?? session.directory ?? session.path
-    const branch = session.worktree?.branch
-    if (!path || !branch) return
+    if (!path || session.worktree?.status === 'removed') return
     void window.boss
       .reviewSnapshot(path)
       .then((snapshot) => {
