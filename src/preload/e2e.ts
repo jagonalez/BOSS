@@ -13,6 +13,7 @@ import type {
 } from '../shared/backend'
 import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
 import type { MessageWithParts, SessionInfo } from '../shared/opencode'
+import { contextHandoffPacket, delegatedContextInstruction } from '../shared/context-handoff'
 
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
@@ -218,6 +219,10 @@ function sourceMessages(): MessageWithParts[] {
     {
       info: { id: 'source-search-agent', sessionID, role: 'assistant', time: { created: Date.now() - 49_000, completed: Date.now() - 48_000 } },
       parts: [{ id: 'source-search-agent-text', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Search marker: second result.' }]
+    },
+    {
+      info: { id: 'source-stale-user', sessionID, role: 'user', time: { created: Date.now() - 47_000 } },
+      parts: [{ id: 'source-stale-user-text', type: 'text', sessionID, messageID: 'source-stale-user', text: 'Spin up a Codex thread to review this PR.' }]
     }
   ]
 }
@@ -294,6 +299,7 @@ export function installE2EApi(boss: BossApi): void {
     }]
   }
   let calls: RecordedCall[] = []
+  let lastContextHandoff = ''
   // The real manager persists this in BOSS's data store. Keep the fixture's
   // equivalent in session storage so a renderer reload exercises that contract.
   let threadTitleSettings = savedThreadTitleSettings()
@@ -506,7 +512,19 @@ export function installE2EApi(boss: BossApi): void {
         intentionallyStopped.add(request.threadId)
         return followUps[request.threadId]
       case 'thread.clone':
-      case 'thread.delegate': return createThread(request.backendId, request.type === 'thread.delegate' ? 'Delegated worker' : 'Continued thread')
+      case 'thread.delegate': {
+        const source = sessions.find((session) => session.id === request.threadId)
+        lastContextHandoff = contextHandoffPacket({
+          sourceThread: source?.title ?? request.threadId,
+          sourceBackend: source?.backendId ?? 'opencode',
+          project: source?.projectId === 'global' ? 'Global chat' : source?.projectPath ?? '',
+          instruction: request.type === 'thread.delegate'
+            ? delegatedContextInstruction(request.instruction.trim())
+            : request.instruction,
+          messages: messages[request.threadId] ?? []
+        })
+        return createThread(request.backendId, request.type === 'thread.delegate' ? 'Delegated worker' : 'Continued thread')
+      }
       case 'thread.fork':
       case 'thread.worktree.create': return createThread(sessions.find((session) => session.id === request.threadId)?.backendId ?? 'opencode', 'Forked thread')
       case 'thread.relay': return sessions.find((session) => session.id === request.targetThreadId)
@@ -682,7 +700,11 @@ export function installE2EApi(boss: BossApi): void {
     calls: () => structuredClone(calls),
     sessions: () => structuredClone(sessions),
     defaults: () => structuredClone(defaults),
-    resetCalls: () => { calls = [] },
+    contextHandoff: () => lastContextHandoff,
+    resetCalls: () => {
+      calls = []
+      lastContextHandoff = ''
+    },
     /** Add a thread the way an agent's spawn does: created in main, carrying
      *  the model main resolved, and never passing through renderer state.
      *  Announced with the same event main sends, which is what makes the
