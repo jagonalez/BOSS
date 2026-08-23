@@ -17,6 +17,15 @@ import type { MessageWithParts, SessionInfo } from '../shared/opencode'
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
   | { channel: 'backend'; request: BackendRequest }
+  | { channel: 'git'; path: string; args: string[] }
+
+interface GitFixtureState {
+  branch: string
+  branches: string[]
+  staged: string[]
+  unstaged: string[]
+  untracked: string[]
+}
 
 const PROJECT = '/tmp/boss-e2e/project'
 const CHECKOUT = `${PROJECT}/checkout`
@@ -260,6 +269,94 @@ export function installE2EApi(boss: BossApi): void {
     calls.push({ channel: 'backend', request: structuredClone(request) })
   }
 
+  // A tiny deterministic repository standing in for `git` itself. Only the
+  // commands the review and commit surfaces issue are modelled; everything
+  // else answers empty so an unexpected call is visible in the recording.
+  let gitState: GitFixtureState = {
+    branch: 'main',
+    branches: ['feature', 'main'],
+    staged: ['src/staged.ts'],
+    unstaged: ['src/edited.ts'],
+    untracked: ['scratch.ts']
+  }
+  const FILE_PATCH = [
+    '@@ -1,4 +1,4 @@',
+    ' const first = unchanged()',
+    '-const total = compute(a, b)',
+    '+const sum = compute(a, b)',
+    ' const last = unchanged()',
+    ' done()',
+    ''
+  ].join('\n')
+
+  const gitRunStub = async (path: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> => {
+    calls.push({ channel: 'git', path: structuredClone(path), args: structuredClone(args) })
+    const [command] = args
+    const out = (stdout = ''): { code: number; stdout: string; stderr: string } => ({ code: 0, stdout, stderr: '' })
+    switch (command) {
+      case 'status':
+        return out([
+          ...gitState.staged.map((file) => `M  ${file}`),
+          ...gitState.unstaged.map((file) => ` M ${file}`),
+          ...gitState.untracked.map((file) => `?? ${file}`),
+          `## ${gitState.branch}`,
+          ''
+        ].join('\n'))
+      case 'diff': {
+        if (args.includes('--cached')) return out(gitState.staged.length ? FILE_PATCH : '')
+        if (args.includes('--name-only')) return out([...gitState.unstaged].sort().join('\n'))
+        return out(FILE_PATCH)
+      }
+      case 'branch':
+        return out(args.includes('--show-current') ? `${gitState.branch}\n` : [...gitState.branches].sort().join('\n') + '\n')
+      case 'log':
+        return out('abc1234567 Initial commit\ndef2345678 Second commit\n')
+      case 'rev-parse':
+        return args[1] === 'HEAD' ? out('e2eheaddeadbeef\n') : out('')
+      case 'add': {
+        for (const file of args.slice(2)) {
+          gitState = {
+            ...gitState,
+            unstaged: gitState.unstaged.filter((f) => f !== file),
+            untracked: gitState.untracked.filter((f) => f !== file),
+            staged: gitState.staged.includes(file) ? gitState.staged : [...gitState.staged, file]
+          }
+        }
+        return out()
+      }
+      case 'restore': {
+        for (const file of args.slice(3)) {
+          if (!gitState.staged.includes(file)) continue
+          gitState = {
+            ...gitState,
+            staged: gitState.staged.filter((f) => f !== file),
+            unstaged: gitState.unstaged.includes(file) ? gitState.unstaged : [...gitState.unstaged, file]
+          }
+        }
+        return out()
+      }
+      case 'commit':
+        gitState = { ...gitState, staged: [] }
+        return out()
+      case 'push':
+      case 'stash':
+        return out()
+      case 'checkout': {
+        const target = args.includes('-b') ? args[args.indexOf('-b') + 1] : args[1]
+        if (target) {
+          gitState = {
+            ...gitState,
+            branch: target,
+            branches: gitState.branches.includes(target) ? gitState.branches : [...gitState.branches, target]
+          }
+        }
+        return out()
+      }
+      default:
+        return out()
+    }
+  }
+
   const createThread = (backendId: BackendId, title?: string): SessionInfo => {
     const preference = defaults[backendId]
     const id = `thread-created-${nextThread++}`
@@ -494,6 +591,7 @@ export function installE2EApi(boss: BossApi): void {
 
   Object.assign(boss, {
     platform: () => 'darwin',
+    gitRun: gitRunStub,
     serverInfo: async () => ({ port: 0, url: 'e2e://boss', version: 'e2e', healthy: true }),
     onServerStatusChanged: () => () => {},
     apiRequest,

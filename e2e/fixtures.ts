@@ -5,8 +5,9 @@ import { test as base, expect, type Page } from '@playwright/test'
 import { _electron as electron, type ElectronApplication } from 'playwright'
 
 export interface E2ECall {
-  channel: 'api' | 'backend'
-  request: Record<string, unknown>
+  channel: 'api' | 'backend' | 'git'
+  request?: Record<string, unknown>
+  args?: string[]
 }
 
 interface E2EControl {
@@ -89,12 +90,22 @@ export const test = base.extend<Fixtures>({
 
 export { expect }
 
-export async function backendCalls(page: Page, type?: string): Promise<E2ECall[]> {
-  const calls = (await control(page).then((item) => item.calls())).filter((call) => call.channel === 'backend')
+type BackendCall = E2ECall & { request: Record<string, unknown> }
+
+export async function backendCalls(page: Page, type?: string): Promise<BackendCall[]> {
+  const calls = (await control(page).then((item) => item.calls())).filter(
+    (call): call is BackendCall => call.channel === 'backend' && Boolean(call.request)
+  )
   return type ? calls.filter((call) => call.request.type === type) : calls
 }
 
-export async function lastBackendCall(page: Page, type: string): Promise<E2ECall> {
+export async function lastBackendCall(page: Page, type: string): Promise<BackendCall> {
   await expect.poll(async () => (await backendCalls(page, type)).length).toBeGreaterThan(0)
   return (await backendCalls(page, type)).at(-1)!
+}
+
+/** Every git command the renderer ran, in order. */
+export async function gitCalls(page: Page): Promise<string[][]> {
+  const calls = (await control(page).then((item) => item.calls())).filter((call) => call.channel === 'git')
+  return calls.map((call) => call.args ?? [])
 }
