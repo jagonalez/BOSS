@@ -7,6 +7,16 @@ async function openSettings(page: Parameters<typeof control>[0]): Promise<void> 
   await expect(page.locator('.settings-page-title strong')).toHaveText('Settings')
 }
 
+async function chooseWorkspaceLayout(
+  page: Parameters<typeof control>[0],
+  label: 'Single-thread' | 'Multi-thread'
+): Promise<void> {
+  await openSettings(page)
+  await page.getByRole('button', { name: 'Appearance', exact: true }).click()
+  await page.getByRole('radio', { name: new RegExp(`^${label}`) }).click()
+  await page.getByRole('button', { name: 'Done' }).click()
+}
+
 async function configureClaudeDefaults(page: Parameters<typeof control>[0]): Promise<void> {
   await openSettings(page)
   await page.getByRole('button', { name: 'Agent defaults' }).click()
@@ -32,6 +42,41 @@ test('boots the real Electron renderer without covering it with a modal', async 
     const window = BrowserWindow.getAllWindows()[0]
     return { count: BrowserWindow.getAllWindows().length, visible: window?.isVisible() }
   })).toEqual({ count: 1, visible: false })
+})
+
+test('switching workspace layouts restores the views previously shown in each mode', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
+
+  const projectViews = appPage.getByRole('tablist', { name: 'Project views' })
+  const visibleCanvas = appPage.locator('.workspace-canvas:not([hidden])')
+  await expect(projectViews.locator('.workspace-view-tab')).toHaveCount(1)
+  await expect(visibleCanvas.locator('.workspace-tab').filter({ hasText: 'Source thread' })).toHaveCount(1)
+  await expect(visibleCanvas.locator('.workspace-tab').filter({ hasText: 'Duplicate transcript' })).toHaveCount(1)
+
+  await chooseWorkspaceLayout(appPage, 'Single-thread')
+  await expect(projectViews).toBeHidden()
+  const firstSingleViewIds = await appPage.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('boss.workspace.single') ?? '{"views":[]}') as { views: Array<{ id: string }> }
+    return saved.views.map((view) => view.id)
+  })
+  expect(firstSingleViewIds).toHaveLength(2)
+
+  await chooseWorkspaceLayout(appPage, 'Multi-thread')
+  await expect(projectViews).toBeVisible()
+  await expect(projectViews.locator('.workspace-view-tab')).toHaveCount(1)
+  await expect(visibleCanvas.locator('.workspace-tab').filter({ hasText: 'Source thread' })).toHaveCount(1)
+  await expect(visibleCanvas.locator('.workspace-tab').filter({ hasText: 'Duplicate transcript' })).toHaveCount(1)
+
+  await chooseWorkspaceLayout(appPage, 'Single-thread')
+  const restoredSingleViewIds = await appPage.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('boss.workspace.single') ?? '{"views":[]}') as { views: Array<{ id: string }> }
+    return saved.views.map((view) => view.id)
+  })
+  expect(restoredSingleViewIds).toEqual(firstSingleViewIds)
+
+  await chooseWorkspaceLayout(appPage, 'Multi-thread')
+  await expect(projectViews.locator('.workspace-view-tab')).toHaveCount(1)
 })
 
 test('keeps a theme family while light, dark, and system appearance change', async ({ appPage }) => {
