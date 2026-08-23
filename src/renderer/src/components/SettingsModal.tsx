@@ -892,13 +892,6 @@ export function SettingsModal(): React.JSX.Element | null {
                             {backend.available && backend.versionWarning ? (
                               <small className="backend-version-warning">{backend.versionWarning}</small>
                             ) : null}
-                            {backend.command ? (
-                              <BackendBinaryPath
-                                backend={{ ...backend, command: backend.command }}
-                                path={backendBins[backend.id] ?? ''}
-                                onSaved={saveBackendBins}
-                              />
-                            ) : null}
                           </div>
                         </div>
 
@@ -933,6 +926,17 @@ export function SettingsModal(): React.JSX.Element | null {
                             </>
                           ) : null}
                         </div>
+                        {/* Full width, below the columns. A filesystem path does not fit the
+                            narrowest column of a four-column grid — the placeholder alone is
+                            longer than the field was, so the value being typed was never
+                            readable. */}
+                        {backend.command ? (
+                          <BackendBinaryPath
+                            backend={{ ...backend, command: backend.command }}
+                            path={backendBins[backend.id] ?? ''}
+                            onSaved={saveBackendBins}
+                          />
+                        ) : null}
                         {backend.id === 'lab' ? <LabConnections onSaved={async () => {
                           await loadEngine()
                           await refreshBackendModels()
