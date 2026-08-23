@@ -273,3 +273,22 @@ test('thread.usage reports recorded metrics plus the thread budget', () => {
     'the budget must be the policy\'s own, absent when there is none'
   )
 })
+
+test('a cloned thread continues in the source checkout, not the open project', () => {
+  // "Continue in <backend>" used to call sessionCreate, which resolves the
+  // app's *current* scope rather than the source thread's. A clone of a
+  // worktree thread therefore landed on the project root with no worktree, so
+  // it silently lost the branch it was meant to be continuing — and with it the
+  // pull request every review surface looks up from the checkout.
+  const start = source.indexOf('async clone(threadId: string')
+  assert.ok(start > 0, 'expected a clone method')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.ok(
+    /executionPath: source\.executionPath/.test(body),
+    'a clone must execute where the source thread was executing'
+  )
+  assert.ok(
+    /source\.worktree\?\.status === 'active' \? source\.worktree : undefined/.test(body),
+    'a clone must inherit a live worktree, and never a reaped one'
+  )
+})
