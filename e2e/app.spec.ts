@@ -1038,3 +1038,69 @@ test('retry resends the prompt that produced a finished reply', async ({ appPage
     url: 'data:image/png;base64,AAAA'
   })
 })
+
+test('automatic compaction is visible while it runs and remains in the transcript', async ({ appPage }) => {
+  const sessionID = 'thread-source'
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'session.compaction.started',
+    properties: { sessionID, trigger: 'auto' }
+  }))
+  await expect(appPage.locator('.thinking-indicator')).toContainText('Compacting context')
+  await expect(appPage.locator('.session-row').filter({ hasText: 'Source thread' })).toContainText('Compacting')
+
+  const messageID = 'compaction-notice-e2e'
+  const created = Date.now()
+  await control(appPage).then((item) => item.emit({
+    type: 'message.updated',
+    properties: { info: { id: messageID, sessionID, role: 'user', time: { created, completed: created } } }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: `${messageID}-part`,
+        type: 'compaction',
+        sessionID,
+        messageID,
+        auto: true,
+        state: { status: 'completed', metadata: { trigger: 'auto', preTokens: 180_000, postTokens: 24_000 } }
+      }
+    }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'session.compacted',
+    properties: { sessionID, trigger: 'auto', preTokens: 180_000, postTokens: 24_000 }
+  }))
+
+  await expect(appPage.locator('.thinking-indicator')).toHaveCount(0)
+  const notice = appPage.locator('.compaction-divider-label')
+  await expect(notice).toHaveText('Context compacted automatically — earlier messages were summarized. 180K → 24K tokens.')
+
+  // Completion reloads native history. The marker must survive that reload and
+  // revisiting the thread, or background compaction remains easy to miss.
+  await appPage.locator('.session-row').filter({ hasText: 'Claude thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(notice).toHaveText('Context compacted automatically — earlier messages were summarized. 180K → 24K tokens.')
+})
+
+test('a failed automatic compaction clears progress and reports the reason', async ({ appPage }) => {
+  const sessionID = 'thread-source'
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'session.compaction.started',
+    properties: { sessionID, trigger: 'auto' }
+  }))
+  await expect(appPage.locator('.thinking-indicator')).toContainText('Compacting context')
+
+  await control(appPage).then((item) => item.emit({
+    type: 'session.error',
+    properties: { sessionID, error: 'The context could not be compacted.' }
+  }))
+
+  await expect(appPage.locator('.thinking-indicator')).toHaveCount(0)
+  await expect(appPage.locator('.chat-error')).toContainText('The context could not be compacted.')
+  await expect(appPage.locator('.session-row').filter({ hasText: 'Source thread' })).not.toContainText('Compacting')
+})

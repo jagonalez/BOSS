@@ -1117,6 +1117,33 @@ export function installE2EApi(boss: BossApi): void {
         if (eventType === 'session.idle' || status === 'idle') busyThreads.delete(properties.sessionID)
         else if (status === 'busy' || status === 'retry') busyThreads.add(properties.sessionID)
       }
+      // Main's TranscriptStore records message events before forwarding them.
+      // Keep the fixture equally reload-safe so a completion event that calls
+      // thread.messages cannot erase the synthetic notice emitted just before
+      // it.
+      const message = (event.properties as { info?: MessageWithParts['info'] } | undefined)?.info
+      if (eventType === 'message.updated' && message?.sessionID) {
+        const current = messages[message.sessionID] ?? []
+        const index = current.findIndex((item) => item.info.id === message.id)
+        messages[message.sessionID] = index >= 0
+          ? current.map((item, itemIndex) => itemIndex === index ? { ...item, info: { ...item.info, ...message } } : item)
+          : [...current, { info: message, parts: [] }]
+      }
+      const part = (event.properties as { part?: MessageWithParts['parts'][number] } | undefined)?.part
+      if ((eventType === 'message.part.updated' || eventType === 'message.part.created') && part?.sessionID) {
+        const current = messages[part.sessionID] ?? []
+        const messageIndex = current.findIndex((item) => item.info.id === part.messageID)
+        if (messageIndex >= 0) {
+          messages[part.sessionID] = current.map((item, itemIndex) => {
+            if (itemIndex !== messageIndex) return item
+            const partIndex = item.parts.findIndex((existing) => existing.id === part.id)
+            const parts = partIndex >= 0
+              ? item.parts.map((existing, index) => index === partIndex ? { ...existing, ...part } : existing)
+              : [...item.parts, part]
+            return { ...item, parts }
+          })
+        }
+      }
       const data = JSON.stringify(event)
       for (const listener of eventListeners) listener(data)
     }

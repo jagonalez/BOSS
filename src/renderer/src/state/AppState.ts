@@ -329,7 +329,7 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       const part = props.part as Part | undefined
       if (!part) return {}
       const patch: Partial<AppState> = { messages: upsertPart(state.messages, part) }
-      if (part.type === 'compaction') {
+      if (part.type === 'compaction' && part.state?.status !== 'completed') {
         patch.compacting = { ...state.compacting, [part.sessionID]: true }
       }
       return patch
@@ -378,6 +378,11 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       if (!sid) return {}
       return { sessionBusy: { ...state.sessionBusy, [sid]: false } }
     }
+    case 'session.compaction.started': {
+      const sid = props.sessionID as string | undefined
+      if (!sid) return {}
+      return { compacting: { ...state.compacting, [sid]: true } }
+    }
     case 'session.compacted': {
       const sid = props.sessionID as string | undefined
       if (!sid) return {}
@@ -388,7 +393,10 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
       // Every backend raises session.error, so the fallback must not name one.
       const msg = errorSummary(props.error ?? props.message ?? 'The agent reported an error')
       if (!sid) return { lastError: msg }
-      return { lastErrorBySession: { ...(state as { lastErrorBySession?: Record<string, string> }).lastErrorBySession, [sid]: msg } }
+      return {
+        lastErrorBySession: { ...(state as { lastErrorBySession?: Record<string, string> }).lastErrorBySession, [sid]: msg },
+        compacting: { ...state.compacting, [sid]: false }
+      }
     }
     case 'config.updated':
       return {}

@@ -6464,9 +6464,13 @@ body.workspace-dragging .workspace-tab-slot {
   margin: 6px auto;
   color: var(--text-faint);
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.02em;
+  text-align: center;
   user-select: none;
+}
+
+.compaction-divider-label {
+  max-width: min(560px, 75%);
 }
 
 .compaction-divider-line {

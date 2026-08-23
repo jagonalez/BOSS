@@ -17,6 +17,7 @@ import { unpackedAsarPath } from './claude-executable'
 import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
 import { toolLabel } from '@shared/tool-label'
+import { compactionCompletedEvents, compactionStartedEvent, type CompactionTrigger } from './compaction-events'
 
 const requireFromMain = createRequire(import.meta.url)
 
@@ -495,7 +496,27 @@ export class ClaudeBackend implements Backend {
     try {
       for await (const message of session as AsyncIterable<SDKMessage>) {
         const value = message as unknown as Record<string, unknown>
-        if (value.type === 'system' && value.subtype === 'init' && Array.isArray(value.mcp_server_errors) && value.mcp_server_errors.length > 0) {
+        if (value.type === 'system' && value.subtype === 'status') {
+          if (value.status === 'compacting') {
+            this.emit(compactionStartedEvent(sessionId))
+          } else if (value.compact_result === 'failed') {
+            this.emit({
+              type: 'session.error',
+              sessionID: sessionId,
+              error: String(value.compact_error ?? 'Claude Code could not compact the context.')
+            })
+          }
+        } else if (value.type === 'system' && value.subtype === 'compact_boundary') {
+          const metadata = (value.compact_metadata ?? {}) as Record<string, unknown>
+          const trigger: CompactionTrigger = metadata.trigger === 'auto' || metadata.trigger === 'manual'
+            ? metadata.trigger
+            : 'unknown'
+          for (const event of compactionCompletedEvents(sessionId, {
+            trigger,
+            preTokens: typeof metadata.pre_tokens === 'number' ? metadata.pre_tokens : undefined,
+            postTokens: typeof metadata.post_tokens === 'number' ? metadata.post_tokens : undefined
+          })) this.emit(event)
+        } else if (value.type === 'system' && value.subtype === 'init' && Array.isArray(value.mcp_server_errors) && value.mcp_server_errors.length > 0) {
           this.emit({
             type: 'session.error',
             sessionID: sessionId,

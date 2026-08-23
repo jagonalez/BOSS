@@ -335,6 +335,37 @@ test('reconciling an idle thread keeps a steered message the backend never repor
   }
 })
 
+test('a BOSS-authored compaction notice survives native history reconciliation', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    store.recordMessage(source, {
+      id: 'compaction-notice-1',
+      sessionID: source.nativeSessionId,
+      role: 'user',
+      time: { created: 2, completed: 2 }
+    })
+    store.recordPart(source, {
+      id: 'compaction-notice-1-part',
+      type: 'compaction',
+      sessionID: source.nativeSessionId,
+      messageID: 'compaction-notice-1',
+      auto: true,
+      state: { status: 'completed', metadata: { trigger: 'auto' } }
+    })
+
+    store.reconcile(source, [], { pruneMissingMessages: true })
+
+    const notice = store.messages(source.threadId).find((message) => message.info.id === 'compaction-notice-1')
+    assert.ok(notice, 'native history cannot report the notice, so pruning must retain it')
+    assert.equal(notice.parts[0]?.type, 'compaction')
+    assert.equal(notice.parts[0]?.auto, true)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('a steered echo is retired once the backend reports the same message', () => {
   const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const path = join(directory, 'transcripts.sqlite')
