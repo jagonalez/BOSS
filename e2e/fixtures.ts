@@ -14,6 +14,9 @@ interface E2EControl {
   sessions(): Promise<Array<Record<string, unknown>>>
   defaults(): Promise<Record<string, Record<string, unknown>>>
   resetCalls(): Promise<void>
+  failNextExport(message: string): Promise<void>
+  holdNextPin(): Promise<void>
+  releasePin(): Promise<void>
   emit(event: Record<string, unknown>): Promise<void>
   spawnThread(backendId: string, title: string): Promise<Record<string, unknown>>
 }
@@ -25,6 +28,12 @@ export async function control(page: Page): Promise<E2EControl> {
     sessions: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.sessions()),
     defaults: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.defaults()),
     resetCalls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.resetCalls()),
+    failNextExport: (message) => page.evaluate(
+      (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.failNextExport(value),
+      message
+    ),
+    holdNextPin: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.holdNextPin()),
+    releasePin: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.releasePin()),
     emit: (event) => page.evaluate((value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.emit(value), event),
     spawnThread: (backendId, title) => page.evaluate(
       (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.spawnThread(value.backendId, value.title),

@@ -30,8 +30,12 @@ export function TokenMeter({ sessionId }: { sessionId: string }): React.JSX.Elem
     }
   }, [sessionId])
 
-  const summary = report ? compactMeter(report) : null
-  if (!report || !summary) return null
+  // Effects run after render, so the previous thread's report can still be in
+  // state for one frame after a tab switch. The id returned by main makes that
+  // stale value harmless even before the effect clears it.
+  const currentReport = report?.threadId === sessionId ? report : null
+  const summary = currentReport ? compactMeter(currentReport) : null
+  if (!currentReport || !summary) return null
   return (
     <div className="token-meter">
       <button
@@ -44,7 +48,7 @@ export function TokenMeter({ sessionId }: { sessionId: string }): React.JSX.Elem
       </button>
       {open ? (
         <div className="token-meter-detail" aria-label="Token usage detail">
-          {usageDetailRows(report).map((row) => (
+          {usageDetailRows(currentReport).map((row) => (
             <div className="token-meter-row" key={row.label}>
               <span>{row.label}</span>
               <strong>{row.value}</strong>

@@ -635,6 +635,7 @@ async function exportCalls(appPage: Parameters<typeof control>[0]): Promise<Arra
 }
 
 test('pinning a thread keeps it first across a reload', async ({ appPage }) => {
+  const fixture = await control(appPage)
   const rows = appPage.locator('.sidebar-section.projects .session-row')
   const sourceRow = rows.filter({ hasText: 'Source thread' })
   await expect(sourceRow).toBeVisible()
@@ -643,6 +644,7 @@ test('pinning a thread keeps it first across a reload', async ({ appPage }) => {
   // move it above all of them, not merely keep its stored flag.
   await expect(rows.first()).toContainText('Claude stop thread')
   await expect(rows.last()).toContainText('Duplicate transcript')
+  await fixture.holdNextPin()
   await sourceRow.getByRole('button', { name: 'Pin thread' }).click()
 
   expect((await lastBackendCall(appPage, 'thread.pin')).request).toEqual({
@@ -651,7 +653,19 @@ test('pinning a thread keeps it first across a reload', async ({ appPage }) => {
     pinned: true
   })
   await expect(rows.first()).toContainText('Source thread')
-  await expect(sourceRow.getByRole('button', { name: 'Unpin thread' })).toBeVisible()
+  const pinnedButton = sourceRow.getByRole('button', { name: 'Unpin thread' })
+  await expect(pinnedButton).toBeVisible()
+  await expect(pinnedButton).toHaveClass(/\bpinned\b/)
+
+  // A session refresh can finish while main is still saving the pin. It must
+  // not overwrite the optimistic choice with its older session snapshot.
+  const listsBefore = (await backendCalls(appPage, 'thread.list')).length
+  await fixture.emit({ type: 'session.updated', properties: { info: { id: 'thread-source' } } })
+  await expect.poll(async () => (await backendCalls(appPage, 'thread.list')).length).toBeGreaterThan(listsBefore)
+  await expect(rows.first()).toContainText('Source thread')
+  await expect(pinnedButton).toHaveClass(/\bpinned\b/)
+  await fixture.releasePin()
+  await expect.poll(async () => (await fixture.sessions()).find((session) => session.id === 'thread-source')?.pinned).toBe(true)
 
   // The pin lives on the thread, so a reload reads it back rather than losing
   // it — the contract main keeps in backend-threads.json.
@@ -675,7 +689,7 @@ test('thread rows and Command Center cards export the transcript as Markdown', a
   assert.ok(markdown.includes('### User'), 'user turns should be labelled')
   assert.ok(markdown.includes('Search marker: first result.'), 'the user message should be in the file')
 
-  // The same action hangs off Command Center's thread cards, which have no
+  // The same action hangs off Command Center's attention cards, which have no
   // context menu of their own otherwise.
   const card = appPage.locator('.command-session-card').filter({ hasText: 'Source thread' })
   await expect(card).toBeVisible()
@@ -683,6 +697,14 @@ test('thread rows and Command Center cards export the transcript as Markdown', a
   await appPage.getByRole('button', { name: 'Export as Markdown…' }).click()
 
   await expect.poll(async () => (await exportCalls(appPage)).length).toBe(2)
+
+  // A save-dialog or disk failure must be visible even while Command Center,
+  // rather than a hidden error that appears only after opening a chat.
+  await (await control(appPage)).failNextExport('The export disk is full.')
+  await sourceRow.click({ button: 'right' })
+  await appPage.getByRole('button', { name: 'Export as Markdown…' }).click()
+  await expect(appPage.getByRole('heading', { name: 'Export failed' })).toBeVisible()
+  await expect(appPage.locator('.modal .body')).toHaveText('Error: The export disk is full.')
 })
 
 test('the composer meter reports what backends recorded and hides when they report nothing', async ({ appPage }) => {

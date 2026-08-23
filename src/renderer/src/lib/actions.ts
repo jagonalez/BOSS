@@ -16,6 +16,7 @@ import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import { threadIsWorking } from './status'
 import { serializeThreadMarkdown, exportFileName } from './thread-export'
 import { BACKEND_SHORT_LABELS } from './backend-labels'
+import { PendingPins } from './pending-pins'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -1019,9 +1020,11 @@ export function markStaleReviews(sessionID: string, contextPath?: string): void 
   })()
 }
 
+const pendingPins = new PendingPins()
+
 export async function refreshSessions(): Promise<void> {
   try {
-    appStore.setState({ sessions: await OpenCode.listSessions() })
+    appStore.setState({ sessions: pendingPins.apply(await OpenCode.listSessions()) })
   } catch {
     /* ignore */
   }
@@ -2064,17 +2067,31 @@ export function archiveAllInPath(path: string): void {
  */
 export function togglePin(id: string): void {
   const current = appStore.getState().sessions.find((session) => session.id === id)
-  const pinned = !(current?.pinned === true)
+  if (!current) return
+  const previousPinned = current.pinned === true
+  const pinned = !previousPinned
+  const generation = pendingPins.begin(id, pinned)
   appStore.setState((s) => ({
     sessions: s.sessions.map((session) => session.id === id ? { ...session, pinned } : session)
   }))
   void OpenCode.pinThread(id, pinned)
-    .then(() => refreshSessions())
-    .catch((error: unknown) => {
+    .then((updated) => {
+      if (!pendingPins.settle(id, generation)) return
       appStore.setState((s) => ({
-        sessions: s.sessions.map((session) => session.id === id ? { ...session, pinned: !pinned } : session),
+        sessions: s.sessions.map((session) => session.id === id
+          ? { ...session, pinned: updated.pinned === true }
+          : session)
+      }))
+    })
+    .catch((error: unknown) => {
+      if (!pendingPins.settle(id, generation)) return
+      appStore.setState((s) => ({
+        sessions: s.sessions.map((session) => session.id === id
+          ? { ...session, pinned: previousPinned }
+          : session),
         lastError: error instanceof Error ? error.message : 'Could not update the thread.'
       }))
+      void refreshSessions()
     })
 }
 
@@ -2107,7 +2124,17 @@ export async function exportSessionMarkdown(id: string): Promise<void> {
       markdown
     })
   } catch (error) {
-    appStore.setState({ lastError: errorSummary(error) })
+    const message = errorSummary(error)
+    appStore.setState({
+      lastError: message,
+      confirm: {
+        title: 'Export failed',
+        message,
+        confirmLabel: 'Got it',
+        notice: true,
+        action: () => {}
+      }
+    })
   }
 }
 

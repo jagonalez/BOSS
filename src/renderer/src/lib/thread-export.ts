@@ -43,7 +43,10 @@ function toolSummary(part: Part): string {
 }
 
 function truncate(value: string): string {
-  return value.length > TOOL_SUMMARY_CHARS ? `${value.slice(0, TOOL_SUMMARY_CHARS)}…` : value
+  const characters = Array.from(value)
+  return characters.length > TOOL_SUMMARY_CHARS
+    ? `${characters.slice(0, TOOL_SUMMARY_CHARS).join('')}…`
+    : value
 }
 
 function imageLabel(part: Part): string {
@@ -57,9 +60,9 @@ type Block =
 
 class MessageWriter {
   private readonly blocks: Block[] = []
-  /** Text already emitted from this message, so a backend that repeats the
-   *  same prose under two part ids (streaming delta + reconciled history)
-   *  exports it once, exactly as the transcript shows it. */
+  /** Text already emitted from this role in the turn, so a backend that repeats
+   *  the same prose under two part or message ids (streaming delta + reconciled
+   *  history) exports it once, exactly as the transcript shows it. */
   private readonly seenText = new Set<string>()
 
   addPart(part: Part): void {
@@ -67,7 +70,10 @@ class MessageWriter {
       case 'text': {
         const text = textOf(part)
         if (!text.trim()) return
-        const key = text.replace(/\s+/g, ' ').trim()
+        // Preserve whitespace that changes Markdown meaning (paragraphs,
+        // indentation, hard breaks and code). Only line-ending representation
+        // is safe to canonicalize for duplicate detection.
+        const key = text.replace(/\r\n/g, '\n')
         if (this.seenText.has(key)) return
         this.seenText.add(key)
         this.blocks.push({ kind: 'text', text })
@@ -133,13 +139,15 @@ export function groupExportTurns(messages: MessageWithParts[]): ExportTurn[] {
 }
 
 function renderRole(role: 'User' | 'Assistant', messages: MessageWithParts[]): string | null {
-  const writers = messages.map((message) => {
-    const writer = new MessageWriter()
+  // One writer per role within the turn, matching the transcript's combined
+  // assistant view. Live output and reconciled history can be separate
+  // messages with different ids; deduping each message alone repeats them.
+  const writer = new MessageWriter()
+  for (const message of messages) {
     for (const part of message.parts) writer.addPart(part)
-    return writer
-  }).filter((writer) => !writer.isEmpty)
-  if (!writers.length) return null
-  return [`### ${role}`, writers.map((writer) => writer.render()).join('\n\n')].join('\n\n')
+  }
+  if (writer.isEmpty) return null
+  return [`### ${role}`, writer.render()].join('\n\n')
 }
 
 /** Serialize a thread's transcript to clean Markdown.

@@ -10,13 +10,17 @@ export function formatCompact(value: number): string {
 export function formatDuration(ms: number): string {
   if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1_000))}s`
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`
-  return `${Math.floor(ms / 3_600_000)}h ${Math.round((ms % 3_600_000) / 60_000)}m`
+  const roundedMinutes = Math.round(ms / 60_000)
+  return `${Math.floor(roundedMinutes / 60)}h ${roundedMinutes % 60}m`
 }
 
 /** The one-line meter beside the composer, or null when there is nothing to
  *  show. A thread whose backends never reported tokens still shows its run
  *  count; a thread with nothing recorded shows nothing at all. */
 export function compactMeter(report: ThreadUsageReport): string | null {
+  // A configured cap is not usage. Keep a brand-new thread hidden even though
+  // remainingTokens can calculate the whole cap as "left".
+  if (report.totals.tokens === undefined && report.totals.runs === 0) return null
   const parts: string[] = []
   if (report.totals.tokens !== undefined) parts.push(`${formatCompact(report.totals.tokens)} tok`)
   if (report.totals.runs > 0) {

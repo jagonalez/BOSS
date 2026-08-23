@@ -102,6 +102,15 @@ test('long tool summaries are truncated to one line', () => {
   assert.ok(line.endsWith('…'))
 })
 
+test('tool summary truncation does not split a Unicode character', () => {
+  const command = `${'x'.repeat(119)}😀tail`
+  const markdown = serializeThreadMarkdown([
+    message('assistant', [part({ type: 'tool', tool: 'bash', state: { status: 'completed', input: { command } } })])
+  ], { title: 'Unicode' })
+  const line = markdown.split('\n').find((item) => item.startsWith('- `bash`'))!
+  assert.ok(line.endsWith('😀…'))
+})
+
 test('images become placeholders naming the picture; attachments are named too', () => {
   const markdown = serializeThreadMarkdown([
     message('user', [
@@ -118,10 +127,33 @@ test('repeated identical text within a message is emitted once', () => {
   const markdown = serializeThreadMarkdown([
     message('assistant', [
       part({ id: 'a', type: 'text', text: 'Same line.' }),
-      part({ id: 'b', type: 'text', text: 'Same   line.' })
+      part({ id: 'b', type: 'text', text: 'Same line.' })
     ])
   ], { title: 'D' })
   assert.equal(markdown.match(/Same line\./g)?.length, 1)
+})
+
+test('reconciled assistant messages dedupe across message ids', () => {
+  const markdown = serializeThreadMarkdown([
+    message('user', [part({ type: 'text', text: 'go' })]),
+    message('assistant', [part({ id: 'live', type: 'text', text: 'Same reply.' })]),
+    message('assistant', [part({ id: 'history', type: 'text', text: 'Same reply.' })])
+  ], { title: 'D' })
+  assert.equal(markdown.match(/Same reply\./g)?.length, 1)
+})
+
+test('whitespace-distinct Markdown is not mistaken for duplicate prose', () => {
+  const markdown = serializeThreadMarkdown([
+    message('assistant', [
+      part({ type: 'text', text: 'alpha beta' }),
+      part({ type: 'text', text: 'alpha\n\nbeta' }),
+      part({ type: 'text', text: 'hard break' }),
+      part({ type: 'text', text: 'hard break  ' })
+    ])
+  ], { title: 'Whitespace' })
+  assert.ok(markdown.includes('alpha beta'))
+  assert.ok(markdown.includes('alpha\n\nbeta'))
+  assert.equal(markdown.match(/hard break/g)?.length, 2)
 })
 
 test('multi-part prose keeps its paragraphs in order', () => {
@@ -148,6 +180,18 @@ test('turns group each user message with the assistant messages after it', () =>
   assert.equal(turns.length, 2)
   assert.equal(turns[0].assistants.length, 2)
   assert.equal(turns[1].user?.parts[0].text, 'two')
+})
+
+test('assistant messages before the first user keep their original position', () => {
+  const turns = groupExportTurns([
+    message('assistant', [part({ type: 'text', text: 'Welcome.' })]),
+    message('user', [part({ type: 'text', text: 'Begin.' })]),
+    message('assistant', [part({ type: 'text', text: 'Started.' })])
+  ])
+  assert.equal(turns.length, 2)
+  assert.equal(turns[0].user, undefined)
+  assert.equal(turns[0].assistants[0].parts[0].text, 'Welcome.')
+  assert.equal(turns[1].user?.parts[0].text, 'Begin.')
 })
 
 test('several assistant messages in one turn share one Assistant heading', () => {

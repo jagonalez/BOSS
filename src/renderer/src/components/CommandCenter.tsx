@@ -322,7 +322,9 @@ export function CommandCenter(): React.JSX.Element {
             <div className="command-section-head"><h2>Needs your attention</h2><span>{classified.attention.length}</span></div>
             <div className="command-list">
               {classified.attention.length > 0
-                ? classified.attention.map(({ thread, label }) => <ThreadCard key={thread.threadId} thread={thread} state="attention" label={label} />)
+                ? classified.attention.map(({ thread, label }) => (
+                    <ThreadCard key={thread.threadId} thread={thread} state="attention" label={label} onCtx={openCardMenu} />
+                  ))
                 : <div className="command-empty">Nothing needs you right now.</div>}
             </div>
           </section>

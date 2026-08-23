@@ -21,6 +21,7 @@ test('formatDuration scales from seconds to hours', () => {
   assert.equal(formatDuration(45_000), '45s')
   assert.equal(formatDuration(95_000), '2m')
   assert.equal(formatDuration(5_400_000), '1h 30m')
+  assert.equal(formatDuration(7_170_000), '2h 0m')
 })
 
 test('a thread with nothing reported hides the meter entirely', () => {
@@ -44,6 +45,10 @@ test('remaining budget appears on the meter only when a cap exists', () => {
     budget: { maxTokens: 50_000 }
   })
   assert.equal(compactMeter(capped), '12.4K tok · 2 runs · 37.6K left')
+})
+
+test('a configured budget does not make an unused thread look active', () => {
+  assert.equal(compactMeter(report({ budget: { maxTokens: 50_000, maxRuns: 5 } })), null)
 })
 
 test('overshooting the cap shows none left, never a negative allowance', () => {

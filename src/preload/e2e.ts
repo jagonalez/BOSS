@@ -318,6 +318,9 @@ export function installE2EApi(boss: BossApi): void {
     }]
   }
   let calls: RecordedCall[] = []
+  let nextExportError: string | undefined
+  let holdNextPin = false
+  let releasePin: (() => void) | undefined
   // The real manager persists this in BOSS's data store. Keep the fixture's
   // equivalent in session storage so a renderer reload exercises that contract.
   let threadTitleSettings = savedThreadTitleSettings()
@@ -488,6 +491,11 @@ export function installE2EApi(boss: BossApi): void {
         return changed
       }
       case 'thread.pin': {
+        if (holdNextPin) {
+          holdNextPin = false
+          await new Promise<void>((resolve) => { releasePin = resolve })
+          releasePin = undefined
+        }
         const found = sessions.find((session) => session.id === request.threadId)
         if (!found) throw new Error(`Unknown fixture thread ${request.threadId}`)
         const changed = { ...found, pinned: request.pinned }
@@ -572,6 +580,11 @@ export function installE2EApi(boss: BossApi): void {
             executionPath: session.executionPath || '',
             updatedAt: session.time?.updated || Date.now(),
             running: false,
+            // Source is intentionally an attention card so its export scenario
+            // covers every Command Center section, not only recent threads.
+            attention: session.id === 'thread-source'
+              ? { kind: 'completed', createdAt: Date.now() - 1_000, detail: 'Fixture run completed' }
+              : undefined,
             usage: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
           })),
           totals: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
@@ -725,6 +738,11 @@ export function installE2EApi(boss: BossApi): void {
     // native dialog or the user's disk.
     exportThreadMarkdown: async (req) => {
       calls.push({ channel: 'export', request: structuredClone(req) })
+      if (nextExportError) {
+        const message = nextExportError
+        nextExportError = undefined
+        throw new Error(message)
+      }
       return `/tmp/boss-e2e/exports/${req.defaultName}`
     }
   } satisfies Partial<BossApi>)
@@ -741,6 +759,9 @@ export function installE2EApi(boss: BossApi): void {
     sessions: () => structuredClone(sessions),
     defaults: () => structuredClone(defaults),
     resetCalls: () => { calls = [] },
+    failNextExport: (message: string) => { nextExportError = message },
+    holdNextPin: () => { holdNextPin = true },
+    releasePin: () => { releasePin?.() },
     /** Add a thread the way an agent's spawn does: created in main, carrying
      *  the model main resolved, and never passing through renderer state.
      *  Announced with the same event main sends, which is what makes the

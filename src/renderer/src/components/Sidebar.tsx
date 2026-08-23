@@ -239,7 +239,7 @@ function SessionRow({
         <span className="name">{session.title || 'Untitled'}</span>
       </span>
       <button
-        className="session-pin"
+        className={`session-pin ${session.pinned ? 'pinned' : ''}`}
         aria-label={session.pinned ? 'Unpin thread' : 'Pin thread'}
         title={session.pinned ? 'Unpin thread' : 'Pin thread'}
         onClick={(event) => {
