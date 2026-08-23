@@ -554,6 +554,62 @@ textarea {
   gap: 22px;
 }
 
+/* Search sits above the categories, because a name is easier to recall than which of nine
+   sections somebody decided a setting belonged in. */
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-faint);
+}
+
+.settings-search:focus-within {
+  border-color: color-mix(in srgb, var(--focus-ring) 55%, var(--line-subtle));
+}
+
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--type-control);
+  outline: none;
+}
+
+.settings-nav-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-results button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/* Where the result will take you, since a match is often found under a heading you did not
+   expect — which is the reason for searching in the first place. */
+.settings-nav-results small {
+  color: var(--text-faint);
+  font-size: var(--type-label);
+}
+
+.settings-nav-empty {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+}
+
 .settings-nav-group {
   display: flex;
   flex-direction: column;
