@@ -3,17 +3,18 @@ import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId, QueuedFollowUp } from '@shared/backend'
 import { composerRecovery, retryPayload } from '../lib/send-recovery'
-import { abortRun, addAnnotation, clearFailedSend, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, startSideChat, steerFollowUp, toggleAsr, updateAnnotationNote, updateFollowUp } from '../lib/actions'
+import { abortRun, addAnnotation, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
-import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, SendIcon, StopIcon, MicIcon, MicOffIcon, VolumeIcon } from './icons'
+import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, ReloadIcon, SendIcon, StopIcon, MicIcon, MicOffIcon, VolumeIcon } from './icons'
 import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
 import { BackendControls } from './BackendControls'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { turnCompletedAt } from '../lib/status'
 import { segmentTurn } from '../lib/part-runs'
+import { retryTurnPayload } from '../lib/regenerate'
 import { AnnotationHighlights } from './AnnotationHighlights'
 import { AnnotationMarkers } from './AnnotationMarkers'
 import { AnnotationPopover, type AnnotationPopoverHandle } from './AnnotationPopover'
@@ -1222,10 +1223,12 @@ function combineAssistants(messages: MessageWithParts[]): MessageWithParts {
 function TurnView({
   turn,
   modelChanged,
+  sessionId,
   onCtx
 }: {
   turn: TurnGroup
   modelChanged?: boolean
+  sessionId?: string
   onCtx?: (e: React.MouseEvent, item: MessageWithParts) => void
 }): React.JSX.Element {
   const model = turn.assistants[0]?.info.model?.id
@@ -1238,6 +1241,20 @@ function TurnView({
     .filter(Boolean)
     .join('\n')
   const lastAssistant = turn.assistants[turn.assistants.length - 1]
+  // Playback state lives in the store, not local state: the auto-speak effect
+  // starts audio outside this component, and its key is what names the turn
+  // whose button becomes the stop control.
+  const speakingKey = useStore(appStore, (s) => s.speakingKey)
+  const speakingThis = Boolean(lastAssistant && speakingKey === lastAssistant.info.id)
+  const working = useStore(appStore, (s) =>
+    sessionId ? Boolean(s.streaming[sessionId] || s.sessionBusy[sessionId]) : false)
+  // A completed reply with a real prompt behind it can be asked for again.
+  // Resending is an ordinary send — history is never truncated — so every
+  // backend qualifies; a busy thread disqualifies itself by disabling.
+  const retryPayload = useMemo(
+    () => (turn.user && lastAssistant?.info.time?.completed ? retryTurnPayload(turn.user) : null),
+    [turn.user, lastAssistant]
+  )
   return (
     <>
       {turn.user ? <MessageView item={turn.user} onCtx={onCtx} /> : null}
@@ -1246,16 +1263,42 @@ function TurnView({
           className="msg assistant"
           onContextMenu={onCtx && lastAssistant ? (e) => onCtx(e, lastAssistant) : undefined}
         >
-          {onCtx && lastAssistant ? (
-            <button className="msg-more" onClick={(e) => onCtx(e, lastAssistant)} title="Message options">
-              ⋯
-            </button>
-          ) : null}
+          {/* Inside msg-actions, not beside it: both anchor to the top-right
+              corner, and a sibling rendered first sat underneath the actions
+              row, which swallowed every click meant for it. */}
           <div className="msg-actions">
-            {speakable ? (
-              <button className="msg-speak" onClick={() => void speakText(speakable)} title="Read aloud">
-                <VolumeIcon size={14} />
+            {onCtx && lastAssistant ? (
+              <button className="msg-more" onClick={(e) => onCtx(e, lastAssistant)} title="Message options">
+                ⋯
               </button>
+            ) : null}
+            {retryPayload && !working ? (
+              <button
+                className="msg-speak"
+                onClick={() => {
+                  if (!sessionId || working) return
+                  void sendPrompt(retryPayload.text, sessionId, retryPayload.attachments)
+                }}
+                disabled={working}
+                title="Retry this turn"
+              >
+                <ReloadIcon size={14} />
+              </button>
+            ) : null}
+            {speakable ? (
+              speakingThis ? (
+                <button className="msg-speak active" onClick={() => stopSpeaking()} title="Stop reading">
+                  <StopIcon size={14} />
+                </button>
+              ) : (
+                <button
+                  className="msg-speak"
+                  onClick={() => void speakText(speakable, lastAssistant.info.id)}
+                  title="Read aloud"
+                >
+                  <VolumeIcon size={14} />
+                </button>
+              )
             ) : null}
           </div>
           <MessageError error={lastAssistant.info.error} />
@@ -1299,6 +1342,9 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
     return path ? path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) : undefined
   })
   const historyCapabilities = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId)?.capabilities)
+  // Raw record, not a defaulted array: a fresh [] each evaluation would defeat
+  // the subscription's equality check and re-render on every store change.
+  const reverted = useStore(appStore, (s) => (effectiveId ? s.reverted[effectiveId] : undefined))
   const projects = useStore(appStore, (s) => s.projects)
   const scrollRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -1466,7 +1512,8 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
     if (spokenRef.current.has(key)) return
     spokenRef.current.add(key)
     if (spokenRef.current.size > 200) spokenRef.current = new Set([...spokenRef.current].slice(-100))
-    void speakText(text)
+    // Tagged with the message id, so the turn being read shows its stop control.
+    void speakText(text, lastAssistant.info.id)
   }, [turns, speakAloud, effectiveId])
 
   const onScroll = (): void => {
@@ -1711,7 +1758,7 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
               const model = turn.assistants[0]?.info.model?.id
               const changed = Boolean(model) && model !== lastModel
               if (model) lastModel = model
-              return <TurnViewMemo key={i} turn={turn} modelChanged={changed} onCtx={onMsgCtx} />
+              return <TurnViewMemo key={i} turn={turn} modelChanged={changed} sessionId={effectiveId} onCtx={onMsgCtx} />
             })
           })()}
           {activity ? (
@@ -1785,6 +1832,52 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
           >
             Copy text
           </button>
+          {/* Only where the backend implements revert: elsewhere the item would
+              promise an undo that drops nothing. */}
+          {historyCapabilities?.revert && msgCtx.message.info.id ? (
+            <button
+              className="ctx-item"
+              onClick={() => {
+                if (effectiveId) void revertMessage(effectiveId, msgCtx.message.info.id)
+                setMsgCtx(null)
+              }}
+            >
+              Undo to here
+            </button>
+          ) : null}
+          {historyCapabilities?.revert && reverted && reverted.length > 0 ? (
+            <button
+              className="ctx-item"
+              onClick={() => {
+                if (effectiveId) void unrevertSession(effectiveId)
+                setMsgCtx(null)
+              }}
+            >
+              Restore undone messages
+            </button>
+          ) : null}
+          {historyCapabilities?.compact ? (
+            <button
+              className="ctx-item"
+              onClick={() => {
+                const target = effectiveId
+                appStore.setState({
+                  confirm: {
+                    title: 'Compact this thread?',
+                    message:
+                      'Earlier messages will be summarized and their full text will no longer be shown in the transcript. The agent continues from the summary.',
+                    confirmLabel: 'Compact',
+                    action: () => {
+                      if (target) void compactSession(target)
+                    }
+                  }
+                })
+                setMsgCtx(null)
+              }}
+            >
+              Compact context…
+            </button>
+          ) : null}
         </div>
       )}
       {effectiveId ? <TodoList sessionId={effectiveId} /> : null}
