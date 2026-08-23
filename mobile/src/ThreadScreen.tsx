@@ -209,12 +209,25 @@ export function ThreadScreen({
         </View>
       ) : null}
 
-      {busy ? (
-        <Pressable style={styles.working} onPress={onStop}>
-          <ActivityIndicator size="small" color={theme.green} />
-          <Text style={styles.workingText}>Working — tap to stop</Text>
-        </Pressable>
-      ) : null}
+      {/* Always mounted, hidden when idle.
+          Mounting this on `busy` made everything below it jump by the banner's
+          height every time it appeared — and session.status fires repeatedly
+          during a run (busy, retry, busy), so it appeared and vanished over and
+          over. Reserving the row costs one hidden view and holds the layout
+          still. */}
+      <Pressable
+        style={[styles.working, !busy && styles.workingIdle]}
+        onPress={busy ? onStop : undefined}
+        pointerEvents={busy ? 'auto' : 'none'}
+        accessibilityElementsHidden={!busy}
+      >
+        {busy ? (
+          <>
+            <ActivityIndicator size="small" color={theme.green} />
+            <Text style={styles.workingText}>Working — tap to stop</Text>
+          </>
+        ) : null}
+      </Pressable>
 
       {modes.length > 1 ? (
         <View style={styles.modes}>
@@ -351,7 +364,16 @@ const styles = StyleSheet.create({
   permTitle: { color: theme.yellow, fontWeight: '700', fontSize: 13, marginBottom: 6 },
   permDesc: { color: theme.muted, fontSize: 13, marginBottom: 10 },
   permRow: { flexDirection: 'row', gap: 8 },
-  working: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingBottom: 6 },
+  // A fixed height so the row occupies the same space whether or not the agent
+  // is working. Without it the empty view collapses and the jump returns.
+  working: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 26,
+    paddingHorizontal: 14
+  },
+  workingIdle: { opacity: 0 },
   workingText: { color: theme.green, fontSize: 12.5 },
   composer: {
     flexDirection: 'row',
