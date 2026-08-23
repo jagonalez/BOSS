@@ -9,6 +9,7 @@ import { ThreadsScreen, type ThreadRow } from './src/ThreadsScreen'
 import { ProjectsScreen } from './src/ProjectsScreen'
 import { NewThreadScreen, type BackendOption, type ModelOption } from './src/NewThreadScreen'
 import { groupByProject, visibleThreads } from './src/parts'
+import { AutomationsScreen, type AutomationRow, type AutomationRunRow } from './src/AutomationsScreen'
 import { ThreadScreen, type PendingPermission, type ThreadMessage } from './src/ThreadScreen'
 import { RelayConnection, clearCredentials, loadCredentials, type RelayCredentials } from './src/relay'
 import { theme } from './src/theme'
@@ -45,6 +46,10 @@ export default function App(): React.JSX.Element {
   // Thinking level is not stored on a thread — it rides on each message — so
   // this is what the next send will ask for.
   const [threadVariants, setThreadVariants] = useState<Record<string, string | undefined>>({})
+  const [tab, setTab] = useState<'work' | 'automations'>('work')
+  const [automations, setAutomations] = useState<AutomationRow[]>([])
+  const [runs, setRuns] = useState<AutomationRunRow[]>([])
+  const [automationBusy, setAutomationBusy] = useState<Record<string, boolean>>({})
 
   const relay = useRef<RelayConnection | null>(null)
   // Read inside callbacks that outlive a render, so they never see a stale id.
@@ -111,6 +116,39 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
+  const refreshAutomations = useCallback(async () => {
+    const connection = relay.current
+    if (!connection) return
+    try {
+      const snapshot = await connection.request<{
+        automations?: AutomationRow[]
+        runs?: AutomationRunRow[]
+      }>({ type: 'automation.list' })
+      setAutomations(snapshot?.automations ?? [])
+      setRuns(snapshot?.runs ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  /** Run or stop an automation, holding the button until the desktop answers. */
+  const commandAutomation = useCallback(async (id: string, action: 'run' | 'stop') => {
+    const connection = relay.current
+    if (!connection) return
+    setAutomationBusy((prev) => ({ ...prev, [id]: true }))
+    try {
+      await connection.request({
+        type: action === 'run' ? 'automation.run' : 'automation.stop',
+        automationId: id
+      })
+      await refreshAutomations()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAutomationBusy((prev) => ({ ...prev, [id]: false }))
+    }
+  }, [refreshAutomations])
+
   /** One event handler for both the live stream and a resume replay. */
   const applyEvent = useCallback((event: Record<string, unknown>) => {
     const props = (event.properties ?? {}) as Record<string, never>
@@ -136,6 +174,7 @@ export default function App(): React.JSX.Element {
         return next
       })
     }
+    if (type === 'automations.updated') void refreshAutomations()
     if (type.startsWith('session.')) void refreshThreads()
     if (type.startsWith('message.') && sid && sid === openRef.current) void refreshMessages(sid)
   }, [refreshMessages, refreshThreads])
@@ -166,6 +205,7 @@ export default function App(): React.JSX.Element {
         // Backends describe each thread's available modes, so the thread
         // screen needs them too — not just the compose screen.
         void loadBackends()
+        void refreshAutomations()
         void refreshThreads()
         if (openRef.current) void refreshMessages(openRef.current)
       }
@@ -190,7 +230,7 @@ export default function App(): React.JSX.Element {
       subscription.remove()
       connection.stop()
     }
-  }, [applyEvent, loadBackends, refreshMessages, refreshThreads])
+  }, [applyEvent, loadBackends, refreshAutomations, refreshMessages, refreshThreads])
 
   /**
    * Start a thread and send its first message.
@@ -360,6 +400,60 @@ export default function App(): React.JSX.Element {
   // Inside a project: its threads. Otherwise the project list.
   const project = openProject === null ? null : projects.find((p) => p.path === openProject)
 
+  const tabs = (
+    <View style={styles.tabs}>
+      <Pressable
+        style={styles.tab}
+        onPress={() => setTab('work')}
+      >
+        <Text style={[styles.tabText, tab === 'work' && styles.tabTextOn]}>Work</Text>
+      </Pressable>
+      <Pressable
+        style={styles.tab}
+        onPress={() => {
+          setTab('automations')
+          void refreshAutomations()
+        }}
+      >
+        <Text style={[styles.tabText, tab === 'automations' && styles.tabTextOn]}>Automations</Text>
+      </Pressable>
+    </View>
+  )
+
+  if (tab === 'automations') {
+    return (
+      <SafeAreaView style={styles.fill}>
+        <StatusBar barStyle="light-content" />
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Automations</Text>
+          <View style={[styles.statusDot, connected && desktopOnline && styles.statusOk]} />
+        </View>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <AutomationsScreen
+          automations={automations}
+          runs={runs}
+          offline={!desktopOnline}
+          refreshing={refreshing}
+          busy={automationBusy}
+          onRefresh={() => {
+            setRefreshing(true)
+            void refreshAutomations().finally(() => setRefreshing(false))
+          }}
+          onRun={(id) => void commandAutomation(id, 'run')}
+          onStop={(id) => void commandAutomation(id, 'stop')}
+          onOpenThread={(id) => {
+            // Jump straight to the run's thread; the Work tab is where
+            // transcripts live.
+            setTab('work')
+            setOpenThread(id)
+            void refreshMessages(id)
+          }}
+        />
+        {tabs}
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.fill}>
       <StatusBar barStyle="light-content" />
@@ -418,11 +512,22 @@ export default function App(): React.JSX.Element {
           }}
         />
       )}
+      {tabs}
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
+  tabs: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.line,
+    paddingTop: 6,
+    paddingBottom: 2
+  },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 8 },
+  tabText: { color: theme.faint, fontSize: 13, fontWeight: '600' },
+  tabTextOn: { color: theme.accent },
   fill: { flex: 1, backgroundColor: theme.bg },
   header: {
     flexDirection: 'row',
