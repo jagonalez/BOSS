@@ -1,5 +1,5 @@
 import { parseGitLog, parseGitBranches, parseGitStatusPorcelain, type StatusFile } from './diff'
-import { gitStageArgs, gitUnstageArgs } from './git-commands'
+import { gitStageArgs, gitUnstageArgs, stashRefForOid } from './git-commands'
 
 export { gitStageArgs, gitUnstageArgs, planBranchSwitch, type BranchSwitchPlan } from './git-commands'
 
@@ -55,7 +55,7 @@ export async function gitCommitFiles(path: string, sha: string): Promise<string[
 }
 
 export async function gitStatusFiles(path: string): Promise<StatusFile[]> {
-  return parseGitStatusPorcelain(await runGit(path, ['status', '--porcelain=v1'])).files
+  return parseGitStatusPorcelain(await runGit(path, ['status', '--porcelain=v1', '-z'])).files
 }
 
 export async function gitStage(path: string, files: StatusFile[]): Promise<void> {
@@ -63,7 +63,8 @@ export async function gitStage(path: string, files: StatusFile[]): Promise<void>
 }
 
 export async function gitUnstage(path: string, files: StatusFile[]): Promise<void> {
-  for (const args of gitUnstageArgs(files)) await runGit(path, args)
+  const head = await window.boss.gitRun(path, ['rev-parse', '--verify', 'HEAD'])
+  for (const args of gitUnstageArgs(files, head.code === 0)) await runGit(path, args)
 }
 
 export async function gitCheckout(path: string, branch: string): Promise<void> {
@@ -74,15 +75,26 @@ export async function gitCreateBranch(path: string, name: string): Promise<void>
   await runGit(path, ['checkout', '-b', name])
 }
 
-export async function gitStashPush(path: string): Promise<void> {
-  await runGit(path, ['stash', 'push', '--include-untracked', '-m', 'BOSS branch switch'])
+async function gitStashHead(path: string): Promise<string | null> {
+  const result = await window.boss.gitRun(path, ['rev-parse', '--verify', 'refs/stash'])
+  return result.code === 0 ? result.stdout.trim() || null : null
 }
 
-export async function gitStashPop(path: string): Promise<void> {
-  await runGit(path, ['stash', 'pop'])
+export async function gitStashPush(path: string): Promise<string | null> {
+  const before = await gitStashHead(path)
+  await runGit(path, ['stash', 'push', '--include-untracked', '-m', 'BOSS branch switch'])
+  const after = await gitStashHead(path)
+  return after && after !== before ? after : null
+}
+
+export async function gitStashPop(path: string, oid: string): Promise<void> {
+  const oids = (await runGit(path, ['stash', 'list', '--format=%H'])).split('\n').map((item) => item.trim()).filter(Boolean)
+  const ref = stashRefForOid(oids, oid)
+  if (!ref) throw new Error(`BOSS branch-switch stash ${oid.slice(0, 12)} is no longer available`)
+  await runGit(path, ['stash', 'pop', ref])
 }
 
 /** Paths where `range` (e.g. `main..feature`) differs from HEAD. */
 export async function gitChangedBetween(path: string, range: string): Promise<string[]> {
-  return (await runGit(path, ['diff', '--name-only', range])).split('\n').map((l) => l.trim()).filter(Boolean)
+  return (await runGit(path, ['diff', '--name-only', '--no-renames', '-z', range])).split('\0').filter(Boolean)
 }

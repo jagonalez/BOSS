@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import type { StatusFile } from '../lib/diff'
 import { gitStage, gitStatusFiles, gitUnstage } from '../lib/git'
@@ -18,17 +18,25 @@ export function CommitDialog(): React.JSX.Element | null {
   const [files, setFiles] = useState<StatusFile[]>([])
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [stagingBusy, setStagingBusy] = useState(false)
   const [output, setOutput] = useState('')
+  const statusRequest = useRef(0)
+  const stagingBusyRef = useRef(false)
+  const pathRef = useRef(path)
+  pathRef.current = path
 
   useEffect(() => {
-    if (!path) return
+    const request = ++statusRequest.current
     setMsg('')
     setOutput('')
+    setFiles([])
+    if (!path) return
     void (async () => {
       try {
-        setFiles(await gitStatusFiles(path))
+        const next = await gitStatusFiles(path)
+        if (request === statusRequest.current && pathRef.current === path) setFiles(next)
       } catch {
-        setFiles([])
+        if (request === statusRequest.current && pathRef.current === path) setFiles([])
       }
     })()
   }, [path])
@@ -42,14 +50,21 @@ export function CommitDialog(): React.JSX.Element | null {
   const unstaged = files.filter((f) => !f.staged)
 
   const reload = async (): Promise<void> => {
+    const expectedPath = path
+    if (pathRef.current !== expectedPath) return
+    const request = ++statusRequest.current
     try {
-      setFiles(await gitStatusFiles(path))
+      const next = await gitStatusFiles(expectedPath)
+      if (request === statusRequest.current && pathRef.current === expectedPath) setFiles(next)
     } catch {
-      setFiles([])
+      if (request === statusRequest.current && pathRef.current === expectedPath) setFiles([])
     }
   }
 
   const toggle = async (file: StatusFile): Promise<void> => {
+    if (busy || stagingBusyRef.current) return
+    stagingBusyRef.current = true
+    setStagingBusy(true)
     // Moved immediately so the click feels instant; a failed git call snaps
     // the list back to what the index actually says.
     setFiles((prev) => prev.map((f) => (f === file ? { ...f, staged: !f.staged, unstaged: f.staged } : f)))
@@ -59,11 +74,16 @@ export function CommitDialog(): React.JSX.Element | null {
     } catch {
       /* fall through to the authoritative list below */
     }
-    await reload()
+    try {
+      await reload()
+    } finally {
+      stagingBusyRef.current = false
+      setStagingBusy(false)
+    }
   }
 
   const run = async (push: boolean): Promise<void> => {
-    if (!msg.trim() || busy || staged.length === 0) return
+    if (!msg.trim() || busy || stagingBusyRef.current || staged.length === 0) return
     setBusy(true)
     setOutput('')
     try {
@@ -89,7 +109,7 @@ export function CommitDialog(): React.JSX.Element | null {
         className="commit-stage-toggle"
         title={file.staged ? `Unstage ${fileLabel(file)}` : `Stage ${fileLabel(file)}`}
         aria-label={file.staged ? `Unstage ${fileLabel(file)}` : `Stage ${fileLabel(file)}`}
-        disabled={busy}
+        disabled={busy || stagingBusy}
         onClick={() => void toggle(file)}
       >
         {file.staged ? '−' : '+'}
@@ -141,10 +161,10 @@ export function CommitDialog(): React.JSX.Element | null {
           <button className="btn-deny" onClick={() => appStore.setState({ commitPath: null })}>
             Cancel
           </button>
-          <button className="btn-ghost" disabled={!msg.trim() || busy || staged.length === 0} onClick={() => void run(false)}>
+          <button className="btn-ghost" disabled={!msg.trim() || busy || stagingBusy || staged.length === 0} onClick={() => void run(false)}>
             Commit{staged.length > 0 ? ` (${staged.length})` : ''}
           </button>
-          <button className="btn-allow" disabled={!msg.trim() || busy || staged.length === 0} onClick={() => void run(true)}>
+          <button className="btn-allow" disabled={!msg.trim() || busy || stagingBusy || staged.length === 0} onClick={() => void run(true)}>
             {busy ? 'Working…' : `Commit & push${staged.length > 0 ? ` (${staged.length})` : ''}`}
           </button>
         </div>

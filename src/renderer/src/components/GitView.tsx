@@ -69,6 +69,8 @@ export function GitView({
   const [creatingChangeRequest, setCreatingChangeRequest] = useState(false)
   const [createChangeRequestError, setCreateChangeRequestError] = useState('')
   const reviewRequest = useRef(0)
+  const scopeRequest = useRef(0)
+  const branchBusyRef = useRef(false)
   const visibleComments = scope === 'change-request'
     ? [...(reviewSnapshot?.changeRequest?.comments ?? []), ...(reviewSnapshot?.localComments ?? [])]
     : reviewSnapshot?.localComments ?? []
@@ -128,39 +130,86 @@ export function GitView({
     void loadReview()
   }
 
-  async function switchTo(target: string, stash: boolean): Promise<void> {
-    if (!projectPath) return
-    setBranchBusy(true)
-    setBranchError('')
+  async function branchSwitchPlan(target: string): Promise<ReturnType<typeof planBranchSwitch>> {
+    if (!projectPath) throw new Error('No checkout is available')
+    const files = await gitStatusFiles(projectPath)
+    const local = files
+      .filter((file) => !file.untracked)
+      .flatMap((file) => file.oldPath ? [file.oldPath, file.path] : [file.path])
+    const untracked = files.filter((file) => file.untracked).map((file) => file.path)
+    return planBranchSwitch(local, untracked, await gitChangedBetween(projectPath, `HEAD..${target}`))
+  }
+
+  async function performSwitch(target: string, expectedStash: boolean): Promise<void> {
+    let checkedOut = false
+    let stashOid: string | null = null
+    const latest = await branchSwitchPlan(target)
+    if (latest.action === 'block') {
+      throw new Error(`The checkout changed while this switch was pending. Conflicting paths: ${latest.conflicts?.join(', ')}`)
+    }
+    if (!expectedStash && latest.action !== 'direct') {
+      throw new Error('The working tree changed while the branch switch was being prepared. Choose the branch again to review the updated plan.')
+    }
+    const shouldStash = expectedStash && latest.action === 'stash'
     try {
-      if (stash) await gitStashPush(projectPath)
+      if (shouldStash) stashOid = await gitStashPush(projectPath)
       try {
         await gitCheckout(projectPath, target)
+        checkedOut = true
       } catch (err) {
-        // The tree is mid-switch with the user's changes parked in a stash;
-        // putting them back is worth more than surfacing the raw error alone.
-        if (stash) await gitStashPop(projectPath).catch(() => {})
+        if (stashOid) {
+          try {
+            await gitStashPop(projectPath, stashOid)
+          } catch (restoreError) {
+            throw new Error(`${String((err as Error).message ?? err)} Restoring BOSS stash ${stashOid.slice(0, 12)} also failed: ${String((restoreError as Error).message ?? restoreError)}`)
+          }
+        }
         throw err
       }
-      if (stash) await gitStashPop(projectPath)
+      // A no-op push returns no oid, so it must never pop the user's existing
+      // top stash. When a stash exists, resolve that captured commit exactly.
+      if (stashOid) await gitStashPop(projectPath, stashOid)
       setCurrent(await gitCurrentBranch(projectPath))
       refreshBranchData()
     } catch (err) {
+      // Checkout may have succeeded before stash restoration failed. Reflect
+      // the actual branch and conflicted worktree instead of leaving old data.
+      if (checkedOut) {
+        try {
+          setCurrent(await gitCurrentBranch(projectPath))
+          refreshBranchData()
+        } catch { /* preserve the original switch error */ }
+      }
+      throw err
+    }
+  }
+
+  async function switchTo(target: string, stash: boolean): Promise<void> {
+    if (!projectPath || branchBusyRef.current) return
+    branchBusyRef.current = true
+    setBranchBusy(true)
+    setBranchError('')
+    try {
+      await performSwitch(target, stash)
+    } catch (err) {
       setBranchError(String((err as Error).message ?? err))
     } finally {
+      branchBusyRef.current = false
       setBranchBusy(false)
     }
   }
 
   async function requestSwitch(target: string): Promise<void> {
-    if (!projectPath || !target || target === current || branchBusy) return
+    if (!projectPath || !target || target === current || branchBusyRef.current) return
+    branchBusyRef.current = true
+    setBranchBusy(true)
     setBranchError('')
     try {
-      const files = await gitStatusFiles(projectPath)
-      const local = files.filter((f) => !f.untracked).map((f) => f.path)
-      const untracked = files.filter((f) => f.untracked).map((f) => f.path)
-      const plan = planBranchSwitch(local, untracked, await gitChangedBetween(projectPath, `HEAD..${target}`))
-      if (plan.action === 'direct') return void switchTo(target, false)
+      const plan = await branchSwitchPlan(target)
+      if (plan.action === 'direct') {
+        await performSwitch(target, false)
+        return
+      }
       if (plan.action === 'block') {
         appStore.setState({
           confirm: {
@@ -176,19 +225,23 @@ export function GitView({
       appStore.setState({
         confirm: {
           title: `Switch to ${target}?`,
-          message: `Your working tree has ${local.length + untracked.length} changed file${local.length + untracked.length === 1 ? '' : 's'}. They will be stashed before the switch and restored after it.`,
+          message: 'Your working tree has local changes. They will be stashed before the switch and restored after it.',
           confirmLabel: 'Stash & switch',
           action: () => void switchTo(target, true)
         }
       })
     } catch (err) {
       setBranchError(String((err as Error).message ?? err))
+    } finally {
+      branchBusyRef.current = false
+      setBranchBusy(false)
     }
   }
 
   async function createBranch(): Promise<void> {
     const name = newBranchName.trim()
-    if (!projectPath || !name || branchBusy) return
+    if (!projectPath || !name || branchBusyRef.current) return
+    branchBusyRef.current = true
     setBranchBusy(true)
     setBranchError('')
     try {
@@ -202,6 +255,7 @@ export function GitView({
     } catch (err) {
       setBranchError(String((err as Error).message ?? err))
     } finally {
+      branchBusyRef.current = false
       setBranchBusy(false)
     }
   }
@@ -215,6 +269,7 @@ export function GitView({
   }, [activeSessionId, gitRefresh, projectPath])
 
   async function loadScope(): Promise<void> {
+    const request = ++scopeRequest.current
     setError('')
     setData([])
     if (!projectPath) return
@@ -242,11 +297,11 @@ export function GitView({
           /* skip unparseable */
         }
       }
-      setData(items)
+      if (request === scopeRequest.current) setData(items)
     } catch (err) {
-      setError(String((err as Error).message ?? err))
+      if (request === scopeRequest.current) setError(String((err as Error).message ?? err))
     }
-    setLoading(false)
+    if (request === scopeRequest.current) setLoading(false)
   }
 
   useEffect(() => {

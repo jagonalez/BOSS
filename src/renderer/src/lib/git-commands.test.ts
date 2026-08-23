@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { StatusFile } from './diff'
-import { gitStageArgs, gitUnstageArgs, planBranchSwitch } from './git-commands.ts'
+import { gitStageArgs, gitUnstageArgs, planBranchSwitch, stashRefForOid } from './git-commands.ts'
 
 function file(path: string, extra: Partial<StatusFile> = {}): StatusFile {
   return { path, staged: false, unstaged: false, untracked: false, ...extra }
@@ -34,6 +34,12 @@ test('unstaging builds one restore per side of an entry', () => {
   ])
 })
 
+test('unstaging before the first commit removes paths from the index without HEAD', () => {
+  assert.deepEqual(gitUnstageArgs([file('first file.ts', { staged: true })], false), [
+    ['rm', '--cached', '--ignore-unmatch', '--', 'first file.ts']
+  ])
+})
+
 test('an empty selection constructs no commands', () => {
   assert.deepEqual(gitStageArgs([]), [])
   assert.deepEqual(gitUnstageArgs([]), [])
@@ -59,4 +65,15 @@ test('an untracked file the target would overwrite blocks the switch too', () =>
   // exists untracked locally, so it is not trivially safe either.
   const plan = planBranchSwitch([], ['appears-on-both.ts'], ['appears-on-both.ts'])
   assert.equal(plan.action, 'block')
+})
+
+test('file-directory collisions block a stash switch', () => {
+  const plan = planBranchSwitch([], ['dir/local.ts'], ['dir'])
+  assert.equal(plan.action, 'block')
+  assert.deepEqual(plan.conflicts, ['dir/local.ts'])
+})
+
+test('captured stash commits resolve to their current reflog entry', () => {
+  assert.equal(stashRefForOid(['newer', 'ours', 'older'], 'ours'), 'stash@{1}')
+  assert.equal(stashRefForOid(['newer', 'older'], 'ours'), null)
 })

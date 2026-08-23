@@ -8,6 +8,7 @@ export interface DiffLine {
 }
 
 const MAX_LCS_LINES = 4000
+const MAX_LCS_CELLS = 1_000_000
 
 /** One row of a side-by-side view. A row holds one side alone when its
  *  counterpart was inserted or deleted, and both when the sides align. Hunk
@@ -28,6 +29,10 @@ function lcs(a: string[], b: string[]): number[][] {
     }
   }
   return dp
+}
+
+function canBuildLcs(aLength: number, bLength: number): boolean {
+  return (aLength + 1) * (bLength + 1) <= MAX_LCS_CELLS
 }
 
 export function parseGitDiff(text: string): DiffLine[] {
@@ -90,6 +95,15 @@ export function wordSegments(oldText: string, newText: string): WordSegment[] {
     return [
       ...a.map((text) => ({ kind: 'del' as const, text })),
       ...b.map((text) => ({ kind: 'add' as const, text }))
+    ]
+  }
+  // A generated/minified line can contain tens of thousands of tokens. The
+  // full matrix would freeze or exhaust the renderer, so fall back to marking
+  // the complete replacement when the fine-grained diff is too expensive.
+  if (!canBuildLcs(a.length, b.length)) {
+    return [
+      { kind: 'del', text: oldText },
+      { kind: 'add', text: newText }
     ]
   }
   const dp = lcs(a, b)
@@ -198,6 +212,10 @@ export function ignoreWhitespaceChanges(lines: DiffLine[]): DiffLine[] {
     while (i < lines.length && lines[i].kind === 'add') adds.push(lines[i++])
     // Walk both runs with an LCS on squashed text so interleaved real changes
     // survive in place rather than being swallowed by an equal-length guess.
+    if (!canBuildLcs(dels.length, adds.length)) {
+      out.push(...dels, ...adds)
+      continue
+    }
     const dp = lcs(dels.map((l) => squashWhitespace(l.text)), adds.map((l) => squashWhitespace(l.text)))
     let d = 0
     let a = 0
@@ -206,7 +224,7 @@ export function ignoreWhitespaceChanges(lines: DiffLine[]): DiffLine[] {
       const wsOnly = !same && squashWhitespace(dels[d].text) === squashWhitespace(adds[a].text)
       if (dp[d + 1][a] >= dp[d][a + 1] && !same && !wsOnly) out.push(dels[d++])
       else if (same || wsOnly) {
-        out.push(same ? dels[d] : { kind: 'ctx', oldNo: dels[d].oldNo, newNo: adds[a].newNo, text: adds[a].text })
+        out.push({ kind: 'ctx', oldNo: dels[d].oldNo, newNo: adds[a].newNo, text: adds[a].text })
         d++
         a++
       } else out.push(adds[a++])
@@ -252,9 +270,40 @@ export interface StatusFile {
   untracked: boolean
 }
 
+function statusFile(xy: string, path: string, oldPath?: string): StatusFile {
+  const file: StatusFile = {
+    path,
+    oldPath,
+    staged: false,
+    unstaged: false,
+    untracked: false
+  }
+  if (xy[0] === '?') file.untracked = true
+  else {
+    file.staged = xy[0] !== ' '
+    file.unstaged = xy[1] !== ' '
+  }
+  return file
+}
+
 export function parseGitStatusPorcelain(text: string): { branch: string; files: StatusFile[] } {
   const files: StatusFile[] = []
   let branch = ''
+  if (text.includes('\0')) {
+    const records = text.split('\0')
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i]
+      if (!record) continue
+      const xy = record.slice(0, 2)
+      const path = record.slice(3)
+      // In porcelain v1 -z output, rename/copy records put the destination
+      // first and the source in the following NUL-delimited field.
+      const renamed = xy.includes('R') || xy.includes('C')
+      const oldPath = renamed ? records[++i] : undefined
+      files.push(statusFile(xy, path, oldPath))
+    }
+    return { branch, files }
+  }
   for (const line of text.split('\n')) {
     if (!line) continue
     if (line.startsWith('##')) {
@@ -268,20 +317,7 @@ export function parseGitStatusPorcelain(text: string): { branch: string; files: 
     // else is a plain path. Quoted paths with spaces keep their quotes here —
     // git re-quotes them on the command line the same way.
     const arrow = raw.includes(' -> ') ? raw.split(' -> ') : null
-    const file: StatusFile = {
-      path: arrow ? arrow[1] : raw,
-      oldPath: arrow ? arrow[0] : undefined,
-      staged: false,
-      unstaged: false,
-      untracked: false
-    }
-    if (xy[0] === '?') {
-      file.untracked = true
-    } else {
-      file.staged = xy[0] !== ' '
-      file.unstaged = xy[1] !== ' '
-    }
-    files.push(file)
+    files.push(statusFile(xy, arrow ? arrow[1] : raw, arrow ? arrow[0] : undefined))
   }
   return { branch, files }
 }
@@ -292,7 +328,7 @@ export function unifiedDiff(original: string, content: string, context = 3): Dif
 
   let ops: Array<{ kind: 'add' | 'del' | 'eq'; text: string }> = []
 
-  if (a.length > MAX_LCS_LINES || b.length > MAX_LCS_LINES) {
+  if (a.length > MAX_LCS_LINES || b.length > MAX_LCS_LINES || !canBuildLcs(a.length, b.length)) {
     for (const line of a) ops.push({ kind: 'del', text: line })
     for (const line of b) ops.push({ kind: 'add', text: line })
   } else {

@@ -8,11 +8,13 @@ export function gitStageArgs(files: StatusFile[]): string[][] {
   return files.map((file) => ['add', '--', ...renameSides(file)])
 }
 
-/** One `git restore --staged -- <path>` per side. A path can be missing from
- *  HEAD (the new half of a rename), so sides go one command each and a miss on
- *  one does not take the other down with it. */
-export function gitUnstageArgs(files: StatusFile[]): string[][] {
-  return files.map((file) => ['restore', '--staged', '--', ...renameSides(file)])
+/** One unstage command per status entry, naming both sides of a rename. Before
+ *  the first commit there is no HEAD for restore to read, so cached removal is
+ *  the equivalent operation. */
+export function gitUnstageArgs(files: StatusFile[], hasHead = true): string[][] {
+  return files.map((file) => hasHead
+    ? ['restore', '--staged', '--', ...renameSides(file)]
+    : ['rm', '--cached', '--ignore-unmatch', '--', ...renameSides(file)])
 }
 
 function renameSides(file: StatusFile): string[] {
@@ -36,8 +38,19 @@ export interface BranchSwitchPlan {
 export function planBranchSwitch(localChanges: string[], untracked: string[], targetChanges: string[]): BranchSwitchPlan {
   const all = [...localChanges, ...untracked]
   if (all.length === 0) return { action: 'direct' }
-  const differing = new Set(targetChanges)
-  const overlapping = all.filter((p) => differing.has(p))
+  const overlapping = all.filter((local) => targetChanges.some((target) => pathsCollide(local, target)))
   if (overlapping.length > 0) return { action: 'block', conflicts: overlapping }
   return { action: 'stash' }
+}
+
+function pathsCollide(a: string, b: string): boolean {
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+}
+
+/** Resolve a captured stash commit to its current reflog selector. Other Git
+ *  clients may add stashes while a switch is running, so stash@{0} is not a
+ *  stable identity. */
+export function stashRefForOid(stashOids: string[], oid: string): string | null {
+  const index = stashOids.indexOf(oid)
+  return index < 0 ? null : `stash@{${index}}`
 }

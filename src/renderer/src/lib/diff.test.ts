@@ -78,6 +78,15 @@ test('word diff handles a fully replaced line and an empty side', () => {
   ])
 })
 
+test('word diff falls back to whole-line marks before its LCS becomes quadratic', () => {
+  const oldText = Array.from({ length: 600 }, (_, i) => `old${i}`).join(' ')
+  const newText = Array.from({ length: 600 }, (_, i) => `new${i}`).join(' ')
+  assert.deepEqual(wordSegments(oldText, newText), [
+    { kind: 'del', text: oldText },
+    { kind: 'add', text: newText }
+  ])
+})
+
 test('ignoring whitespace folds space-only edits back into context', () => {
   const out = ignoreWhitespaceChanges(parseGitDiff([
     '@@ -1,4 +1,4 @@',
@@ -105,6 +114,14 @@ test('ignoring whitespace keeps real changes inside a mixed block', () => {
   assert.deepEqual(out.map((l) => l.kind), ['hunk', 'del', 'add'])
 })
 
+test('ignoring whitespace leaves oversized change blocks untouched', () => {
+  const lines: DiffLine[] = [line('hunk', '@@')]
+  for (let i = 0; i < 1_001; i++) lines.push(line('del', `old ${i}`, i + 1))
+  for (let i = 0; i < 1_001; i++) lines.push(line('add', `new ${i}`, null, i + 1))
+  const out = ignoreWhitespaceChanges(lines)
+  assert.deepEqual(out, lines)
+})
+
 test('status parsing splits renames into old and new paths', () => {
   const parsed = parseGitStatusPorcelain([
     '## main',
@@ -120,4 +137,21 @@ test('status parsing splits renames into old and new paths', () => {
   assert.deepEqual(renamed, { path: 'src/new-name.ts', oldPath: 'src/old-name.ts', staged: true, unstaged: false, untracked: false })
   assert.deepEqual(parsed.files.find((f) => f.path === 'scratch.ts'), { path: 'scratch.ts', oldPath: undefined, staged: false, unstaged: false, untracked: true })
   assert.deepEqual(parsed.files.find((f) => f.path === 'src/deleted-later.ts'), { path: 'src/deleted-later.ts', oldPath: undefined, staged: false, unstaged: true, untracked: false })
+})
+
+test('NUL-delimited status preserves raw unusual paths and rename sides', () => {
+  const parsed = parseGitStatusPorcelain([
+    '?? a b.txt',
+    '?? arrow -> name.txt',
+    '?? é.ts',
+    'R  new name.ts',
+    'old name.ts',
+    ''
+  ].join('\0'))
+  assert.deepEqual(parsed.files, [
+    { path: 'a b.txt', oldPath: undefined, staged: false, unstaged: false, untracked: true },
+    { path: 'arrow -> name.txt', oldPath: undefined, staged: false, unstaged: false, untracked: true },
+    { path: 'é.ts', oldPath: undefined, staged: false, unstaged: false, untracked: true },
+    { path: 'new name.ts', oldPath: 'old name.ts', staged: true, unstaged: false, untracked: false }
+  ])
 })

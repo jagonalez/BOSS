@@ -709,10 +709,18 @@ test('committing stages a chosen subset and commits only it', async ({ appPage }
 
   // Recording starts here, so everything below is asserted against the exact
   // git traffic this test caused.
-  await control(appPage).then((item) => item.resetCalls())
+  const e2e = await control(appPage)
+  await e2e.resetCalls()
   await dialog.locator('.commit-input').fill('Just the scratch file')
+  await e2e.holdGit('add')
   await dialog.getByRole('button', { name: 'Stage scratch.ts' }).click()
   const commitButton = dialog.getByRole('button', { name: 'Commit (1)', exact: true })
+  // The optimistic row move must not let Commit or another toggle overtake the
+  // still-running git add.
+  await expect.poll(async () => gitCalls(appPage).then((calls) => calls.some((args) => args[0] === 'add'))).toBe(true)
+  await expect(commitButton).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Stage src/edited.ts' })).toBeDisabled()
+  await e2e.releaseGit('add')
   await expect(commitButton).toBeEnabled()
   await commitButton.click()
 
@@ -722,4 +730,49 @@ test('committing stages a chosen subset and commits only it', async ({ appPage }
   const calls = await gitCalls(appPage)
   expect(calls).toContainEqual(['commit', '-m', 'Just the scratch file'])
   expect(calls.some((args) => args.includes('-A'))).toBe(false)
+})
+
+test('branch switching blocks conflicts and restores a targeted stash on a safe branch', async ({ appPage }) => {
+  await openReviewTab(appPage)
+  const branch = appPage.getByRole('combobox', { name: 'Switch branch' })
+  await expect(branch).toBeEnabled()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+
+  // The fixture's conflict branch changes src/edited.ts, which is also dirty
+  // locally. The guard must stop before checkout.
+  await branch.selectOption('conflict')
+  const blocked = appPage.locator('.modal').filter({ hasText: "Can't switch to conflict" })
+  await expect(blocked).toContainText('src/edited.ts')
+  await blocked.getByRole('button', { name: 'Stay' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+
+  await control(appPage).then((item) => item.resetCalls())
+  await branch.selectOption('feature')
+  const confirm = appPage.locator('.modal').filter({ hasText: 'Switch to feature?' })
+  await confirm.getByRole('button', { name: 'Stash & switch' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('feature')
+
+  const calls = await gitCalls(appPage)
+  expect(calls).toContainEqual(['stash', 'push', '--include-untracked', '-m', 'BOSS branch switch'])
+  expect(calls).toContainEqual(['checkout', 'feature'])
+  expect(calls).toContainEqual(['stash', 'pop', 'stash@{0}'])
+
+  // Restoration is observable in the UI too: the feature checkout still has
+  // the same local working-tree change after the targeted stash is popped.
+  await expect(appPage.locator('.diff-card-path')).toContainText('src/edited.ts')
+
+  // Reproduce the confirmation-time race: after BOSS planned a stash switch,
+  // another Git client stashes the changes first. Revalidation must switch the
+  // now-clean tree directly and leave that pre-existing stash untouched.
+  await branch.selectOption('main')
+  const back = appPage.locator('.modal').filter({ hasText: 'Switch to main?' })
+  await expect(back).toBeVisible()
+  await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['stash', 'push', '--include-untracked', '-m', 'manual existing stash']))
+  await control(appPage).then((item) => item.resetCalls())
+  await back.getByRole('button', { name: 'Stash & switch' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+  const retryCalls = await gitCalls(appPage)
+  expect(retryCalls.some((args) => args[0] === 'stash')).toBe(false)
+  const existing = await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['rev-parse', '--verify', 'refs/stash']))
+  expect(existing.code).toBe(0)
 })
