@@ -67,7 +67,7 @@ test('Ctrl+F searches the active thread and moves between its matches', async ({
 })
 
 test('shows an attached image and one copy of a response echoed under two message ids', async ({ appPage }) => {
-  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
 
   await expect(appPage.getByRole('img', { name: 'duplicate-example.png' })).toBeVisible()
   await expect(appPage.getByText('Critical find. Let me inspect it.')).toHaveCount(1)

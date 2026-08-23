@@ -166,6 +166,20 @@ function initialSession(): SessionInfo {
   }
 }
 
+function initialDuplicateSession(): SessionInfo {
+  return {
+    id: 'thread-duplicate',
+    backendId: 'opencode',
+    nativeSessionId: 'native-duplicate',
+    projectId: 'boss-e2e',
+    projectPath: PROJECT,
+    executionPath: CHECKOUT,
+    title: 'Duplicate transcript',
+    time: { created: Date.now() - 55_000, updated: Date.now() - 3_000 },
+    model: { id: 'gpt-5.6', provider: 'openai' }
+  }
+}
+
 function initialClaudeSession(): SessionInfo {
   return {
     id: 'thread-claude',
@@ -196,7 +210,6 @@ function initialOpenCodeStopSession(): SessionInfo {
 
 function sourceMessages(): MessageWithParts[] {
   const sessionID = 'thread-source'
-  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
   return [
     {
       info: { id: 'source-search-user', sessionID, role: 'user', time: { created: Date.now() - 50_000 } },
@@ -205,7 +218,14 @@ function sourceMessages(): MessageWithParts[] {
     {
       info: { id: 'source-search-agent', sessionID, role: 'assistant', time: { created: Date.now() - 49_000, completed: Date.now() - 48_000 } },
       parts: [{ id: 'source-search-agent-text', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Search marker: second result.' }]
-    },
+    }
+  ]
+}
+
+function duplicateMessages(): MessageWithParts[] {
+  const sessionID = 'thread-duplicate'
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  return [
     {
       info: { id: 'source-duplicate-user', sessionID, role: 'user', time: { created: Date.now() - 40_000 } },
       parts: [
@@ -237,8 +257,11 @@ function sourceMessages(): MessageWithParts[] {
  * boundary, React tree, localStorage, and user interactions. This module is
  * reachable only when the main process explicitly starts with BOSS_E2E=1. */
 export function installE2EApi(boss: BossApi): void {
-  let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
-  const messages: Record<string, MessageWithParts[]> = { 'thread-source': sourceMessages() }
+  let sessions = [initialSession(), initialDuplicateSession(), initialClaudeSession(), initialOpenCodeStopSession()]
+  const messages: Record<string, MessageWithParts[]> = {
+    'thread-source': sourceMessages(),
+    'thread-duplicate': duplicateMessages()
+  }
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
   let labConnections: LabConnectionsSettings = {
     connections: [{
