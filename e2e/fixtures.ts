@@ -5,7 +5,7 @@ import { test as base, expect, type Page } from '@playwright/test'
 import { _electron as electron, type ElectronApplication } from 'playwright'
 
 export interface E2ECall {
-  channel: 'api' | 'backend'
+  channel: 'api' | 'backend' | 'export'
   request: Record<string, unknown>
 }
 

@@ -11,6 +11,7 @@ import { AttachmentIcon, ChevronIcon, FileIcon, FolderIcon, SendIcon, StopIcon, 
 import { StepCard } from './StepCard'
 import { ModelPicker } from './ModelPicker'
 import { BackendControls } from './BackendControls'
+import { TokenMeter } from './TokenMeter'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { turnCompletedAt } from '../lib/status'
 import { segmentTurn } from '../lib/part-runs'
@@ -1105,6 +1106,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             <ModePicker backendId={backendId} sessionId={effectiveSession ?? undefined} />
             <ModelPicker onPick={onModelChange} sessionId={effectiveSession ?? undefined} />
             <EffortPicker sessionId={effectiveSession ?? undefined} />
+            {effectiveSession ? <TokenMeter sessionId={effectiveSession} /> : null}
           </div>
           <div className="composer-submit-actions">
             {working ? (

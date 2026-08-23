@@ -22,7 +22,7 @@ import type { WebhookSettings } from '@shared/notification'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
 import type { RemoteAccessStatus } from '@shared/relay'
-import type { SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
+import type { SupervisionSnapshot, ThreadUsageReport, TranscriptSearchResult } from '@shared/supervision'
 import type { TaskPolicy } from '@shared/task-policy'
 
 export class ApiError extends Error {
@@ -192,6 +192,10 @@ export const OpenCode = {
     backendRequest<SupervisionSnapshot>({ type: 'supervision.acknowledge', threadId }),
   archiveThread: (threadId: string, archived: boolean) =>
     backendRequest<SupervisionSnapshot>({ type: 'thread.archive', threadId, archived }),
+  pinThread: (threadId: string, pinned: boolean) =>
+    backendRequest<SessionInfo>({ type: 'thread.pin', threadId, pinned }),
+  threadUsage: (threadId: string) =>
+    backendRequest<ThreadUsageReport>({ type: 'thread.usage', threadId }),
   taskPolicy: (threadId: string) =>
     backendRequest<TaskPolicy | undefined>({ type: 'thread.policy.get', threadId }),
   setTaskPolicy: (threadId: string, policy: TaskPolicy) =>

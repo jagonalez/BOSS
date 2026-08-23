@@ -17,10 +17,15 @@ import type { MessageWithParts, SessionInfo } from '../shared/opencode'
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
   | { channel: 'backend'; request: BackendRequest }
+  | { channel: 'export'; request: import('../shared/ipc').ThreadExportRequest }
 
 const PROJECT = '/tmp/boss-e2e/project'
 const CHECKOUT = `${PROJECT}/checkout`
 const THREAD_TITLE_SETTINGS_KEY = 'boss-e2e-thread-title-settings'
+/** Pins survive a renderer reload here the way they survive one in the real
+ *  app's backend-threads.json, so the reload test exercises the same contract
+ *  the manager keeps. */
+const THREAD_PINS_KEY = 'boss-e2e-thread-pins'
 
 interface E2EStorage {
   getItem(key: string): string | null
@@ -42,6 +47,22 @@ function savedThreadTitleSettings(): { autoNameFromFirstPrompt: boolean } {
       : { autoNameFromFirstPrompt: false }
   } catch {
     return { autoNameFromFirstPrompt: false }
+  }
+}
+
+function savedThreadPins(): Record<string, boolean> {
+  try {
+    const stored = e2eStorage()?.getItem(THREAD_PINS_KEY)
+    if (!stored) return {}
+    const parsed: unknown = JSON.parse(stored)
+    if (typeof parsed !== 'object' || parsed === null) return {}
+    const pins: Record<string, boolean> = {}
+    for (const [threadId, pinned] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof pinned === 'boolean') pins[threadId] = pinned
+    }
+    return pins
+  } catch {
+    return {}
   }
 }
 
@@ -212,7 +233,10 @@ function sourceMessages(): MessageWithParts[] {
  * boundary, React tree, localStorage, and user interactions. This module is
  * reachable only when the main process explicitly starts with BOSS_E2E=1. */
 export function installE2EApi(boss: BossApi): void {
-  let sessions = [initialSession(), initialClaudeSession(), initialOpenCodeStopSession()]
+  let threadPins = savedThreadPins()
+  const applyPins = (list: SessionInfo[]): SessionInfo[] =>
+    list.map((session) => (threadPins[session.id] === undefined ? session : { ...session, pinned: threadPins[session.id] }))
+  let sessions = applyPins([initialSession(), initialClaudeSession(), initialOpenCodeStopSession()])
   const messages: Record<string, MessageWithParts[]> = { 'thread-source': sourceMessages() }
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
   let labConnections: LabConnectionsSettings = {
@@ -381,6 +405,33 @@ export function installE2EApi(boss: BossApi): void {
         sessions = sessions.map((session) => session.id === request.threadId ? changed : session)
         return changed
       }
+      case 'thread.pin': {
+        const found = sessions.find((session) => session.id === request.threadId)
+        if (!found) throw new Error(`Unknown fixture thread ${request.threadId}`)
+        const changed = { ...found, pinned: request.pinned }
+        sessions = sessions.map((session) => session.id === request.threadId ? changed : session)
+        threadPins = { ...threadPins, [request.threadId]: request.pinned }
+        e2eStorage()?.setItem(THREAD_PINS_KEY, JSON.stringify(threadPins))
+        return changed
+      }
+      // The source thread is the one with a recorded transcript, so it is the
+      // one with reported tokens; every other thread reports nothing at all,
+      // which is what makes its meter hide.
+      case 'thread.usage':
+        return request.threadId === 'thread-source'
+          ? {
+              threadId: request.threadId,
+              totals: { runs: 4, durationMs: 95_000, tokens: 12_400, tokenRuns: 3, toolCalls: 11 },
+              lastRun: {
+                status: 'completed',
+                startedAt: Date.now() - 20_000,
+                finishedAt: Date.now(),
+                durationMs: 20_000,
+                tokens: 3_100,
+                toolCalls: 4
+              }
+            }
+          : { threadId: request.threadId, totals: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 } }
       case 'thread.messages': return messages[request.threadId] ?? []
       // Main allows one run per thread and refuses the rest, because only it
       // knows without a race. The renderer is expected to queue what it refuses
@@ -529,7 +580,14 @@ export function installE2EApi(boss: BossApi): void {
     updateStatus: async () => ({ currentVersion: 'e2e', channel: 'stable', checking: false, available: false, url: '' }),
     updateCheck: async () => ({ currentVersion: 'e2e', channel: 'stable', checking: false, available: false, url: '' }),
     onUpdateChanged: () => () => {},
-    onMenuCommand: () => () => {}
+    onMenuCommand: () => () => {},
+    // Stands in for the real save dialog: records what the renderer handed
+    // over and resolves a path, so the export flow can be asserted without a
+    // native dialog or the user's disk.
+    exportThreadMarkdown: async (req) => {
+      calls.push({ channel: 'export', request: structuredClone(req) })
+      return `/tmp/boss-e2e/exports/${req.defaultName}`
+    }
   } satisfies Partial<BossApi>)
 
   contextBridge.exposeInMainWorld('bossE2E', {

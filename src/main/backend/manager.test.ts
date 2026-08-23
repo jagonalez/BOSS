@@ -225,3 +225,51 @@ test('the same image reported twice is shown once, and two images stay two', () 
     'the part id should follow the stored image, which is unique per written image'
   )
 })
+
+test('pinning is recorded on the binding and persisted, like archiving', () => {
+  // A pin that lived in one window's storage would put the thread at the top
+  // of that window's list and nowhere else — the phone and a second window
+  // would disagree about what is pinned. The handler must write the field on
+  // the binding (which save() serializes wholesale) before anything else.
+  const start = source.indexOf("case 'thread.pin':")
+  assert.ok(start > 0, 'expected a thread.pin case in handle()')
+  const body = source.slice(start, source.indexOf('\n      }', start))
+  assert.ok(
+    /binding\.pinned = request\.pinned/.test(body),
+    'the pin must land on the binding, which is what persists'
+  )
+  const save = body.indexOf('this.save()')
+  assert.ok(save > 0, 'the pin must be saved')
+  assert.ok(
+    save < body.indexOf('type: \'session.updated\''),
+    'the announcement must come after the save, so late listeners read stored state'
+  )
+})
+
+test('a session carries its pin to every client', () => {
+  // session() is the only shape the renderer and the mobile page ever see.
+  // Dropping the field there would leave the sidebar sorting from nothing.
+  const start = source.indexOf('private session(binding: ThreadBinding')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.ok(
+    /pinned: binding\.pinned === true/.test(body),
+    'session() must project binding.pinned'
+  )
+})
+
+test('thread.usage reports recorded metrics plus the thread budget', () => {
+  // The composer meter reads this. It must surface exactly what the transcript
+  // store recorded — never invent numbers — and attach the budget only when a
+  // policy actually set one.
+  const start = source.indexOf("case 'thread.usage':")
+  assert.ok(start > 0, 'expected a thread.usage case in handle()')
+  const body = source.slice(start, source.indexOf('\n      }', start))
+  assert.ok(
+    /transcripts\?\.usage\(binding\.id\)/.test(body),
+    'usage must come from the transcript store'
+  )
+  assert.ok(
+    /budget: binding\.policy\?\.budget/.test(body),
+    'the budget must be the policy\'s own, absent when there is none'
+  )
+})

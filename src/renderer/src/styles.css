@@ -4175,6 +4175,45 @@ body.workspace-dragging .workspace-tab-slot {
   padding-top: 2px;
 }
 
+/* Pin control on a thread row. Always present so the affordance is
+   discoverable, but quiet until used: an unpinned star is faint, a pinned one
+   takes the accent and fills, and hovering any row sharpens its own. */
+.session-pin {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.session-pin svg {
+  fill: transparent;
+  transition: fill 120ms ease, color 120ms ease;
+}
+
+.session-row:hover .session-pin {
+  color: var(--text-muted);
+}
+
+.session-pin.pinned,
+.session-row:hover .session-pin.pinned {
+  color: var(--yellow);
+}
+
+.session-pin.pinned svg {
+  fill: currentColor;
+}
+
+.session-row.pinned .session-copy .name {
+  color: var(--text);
+}
+
 .session-state {
   display: grid;
   width: 9px;
@@ -5742,6 +5781,76 @@ body.workspace-dragging .workspace-tab-slot {
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
+}
+
+/* Reported token usage beside the composer. A quiet count that opens into the
+   breakdown; positioned relative so the detail can hang over the composer
+   without pushing the textarea around. */
+.token-meter {
+  position: relative;
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: 2px;
+}
+
+.token-meter-toggle {
+  padding: 3px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.token-meter-toggle:hover,
+.token-meter-toggle.open {
+  color: var(--text-muted);
+  background: var(--bg-inset);
+}
+
+.token-meter-detail {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 210px;
+  max-width: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated, var(--bg));
+  box-shadow: var(--shadow-lg);
+}
+
+.token-meter-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--type-label);
+}
+
+.token-meter-row span {
+  color: var(--text-faint);
+}
+
+.token-meter-row strong {
+  color: var(--text);
+  font-weight: 560;
+  text-align: right;
+}
+
+.token-meter-note {
+  margin-top: 2px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 5px;
+  color: var(--text-faint);
+  font-size: calc(var(--type-label) - 0.5px);
 }
 
 .btn-stop-secondary {

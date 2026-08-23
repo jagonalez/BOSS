@@ -14,6 +14,8 @@ import { composeAnnotatedPrompt, createAnnotation, remainingAnnotations, sideCha
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import { threadIsWorking } from './status'
+import { serializeThreadMarkdown, exportFileName } from './thread-export'
+import { BACKEND_SHORT_LABELS } from './backend-labels'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -2051,6 +2053,62 @@ export function archiveAllInPath(path: string): void {
     persistArchived(archived)
     return { archived }
   })
+}
+
+/**
+ * Keep a thread at the top of its section, or stop keeping it there.
+ *
+ * Optimistic like archiving: the row moves under the thumb, and main's reply
+ * refreshes every client. A refusal puts the row back rather than leaving it
+ * floating where the user dropped it.
+ */
+export function togglePin(id: string): void {
+  const current = appStore.getState().sessions.find((session) => session.id === id)
+  const pinned = !(current?.pinned === true)
+  appStore.setState((s) => ({
+    sessions: s.sessions.map((session) => session.id === id ? { ...session, pinned } : session)
+  }))
+  void OpenCode.pinThread(id, pinned)
+    .then(() => refreshSessions())
+    .catch((error: unknown) => {
+      appStore.setState((s) => ({
+        sessions: s.sessions.map((session) => session.id === id ? { ...session, pinned: !pinned } : session),
+        lastError: error instanceof Error ? error.message : 'Could not update the thread.'
+      }))
+    })
+}
+
+/**
+ * Serialize a thread and hand it to main, which asks where to keep the file.
+ *
+ * The transcript is fetched fresh rather than read from state: a context menu
+ * works on rows that were never opened, whose messages this window never
+ * loaded. Cancelling the dialog is not an error.
+ */
+export async function exportSessionMarkdown(id: string): Promise<void> {
+  try {
+    const [messages, session] = await Promise.all([
+      OpenCode.listMessages(id),
+      OpenCode.getSession(id).catch(() => undefined)
+    ])
+    const known = appStore.getState().sessions.find((item) => item.id === id)
+    const title = session?.title || known?.title || 'Untitled thread'
+    const markdown = serializeThreadMarkdown(messages, {
+      title,
+      backendLabel: session?.backendId ?? known?.backendId
+        ? BACKEND_SHORT_LABELS[(session?.backendId ?? known?.backendId)!]
+        : undefined,
+      projectPath: session?.projectPath ?? known?.projectPath,
+      exportedAt: Date.now()
+    })
+    await window.boss.exportThreadMarkdown({
+      title,
+      defaultName: exportFileName(title),
+      markdown
+    })
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+  }
 }
 
 export async function forkSession(id: string): Promise<void> {

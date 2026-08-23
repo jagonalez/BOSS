@@ -16,6 +16,9 @@ export interface SessionInfo {
   /** Hidden from the default list. Recorded on the thread rather than in one
    *  window's storage, so every client agrees on what is visible. */
   archived?: boolean
+  /** Kept at the top of its section. Lives on the thread like archived does,
+   *  so every client sorts the same way. */
+  pinned?: boolean
   worktree?: import('./worktree').WorktreeInfo
   title?: string
   time?: SessionTime

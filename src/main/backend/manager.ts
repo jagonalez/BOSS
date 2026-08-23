@@ -91,6 +91,9 @@ interface ThreadBinding {
    * is a property of the thread, so it belongs here where every client sees it.
    */
   archived?: boolean
+  /** Kept at the top of its section in every thread list. Same reasoning as
+   *  `archived`: a property of the thread, not of one window's storage. */
+  pinned?: boolean
   policy?: TaskPolicy
   /** What the policy has already done for this thread. Separate from the
    *  policy itself so editing the configuration never rewrites history. */
@@ -1156,6 +1159,7 @@ export class BackendManager {
       projectPath: binding.projectPath,
       executionPath: binding.executionPath,
       archived: binding.archived === true,
+      pinned: binding.pinned === true,
       title: binding.title ?? native?.title,
       directory: binding.executionPath || native?.directory,
       path: binding.executionPath || native?.path,
@@ -2644,6 +2648,26 @@ export class BackendManager {
         binding.archived = request.archived
         this.save()
         return this.supervisionSnapshot()
+      }
+      case 'thread.pin': {
+        const binding = this.binding(request.threadId)
+        binding.pinned = request.pinned
+        this.save()
+        const session = this.session(binding)
+        this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
+        return session
+      }
+      case 'thread.usage': {
+        const binding = this.binding(request.threadId)
+        const usage = this.transcripts?.usage(binding.id) ?? {
+          totals: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
+        }
+        return {
+          threadId: binding.id,
+          totals: usage.totals,
+          lastRun: usage.lastRun,
+          budget: binding.policy?.budget
+        }
       }
       case 'thread.policy.get': return this.taskPolicy(request.threadId)
       case 'thread.policy.set': return this.setTaskPolicy(request.threadId, request.policy)

@@ -120,7 +120,8 @@ const boss: BossApi = {
   onUpdateChanged: (cb) => subscribe(IpcChannels.UpdateChanged, cb),
   updateRestart: () => ipcRenderer.invoke(IpcChannels.UpdateRestart),
   updateChannelSet: (channel) => ipcRenderer.invoke(IpcChannels.UpdateChannelSet, channel),
-  onMenuCommand: (cb) => subscribe(IpcChannels.MenuCommand, cb)
+  onMenuCommand: (cb) => subscribe(IpcChannels.MenuCommand, cb),
+  exportThreadMarkdown: (req) => ipcRenderer.invoke(IpcChannels.ThreadExportMarkdown, req)
 }
 
 if (process.env.BOSS_E2E === '1') installE2EApi(boss)
