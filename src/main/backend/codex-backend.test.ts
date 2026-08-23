@@ -143,3 +143,15 @@ test('a tool image becomes a content block rather than base64 in the text', () =
   assert.ok(helper.includes("type: 'image'"), 'the block should be an image block')
   assert.ok(/mimeType/.test(helper) && /data/.test(helper), 'it should carry mimeType and data')
 })
+
+test('title generation is a bounded structured turn in an ephemeral thread', () => {
+  const generate = source.slice(source.indexOf('async generateTitle('), source.indexOf('private async ensureLoaded('))
+  assert.ok(generate.includes('ephemeral: true'), 'title work must not create a persisted user thread')
+  assert.ok(generate.includes("effort: 'low'"), 'the title turn should keep reasoning cost low')
+  assert.ok(generate.includes('outputSchema:'), 'the title turn should constrain the response shape')
+  assert.ok(generate.includes('.slice(0, 1_600)'), 'a long first prompt should not become a long title request')
+
+  const notifications = source.slice(source.indexOf('private mapNotification('), source.indexOf('async sessionsList('))
+  assert.ok(notifications.indexOf('const titleRun') < notifications.indexOf('switch (method)'), 'ephemeral title events should be intercepted')
+  assert.ok(notifications.includes('this.finishTitleRun(sessionId'), 'completion should settle the pending title')
+})

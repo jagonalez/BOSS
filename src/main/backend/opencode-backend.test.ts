@@ -176,3 +176,12 @@ test('a slash command sends the model as a provider/model string', async () => {
 
   assert.equal((bodies.at(-1) as { model?: unknown })?.model, 'anthropic/claude-opus-4-5')
 })
+
+test('uses OpenCode’s small-model session title when it becomes available', async () => {
+  const { backend } = harness({})
+  backend.sessionGet = async (id) => ({ id, title: 'Improve automatic thread naming' })
+
+  const title = await backend.generateTitle('ses_title', [], { currentTitle: 'Untitled thread' })
+
+  assert.equal(title, 'Improve automatic thread naming')
+})

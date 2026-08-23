@@ -828,7 +828,7 @@ export function SettingsModal(): React.JSX.Element | null {
                 <section className="settings-card settings-card-list">
                   <SettingsRow
                     title="Auto-name threads"
-                    description="Use the first prompt to give new, untitled threads a compact name. This happens locally and never sends an extra model request or uses tokens."
+                    description="Generate a short name from the first request, using a small model call when supported and a local fallback otherwise."
                   >
                     <label className="settings-computer-toggle">
                       <input

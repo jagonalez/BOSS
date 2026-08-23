@@ -14,6 +14,7 @@ import type {
 import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
 import type { MessageWithParts, SessionInfo } from '../shared/opencode'
 import { contextHandoffPacket, delegatedContextInstruction } from '../shared/context-handoff'
+import { titleFromFirstPrompt } from '../shared/thread-title'
 
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
@@ -797,6 +798,20 @@ export function installE2EApi(boss: BossApi): void {
       // rather than drop it.
       case 'thread.send':
         if (busyThreads.has(request.threadId)) throw new Error(THREAD_BUSY_ERROR)
+        if (threadTitleSettings.autoNameFromFirstPrompt) {
+          const found = sessions.find((session) => session.id === request.threadId)
+          // Codex stands in for a successful cheap model call; Claude has no
+          // title generator in BOSS and exercises the local fallback.
+          const title = found?.backendId === 'codex'
+            ? 'Improve automatic thread naming'
+            : titleFromFirstPrompt(found?.title, request.parts)
+          if (found && title) {
+            const changed = { ...found, title, time: { ...found.time, updated: Date.now() } }
+            sessions = sessions.map((session) => session.id === request.threadId ? changed : session)
+            const data = JSON.stringify({ type: 'session.updated', properties: { info: changed }, backendId: changed.backendId })
+            for (const listener of eventListeners) listener(data)
+          }
+        }
         busyThreads.add(request.threadId)
         return undefined
       case 'thread.todos': return []
