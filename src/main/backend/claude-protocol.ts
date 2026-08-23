@@ -1,3 +1,5 @@
+import type { Part } from '@shared/opencode'
+
 /** The mode names the Claude Agent SDK takes.
  *
  *  'default' is what the SDK types call the mode the CLI spells 'manual' — the
@@ -48,6 +50,35 @@ export function claudeMessageContent(parts: unknown[]): string | Array<Record<st
   if (!blocks.length) return prompt
   // Text last: the instruction reads better after what it refers to.
   return prompt ? [...blocks, { type: 'text', text: prompt }] : blocks
+}
+
+/** The user's durable transcript copy. Claude's SDK history is owned by BOSS,
+ *  so the echo must retain the original file part as well as the text sent to
+ *  the model. Keeping only text made the model see a screenshot that the user
+ *  could no longer see in their own conversation. */
+export function claudeTranscriptParts(parts: unknown[], sessionID: string, messageID: string): Part[] {
+  const transcript: Part[] = []
+  for (const [index, part] of parts.entries()) {
+    if (!part || typeof part !== 'object') continue
+    const item = part as { type?: string; text?: string; filename?: string; mime?: string; url?: string }
+    if (item.type === 'text' && item.text) {
+      transcript.push({ id: `${messageID}-text-${index}`, type: 'text', sessionID, messageID, text: item.text })
+    } else if (item.type === 'file') {
+      transcript.push({
+        id: `${messageID}-file-${index}`,
+        type: 'file',
+        sessionID,
+        messageID,
+        state: {
+          status: 'completed',
+          path: item.filename,
+          name: item.filename,
+          ...(item.mime?.startsWith('image/') && item.url ? { mime: item.mime, url: item.url } : {})
+        }
+      })
+    }
+  }
+  return transcript
 }
 
 /** Report a failed Claude result unless BOSS deliberately stopped the turn.

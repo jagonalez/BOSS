@@ -12,6 +12,7 @@ import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { qaDescription } from '@shared/qa'
 import { QA_GUIDANCE } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
+import { compactionCompletedEvents, compactionStartedEvent } from './compaction-events'
 
 type RpcRequest = { id?: string; type: string; [key: string]: unknown }
 type RpcResponse = { id?: string; type: 'response'; command: string; success: boolean; data?: unknown; error?: string }
@@ -262,6 +263,7 @@ export class PiBackend implements Backend {
   private sessionDirectories = new Map<string, string>()
   private messageIds = new Map<string, string>()
   private liveText = new Map<string, string>()
+  private manualCompactions = new Set<string>()
   private forkEntryIds = new Map<string, Map<string, string>>()
   private version = ''
   private healthy = false
@@ -646,9 +648,15 @@ export default function (pi: ExtensionAPI) {
       }
       case 'compaction_start':
         this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'busy' } })
+        this.emit(compactionStartedEvent(
+          sessionId,
+          this.manualCompactions.has(sessionId) ? 'manual' : 'auto'
+        ))
         break
       case 'compaction_end':
-        this.emit({ type: 'session.compacted', sessionID: sessionId })
+        for (const emitted of compactionCompletedEvents(sessionId, {
+          trigger: this.manualCompactions.delete(sessionId) ? 'manual' : 'auto'
+        })) this.emit(emitted)
         break
       case 'extension_error':
         this.emit({ type: 'session.error', sessionID: sessionId, error: String(event.error ?? 'Pi extension error') })
@@ -837,5 +845,13 @@ export default function (pi: ExtensionAPI) {
 
   async revert(_sessionId: string, _messageId: string): Promise<void> {}
   async unrevert(_sessionId: string): Promise<void> {}
-  async compact(sessionId: string): Promise<void> { await (await this.runtime(sessionId)).send({ type: 'compact' }, 120_000) }
+  async compact(sessionId: string): Promise<void> {
+    this.manualCompactions.add(sessionId)
+    try {
+      await (await this.runtime(sessionId)).send({ type: 'compact' }, 120_000)
+    } catch (error) {
+      this.manualCompactions.delete(sessionId)
+      throw error
+    }
+  }
 }

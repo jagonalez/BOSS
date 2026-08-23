@@ -8,6 +8,7 @@ import { PairScreen } from './src/PairScreen'
 import { ThreadsScreen, type ThreadRow } from './src/ThreadsScreen'
 import { ProjectsScreen } from './src/ProjectsScreen'
 import { NewThreadScreen, type BackendOption, type ModelOption } from './src/NewThreadScreen'
+import { DelegateScreen } from './src/DelegateScreen'
 import { groupByProject, visibleThreads } from './src/parts'
 import { AutomationsScreen, type AutomationRow, type AutomationRunRow } from './src/AutomationsScreen'
 import { WorkScreen, type DiffFile, type Todo } from './src/WorkScreen'
@@ -40,6 +41,8 @@ export default function App(): React.JSX.Element {
   // Which project's threads are open. null means the project list itself.
   const [openProject, setOpenProject] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
+  /** The thread being delegated from, while its options are being chosen. */
+  const [delegating, setDelegating] = useState<string | null>(null)
   const [backends, setBackends] = useState<BackendOption[]>([])
   const [models, setModels] = useState<ModelOption[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
@@ -352,6 +355,54 @@ export default function App(): React.JSX.Element {
     }
   }, [openProject, refreshMessages, refreshThreads])
 
+  /**
+   * Delegate to a new worker thread, then open it.
+   *
+   * One request, unlike createThread: the desktop's delegate builds the context
+   * packet and sends the first message itself, so the options ride along with
+   * the delegation rather than following it. Opening the worker is the point —
+   * on a phone there is no second pane to watch it in.
+   */
+  const startDelegate = useCallback(async (from: string, input: {
+    backendId: string
+    instruction: string
+    placement: 'same-checkout' | 'new-worktree'
+    model?: { modelID: string; providerID: string; variant?: string }
+    mode?: string
+  }) => {
+    const connection = relay.current
+    if (!connection) return
+    setSending(true)
+    try {
+      const created = await connection.request<{ id?: string }>({
+        type: 'thread.delegate',
+        threadId: from,
+        backendId: input.backendId,
+        instruction: input.instruction,
+        placement: input.placement,
+        options: {
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.mode ? { mode: input.mode } : {})
+        }
+      })
+      setDelegating(null)
+      setError(undefined)
+      const id = created?.id
+      // A delegate with no id still ran on the desktop; the list will show it.
+      if (id) {
+        setOpenThread(id)
+        await refreshThreads()
+        await refreshMessages(id)
+      } else {
+        await refreshThreads()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSending(false)
+    }
+  }, [refreshMessages, refreshThreads])
+
   if (!loaded) return <View style={styles.fill} />
 
   if (!credentials?.token) {
@@ -364,6 +415,30 @@ export default function App(): React.JSX.Element {
             setError(undefined)
             void relay.current?.pair(payload)
           }}
+        />
+      </SafeAreaView>
+    )
+  }
+
+  // Before the thread branch: choosing how to delegate replaces the thread it
+  // was started from, the way composing replaces the list.
+  if (delegating) {
+    const from = threads.find((t) => t.threadId === delegating)
+    return (
+      <SafeAreaView style={styles.fill}>
+        <StatusBar barStyle="light-content" />
+        <DelegateScreen
+          source={from?.title || 'Untitled thread'}
+          sourceBackendId={from?.backendId}
+          backends={backends}
+          models={models}
+          loadingModels={loadingModels}
+          sending={sending}
+          error={error}
+          canWorktree={Boolean(from?.projectPath)}
+          onPickBackend={(id) => void loadModels(id)}
+          onCancel={() => { setDelegating(null); setError(undefined) }}
+          onDelegate={(input) => void startDelegate(delegating, input)}
         />
       </SafeAreaView>
     )
@@ -417,17 +492,12 @@ export default function App(): React.JSX.Element {
           variant={threadVariants[threadId]}
           onVariant={(next) => setThreadVariants((prev) => ({ ...prev, [threadId]: next }))}
           onDelegate={() => {
-            const instruction = 'Continue this work in a separate thread.'
-            void relay.current
-              ?.request({
-                type: 'thread.delegate',
-                threadId,
-                backendId: threads.find((t) => t.threadId === threadId)?.backendId ?? 'opencode',
-                instruction,
-                placement: 'new-worktree'
-              })
-              .then(() => refreshThreads())
-              .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+            // Only opens the options. Delegating creates a thread, a branch,
+            // and a running agent, which is too much for one unconfirmed tap.
+            setError(undefined)
+            setDelegating(threadId)
+            const backendId = threads.find((t) => t.threadId === threadId)?.backendId
+            if (backendId) void loadModels(backendId)
           }}
           onMode={(next) => {
             // Optimistic: the desktop has no event for a mode change, so the

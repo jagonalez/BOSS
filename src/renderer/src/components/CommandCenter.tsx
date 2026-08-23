@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SupervisedThread, SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
 import { buildTaskTree, flattenTaskTree, type TaskNode } from '@shared/task-tree'
 import { useStore, appStore } from '../state/AppState'
-import { openProject, selectSession } from '../lib/actions'
+import { exportSessionMarkdown, openProject, selectSession } from '../lib/actions'
 import { OpenCode } from '../lib/opencode'
 import { ChatIcon, ChevronIcon, SearchIcon } from './icons'
 import { serviceDegradations } from '../lib/status'
@@ -47,12 +47,13 @@ const LINEAGE_LABELS: Record<NonNullable<SupervisedThread['lineage']>['kind'], s
   fallback: 'Fallback for'
 }
 
-function ThreadCard({ thread, state, label, depth = 0, parentTitle }: {
+function ThreadCard({ thread, state, label, depth = 0, parentTitle, onCtx }: {
   thread: SupervisedThread
   state: 'attention' | 'running' | 'recent'
   label: string
   depth?: number
   parentTitle?: string
+  onCtx?: (event: React.MouseEvent, thread: SupervisedThread) => void
 }): React.JSX.Element {
   const metrics = [
     thread.lastRun?.durationMs ? duration(thread.lastRun.durationMs) : '',
@@ -80,6 +81,7 @@ function ThreadCard({ thread, state, label, depth = 0, parentTitle }: {
       className={`command-session-card${depth > 0 ? ' nested' : ''}`}
       style={depth > 0 ? { marginLeft: `${Math.min(depth, 4) * 18}px` } : undefined}
       onClick={() => void openThread(thread)}
+      onContextMenu={onCtx ? (event) => onCtx(event, thread) : undefined}
     >
       <span className={`command-state-icon ${state}`}><ChatIcon size={14} /></span>
       <span className="command-session-main">
@@ -99,11 +101,12 @@ function ThreadCard({ thread, state, label, depth = 0, parentTitle }: {
 }
 
 /** Render a lineage tree as an indented list. */
-function ThreadTree({ nodes, state, label, titles }: {
+function ThreadTree({ nodes, state, label, titles, onCtx }: {
   nodes: TaskNode[]
   state: 'attention' | 'running' | 'recent'
   label: string
   titles: Map<string, string>
+  onCtx?: (event: React.MouseEvent, thread: SupervisedThread) => void
 }): React.JSX.Element {
   return (
     <>
@@ -115,6 +118,7 @@ function ThreadTree({ nodes, state, label, titles }: {
           label={label}
           depth={node.depth}
           parentTitle={node.thread.lineage ? titles.get(node.thread.lineage.sourceThreadId) : undefined}
+          onCtx={onCtx}
         />
       ))}
     </>
@@ -149,7 +153,46 @@ export function CommandCenter(): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<TranscriptSearchResult[]>([])
   const [searching, setSearching] = useState(false)
+  /** A thread card's right-click menu. Cards are buttons that open on click,
+   *  so secondary actions live here rather than in the card itself. */
+  const [cardMenu, setCardMenu] = useState<{ x: number; y: number; thread: SupervisedThread } | null>(null)
+  const cardMenuRef = useRef<HTMLDivElement>(null)
   const degradations = serviceDegradations(serverUrl, serverHealthy, backends)
+
+  useEffect(() => {
+    if (!cardMenu) return
+    const close = (): void => setCardMenu(null)
+    const onDoc = (event: MouseEvent): void => {
+      if (cardMenuRef.current && !cardMenuRef.current.contains(event.target as Node)) close()
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [cardMenu])
+
+  const openCardMenu = useCallback((event: React.MouseEvent, thread: SupervisedThread): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    setCardMenu({ x: event.clientX, y: event.clientY, thread })
+  }, [])
+
+  const cardMenuItem = (label: string, fn: () => void): React.JSX.Element => (
+    <button
+      className="ctx-item"
+      onClick={() => {
+        setCardMenu(null)
+        fn()
+      }}
+    >
+      {label}
+    </button>
+  )
 
   useEffect(() => {
     let disposed = false
@@ -279,7 +322,9 @@ export function CommandCenter(): React.JSX.Element {
             <div className="command-section-head"><h2>Needs your attention</h2><span>{classified.attention.length}</span></div>
             <div className="command-list">
               {classified.attention.length > 0
-                ? classified.attention.map(({ thread, label }) => <ThreadCard key={thread.threadId} thread={thread} state="attention" label={label} />)
+                ? classified.attention.map(({ thread, label }) => (
+                    <ThreadCard key={thread.threadId} thread={thread} state="attention" label={label} onCtx={openCardMenu} />
+                  ))
                 : <div className="command-empty">Nothing needs you right now.</div>}
             </div>
           </section>
@@ -288,7 +333,7 @@ export function CommandCenter(): React.JSX.Element {
             <div className="command-section-head"><h2>Running</h2><span>{classified.running.length}</span></div>
             <div className="command-list">
               {classified.running.length > 0
-                ? <ThreadTree nodes={classified.runningTree} state="running" label="Working" titles={classified.titles} />
+                ? <ThreadTree nodes={classified.runningTree} state="running" label="Working" titles={classified.titles} onCtx={openCardMenu} />
                 : <div className="command-empty">No agents are currently running.</div>}
             </div>
           </section>
@@ -297,12 +342,23 @@ export function CommandCenter(): React.JSX.Element {
             <div className="command-section-head"><h2>Recently active</h2><span>{flattenTaskTree(classified.recent).length}</span></div>
             <div className="command-list">
               {classified.recent.length > 0
-                ? <ThreadTree nodes={classified.recent} state="recent" label="Updated" titles={classified.titles} />
+                ? <ThreadTree nodes={classified.recent} state="recent" label="Updated" titles={classified.titles} onCtx={openCardMenu} />
                 : <div className="command-empty">Your recent work will appear here.</div>}
             </div>
           </section>
         </div>
       )}
+
+      {cardMenu ? (
+        <div
+          ref={cardMenuRef}
+          className="ctx-menu"
+          style={{ left: Math.min(cardMenu.x, window.innerWidth - 220), top: cardMenu.y }}
+        >
+          {cardMenuItem('Open', () => void openThread(cardMenu.thread))}
+          {cardMenuItem('Export as Markdown…', () => void exportSessionMarkdown(cardMenu.thread.threadId))}
+        </div>
+      ) : null}
     </div>
   )
 }

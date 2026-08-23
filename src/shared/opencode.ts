@@ -16,6 +16,9 @@ export interface SessionInfo {
   /** Hidden from the default list. Recorded on the thread rather than in one
    *  window's storage, so every client agrees on what is visible. */
   archived?: boolean
+  /** Kept at the top of its section. Lives on the thread like archived does,
+   *  so every client sorts the same way. */
+  pinned?: boolean
   worktree?: import('./worktree').WorktreeInfo
   title?: string
   time?: SessionTime
@@ -287,7 +290,8 @@ export type EventMessage =
   | { type: 'question.rejected'; sessionID: string; requestID: string }
   | { type: 'session.status'; sessionID: string; status: { type: 'idle' | 'busy' | 'retry' } }
   | { type: 'session.idle'; sessionID: string }
-  | { type: 'session.compacted'; sessionID: string }
+  | { type: 'session.compaction.started'; sessionID: string; trigger?: 'auto' | 'manual' | 'unknown' }
+  | { type: 'session.compacted'; sessionID: string; trigger?: 'auto' | 'manual' | 'unknown'; preTokens?: number; postTokens?: number }
   | { type: 'server.connected' }
   | { type: 'server.disconnected' }
   | { type: 'config.updated' }
@@ -296,12 +300,13 @@ export type EventMessage =
 
 /** Ids BOSS mints itself, for transcript entries no backend will ever report.
  *
- *  A steered message is folded into the run the backend is already doing, and
- *  a tool image is produced by BOSS rather than by the model, so neither comes
- *  back in a native history list. Anything reconciling BOSS's transcript
+ *  A steered message is folded into the run the backend is already doing, a
+ *  tool image is produced by BOSS rather than by the model, and a compaction
+ *  notice represents an out-of-band event. None comes back in native history.
+ *  Anything reconciling BOSS's transcript
  *  against that list has to know the difference: treating "the backend did not
  *  mention it" as "it never existed" deletes the message the user just sent. */
-const LOCAL_MESSAGE_PREFIXES = ['steer-', 'assistant-tool-image-'] as const
+const LOCAL_MESSAGE_PREFIXES = ['steer-', 'assistant-tool-image-', 'compaction-notice-'] as const
 
 /** Whether this transcript entry was authored by BOSS rather than a backend.
  *

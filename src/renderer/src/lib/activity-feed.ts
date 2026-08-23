@@ -10,6 +10,7 @@ export type ActivityKind =
   | 'permission.answered'
   | 'question'
   | 'question.answered'
+  | 'question.rejected'
   | 'error'
   | 'done'
 
@@ -18,6 +19,7 @@ export const ACTIVITY_KINDS: readonly ActivityKind[] = [
   'permission.answered',
   'question',
   'question.answered',
+  'question.rejected',
   'error',
   'done'
 ]
@@ -59,8 +61,10 @@ function dedupeKey(event: ActivityEvent): string {
  *  same kind records fresh. */
 export function activityReducer(state: ActivityFeedState, action: ActivityAction): ActivityFeedState {
   switch (action.type) {
-    case 'markAllRead':
-      return { events: state.events, lastReadTs: Math.max(state.lastReadTs, action.ts) }
+    case 'markAllRead': {
+      const newestTs = state.events.reduce((latest, event) => Math.max(latest, event.ts), 0)
+      return { events: state.events, lastReadTs: Math.max(state.lastReadTs, action.ts, newestTs) }
+    }
     case 'record': {
       if (!isActivityKind(action.event.kind)) return state
       const key = dedupeKey(action.event)
@@ -69,14 +73,14 @@ export function activityReducer(state: ActivityFeedState, action: ActivityAction
       )
       let events: ActivityEvent[]
       if (pendingIndex >= 0) {
-        events = [...state.events]
-        const current = events[pendingIndex]
-        events[pendingIndex] = {
+        const current = state.events[pendingIndex]
+        const updated = {
           ...current,
           ts: action.event.ts,
           threadTitle: action.event.threadTitle ?? current.threadTitle,
           detail: action.event.detail ?? current.detail
         }
+        events = [updated, ...state.events.filter((_, index) => index !== pendingIndex)]
       } else {
         events = [action.event, ...state.events]
       }
@@ -91,7 +95,7 @@ export function unreadCount(state: ActivityFeedState): number {
 
 /** A compact age for a row: "just now", "5m ago", "3h ago", "2d ago". */
 export function formatRelativeTime(ts: number, now: number): string {
-  const seconds = Math.max(0, Math.round((now - ts) / 1000))
+  const seconds = Math.max(0, Math.floor((now - ts) / 1000))
   if (seconds < 60) return 'just now'
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`

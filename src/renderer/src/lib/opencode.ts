@@ -21,8 +21,9 @@ import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/a
 import type { WebhookSettings } from '@shared/notification'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
+import type { TelegramSettingsPatch, TelegramStatus } from '@shared/telegram'
 import type { RemoteAccessStatus } from '@shared/relay'
-import type { SupervisionSnapshot, TranscriptSearchResult } from '@shared/supervision'
+import type { SupervisionSnapshot, ThreadUsageReport, TranscriptSearchResult } from '@shared/supervision'
 import type { TaskPolicy } from '@shared/task-policy'
 
 export class ApiError extends Error {
@@ -192,6 +193,10 @@ export const OpenCode = {
     backendRequest<SupervisionSnapshot>({ type: 'supervision.acknowledge', threadId }),
   archiveThread: (threadId: string, archived: boolean) =>
     backendRequest<SupervisionSnapshot>({ type: 'thread.archive', threadId, archived }),
+  pinThread: (threadId: string, pinned: boolean) =>
+    backendRequest<SessionInfo>({ type: 'thread.pin', threadId, pinned }),
+  threadUsage: (threadId: string) =>
+    backendRequest<ThreadUsageReport>({ type: 'thread.usage', threadId }),
   taskPolicy: (threadId: string) =>
     backendRequest<TaskPolicy | undefined>({ type: 'thread.policy.get', threadId }),
   setTaskPolicy: (threadId: string, policy: TaskPolicy) =>
@@ -237,6 +242,10 @@ export const OpenCode = {
   deleteAutomation: (automationId: string) => backendRequest<void>({ type: 'automation.delete', automationId }),
   runAutomation: (automationId: string) => backendRequest<void>({ type: 'automation.run', automationId }),
   stopAutomation: (automationId: string) => backendRequest<void>({ type: 'automation.stop', automationId }),
+  automationWebhookToken: (automationId: string) =>
+    backendRequest<{ token: string; url: string }>({ type: 'automation.webhook.token', automationId }),
+  telegramStatus: () => backendRequest<TelegramStatus>({ type: 'telegram.status' }),
+  telegramSet: (patch: TelegramSettingsPatch) => backendRequest<TelegramStatus>({ type: 'telegram.set', patch }),
   relayToThread: (sourceThreadId: string, targetThreadId: string, instruction?: string) =>
     backendRequest<SessionInfo>({ type: 'thread.relay', sourceThreadId, targetThreadId, instruction }),
   threadBus: (threadId?: string) =>

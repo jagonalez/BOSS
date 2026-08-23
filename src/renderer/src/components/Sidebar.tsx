@@ -31,9 +31,11 @@ import {
   selectSession,
   sessionMetaFor,
   showPage,
-  toggleArchive
+  toggleArchive,
+  togglePin,
+  exportSessionMarkdown
 } from '../lib/actions'
-import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, TerminalIcon } from './icons'
+import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -199,7 +201,7 @@ function SessionRow({
   ].filter(Boolean)
   return (
     <div
-      className={`item sub session-row ${showing ? 'active' : ''}`}
+      className={`item sub session-row ${session.pinned ? 'pinned' : ''} ${showing ? 'active' : ''}`}
       draggable
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = 'move'
@@ -236,6 +238,18 @@ function SessionRow({
         </span>
         <span className="name">{session.title || 'Untitled'}</span>
       </span>
+      <button
+        className={`session-pin ${session.pinned ? 'pinned' : ''}`}
+        aria-label={session.pinned ? 'Unpin thread' : 'Pin thread'}
+        title={session.pinned ? 'Unpin thread' : 'Pin thread'}
+        onClick={(event) => {
+          // The row itself selects; a pin click is only a pin.
+          event.stopPropagation()
+          togglePin(session.id)
+        }}
+      >
+        <StarIcon size={12} />
+      </button>
       <span className="meta">{timeAgo(session.time?.updated)}</span>
     </div>
   )
@@ -438,6 +452,17 @@ export function Sidebar(): React.JSX.Element {
   const visibleSessions = sessions.filter((s) => !isArchived(s) && !s.parentID && matches(s))
   const archivedSessions = sessions.filter((s) => isArchived(s) && matches(s))
 
+  /** Pinned threads above the rest, each half keeping its recency order.
+   *  Sorting inside the halves matters where a backend's list was not built
+   *  newest-first; partitioning keeps a pin meaning "top of the section". */
+  const pinnedFirst = (list: SessionInfo[]): SessionInfo[] => {
+    const byRecency = (a: SessionInfo, b: SessionInfo): number => (b.time?.updated ?? 0) - (a.time?.updated ?? 0)
+    return [
+      ...list.filter((session) => session.pinned === true).sort(byRecency),
+      ...list.filter((session) => session.pinned !== true).sort(byRecency)
+    ]
+  }
+
   const sessionsByPath = new Map<string, SessionInfo[]>()
   for (const session of visibleSessions) {
     const raw = session.projectPath ?? session.directory ?? session.path ?? ''
@@ -446,6 +471,7 @@ export function Sidebar(): React.JSX.Element {
     list.push(session)
     sessionsByPath.set(key, list)
   }
+  for (const [key, list] of sessionsByPath) sessionsByPath.set(key, pinnedFirst(list))
   const looseChats = sessionsByPath.get('') ?? []
   const projectPaths = Array.from(
     new Set(
@@ -528,15 +554,14 @@ export function Sidebar(): React.JSX.Element {
     e.preventDefault()
     e.stopPropagation()
     setCtx({ x: e.clientX, y: e.clientY, session })
-    // Surface the pull request the thread's worktree branch has open, the same
-    // lookup the hover card does, so the menu can remind the user what the
-    // thread produced. Only worktree threads get one: a thread on the main
-    // checkout is usually on the default branch, where a pull request would be
-    // surprising. Resolved asynchronously and merged back by thread id so a
-    // fetch for one thread never paints a later menu.
+    // Surface the pull request the thread's checkout has open, the same lookup
+    // the hover card does, so the menu can remind the user what the thread
+    // produced. Any live checkout qualifies: the snapshot resolves the branch
+    // with git, so gating on the thread's stored worktree only hid pull
+    // requests that were really there. Resolved asynchronously and merged back
+    // by thread id so a fetch for one thread never paints a later menu.
     const path = session.executionPath ?? session.projectPath ?? session.directory ?? session.path
-    const branch = session.worktree?.branch
-    if (!path || !branch) return
+    if (!path || session.worktree?.status === 'removed') return
     void window.boss
       .reviewSnapshot(path)
       .then((snapshot) => {
@@ -985,6 +1010,12 @@ export function Sidebar(): React.JSX.Element {
                   })
                 )
               )}
+              {ctx.session.pinned ? (
+                menuItem('Unpin', () => togglePin(ctx.session!.id))
+              ) : (
+                menuItem('Pin to top', () => togglePin(ctx.session!.id))
+              )}
+              {menuItem('Export as Markdown…', () => void exportSessionMarkdown(ctx.session!.id))}
               {menuItem('Delete', () =>
                 appStore.setState({
                   confirm: {

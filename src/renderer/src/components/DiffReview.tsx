@@ -1,7 +1,8 @@
 import React, { useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { DiffLine } from '../lib/diff'
-import { DiffLines } from './DiffLines'
+import { ignoreWhitespaceChanges } from '../lib/diff'
+import { DiffLines, type DiffMode } from './DiffLines'
 import { ChevronIcon } from './icons'
 import type { AddReviewCommentInput, ReviewComment, ReviewProviderSummary } from '@shared/review'
 
@@ -10,6 +11,25 @@ export interface DiffFileData {
   additions: number
   deletions: number
   lines: DiffLine[]
+}
+
+const DIFF_MODE_KEY = 'boss.diffMode'
+const DIFF_IGNORE_WS_KEY = 'boss.diffIgnoreWhitespace'
+
+function savedDiffMode(): DiffMode {
+  try {
+    return localStorage.getItem(DIFF_MODE_KEY) === 'split' ? 'split' : 'unified'
+  } catch {
+    return 'unified'
+  }
+}
+
+function savedIgnoreWhitespace(): boolean {
+  try {
+    return localStorage.getItem(DIFF_IGNORE_WS_KEY) === '1'
+  } catch {
+    return false
+  }
 }
 
 export function DiffReview({
@@ -35,6 +55,22 @@ export function DiffReview({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [listWidth, setListWidth] = useState(260)
+  const [mode, setMode] = useState<DiffMode>(savedDiffMode)
+  const [ignoreWs, setIgnoreWs] = useState(savedIgnoreWhitespace)
+
+  const switchMode = (next: DiffMode): void => {
+    setMode(next)
+    try {
+      localStorage.setItem(DIFF_MODE_KEY, next)
+    } catch { /* private mode */ }
+  }
+
+  const switchIgnoreWs = (next: boolean): void => {
+    setIgnoreWs(next)
+    try {
+      localStorage.setItem(DIFF_IGNORE_WS_KEY, next ? '1' : '0')
+    } catch { /* private mode */ }
+  }
 
   const onListResize = (e: React.MouseEvent): void => {
     e.preventDefault()
@@ -53,11 +89,23 @@ export function DiffReview({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return q ? files.filter((f) => f.path.toLowerCase().includes(q)) : files
-  }, [files, query])
+    const list = q ? files.filter((f) => f.path.toLowerCase().includes(q)) : files
+    if (!ignoreWs) return list
+    // Whitespace-only churn folds back into context, so the stats are
+    // recomputed from what is actually drawn rather than reused.
+    return list.map((f) => {
+      const lines = ignoreWhitespaceChanges(f.lines)
+      return {
+        ...f,
+        lines,
+        additions: lines.filter((l) => l.kind === 'add').length,
+        deletions: lines.filter((l) => l.kind === 'del').length
+      }
+    })
+  }, [files, query, ignoreWs])
 
-  const totalAdds = files.reduce((a, f) => a + f.additions, 0)
-  const totalDels = files.reduce((a, f) => a + f.deletions, 0)
+  const totalAdds = filtered.reduce((a, f) => a + f.additions, 0)
+  const totalDels = filtered.reduce((a, f) => a + f.deletions, 0)
 
   const toggle = (path: string): void => {
     setCollapsed((prev) => {
@@ -147,9 +195,23 @@ export function DiffReview({
             <span className="add">+{totalAdds}</span> <span className="del">−{totalDels}</span>
           </span>
           {files.length > 0 && (
-            <button className="btn-ghost" onClick={toggleAll}>
-              {allCollapsed ? 'Expand all' : 'Collapse all'}
-            </button>
+            <div className="diff-stack-actions" role="group" aria-label="Diff options">
+              <div className="diff-mode-toggle" role="group" aria-label="Diff layout">
+                <button className={mode === 'unified' ? 'active' : ''} onClick={() => switchMode('unified')} title="One column, deletions above additions">Unified</button>
+                <button className={mode === 'split' ? 'active' : ''} onClick={() => switchMode('split')} title="Old and new side by side">Split</button>
+              </div>
+              <button
+                className={`btn-ghost diff-whitespace-toggle ${ignoreWs ? 'active' : ''}`}
+                onClick={() => switchIgnoreWs(!ignoreWs)}
+                title="Hide changes that only move space"
+                aria-pressed={ignoreWs}
+              >
+                Ignore whitespace
+              </button>
+              <button className="btn-ghost" onClick={toggleAll}>
+                {allCollapsed ? 'Expand all' : 'Collapse all'}
+              </button>
+            </div>
           )}
         </div>
         <div className="diff-stack-body" ref={stackRef}>
@@ -176,7 +238,7 @@ export function DiffReview({
                       <span className="add">+{f.additions}</span> <span className="del">−{f.deletions}</span>
                     </span>
                   </button>
-                  {!isCollapsed ? <DiffLines lines={f.lines} path={f.path} comments={comments} provider={provider} canPublish={canPublish} onAddComment={onAddComment} /> : null}
+                  {!isCollapsed ? <DiffLines lines={f.lines} path={f.path} mode={mode} comments={comments} provider={provider} canPublish={canPublish} onAddComment={onAddComment} /> : null}
                 </div>
               )
             })}

@@ -36,6 +36,13 @@ export const RenameIcon = (p: IconProps): React.JSX.Element => (
   </Svg>
 )
 
+/** Five-pointed star; CSS fills it when a thread is pinned. */
+export const StarIcon = (p: IconProps): React.JSX.Element => (
+  <Svg {...p}>
+    <path d="m12 3 2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-2.9-5.4 2.9 1.1-6L3.2 9.4l6.1-.8L12 3Z" />
+  </Svg>
+)
+
 export const FolderIcon = (p: IconProps): React.JSX.Element => (
   <Svg {...p}>
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />

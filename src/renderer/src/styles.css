@@ -33,6 +33,14 @@
   --control-min: 26px;
   --control-h: 30px;
   --control-h-lg: 34px;
+  --control-pad-y: 7px;
+  --control-pad-y-lg: 9px;
+  --select-pad-y: 7px;
+  --settings-row-min: 64px;
+  --settings-row-pad-y: 14px;
+  --toolbar-pad-y: 10px;
+  --nav-row-pad-y: 10px;
+  --primary-nav-row-pad-y: 9px;
   --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --type-page-title: 24px;
@@ -42,6 +50,10 @@
   --type-thread: 13px;
   --type-meta: 11px;
   --type-label: 10.5px;
+  /* The only two sizes a person can change. Everything above is chrome and keeps the size it was
+     designed at, so a larger reading size never moves a row height or reflows a list. */
+  --type-reading: 14.5px;
+  --type-terminal: 13px;
   --leading-body: 1.5;
   --leading-compact: 1.35;
   /* Semantic workspace tokens. Themes only need to redefine the base tokens above. */
@@ -60,6 +72,7 @@
   --line-strong: var(--border);
   --focus-ring: var(--accent);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --overlay-scrim: rgba(0, 0, 0, 0.6);
   /* macOS inset traffic lights. The OS draws them over the renderer at
      trafficLightPosition {x:16,y:16} (see src/main/index.ts), so layout must
      reserve room for them. The lights end at x=68: x:16 plus three 12px
@@ -138,8 +151,8 @@ textarea {
   cursor: pointer;
 }
 
-.ui-button-medium { min-height: var(--control-h-lg); padding: 9px 14px; font-size: var(--type-control); }
-.ui-button-small { min-height: var(--control-h); padding: 7px 12px; font-size: 12px; }
+.ui-button-medium { min-height: var(--control-h-lg); padding: var(--control-pad-y-lg) 14px; font-size: var(--type-control); }
+.ui-button-small { min-height: var(--control-h); padding: var(--control-pad-y) 12px; font-size: 12px; }
 .ui-button:hover:not(:disabled),
 .ui-icon-button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface-hover); }
 .ui-button:active:not(:disabled),
@@ -166,7 +179,7 @@ textarea {
 
 .ui-select {
   min-height: var(--control-h-lg);
-  padding: 7px 30px 7px 12px;
+  padding: var(--select-pad-y) 30px var(--select-pad-y) 12px;
   border-radius: 7px;
   font: inherit;
   font-size: var(--type-control);
@@ -198,8 +211,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 24px;
-  min-height: 64px;
-  padding: 14px 0;
+  min-height: var(--settings-row-min);
+  padding: var(--settings-row-pad-y) 0;
   border-bottom: 1px solid var(--line-subtle);
 }
 
@@ -550,6 +563,62 @@ textarea {
   gap: 22px;
 }
 
+/* Search sits above the categories, because a name is easier to recall than which of nine
+   sections somebody decided a setting belonged in. */
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-faint);
+}
+
+.settings-search:focus-within {
+  border-color: color-mix(in srgb, var(--focus-ring) 55%, var(--line-subtle));
+}
+
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--type-control);
+  outline: none;
+}
+
+.settings-nav-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-results button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/* Where the result will take you, since a match is often found under a heading you did not
+   expect — which is the reason for searching in the first place. */
+.settings-nav-results small {
+  color: var(--text-faint);
+  font-size: var(--type-label);
+}
+
+.settings-nav-empty {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+}
+
 .settings-nav-group {
   display: flex;
   flex-direction: column;
@@ -567,7 +636,7 @@ textarea {
 
 .settings-sidebar button {
   width: 100%;
-  padding: 10px 12px;
+  padding: var(--nav-row-pad-y) 12px;
   border: 0;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -1341,6 +1410,22 @@ textarea {
   height: 78px;
 }
 
+/* A size, with a nudge either side of it. The number sits between the two so the pair reads as
+   one control rather than as two buttons that happen to be adjacent. */
+.settings-size-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-size-stepper > span {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--type-control);
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-theme-families {
   display: flex;
   flex-direction: column;
@@ -1500,7 +1585,7 @@ textarea {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 9px 11px;
+  padding: var(--primary-nav-row-pad-y) 11px;
   border: 0;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -3178,6 +3263,22 @@ body.workspace-dragging .workspace-tab-slot {
   font-size: 12px;
 }
 
+.automation-webhook-events {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.automation-hook-url {
+  display: block;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 11px;
+  word-break: break-all;
+  user-select: all;
+}
+
 .automation-error {
   margin: 4px 0;
   color: var(--red);
@@ -4206,6 +4307,45 @@ body.workspace-dragging .workspace-tab-slot {
   padding-top: 2px;
 }
 
+/* Pin control on a thread row. Always present so the affordance is
+   discoverable, but quiet until used: an unpinned star is faint, a pinned one
+   takes the accent and fills, and hovering any row sharpens its own. */
+.session-pin {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.session-pin svg {
+  fill: transparent;
+  transition: fill 120ms ease, color 120ms ease;
+}
+
+.session-row:hover .session-pin {
+  color: var(--text-muted);
+}
+
+.session-pin.pinned,
+.session-row:hover .session-pin.pinned {
+  color: var(--yellow);
+}
+
+.session-pin.pinned svg {
+  fill: currentColor;
+}
+
+.session-row.pinned .session-copy .name {
+  color: var(--text);
+}
+
 .session-state {
   display: grid;
   width: 9px;
@@ -4448,7 +4588,7 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 16px;
+  padding: var(--toolbar-pad-y) 16px;
   border-bottom: 1px solid var(--border-subtle);
   user-select: none;
   -webkit-app-region: drag;
@@ -4730,15 +4870,24 @@ body.workspace-dragging .workspace-tab-slot {
   color: var(--text);
 }
 
+/* The stop control for a turn being read aloud must not hide with the hover:
+   it is the only visible sign playback is running. */
+.msg-speak.active {
+  opacity: 1;
+  color: var(--accent);
+}
+
 .msg.user {
   align-items: flex-end;
 }
 
 .msg.user .msg-body {
   background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px 14px 4px 14px;
-  padding: 10px 14px;
+  /* No border: the fill already separates it from the canvas, and the two together drew the
+     bubble twice. The corners are even, rather than notched toward the speaker — the alignment
+     already says who is talking. */
+  border-radius: 16px;
+  padding: 11px 15px;
   max-width: 82%;
 }
 
@@ -4950,7 +5099,7 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .md {
-  font-size: 14.5px;
+  font-size: var(--type-reading);
   line-height: 1.65;
   color: var(--text);
   word-break: break-word;
@@ -5076,6 +5225,48 @@ body.workspace-dragging .workspace-tab-slot {
   line-height: 1.5;
 }
 
+.md .code-block {
+  position: relative;
+  margin: 0 0 10px;
+}
+
+.md .code-block .part.code {
+  margin: 0;
+}
+
+.code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.code-block:hover .code-copy,
+.code-copy:focus-visible,
+.code-copy.copied {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  color: var(--text);
+}
+
+.code-copy.copied {
+  color: var(--green);
+}
+
 .tool-call {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
@@ -5139,9 +5330,11 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .step-card {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
-  background: var(--bg-inset);
+  /* Transparent rather than inset: a filled panel behind every run of steps cut the transcript
+     into bands, where the reply above and below it sits straight on the canvas. */
+  background: transparent;
   overflow: hidden;
 }
 
@@ -5319,9 +5512,14 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .tool-detail {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  /* No frame of its own: these sit inside a step card that already has one, and a border per
+     row turned a run of tool calls into a stack of boxes. They are told apart by a hairline
+     between them instead. */
   overflow: hidden;
+}
+
+.tool-detail + .tool-detail {
+  border-top: 1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent);
 }
 
 .tool-detail-head {
@@ -5790,6 +5988,76 @@ body.workspace-dragging .workspace-tab-slot {
   gap: 4px;
 }
 
+/* Reported token usage beside the composer. A quiet count that opens into the
+   breakdown; positioned relative so the detail can hang over the composer
+   without pushing the textarea around. */
+.token-meter {
+  position: relative;
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: 2px;
+}
+
+.token-meter-toggle {
+  padding: 3px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.token-meter-toggle:hover,
+.token-meter-toggle.open {
+  color: var(--text-muted);
+  background: var(--bg-inset);
+}
+
+.token-meter-detail {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 210px;
+  max-width: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated, var(--bg));
+  box-shadow: var(--shadow-lg);
+}
+
+.token-meter-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--type-label);
+}
+
+.token-meter-row span {
+  color: var(--text-faint);
+}
+
+.token-meter-row strong {
+  color: var(--text);
+  font-weight: 560;
+  text-align: right;
+}
+
+.token-meter-note {
+  margin-top: 2px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 5px;
+  color: var(--text-faint);
+  font-size: calc(var(--type-label) - 0.5px);
+}
+
 .btn-stop-secondary {
   width: 28px;
   height: 36px;
@@ -6205,9 +6473,13 @@ body.workspace-dragging .workspace-tab-slot {
   margin: 6px auto;
   color: var(--text-faint);
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.02em;
+  text-align: center;
   user-select: none;
+}
+
+.compaction-divider-label {
+  max-width: min(560px, 75%);
 }
 
 .compaction-divider-line {
@@ -6802,11 +7074,27 @@ select:hover {
 
 .git-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
+  flex-direction: column;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.git-toolbar-primary,
+.git-checkout-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.git-toolbar-primary {
+  padding: 6px 10px;
+}
+
+.git-checkout-bar {
+  padding: 5px 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  flex-wrap: wrap;
 }
 
 .git-reviews {
@@ -6845,6 +7133,14 @@ select:hover {
 .git-scope {
   display: flex;
   gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.git-scope::-webkit-scrollbar {
+  display: none;
 }
 
 .git-scope-btn {
@@ -6866,6 +7162,10 @@ select:hover {
 .git-scope-btn.active {
   color: var(--text);
   background: var(--bg-active);
+}
+
+.git-run-review {
+  flex: 0 0 auto;
 }
 
 .git-commit {
@@ -7516,6 +7816,7 @@ select:hover {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  container-type: inline-size;
 }
 
 .diff-stack-head {
@@ -7536,6 +7837,30 @@ select:hover {
 .diff-stack-total {
   margin-left: auto;
   font-size: 12px;
+}
+
+.diff-stack-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+@container (max-width: 620px) {
+  .diff-stack-head {
+    flex-wrap: wrap;
+    row-gap: 7px;
+  }
+
+  .diff-stack-actions {
+    flex: 1 0 100%;
+  }
+}
+
+@container (max-width: 390px) {
+  .diff-stack-actions {
+    flex-wrap: wrap;
+  }
 }
 
 .diff-stack-body {
@@ -9295,6 +9620,14 @@ select:hover {
 [data-ui-density='compact'] {
   --control-h-lg: 30px;
   --control-h: 26px;
+  --control-pad-y: 3px;
+  --control-pad-y-lg: 5px;
+  --select-pad-y: 4px;
+  --settings-row-min: 52px;
+  --settings-row-pad-y: 8px;
+  --toolbar-pad-y: 6px;
+  --nav-row-pad-y: 7px;
+  --primary-nav-row-pad-y: 6px;
   --leading-body: 1.4;
 }
 
@@ -9439,7 +9772,7 @@ select:hover {
   position: fixed;
   inset: 0;
   /* Dimming the app behind a modal, which is a scrim rather than a surface. */
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay-scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -9519,4 +9852,227 @@ select:hover {
   text-align: center;
   color: var(--text-faint);
   font-size: var(--type-meta);
+}
+
+/* Diff view modes and word-level marking */
+
+.diff-mode-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.diff-mode-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.diff-mode-toggle button + button {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.diff-mode-toggle button:hover {
+  color: var(--text);
+}
+
+.diff-mode-toggle button.active {
+  color: var(--surface-app);
+  background: var(--accent);
+}
+
+.diff-whitespace-toggle.active {
+  color: var(--accent);
+}
+
+.word-del,
+.word-add {
+  border-radius: 2px;
+}
+
+.word-del {
+  background: var(--diff-del-gutter);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.word-add {
+  background: var(--diff-add-gutter);
+}
+
+.diff-view.split {
+  padding: 10px 6px;
+}
+
+.diff-split-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.diff-split-row .diff-line.half {
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-line.half .ln {
+  width: 38px;
+  padding-right: 8px;
+}
+
+.diff-line.half.empty {
+  background: var(--bg-inset);
+  min-height: 19px;
+}
+
+.diff-line.hunk.span .lc {
+  color: var(--diff-hunk-text);
+  font-weight: 600;
+}
+
+/* Branch switcher */
+
+.git-branch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 360px;
+}
+
+.git-control-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.git-branch.busy {
+  opacity: 0.6;
+}
+
+.git-branch select {
+  min-width: 0;
+  max-width: 220px;
+}
+
+.git-branch select option.current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.git-branch-name {
+  width: 170px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.git-compare {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.git-compare select {
+  min-width: 0;
+  max-width: 220px;
+}
+
+/* Commit dialog staging sections */
+
+.commit-section {
+  margin-bottom: 8px;
+}
+
+.commit-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 5px;
+}
+
+.commit-section-title small {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.commit-section .commit-files {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.commit-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.commit-file:hover {
+  background: var(--bg-hover);
+}
+
+.commit-file.staged .commit-file-path {
+  color: var(--text);
+}
+
+.commit-stage-toggle {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.commit-stage-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.commit-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.commit-file-kind {
+  color: var(--text-faint);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+}
+
+.commit-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 3px 6px;
 }

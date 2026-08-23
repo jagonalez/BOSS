@@ -10,6 +10,7 @@ const KIND_LABELS: Record<ActivityKind, string> = {
   'permission.answered': 'Permission answered',
   question: 'Question asked',
   'question.answered': 'Answer sent',
+  'question.rejected': 'Question dismissed',
   error: 'Run failed',
   done: 'Run finished'
 }
@@ -19,6 +20,7 @@ const KIND_TONES: Record<ActivityKind, string> = {
   'permission.answered': 'success',
   question: 'accent',
   'question.answered': 'success',
+  'question.rejected': 'neutral',
   error: 'danger',
   done: 'success'
 }

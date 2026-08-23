@@ -124,13 +124,14 @@ function parseJson<T>(value: string): T | undefined {
 
 /** Ids BOSS mints itself, for transcript entries no backend will ever report.
  *
- *  A steered message is folded into the run the backend is already doing, and a
- *  tool image is produced by BOSS rather than by the model, so neither comes
- *  back in a native history list. Kept here as a literal rather than imported
+ *  A steered message is folded into the run the backend is already doing, a
+ *  tool image is produced by BOSS rather than by the model, and a compaction
+ *  notice represents an out-of-band event. None comes back in native history.
+ *  Kept here as a literal rather than imported
  *  from @shared: this file is one of the few the node test runner can load, and
  *  a value import from an aliased path is exactly what would break that.
  *  Mirrors isLocallyAuthoredMessageId in src/shared/opencode.ts. */
-const LOCAL_MESSAGE_PREFIXES = ['steer-', 'assistant-tool-image-']
+const LOCAL_MESSAGE_PREFIXES = ['steer-', 'assistant-tool-image-', 'compaction-notice-']
 
 function isLocallyAuthoredMessageId(messageId: string): boolean {
   return LOCAL_MESSAGE_PREFIXES.some((prefix) => messageId.startsWith(prefix))
@@ -140,6 +141,29 @@ function narrativeKey(part: Part): string | undefined {
   if (part.type !== 'text' && part.type !== 'reasoning') return undefined
   const text = (part.text ?? part.state?.text ?? '').replace(/\s+/g, ' ').trim()
   return text ? `${part.type}\u0000${text}` : undefined
+}
+
+/** Remove a backend's live/history echo without erasing an intentional repeat
+ *  in a later turn. Some backends give the streamed assistant message and the
+ *  finished history message different ids, so part- or message-id dedupe alone
+ *  cannot recognize that they are the same line. User messages are the turn
+ *  boundary: identical prose after the user speaks again is a new response. */
+function uniqueAssistantNarrative(messages: MessageWithParts[]): MessageWithParts[] {
+  let seen = new Set<string>()
+  return messages.map((message) => {
+    if (message.info.role === 'user') {
+      seen = new Set<string>()
+      return message
+    }
+    const parts = message.parts.filter((part) => {
+      const key = narrativeKey(part)
+      if (!key) return true
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    return parts.length === message.parts.length ? message : { ...message, parts }
+  })
 }
 
 /**
@@ -445,10 +469,11 @@ export class TranscriptStore {
       partsByMessage.set(row.message_id, parts)
     }
 
-    return selected.flatMap((row) => {
+    const messages = selected.flatMap((row) => {
       const info = parseJson<MessageInfo>(row.data_json)
       return info ? [{ info, parts: partsByMessage.get(row.message_id) ?? [] }] : []
     })
+    return uniqueAssistantNarrative(messages)
   }
 
   hasMessages(threadId: string): boolean {

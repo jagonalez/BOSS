@@ -8,6 +8,7 @@ import { SitesPage } from './components/SitesPage'
 import { AutomationsPage } from './components/AutomationsPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme } from './lib/themes'
+import { applyTypography, loadTypography } from './lib/typography'
 import { CommitDialog } from './components/CommitDialog'
 import { RenameModal } from './components/RenameModal'
 import { ConfirmModal } from './components/ConfirmModal'
@@ -90,6 +91,7 @@ export function App(): React.JSX.Element {
     applyTheme(loadTheme())
     loadActivity()
     loadAppearance()
+    applyTypography(loadTypography())
   }, [])
 
   // Views load once and stay. They belong to the app, not to a project, so
@@ -132,7 +134,11 @@ export function App(): React.JSX.Element {
   }, [modalOpen])
 
   useEffect(() => {
-    let refreshTimer: number | undefined
+    // Keyed per session: a single shared timer let every thread cancel every
+    // other thread's pending refetch, so under concurrent streaming the
+    // trailing refresh could be starved indefinitely and, when it did fire,
+    // only refreshed whichever thread emitted last.
+    const refreshTimers = new Map<string, number>()
 
     document.documentElement.dataset.platform = window.boss.platform()
     void window.boss.subscribeEvents()
@@ -153,7 +159,8 @@ export function App(): React.JSX.Element {
         appStore.setState({ serverHealthy: false })
         return
       }
-      const patch = applyEvent(appStore.getState(), ev)
+      const previousState = appStore.getState()
+      const patch = applyEvent(previousState, ev)
       if (Object.keys(patch).length > 0) appStore.setState(patch)
       switch (ev.type) {
         case 'session.updated':
@@ -206,21 +213,20 @@ export function App(): React.JSX.Element {
           // Main answers Auto and Plan requests against the thread's current
           // mode and never forwards them, so anything arriving here is a
           // request the user is meant to see.
-          const patch = applyEvent(appStore.getState(), ev)
-          if (Object.keys(patch).length > 0) appStore.setState(patch)
           setAttention('permission')
           const askedProps = (ev.properties ?? {}) as { sessionID?: string }
           recordActivity('permission', askedProps.sessionID)
           break
         }
         case 'permission.replied': {
-          const repliedProps = (ev.properties ?? {}) as { sessionID?: string }
-          recordActivity('permission.answered', repliedProps.sessionID)
+          const repliedProps = (ev.properties ?? {}) as { sessionID?: string; permissionID?: string }
+          const pending = repliedProps.sessionID ? previousState.permissions[repliedProps.sessionID] : undefined
+          if (pending && (!repliedProps.permissionID || pending.id === repliedProps.permissionID)) {
+            recordActivity('permission.answered', repliedProps.sessionID)
+          }
           break
         }
         case 'question.asked': {
-          const patch = applyEvent(appStore.getState(), ev)
-          if (Object.keys(patch).length > 0) appStore.setState(patch)
           // A question wants an answer, not a yes/no on a tool call. Saying
           // "Permission needed" here sent people looking for an approval
           // prompt that was never coming.
@@ -229,10 +235,20 @@ export function App(): React.JSX.Element {
           recordActivity('question', questionProps.sessionID)
           break
         }
-        case 'question.replied':
+        case 'question.replied': {
+          const answeredProps = (ev.properties ?? {}) as { sessionID?: string; requestID?: string }
+          const pending = answeredProps.sessionID ? previousState.questions[answeredProps.sessionID] : undefined
+          if (pending && (!answeredProps.requestID || pending.id === answeredProps.requestID)) {
+            recordActivity('question.answered', answeredProps.sessionID)
+          }
+          break
+        }
         case 'question.rejected': {
-          const answeredProps = (ev.properties ?? {}) as { sessionID?: string }
-          recordActivity('question.answered', answeredProps.sessionID)
+          const rejectedProps = (ev.properties ?? {}) as { sessionID?: string; requestID?: string }
+          const pending = rejectedProps.sessionID ? previousState.questions[rejectedProps.sessionID] : undefined
+          if (pending && (!rejectedProps.requestID || pending.id === rejectedProps.requestID)) {
+            recordActivity('question.rejected', rejectedProps.sessionID)
+          }
           break
         }
         case 'session.error': {
@@ -249,17 +265,18 @@ export function App(): React.JSX.Element {
         case 'message.updated':
         case 'message.part.updated':
         case 'message.part.created':
-          window.clearTimeout(refreshTimer)
           const props = (ev.properties ?? {}) as { sessionID?: string; part?: { sessionID?: string } }
           const eventSessionId = props.sessionID ?? props.part?.sessionID ?? appStore.getState().activeSessionId ?? undefined
           refreshStreaming(eventSessionId)
-          refreshTimer = window.setTimeout(() => {
+          if (eventSessionId) {
             const id = eventSessionId
-            if (id) {
+            window.clearTimeout(refreshTimers.get(id))
+            refreshTimers.set(id, window.setTimeout(() => {
+              refreshTimers.delete(id)
               void loadMessages(id)
               void loadTodos(id)
-            }
-          }, 300)
+            }, 300))
+          }
           break
         case 'config.updated':
           void refreshConfig()
@@ -343,7 +360,8 @@ export function App(): React.JSX.Element {
       offSpeech()
       offBrowseAgent()
       offSites()
-      window.clearTimeout(refreshTimer)
+      for (const timer of refreshTimers.values()) window.clearTimeout(timer)
+      refreshTimers.clear()
       void window.boss.unsubscribeEvents()
     }
   }, [])

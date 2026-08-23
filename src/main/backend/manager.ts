@@ -53,6 +53,7 @@ import {
 } from '@shared/task-policy'
 import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
 import { backendVersionWarning } from '@shared/backend-version'
+import { contextHandoffPacket, delegatedContextInstruction } from '@shared/context-handoff'
 
 interface ThreadBinding {
   id: string
@@ -91,6 +92,9 @@ interface ThreadBinding {
    * is a property of the thread, so it belongs here where every client sees it.
    */
   archived?: boolean
+  /** Kept at the top of its section in every thread list. Same reasoning as
+   *  `archived`: a property of the thread, not of one window's storage. */
+  pinned?: boolean
   policy?: TaskPolicy
   /** What the policy has already done for this thread. Separate from the
    *  policy itself so editing the configuration never rewrites history. */
@@ -160,7 +164,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
     label: 'OpenCode',
     description: 'OpenCode server with native sessions, permissions, tools, and providers.',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false, revert: true, compact: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
       { id: 'auto', label: 'Auto', description: 'approve supported actions automatically' },
@@ -171,14 +175,14 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Pi',
     description: 'Pi coding agent over its native JSONL RPC protocol.',
     command: 'pi',
-    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: false, nativeFork: true, steering: 'native', branching: 'message', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, revert: false, compact: true },
     modes: [{ id: 'auto', label: 'Approved', description: 'Pi RPC runs with its approved tool policy' }]
   },
   codex: {
     label: 'Codex',
     description: 'Codex CLI through the supported app-server JSON-RPC protocol.',
     command: 'codex',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'native', branching: 'thread', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, revert: false, compact: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'request approval when Codex needs to leave its sandbox' },
       { id: 'auto', label: 'Auto', description: 'run inside the workspace sandbox without approval prompts' },
@@ -189,7 +193,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Claude Code',
     description: 'Claude Code through its streaming non-interactive protocol.',
     command: 'claude',
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'context-copy', images: true, mcp: false, interactiveQuestions: false, nativeAutoMode: true, revert: false, compact: false },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before tools that need approval' },
       { id: 'auto', label: 'Auto', description: 'let Claude decide which tool calls can run automatically' },
@@ -202,7 +206,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     description: 'From-scratch harness speaking OpenAI-compatible APIs to a local ollama or any cloud endpoint.',
     // No command: there is no CLI to resolve, so the backend is always
     // available regardless of PATH (mirrors how opencode has no command).
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true },
+    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true, revert: false, compact: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before every file write or shell command' },
       { id: 'auto', label: 'Auto', description: 'run file writes and shell commands without asking' },
@@ -254,20 +258,6 @@ function textFromParts(parts: unknown[]): string {
     .join('\n')
 }
 
-function transcript(messages: MessageWithParts[], maxChars = 48_000): string {
-  const rendered = messages.slice(-30).map((message) => {
-    const body = message.parts
-      .filter((part) => part.type === 'text')
-      .map((part) => part.text ?? '')
-      .filter(Boolean)
-      .join('\n')
-    return `${message.info.role === 'user' ? 'USER' : 'ASSISTANT'}:\n${body}`
-  }).filter((item) => !item.endsWith(':\n'))
-  let result = rendered.join('\n\n')
-  if (result.length > maxChars) result = `[…earlier context omitted…]\n\n${result.slice(-maxChars)}`
-  return result
-}
-
 export class BackendManager {
   private projectPath = ''
   private readonly bindings = new Map<string, ThreadBinding>()
@@ -294,6 +284,7 @@ export class BackendManager {
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
   private remote?: { handle(request: BackendRequest): Promise<unknown> }
+  private telegram?: { handle(request: BackendRequest): Promise<unknown> }
   private binaryOverrides?: BinaryOverrides
   private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
   private threadTitleSettings: ThreadTitleSettings = { ...DEFAULT_THREAD_TITLE_SETTINGS }
@@ -896,6 +887,10 @@ export class BackendManager {
     this.remote = remote
   }
 
+  attachTelegram(telegram: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.telegram = telegram
+  }
+
   attachBinaryOverrides(overrides: BinaryOverrides): void {
     this.binaryOverrides = overrides
   }
@@ -1156,6 +1151,7 @@ export class BackendManager {
       projectPath: binding.projectPath,
       executionPath: binding.executionPath,
       archived: binding.archived === true,
+      pinned: binding.pinned === true,
       title: binding.title ?? native?.title,
       directory: binding.executionPath || native?.directory,
       path: binding.executionPath || native?.path,
@@ -1227,8 +1223,20 @@ export class BackendManager {
       case 'question.replied': return { type: value.type, properties: { sessionID: value.sessionID, requestID: value.requestID } }
       case 'question.rejected': return { type: value.type, properties: { sessionID: value.sessionID, requestID: value.requestID } }
       case 'session.status': return { type: value.type, properties: { sessionID: value.sessionID, status: value.status } }
-      case 'session.idle':
-      case 'session.compacted': return { type: value.type, properties: { sessionID: value.sessionID } }
+      case 'session.idle': return { type: value.type, properties: { sessionID: value.sessionID } }
+      case 'session.compaction.started': return {
+        type: value.type,
+        properties: { sessionID: value.sessionID, trigger: value.trigger }
+      }
+      case 'session.compacted': return {
+        type: value.type,
+        properties: {
+          sessionID: value.sessionID,
+          trigger: value.trigger,
+          preTokens: value.preTokens,
+          postTokens: value.postTokens
+        }
+      }
       case 'session.error': return { type: value.type, properties: { sessionID: value.sessionID, error: value.error } }
       default: return value
     }
@@ -2071,27 +2079,45 @@ export class BackendManager {
     const messages = await sourceBackend.messagesList(source.nativeSessionId)
     const diffs = await sourceBackend.diffGet(source.nativeSessionId).catch(() => [])
     const diffSummary = diffs.slice(0, 30).map((diff) => `- ${diff.path}: ${diff.status ?? 'changed'}`).join('\n')
-    return [
-      '[BOSS CONTEXT HANDOFF]',
-      `Source thread: ${source.title ?? sourceThreadId}`,
-      `Source backend: ${source.backendId}`,
-      `Project: ${source.projectId === 'global' ? 'Global chat' : source.projectPath}`,
-      instruction ? `User instruction: ${instruction}` : 'Continue from this context. First summarize your understanding, then wait for or follow the user’s latest request.',
-      diffSummary ? `Changed files reported by the source backend:\n${diffSummary}` : '',
-      'Conversation transcript:',
-      transcript(messages)
-    ].filter(Boolean).join('\n\n')
+    return contextHandoffPacket({
+      sourceThread: source.title ?? sourceThreadId,
+      sourceBackend: source.backendId,
+      project: source.projectId === 'global' ? 'Global chat' : source.projectPath,
+      instruction,
+      diffSummary,
+      messages
+    })
   }
 
   async clone(threadId: string, backendId: BackendId, instruction?: string, options?: BackendMessageOptions): Promise<SessionInfo> {
     const source = this.binding(threadId)
     const packet = await this.contextPacket(threadId, instruction)
     const title = `${source.title ?? 'Untitled'} · ${DEFINITIONS[backendId].label}`
-    const created = await this.sessionCreate(backendId, title, {
-      kind: 'clone',
+    // Continue where the source left off, not wherever the app happens to be
+    // pointed. sessionCreate resolves the *current* scope, so a clone of a
+    // worktree thread used to land on the project root with no worktree — the
+    // handed-off thread lost the branch it was continuing, and with it the
+    // pull request every review surface looks up from the checkout.
+    const lineage = {
+      kind: 'clone' as const,
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
-    }, source.projectId === 'global' ? 'global' : 'current')
+    }
+    const created = source.projectId === 'global'
+      ? await this.sessionCreate(backendId, title, lineage, 'global')
+      : await this.sessionCreateInScope(
+        backendId,
+        {
+          projectId: source.projectId,
+          projectPath: source.projectPath,
+          executionPath: source.executionPath
+        },
+        title,
+        lineage,
+        // Only a live checkout carries over. A reaped worktree would hand the
+        // clone a path that is no longer there.
+        source.worktree?.status === 'active' ? source.worktree : undefined
+      )
     await this.sendMessage(
       created.id,
       [{ type: 'text', text: packet }],
@@ -2110,11 +2136,7 @@ export class BackendManager {
     const task = instruction.trim()
     if (!task) throw new Error('Describe the task to delegate.')
     const source = this.binding(threadId)
-    const packet = await this.contextPacket(threadId, [
-      'You are a delegated worker. Complete the task below autonomously.',
-      'Keep your work scoped to the task. Report the result, relevant files, verification, and any blockers when finished.',
-      `Delegated task: ${task}`
-    ].join('\n'))
+    const packet = await this.contextPacket(threadId, delegatedContextInstruction(task))
     const shortTask = task.replace(/\s+/g, ' ').slice(0, 56)
     const title = `Delegate · ${shortTask}${task.length > 56 ? '…' : ''}`
     let created: SessionInfo
@@ -2559,6 +2581,10 @@ export class BackendManager {
       if (!this.mobile) throw new Error('Mobile access is not available.')
       return this.mobile.handle(request)
     }
+    if (request.type.startsWith('telegram.')) {
+      if (!this.telegram) throw new Error('Telegram messaging is not available.')
+      return this.telegram.handle(request)
+    }
     if (request.type.startsWith('remote.')) {
       if (!this.remote) throw new Error('Remote access is not available.')
       return this.remote.handle(request)
@@ -2652,6 +2678,26 @@ export class BackendManager {
         binding.archived = request.archived
         this.save()
         return this.supervisionSnapshot()
+      }
+      case 'thread.pin': {
+        const binding = this.binding(request.threadId)
+        binding.pinned = request.pinned
+        this.save()
+        const session = this.session(binding)
+        this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
+        return session
+      }
+      case 'thread.usage': {
+        const binding = this.binding(request.threadId)
+        const usage = this.transcripts?.usage(binding.id) ?? {
+          totals: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
+        }
+        return {
+          threadId: binding.id,
+          totals: usage.totals,
+          lastRun: usage.lastRun,
+          budget: binding.policy?.budget
+        }
       }
       case 'thread.policy.get': return this.taskPolicy(request.threadId)
       case 'thread.policy.set': return this.setTaskPolicy(request.threadId, request.policy)

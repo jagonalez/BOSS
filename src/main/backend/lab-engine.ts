@@ -10,6 +10,8 @@ import { LabSessionStore } from './lab-session-store.ts'
 import { listModels, streamChatCompletion } from './lab-client.ts'
 // @ts-expect-error Application builds use bundler resolution.
 import { cropHistory, openAiMessagesFromHistory, type LabChatMessage } from './lab-openai.ts'
+// @ts-expect-error Node's type-stripping tests require the explicit extension.
+import { compactionNotice } from './compaction-events.ts'
 // @ts-expect-error Application builds use bundler resolution.
 import { parseToolArguments, type LabFunctionCall } from './lab-tool-call.ts'
 // @ts-expect-error Application builds use bundler resolution.
@@ -430,7 +432,16 @@ export class LabEngine {
     }
     this.running.set(options.sessionId, options.controller)
     const signal = options.signal ?? options.controller.signal
-    const { history: cropped, omitted } = cropHistory(this.store.messages(options.sessionId), this.config.contextChars)
+    const storedHistory = this.store.messages(options.sessionId)
+    const { history: cropped, omitted } = cropHistory(storedHistory, this.config.contextChars)
+    // Cropping is deliberately lossy, unlike compaction. Make that visible the
+    // first time it happens instead of letting the user infer it from a later
+    // answer that has quietly forgotten old decisions.
+    if (omitted && !storedHistory.some((message) => message.parts.some((part) => part.type === 'compaction' && part.overflow))) {
+      const notice = compactionNotice(options.sessionId, { trigger: 'auto', overflow: true })
+      this.store.upsertMessage(options.sessionId, notice)
+      if (options.emitStatus) sink.onUserMessage(options.sessionId, notice)
+    }
     const note = omitted
       ? '\n[Some earlier parts of this thread were omitted to fit the context window. Answer from what remains.]'
       : ''

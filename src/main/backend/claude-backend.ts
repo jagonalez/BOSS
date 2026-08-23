@@ -14,10 +14,10 @@ import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
 import { unpackedAsarPath } from './claude-executable'
-import { textFromParts } from './manager'
-import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, parseClaudeQuestions } from './claude-protocol'
+import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudePermissionRequest } from './claude-protocol'
 import { toolLabel } from '@shared/tool-label'
+import { compactionCompletedEvents, compactionStartedEvent, type CompactionTrigger } from './compaction-events'
 
 const requireFromMain = createRequire(import.meta.url)
 
@@ -59,6 +59,8 @@ interface ClaudeStore {
   version: 1
   sessions: Record<string, { title?: string; projectPath: string; createdAt: number; updatedAt: number; messages: MessageWithParts[] }>
 }
+
+const SAVE_DEBOUNCE_MS = 100
 
 function storeFile(): string {
   return join(app.getPath('userData'), 'claude-threads.json')
@@ -128,6 +130,7 @@ export class ClaudeBackend implements Backend {
    *  settled. Claude outlives its own result, so cleanup needs its own list. */
   private lingering = new Set<ClaudeRun>()
   private store: ClaudeStore = { version: 1, sessions: {} }
+  private saveTimer?: ReturnType<typeof setTimeout>
   private threadBus?: ThreadBusConnection
 
   constructor(cwd?: string, command = resolveBackendBin('claude')) {
@@ -156,6 +159,9 @@ export class ClaudeBackend implements Backend {
     for (const run of this.lingering) void run.query.interrupt().catch(() => {})
     this.lingering.clear()
     this.runs.clear()
+    // A debounced write may still be pending; shutting down without it would
+    // drop the tail of the last turn.
+    if (this.saveTimer) this.save()
     this.healthy = false
   }
 
@@ -177,8 +183,29 @@ export class ClaudeBackend implements Backend {
   }
 
   private emit(event: EventMessage): void { this.eventCb?.(event) }
+  /** Write the whole store synchronously. Callers on the hot streaming path
+   *  must use saveSoon() instead: this serialises every session and blocks the
+   *  main process, which also serves IPC, so a per-token call here freezes the
+   *  UI once the store grows. Indentation is dropped because nothing reads this
+   *  file by eye and it is a third of the bytes. */
   private save(): void {
-    try { writeFileSync(storeFile(), JSON.stringify(this.store, null, 2)) } catch { /* keep in memory */ }
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = undefined
+    }
+    try { writeFileSync(storeFile(), JSON.stringify(this.store)) } catch { /* keep in memory */ }
+  }
+
+  /** Coalesce bursts of streaming writes into one flush. Deltas arrive per
+   *  token per thread; persisting each one is pure waste when the next
+   *  supersedes it milliseconds later. */
+  private saveSoon(): void {
+    if (this.saveTimer) return
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined
+      this.save()
+    }, SAVE_DEBOUNCE_MS)
+    this.saveTimer.unref?.()
   }
 
   private record(sessionId: string) {
@@ -255,7 +282,7 @@ export class ClaudeBackend implements Backend {
     if (index >= 0) record.messages[index] = message
     else record.messages.push(message)
     record.updatedAt = Date.now()
-    this.save()
+    this.saveSoon()
     this.emit({ type: 'message.updated', message: message.info })
     message.parts.forEach((part) => this.emit({ type: 'message.part.updated', part }))
   }
@@ -287,7 +314,7 @@ export class ClaudeBackend implements Backend {
     }
     if (changed) {
       record.updatedAt = Date.now()
-      this.save()
+      this.saveSoon()
     }
   }
 
@@ -300,15 +327,14 @@ export class ClaudeBackend implements Backend {
     // dropped the message instead of queueing it.
     if (this.runs.has(sessionId)) throw new Error(THREAD_BUSY_ERROR)
     const record = this.record(sessionId)
-    // What Claude is sent, which carries an attached image as a block rather
-    // than describing it. The transcript echo below stays text: main records
-    // the image part itself, so repeating it here would show it twice.
+    // What Claude is sent carries an attached image as a block; the durable
+    // transcript below keeps the corresponding file part so the user sees the
+    // same attachment after a reload.
     const content = claudeMessageContent(parts)
-    const prompt = textFromParts(parts)
     const userId = randomUUID()
     this.upsert(sessionId, {
       info: { id: userId, sessionID: sessionId, role: 'user', time: { created: Date.now() } },
-      parts: [{ id: `${userId}-text`, type: 'text', sessionID: sessionId, messageID: userId, text: prompt }]
+      parts: claudeTranscriptParts(parts, sessionId, userId)
     })
 
     const hasHistory = record.messages.some((message) => message.info.role === 'assistant')
@@ -470,7 +496,27 @@ export class ClaudeBackend implements Backend {
     try {
       for await (const message of session as AsyncIterable<SDKMessage>) {
         const value = message as unknown as Record<string, unknown>
-        if (value.type === 'system' && value.subtype === 'init' && Array.isArray(value.mcp_server_errors) && value.mcp_server_errors.length > 0) {
+        if (value.type === 'system' && value.subtype === 'status') {
+          if (value.status === 'compacting') {
+            this.emit(compactionStartedEvent(sessionId))
+          } else if (value.compact_result === 'failed') {
+            this.emit({
+              type: 'session.error',
+              sessionID: sessionId,
+              error: String(value.compact_error ?? 'Claude Code could not compact the context.')
+            })
+          }
+        } else if (value.type === 'system' && value.subtype === 'compact_boundary') {
+          const metadata = (value.compact_metadata ?? {}) as Record<string, unknown>
+          const trigger: CompactionTrigger = metadata.trigger === 'auto' || metadata.trigger === 'manual'
+            ? metadata.trigger
+            : 'unknown'
+          for (const event of compactionCompletedEvents(sessionId, {
+            trigger,
+            preTokens: typeof metadata.pre_tokens === 'number' ? metadata.pre_tokens : undefined,
+            postTokens: typeof metadata.post_tokens === 'number' ? metadata.post_tokens : undefined
+          })) this.emit(event)
+        } else if (value.type === 'system' && value.subtype === 'init' && Array.isArray(value.mcp_server_errors) && value.mcp_server_errors.length > 0) {
           this.emit({
             type: 'session.error',
             sessionID: sessionId,

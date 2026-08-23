@@ -36,6 +36,15 @@ test('repeating a kind for a thread while unread updates the entry instead of st
   assert.equal(state.events[0].ts, 2000)
 })
 
+test('updating an unread entry moves it back to the front', () => {
+  const permission = event({ id: 'a', kind: 'permission', ts: 1000, sessionId: 's1' })
+  const question = event({ id: 'b', kind: 'question', ts: 1500, sessionId: 's2' })
+  const updated = event({ id: 'c', kind: 'permission', ts: 2000, sessionId: 's1' })
+  const state = activityReducer(feed([question, permission]), { type: 'record', event: updated })
+  assert.deepEqual(state.events.map((item) => item.id), ['a', 'b'])
+  assert.deepEqual(state.events.map((item) => item.ts), [2000, 1500])
+})
+
 test('the same kind records fresh once the earlier entry was read', () => {
   const read = event({ id: 'a', kind: 'error', ts: 1000, sessionId: 's1' })
   const next = event({ id: 'b', kind: 'error', ts: 5000, sessionId: 's1' })
@@ -63,12 +72,13 @@ test('events beyond the cap drop the oldest, not the newest', () => {
   assert.equal(state.events.at(-1)!.id, 'e10')
 })
 
-test('markAllRead clears the badge and never moves the watermark backwards', () => {
+test('markAllRead clears every current event and never moves the watermark backwards', () => {
   const state = activityReducer(feed([event({ id: 'a', ts: 3000 }), event({ id: 'b', kind: 'done', ts: 1000 })]), {
     type: 'markAllRead',
     ts: 2000
   })
-  assert.equal(unreadCount(state), 1)
+  assert.equal(unreadCount(state), 0)
+  assert.equal(state.lastReadTs, 3000)
   const backwards = activityReducer({ events: [], lastReadTs: 9000 }, { type: 'markAllRead', ts: 1000 })
   assert.equal(backwards.lastReadTs, 9000)
 })
@@ -81,6 +91,7 @@ test('unreadCount counts only entries newer than the watermark', () => {
 test('formatRelativeTime buckets without rounding up to the next unit early', () => {
   const now = Date.parse('2026-01-01T12:00:00Z')
   assert.equal(formatRelativeTime(now - 30_000, now), 'just now')
+  assert.equal(formatRelativeTime(now - 59_999, now), 'just now')
   assert.equal(formatRelativeTime(now - 5 * 60_000, now), '5m ago')
   assert.equal(formatRelativeTime(now - 3 * 3_600_000, now), '3h ago')
   assert.equal(formatRelativeTime(now - 2 * 86_400_000, now), '2d ago')

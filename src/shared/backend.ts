@@ -26,6 +26,12 @@ export interface BackendCapabilities {
   interactiveQuestions: boolean
   /** The backend enforces its own Auto policy; escalations must still be shown to the user. */
   nativeAutoMode: boolean
+  /** The backend can revert a thread to a message and restore what was reverted.
+   *  Without it the transcript offers no undo, because pretending would drop
+   *  nothing but report it dropped. */
+  revert: boolean
+  /** The backend can replace earlier context with a summary. */
+  compact: boolean
 }
 
 export interface QueuedFollowUpAttachment {
@@ -275,6 +281,12 @@ export type BackendRequest =
   /** Hide a thread from the default list, or bring it back. Recorded on the
    *  thread so every client agrees, rather than in one window's storage. */
   | { type: 'thread.archive'; threadId: string; archived: boolean }
+  /** Keep a thread at the top of its section, or stop keeping it there.
+   *  Recorded on the thread like archiving is, for the same reason. */
+  | { type: 'thread.pin'; threadId: string; pinned: boolean }
+  /** What this thread has spent, as the backend reported it, and what its
+   *  budget still allows. Numbers a backend never reported stay absent. */
+  | { type: 'thread.usage'; threadId: string }
   | { type: 'thread.policy.get'; threadId: string }
   | { type: 'thread.policy.set'; threadId: string; policy: import('./task-policy').TaskPolicy }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }
@@ -294,6 +306,9 @@ export type BackendRequest =
   | { type: 'automation.stop'; automationId: string }
   | { type: 'automation.webhook.get' }
   | { type: 'automation.webhook.set'; url?: string; onlyWhenAway?: boolean }
+  /** The per-automation hook secret and full URL. Never included in snapshots,
+   *  so phones and the relay cannot read it. */
+  | { type: 'automation.webhook.token'; automationId: string }
   | { type: 'mcp.list' }
   | { type: 'mcp.add'; input: import('./mcp').McpConnectionInput }
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }
@@ -301,6 +316,8 @@ export type BackendRequest =
   | { type: 'mcp.import.scan' }
   | { type: 'mobile.status' }
   | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean } }
+  | { type: 'telegram.status' }
+  | { type: 'telegram.set'; patch: { enabled?: boolean; threadId?: string; allowedChats?: number[]; token?: string; clearToken?: boolean } }
   | { type: 'remote.status' }
   | { type: 'remote.set'; patch: { enabled?: boolean; relayUrl?: string; forgetDeviceId?: string; revokeAll?: boolean } }
   | { type: 'remote.pair' }

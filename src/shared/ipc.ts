@@ -263,7 +263,9 @@ export const IpcChannels = {
   UpdateCheck: 'update:check',
   UpdateRestart: 'update:restart',
   UpdateChannelSet: 'update:channel-set',
-  UpdateChanged: 'update:changed'
+  UpdateChanged: 'update:changed',
+  /** Write a thread's Markdown export to a file the user picks. */
+  ThreadExportMarkdown: 'thread:export-markdown'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -280,3 +282,13 @@ export type MenuCommand =
   | 'pane.split-horizontal'
   | 'pane.split-vertical'
   | 'palette.open'
+
+/** A thread transcript already serialized to Markdown, handed to main so the
+ *  user can pick where to keep it. The renderer owns the serialization; main
+ *  owns the dialog and the disk. */
+export interface ThreadExportRequest {
+  title: string
+  /** File name the save dialog starts from, e.g. `my-thread.md`. */
+  defaultName: string
+  markdown: string
+}

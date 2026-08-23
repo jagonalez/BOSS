@@ -16,6 +16,9 @@ import { composeAnnotatedPrompt, createAnnotation, remainingAnnotations, sideCha
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import { threadIsWorking } from './status'
+import { serializeThreadMarkdown, exportFileName } from './thread-export'
+import { BACKEND_SHORT_LABELS } from './backend-labels'
+import { PendingPins } from './pending-pins'
 import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { QaPolicy } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -1022,9 +1025,11 @@ export function markStaleReviews(sessionID: string, contextPath?: string): void 
   })()
 }
 
+const pendingPins = new PendingPins()
+
 export async function refreshSessions(): Promise<void> {
   try {
-    appStore.setState({ sessions: await OpenCode.listSessions() })
+    appStore.setState({ sessions: pendingPins.apply(await OpenCode.listSessions()) })
   } catch {
     /* ignore */
   }
@@ -2058,6 +2063,86 @@ export function archiveAllInPath(path: string): void {
   })
 }
 
+/**
+ * Keep a thread at the top of its section, or stop keeping it there.
+ *
+ * Optimistic like archiving: the row moves under the thumb, and main's reply
+ * refreshes every client. A refusal puts the row back rather than leaving it
+ * floating where the user dropped it.
+ */
+export function togglePin(id: string): void {
+  const current = appStore.getState().sessions.find((session) => session.id === id)
+  if (!current) return
+  const previousPinned = current.pinned === true
+  const pinned = !previousPinned
+  const generation = pendingPins.begin(id, pinned)
+  appStore.setState((s) => ({
+    sessions: s.sessions.map((session) => session.id === id ? { ...session, pinned } : session)
+  }))
+  void OpenCode.pinThread(id, pinned)
+    .then((updated) => {
+      if (!pendingPins.settle(id, generation)) return
+      appStore.setState((s) => ({
+        sessions: s.sessions.map((session) => session.id === id
+          ? { ...session, pinned: updated.pinned === true }
+          : session)
+      }))
+    })
+    .catch((error: unknown) => {
+      if (!pendingPins.settle(id, generation)) return
+      appStore.setState((s) => ({
+        sessions: s.sessions.map((session) => session.id === id
+          ? { ...session, pinned: previousPinned }
+          : session),
+        lastError: error instanceof Error ? error.message : 'Could not update the thread.'
+      }))
+      void refreshSessions()
+    })
+}
+
+/**
+ * Serialize a thread and hand it to main, which asks where to keep the file.
+ *
+ * The transcript is fetched fresh rather than read from state: a context menu
+ * works on rows that were never opened, whose messages this window never
+ * loaded. Cancelling the dialog is not an error.
+ */
+export async function exportSessionMarkdown(id: string): Promise<void> {
+  try {
+    const [messages, session] = await Promise.all([
+      OpenCode.listMessages(id),
+      OpenCode.getSession(id).catch(() => undefined)
+    ])
+    const known = appStore.getState().sessions.find((item) => item.id === id)
+    const title = session?.title || known?.title || 'Untitled thread'
+    const markdown = serializeThreadMarkdown(messages, {
+      title,
+      backendLabel: session?.backendId ?? known?.backendId
+        ? BACKEND_SHORT_LABELS[(session?.backendId ?? known?.backendId)!]
+        : undefined,
+      projectPath: session?.projectPath ?? known?.projectPath,
+      exportedAt: Date.now()
+    })
+    await window.boss.exportThreadMarkdown({
+      title,
+      defaultName: exportFileName(title),
+      markdown
+    })
+  } catch (error) {
+    const message = errorSummary(error)
+    appStore.setState({
+      lastError: message,
+      confirm: {
+        title: 'Export failed',
+        message,
+        confirmLabel: 'Got it',
+        notice: true,
+        action: () => {}
+      }
+    })
+  }
+}
+
 export async function forkSession(id: string): Promise<void> {
   try {
     const session = await OpenCode.fork(id)
@@ -2105,8 +2190,9 @@ export async function removeSessionWorktree(id: string): Promise<void> {
 export async function revertMessage(sessionID: string, messageID: string): Promise<void> {
   try {
     await OpenCode.revertMessage(sessionID, messageID)
-  } catch {
-    /* ignore */
+  } catch (error) {
+    setSessionError(sessionID, errorSummary(error))
+    return
   }
   const state = appStore.getState()
   const msgs = state.messages[sessionID] ?? []
@@ -2127,8 +2213,9 @@ export async function revertMessage(sessionID: string, messageID: string): Promi
 export async function unrevertSession(sessionID: string): Promise<void> {
   try {
     await OpenCode.unrevert(sessionID)
-  } catch {
-    /* ignore */
+  } catch (error) {
+    setSessionError(sessionID, errorSummary(error))
+    return
   }
   appStore.setState((s) => {
     const reverted = { ...s.reverted }
@@ -2705,7 +2792,12 @@ export function setSpeakAloud(on: boolean): void {
 
 let ttsAudio: HTMLAudioElement | null = null
 
-export async function speakText(text: string): Promise<void> {
+/** Speak one passage, optionally tagged with the turn it came from.
+ *
+ *  The tag is what lets the transcript swap its speaker button for a stop
+ *  control while this audio plays and only then: a second speakText() call
+ *  replaces the audio, so the key moves with it. */
+export async function speakText(text: string, key?: string): Promise<void> {
   const cur = appStore.getState()
   const trimmed = text.trim()
   if (!trimmed) return
@@ -2717,16 +2809,29 @@ export async function speakText(text: string): Promise<void> {
     }
     if (!result.dataUrl) return
     ttsAudio?.pause()
-    ttsAudio = new Audio(result.dataUrl)
-    void ttsAudio.play()
+    const audio = new Audio(result.dataUrl)
+    ttsAudio = audio
+    appStore.setState({ speakingKey: key ?? null })
+    const settle = (): void => {
+      // A newer utterance owns the field by now; leave it alone.
+      if (ttsAudio === audio) {
+        ttsAudio = null
+        appStore.setState((s) => (s.speakingKey === (key ?? null) ? { speakingKey: null } : {}))
+      }
+    }
+    audio.onended = settle
+    audio.onerror = settle
+    void audio.play().catch(settle)
   } catch (err) {
     appStore.setState({ lastError: errorSummary(err) })
   }
 }
 
 export function stopSpeaking(): void {
+  const hadAudio = ttsAudio !== null
   ttsAudio?.pause()
   ttsAudio = null
+  if (hadAudio || appStore.getState().speakingKey !== null) appStore.setState({ speakingKey: null })
 }
 
 let micSession: ReturnType<typeof startMicCapture> extends Promise<infer T> ? T | null : null = null
@@ -2961,9 +3066,17 @@ export function recordActivity(kind: ActivityKind, sessionId?: string, detail?: 
   const threadTitle = sessionId
     ? state.sessions.find((session) => session.id === sessionId)?.title || undefined
     : undefined
+  const latestTs = state.activity.events.reduce((latest, event) => Math.max(latest, event.ts), 0)
   const next = activityReducer(state.activity, {
     type: 'record',
-    event: { id: crypto.randomUUID(), kind, ts: Date.now(), sessionId, threadTitle, detail }
+    event: {
+      id: crypto.randomUUID(),
+      kind,
+      ts: Math.max(Date.now(), state.activity.lastReadTs + 1, latestTs + 1),
+      sessionId,
+      threadTitle,
+      detail
+    }
   })
   if (next === state.activity) return
   saveActivityFeed(next)

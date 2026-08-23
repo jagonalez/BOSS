@@ -1,4 +1,7 @@
-import { parseGitLog, parseGitBranches } from './diff'
+import { parseGitLog, parseGitBranches, parseGitStatusPorcelain, type StatusFile } from './diff'
+import { gitStageArgs, gitUnstageArgs, preferredCompareBranch, stashRefForOid } from './git-commands'
+
+export { gitStageArgs, gitUnstageArgs, planBranchSwitch, type BranchSwitchPlan } from './git-commands'
 
 async function runGit(path: string, args: string[]): Promise<string> {
   const res = await window.boss.gitRun(path, args)
@@ -6,14 +9,30 @@ async function runGit(path: string, args: string[]): Promise<string> {
   return res.stdout
 }
 
+async function untrackedFileDiff(path: string, file: string): Promise<string> {
+  const res = await window.boss.gitRun(path, ['diff', '--no-index', '--', '/dev/null', file])
+  // `git diff --no-index` uses 1 for "different", which is the successful
+  // result here: stdout contains the new-file patch we want to draw.
+  if (res.code !== 0 && res.code !== 1) {
+    throw new Error(res.stderr.trim() || res.stdout.trim() || 'git diff failed')
+  }
+  return res.stdout
+}
+
 export async function gitDiffFiles(path: string, scope: 'worktree' | 'staged' | 'compare', base?: string): Promise<string[]> {
   const args =
     scope === 'worktree'
-      ? ['diff', '--name-only']
+      ? ['diff', '--name-only', '-z']
       : scope === 'staged'
-        ? ['diff', '--cached', '--name-only']
-        : ['diff', base ?? 'origin/main', '--name-only']
-  return (await runGit(path, args)).split('\n').map((l) => l.trim()).filter(Boolean)
+        ? ['diff', '--cached', '--name-only', '-z']
+        : ['diff', base || 'origin/main', '--name-only', '-z']
+  const tracked = (await runGit(path, args)).split('\0').filter(Boolean)
+  if (scope !== 'worktree') return tracked
+
+  // `git diff` deliberately excludes untracked files. Include them explicitly
+  // so a checkout containing newly created files does not look clean.
+  const untracked = (await gitStatusFiles(path)).filter((file) => file.untracked).map((file) => file.path)
+  return [...new Set([...tracked, ...untracked])]
 }
 
 export async function gitFileDiff(path: string, scope: 'worktree' | 'staged' | 'compare', file: string, base?: string): Promise<string> {
@@ -22,8 +41,11 @@ export async function gitFileDiff(path: string, scope: 'worktree' | 'staged' | '
       ? ['diff', '--', file]
       : scope === 'staged'
         ? ['diff', '--cached', '--', file]
-        : ['diff', base ?? 'origin/main', '--', file]
-  return runGit(path, args)
+        : ['diff', base || 'origin/main', '--', file]
+  const patch = await runGit(path, args)
+  if (scope !== 'worktree' || patch) return patch
+  const untracked = (await gitStatusFiles(path)).some((item) => item.untracked && item.path === file)
+  return untracked ? untrackedFileDiff(path, file) : patch
 }
 
 export async function gitLog(path: string): Promise<Array<{ sha: string; msg: string }>> {
@@ -34,6 +56,16 @@ export async function gitBranches(path: string): Promise<string[]> {
   const list = parseGitBranches(await runGit(path, ['branch', '--format=%(refname:short)']))
   const current = (await runGit(path, ['branch', '--show-current'])).trim()
   return list.filter((b) => b && b !== current)
+}
+
+export async function gitCompareBranches(path: string): Promise<string[]> {
+  return parseGitBranches(await runGit(path, ['branch', '--all', '--format=%(refname:short)']))
+    .filter((branch) => branch && !branch.endsWith('/HEAD'))
+}
+
+export async function gitDefaultCompareBranch(path: string, branches: string[], current: string): Promise<string> {
+  const head = await window.boss.gitRun(path, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'])
+  return preferredCompareBranch(branches, current, head.code === 0 ? head.stdout.trim() : undefined)
 }
 
 export async function gitCurrentBranch(path: string): Promise<string> {
@@ -49,4 +81,49 @@ export async function gitCommitFiles(path: string, sha: string): Promise<string[
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean)
+}
+
+export async function gitStatusFiles(path: string): Promise<StatusFile[]> {
+  return parseGitStatusPorcelain(await runGit(path, ['status', '--porcelain=v1', '-z'])).files
+}
+
+export async function gitStage(path: string, files: StatusFile[]): Promise<void> {
+  for (const args of gitStageArgs(files)) await runGit(path, args)
+}
+
+export async function gitUnstage(path: string, files: StatusFile[]): Promise<void> {
+  const head = await window.boss.gitRun(path, ['rev-parse', '--verify', 'HEAD'])
+  for (const args of gitUnstageArgs(files, head.code === 0)) await runGit(path, args)
+}
+
+export async function gitCheckout(path: string, branch: string): Promise<void> {
+  await runGit(path, ['checkout', branch])
+}
+
+export async function gitCreateBranch(path: string, name: string): Promise<void> {
+  await runGit(path, ['checkout', '-b', name])
+}
+
+async function gitStashHead(path: string): Promise<string | null> {
+  const result = await window.boss.gitRun(path, ['rev-parse', '--verify', 'refs/stash'])
+  return result.code === 0 ? result.stdout.trim() || null : null
+}
+
+export async function gitStashPush(path: string): Promise<string | null> {
+  const before = await gitStashHead(path)
+  await runGit(path, ['stash', 'push', '--include-untracked', '-m', 'BOSS branch switch'])
+  const after = await gitStashHead(path)
+  return after && after !== before ? after : null
+}
+
+export async function gitStashPop(path: string, oid: string): Promise<void> {
+  const oids = (await runGit(path, ['stash', 'list', '--format=%H'])).split('\n').map((item) => item.trim()).filter(Boolean)
+  const ref = stashRefForOid(oids, oid)
+  if (!ref) throw new Error(`BOSS branch-switch stash ${oid.slice(0, 12)} is no longer available`)
+  await runGit(path, ['stash', 'pop', ref])
+}
+
+/** Paths where `range` (e.g. `main..feature`) differs from HEAD. */
+export async function gitChangedBetween(path: string, range: string): Promise<string[]> {
+  return (await runGit(path, ['diff', '--name-only', '--no-renames', '-z', range])).split('\0').filter(Boolean)
 }

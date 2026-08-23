@@ -1,4 +1,5 @@
-import { backendCalls, control, expect, lastBackendCall, test } from './fixtures'
+import assert from 'node:assert/strict'
+import { backendCalls, control, expect, gitCalls, lastBackendCall, test } from './fixtures'
 import type { BossApi } from '../src/shared/api'
 
 async function openSettings(page: Parameters<typeof control>[0]): Promise<void> {
@@ -64,6 +65,14 @@ test('Ctrl+F searches the active thread and moves between its matches', async ({
 
   await appPage.keyboard.press('Escape')
   await expect(search).toHaveCount(0)
+})
+
+test('shows an attached image and one copy of a response echoed under two message ids', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
+
+  await expect(appPage.getByRole('img', { name: 'duplicate-example.png' })).toBeVisible()
+  await expect(appPage.getByText('Critical find. Let me inspect it.')).toHaveCount(1)
+  await expect(appPage.locator('.step-card')).toHaveCount(2)
 })
 
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {
@@ -265,6 +274,15 @@ test('delegation sends the chosen backend, worktree placement, and target defaul
       mode: 'auto'
     }
   })
+  const handoff = await control(appPage).then((item) => item.contextHandoff())
+  const currentTask = handoff.indexOf('CURRENT TASK — AUTHORITATIVE')
+  const history = handoff.indexOf('HISTORICAL TRANSCRIPT — REFERENCE ONLY')
+  const staleRequest = handoff.indexOf('> Spin up a Codex thread to review this PR.')
+  expect(currentTask).toBeGreaterThanOrEqual(0)
+  expect(history).toBeGreaterThan(currentTask)
+  expect(handoff).toContain('Delegated task: Audit the E2E workflow and report gaps.')
+  expect(staleRequest).toBeGreaterThan(history)
+  expect(handoff.lastIndexOf('Follow only CURRENT TASK above.')).toBeGreaterThan(staleRequest)
   await expect(appPage.locator('.delegate-modal')).toHaveCount(0)
 })
 
@@ -625,6 +643,15 @@ test('the command palette opens from the keyboard and runs a command', async ({ 
   const input = palette.getByRole('textbox', { name: 'Search commands' })
   await expect(input).toBeFocused()
 
+  // The renderer shortcut and Electron menu accelerator both mean "open";
+  // receiving both must not toggle the palette closed again.
+  await appPage.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+  await appPage.keyboard.press('Escape')
+  await expect(palette).toHaveCount(0)
+  await appPage.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+
   // Fuzzy, not substring: a dropped letter still finds the command.
   await input.fill('sttngs')
   await appPage.keyboard.press('Enter')
@@ -672,9 +699,33 @@ test('an attention event raises an unread badge that mark-all-read clears', asyn
   await expect(panel).toHaveCount(0)
   await expect(appPage.locator('.workspace-tab.active').filter({ hasText: 'Source thread' })).toBeVisible()
 
-  // The event is still unread after visiting, so the badge stands until read.
+  await control(appPage).then((item) => item.emit({
+    type: 'permission.replied',
+    properties: {
+      sessionID: 'thread-source',
+      permissionID: 'permission-inbox',
+      response: 'once'
+    }
+  }))
+  await expect(bell.locator('.inbox-badge')).toHaveText('2')
+
+  // Visiting leaves both events unread, so the badge stands until read.
   await bell.click()
+  await expect(panel.locator('.inbox-row').filter({ hasText: 'Permission answered' })).toBeVisible()
   await panel.getByRole('button', { name: 'Mark all read' }).click()
+  await expect(bell.locator('.inbox-badge')).toHaveCount(0)
+
+  // Main can forward the reply from an Auto/Plan permission whose request it
+  // intentionally swallowed. With no matching prompt in renderer state, that
+  // reply is not user activity and must not resurrect the badge.
+  await control(appPage).then((item) => item.emit({
+    type: 'permission.replied',
+    properties: {
+      sessionID: 'thread-source',
+      permissionID: 'permission-auto',
+      response: 'once'
+    }
+  }))
   await expect(bell.locator('.inbox-badge')).toHaveCount(0)
 })
 
@@ -692,4 +743,521 @@ test('a base font size choice survives a reload and can be undone', async ({ app
 
   await appPage.getByLabel('Base font size').selectOption('default')
   await expect(appPage.locator('html')).not.toHaveAttribute('data-ui-font-size')
+})
+
+test('compact density reduces common chrome and survives a reload', async ({ appPage }) => {
+  const toolbar = appPage.locator('.toolbar')
+  const comfortableHeight = await toolbar.evaluate((element) => element.getBoundingClientRect().height)
+
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await appPage.getByLabel('UI density').selectOption('compact')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+  const compactHeight = await toolbar.evaluate((element) => element.getBoundingClientRect().height)
+  expect(compactHeight).toBeLessThan(comfortableHeight)
+
+  await appPage.reload()
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await expect(appPage.getByLabel('UI density')).toHaveValue('compact')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+
+  await appPage.getByLabel('UI density').selectOption('comfortable')
+  await expect(appPage.locator('html')).not.toHaveAttribute('data-ui-density')
+})
+
+async function exportCalls(appPage: Parameters<typeof control>[0]): Promise<Array<Record<string, unknown>>> {
+  const calls = await (await control(appPage)).calls()
+  return calls
+    .filter((call) => call.channel === 'export')
+    .map((call) => call.request as Record<string, unknown>)
+}
+
+test('pinning a thread keeps it first across a reload', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  const rows = appPage.locator('.sidebar-section.projects .session-row')
+  const sourceRow = rows.filter({ hasText: 'Source thread' })
+  await expect(sourceRow).toBeVisible()
+
+  // Mid-list among the fixture threads rather than newest, so pinning must
+  // move it above all of them, not merely keep its stored flag.
+  await expect(rows.first()).toContainText('Claude stop thread')
+  await expect(rows.last()).toContainText('Duplicate transcript')
+  await fixture.holdNextPin()
+  await sourceRow.getByRole('button', { name: 'Pin thread' }).click()
+
+  expect((await lastBackendCall(appPage, 'thread.pin')).request).toEqual({
+    type: 'thread.pin',
+    threadId: 'thread-source',
+    pinned: true
+  })
+  await expect(rows.first()).toContainText('Source thread')
+  const pinnedButton = sourceRow.getByRole('button', { name: 'Unpin thread' })
+  await expect(pinnedButton).toBeVisible()
+  await expect(pinnedButton).toHaveClass(/\bpinned\b/)
+
+  // A session refresh can finish while main is still saving the pin. It must
+  // not overwrite the optimistic choice with its older session snapshot.
+  const listsBefore = (await backendCalls(appPage, 'thread.list')).length
+  await fixture.emit({ type: 'session.updated', properties: { info: { id: 'thread-source' } } })
+  await expect.poll(async () => (await backendCalls(appPage, 'thread.list')).length).toBeGreaterThan(listsBefore)
+  await expect(rows.first()).toContainText('Source thread')
+  await expect(pinnedButton).toHaveClass(/\bpinned\b/)
+  await fixture.releasePin()
+  await expect.poll(async () => (await fixture.sessions()).find((session) => session.id === 'thread-source')?.pinned).toBe(true)
+
+  // The pin lives on the thread, so a reload reads it back rather than losing
+  // it — the contract main keeps in backend-threads.json.
+  await appPage.reload()
+  const reloadedRows = appPage.locator('.sidebar-section.projects .session-row')
+  await expect(reloadedRows.first()).toContainText('Source thread')
+  await expect(reloadedRows.first().getByRole('button', { name: 'Unpin thread' })).toBeVisible()
+})
+
+test('thread rows and Command Center cards export the transcript as Markdown', async ({ appPage }) => {
+  const sourceRow = appPage.locator('.session-row').filter({ hasText: 'Source thread' })
+  await expect(sourceRow).toBeVisible()
+  await sourceRow.click({ button: 'right' })
+  await appPage.getByRole('button', { name: 'Export as Markdown…' }).click()
+
+  await expect.poll(async () => (await exportCalls(appPage)).length).toBeGreaterThanOrEqual(1)
+  const [fromRow] = await exportCalls(appPage)
+  expect(fromRow).toMatchObject({ title: 'Source thread', defaultName: 'source-thread.md' })
+  const markdown = String(fromRow.markdown)
+  assert.ok(markdown.startsWith('# Source thread'), 'the file should carry the thread title as its heading')
+  assert.ok(markdown.includes('### User'), 'user turns should be labelled')
+  assert.ok(markdown.includes('Search marker: first result.'), 'the user message should be in the file')
+
+  // The same action hangs off Command Center's attention cards, which have no
+  // context menu of their own otherwise.
+  const card = appPage.locator('.command-session-card').filter({ hasText: 'Source thread' })
+  await expect(card).toBeVisible()
+  await card.click({ button: 'right' })
+  await appPage.getByRole('button', { name: 'Export as Markdown…' }).click()
+
+  await expect.poll(async () => (await exportCalls(appPage)).length).toBe(2)
+
+  // A save-dialog or disk failure must be visible even while Command Center,
+  // rather than a hidden error that appears only after opening a chat.
+  await (await control(appPage)).failNextExport('The export disk is full.')
+  await sourceRow.click({ button: 'right' })
+  await appPage.getByRole('button', { name: 'Export as Markdown…' }).click()
+  await expect(appPage.getByRole('heading', { name: 'Export failed' })).toBeVisible()
+  await expect(appPage.locator('.modal .body')).toHaveText('Error: The export disk is full.')
+})
+
+test('the composer meter reports what backends recorded and hides when they report nothing', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  // Only reported numbers: the fixture's source thread has recorded tokens,
+  // so the meter shows them compactly beside the composer controls.
+  const meter = appPage.locator('.token-meter-toggle:visible')
+  await expect(meter).toBeVisible()
+  await expect(meter).toContainText(/12\.4K tok/)
+  await expect(meter).toContainText('4 runs')
+
+  await meter.click()
+  const detail = appPage.getByLabel('Token usage detail')
+  await expect(detail).toBeVisible()
+  await expect(detail).toContainText('12.4K across 3 runs')
+  await expect(detail).toContainText('Only tokens the backend reports are counted.')
+
+  // A thread whose backend never reported anything shows no meter at all —
+  // not a row of zeros. The previous thread's tab stays mounted but hidden,
+  // so this is about visible meters.
+  await appPage.locator('.session-row').filter({ hasText: 'Claude stop thread' }).click()
+  await expect(appPage.locator('.token-meter-toggle:visible')).toHaveCount(0)
+})
+
+/** Open the review surface for the source thread's checkout. */
+async function openReviewTab(page: Parameters<typeof control>[0]): Promise<void> {
+  await page.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await page.locator('.workspace-tab-add-inline[title="Add a terminal, files or review to this thread"]').click()
+  await page.locator('.workspace-add-menu-item').filter({ hasText: 'Review' }).click()
+}
+
+test('the diff view toggles between unified and split and remembers it', async ({ appPage }) => {
+  await openReviewTab(appPage)
+
+  // Pick the tracked file: Working tree also includes the fixture's new,
+  // untracked file, which has its own card.
+  const card = appPage.locator('.diff-card').filter({ hasText: 'src/edited.ts' })
+  await expect(card).toHaveCount(1)
+  const view = card.locator('.diff-view')
+  await expect(view).toHaveAttribute('data-mode', 'unified')
+
+  await expect(view.locator('.word-del')).toContainText('total')
+  await expect(view.locator('.word-add')).toContainText('sum')
+
+  const toggle = appPage.getByRole('group', { name: 'Diff layout' })
+  await toggle.getByRole('button', { name: 'Split' }).click()
+  await expect(view).toHaveAttribute('data-mode', 'split')
+
+  // Two gutters side by side inside the one file block: the modified pair sits
+  // on one row, old left and new right, each carrying its own word mark.
+  const row = view.locator('.diff-split-row:has(.word-del)').first()
+  await expect(row.locator('.diff-line.half')).toHaveCount(2)
+  await expect(row.locator('.diff-line.half.left')).toContainText('total')
+  await expect(row.locator('.diff-line.half.right')).toContainText('sum')
+  await expect(card.locator('.diff-line.hunk.span')).toHaveCount(1)
+
+  await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffMode'))).toBe('split')
+
+  // The choice survives leaving and re-entering the workspace: a fresh
+  // DiffReview reads it back when it mounts.
+  await appPage.reload()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
+  await expect(appPage.locator('.diff-view.split').first()).toBeVisible()
+
+  await appPage.getByRole('group', { name: 'Diff layout' }).getByRole('button', { name: 'Unified' }).click()
+  await expect(appPage.locator('.diff-view[data-mode="unified"]').first()).toBeVisible()
+})
+
+test('the whitespace toggle is offered on the diff toolbar and persists', async ({ appPage }) => {
+  await openReviewTab(appPage)
+  await expect(appPage.locator('.diff-card')).toHaveCount(2)
+
+  const whitespace = appPage.locator('.diff-whitespace-toggle')
+  await expect(whitespace).toHaveText('Ignore whitespace')
+  await expect(whitespace).toHaveAttribute('aria-pressed', 'false')
+  await whitespace.click()
+  await expect(whitespace).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffIgnoreWhitespace'))).toBe('1')
+
+  // A freshly mounted diff reads the preference back.
+  await appPage.reload()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
+  await expect(appPage.locator('.diff-whitespace-toggle')).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('review scopes expose untracked, staged, and committed branch changes in a responsive toolbar', async ({ appPage }) => {
+  await appPage.setViewportSize({ width: 760, height: 700 })
+  await openReviewTab(appPage)
+
+  const paths = appPage.locator('.diff-file-path')
+  await expect(paths).toHaveText(['src/edited.ts', 'scratch.ts'])
+
+  const scopes = appPage.getByRole('tablist', { name: 'Review scope' })
+  await scopes.getByRole('tab', { name: 'Staged' }).click()
+  await expect(paths).toHaveText(['src/staged.ts'])
+
+  await scopes.getByRole('tab', { name: 'Compare' }).click()
+  await expect(appPage.getByRole('combobox', { name: 'Compare against' })).toHaveValue('origin/main')
+  await expect(paths).toHaveText(['src/committed.ts'])
+
+  // The checkout controls live on their own semantic row and both toolbars
+  // contain their controls at a normal split-pane width instead of spilling
+  // over the review content.
+  await expect(appPage.getByRole('group', { name: 'Checkout branch' })).toBeVisible()
+  await expect(appPage.getByRole('group', { name: 'Diff options' })).toBeVisible()
+  await expect.poll(() => appPage.locator('.git-toolbar').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await expect.poll(() => appPage.locator('.diff-stack-head').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+})
+
+test('committing stages a chosen subset and commits only it', async ({ appPage }) => {
+  // The row labels projects by folder name; its title carries the full path.
+  const project = appPage.locator('.sidebar-section.projects .project-row[title="/tmp/boss-e2e/project"]')
+  await expect(project).toBeVisible()
+  await project.click({ button: 'right' })
+  await appPage.getByRole('button', { name: 'Commit & push…' }).click()
+
+  const dialog = appPage.locator('.modal')
+  const staged = dialog.locator('.commit-section.staged')
+  const unstaged = dialog.locator('.commit-section.unstaged')
+  await expect(staged).toContainText('src/staged.ts')
+  await expect(unstaged).toContainText('src/edited.ts')
+  await expect(unstaged).toContainText('scratch.ts')
+
+  // Nothing staged means nothing to commit: the buttons stand down, and the
+  // labels lose their counts.
+  await dialog.getByRole('button', { name: 'Unstage src/staged.ts' }).click()
+  await expect(dialog.getByRole('button', { name: 'Commit', exact: true })).toBeDisabled()
+
+  // Recording starts here, so everything below is asserted against the exact
+  // git traffic this test caused.
+  const e2e = await control(appPage)
+  await e2e.resetCalls()
+  await dialog.locator('.commit-input').fill('Just the scratch file')
+  await e2e.holdGit('add')
+  await dialog.getByRole('button', { name: 'Stage scratch.ts' }).click()
+  const commitButton = dialog.getByRole('button', { name: 'Commit (1)', exact: true })
+  // The optimistic row move must not let Commit or another toggle overtake the
+  // still-running git add.
+  await expect.poll(async () => gitCalls(appPage).then((calls) => calls.some((args) => args[0] === 'add'))).toBe(true)
+  await expect(commitButton).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Stage src/edited.ts' })).toBeDisabled()
+  await e2e.releaseGit('add')
+  await expect(commitButton).toBeEnabled()
+  await commitButton.click()
+
+  await expect(dialog.locator('.commit-output')).toContainText('Committed ✓')
+  // Exactly one targeted add — no sweep of everything with -A.
+  await expect.poll(async () => gitCalls(appPage).then((calls) => calls.filter((args) => args[0] === 'add'))).toEqual([['add', '--', 'scratch.ts']])
+  const calls = await gitCalls(appPage)
+  expect(calls).toContainEqual(['commit', '-m', 'Just the scratch file'])
+  expect(calls.some((args) => args.includes('-A'))).toBe(false)
+})
+
+test('branch switching blocks conflicts and restores a targeted stash on a safe branch', async ({ appPage }) => {
+  await openReviewTab(appPage)
+  const branch = appPage.getByRole('combobox', { name: 'Switch branch' })
+  await expect(branch).toBeEnabled()
+  await expect(branch).toHaveValue('main')
+
+  // The fixture's conflict branch changes src/edited.ts, which is also dirty
+  // locally. The guard must stop before checkout.
+  await branch.selectOption('conflict')
+  const blocked = appPage.locator('.modal').filter({ hasText: "Can't switch to conflict" })
+  await expect(blocked).toContainText('src/edited.ts')
+  await blocked.getByRole('button', { name: 'Stay' }).click()
+  await expect(branch).toHaveValue('main')
+
+  await control(appPage).then((item) => item.resetCalls())
+  await branch.selectOption('feature')
+  const confirm = appPage.locator('.modal').filter({ hasText: 'Switch to feature?' })
+  await confirm.getByRole('button', { name: 'Stash & switch' }).click()
+  await expect(branch).toHaveValue('feature')
+
+  const calls = await gitCalls(appPage)
+  expect(calls).toContainEqual(['stash', 'push', '--include-untracked', '-m', 'BOSS branch switch'])
+  expect(calls).toContainEqual(['checkout', 'feature'])
+  expect(calls).toContainEqual(['stash', 'pop', 'stash@{0}'])
+
+  // Restoration is observable in the UI too: the feature checkout still has
+  // the same local working-tree change after the targeted stash is popped.
+  await expect(appPage.locator('.diff-card-path').filter({ hasText: 'src/edited.ts' })).toHaveCount(1)
+
+  // Reproduce the confirmation-time race: after BOSS planned a stash switch,
+  // another Git client stashes the changes first. Revalidation must switch the
+  // now-clean tree directly and leave that pre-existing stash untouched.
+  await branch.selectOption('main')
+  const back = appPage.locator('.modal').filter({ hasText: 'Switch to main?' })
+  await expect(back).toBeVisible()
+  await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['stash', 'push', '--include-untracked', '-m', 'manual existing stash']))
+  await control(appPage).then((item) => item.resetCalls())
+  await back.getByRole('button', { name: 'Stash & switch' }).click()
+  await expect(branch).toHaveValue('main')
+  const retryCalls = await gitCalls(appPage)
+  expect(retryCalls.some((args) => args[0] === 'stash')).toBe(false)
+  const existing = await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['rev-parse', '--verify', 'refs/stash']))
+  expect(existing.code).toBe(0)
+})
+
+test('a fenced code block in chat highlights and copies raw code', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  const block = appPage.locator('.md .code-block').first()
+  await expect(block.locator('span.hljs-keyword')).toHaveText('const')
+
+  // The label is the button text, which reads Copy before it flips to Copied.
+  const copy = block.locator('.code-copy')
+  await expect(copy).toHaveAccessibleName('Copy')
+  await copy.click()
+  await expect(copy).toHaveText(/Copied/)
+
+  // The clipboard carries the raw code, never the highlight markup.
+  const writes = await control(appPage).then((item) => item.clipboardWrites())
+  expect(writes.at(-1)).toBe('const answer = 42\nconsole.log(answer)')
+})
+
+test('compact asks before summarizing and then compacts the thread', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  const menu = appPage.locator('.ctx-menu')
+  const compactItem = menu.getByRole('button', { name: 'Compact context…' })
+
+  // Cancel keeps the transcript untouched.
+  await appPage.locator('.msg.user .msg-more').first().click()
+  await compactItem.click()
+  const modal = appPage.locator('.modal-backdrop')
+  await expect(modal.getByRole('heading', { name: 'Compact this thread?' })).toBeVisible()
+  await modal.getByRole('button', { name: 'Cancel' }).click()
+  await expect(modal).toHaveCount(0)
+
+  await control(appPage).then((item) => item.resetCalls())
+  await appPage.locator('.msg.user .msg-more').first().click()
+  await compactItem.click()
+  await modal.getByRole('button', { name: 'Compact' }).click()
+  expect((await lastBackendCall(appPage, 'thread.compact')).request).toMatchObject({
+    type: 'thread.compact',
+    threadId: 'thread-source'
+  })
+  await expect(appPage.locator('.msg.assistant .msg-body')).toHaveText('Compacted context summary.')
+  await expect(appPage.locator('.messages')).not.toContainText('second result')
+})
+
+test('undo to here reverts on an opencode thread and restores again', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.resetCalls())
+
+  const more = appPage.locator('.msg.assistant .msg-more').last()
+  const menu = appPage.locator('.ctx-menu')
+
+  await more.click()
+  await menu.getByRole('button', { name: 'Undo to here' }).click()
+  expect((await lastBackendCall(appPage, 'thread.revert')).request).toMatchObject({
+    type: 'thread.revert',
+    threadId: 'thread-source',
+    messageId: 'source-search-agent'
+  })
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+
+  await appPage.locator('.msg.user .msg-more').click()
+  await menu.getByRole('button', { name: 'Restore undone messages' }).click()
+  expect((await lastBackendCall(appPage, 'thread.unrevert')).request).toMatchObject({
+    type: 'thread.unrevert',
+    threadId: 'thread-source'
+  })
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+})
+
+test('history controls stay hidden when the backend cannot perform them', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Claude stop thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('Claude history controls are unavailable.')
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  const menu = appPage.locator('.ctx-menu')
+  await expect(menu.getByRole('button', { name: 'Undo to here' })).toHaveCount(0)
+  await expect(menu.getByRole('button', { name: 'Restore undone messages' })).toHaveCount(0)
+  await expect(menu.getByRole('button', { name: 'Compact context…' })).toHaveCount(0)
+})
+
+test('a failed undo leaves the transcript and restore state unchanged', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.failNextBackendRequest('thread.revert', 'Fixture revert failed.'))
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Undo to here' }).click()
+
+  await expect(appPage.locator('.chat-error')).toContainText('Fixture revert failed.')
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await expect(appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' })).toHaveCount(0)
+})
+
+test('a failed restore keeps the undone transcript restorable', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Undo to here' }).click()
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+  await control(appPage).then((item) => item.failNextBackendRequest('thread.unrevert', 'Fixture restore failed.'))
+
+  await appPage.locator('.msg.user .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' }).click()
+
+  await expect(appPage.locator('.chat-error')).toContainText('Fixture restore failed.')
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+  await appPage.locator('.msg.user .msg-more').click()
+  await expect(appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' })).toBeVisible()
+})
+
+test('reading a reply aloud swaps its speaker button for a stop control', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  const actions = appPage.locator('.msg.assistant .msg-actions')
+  await actions.getByRole('button', { name: 'Read aloud' }).click()
+
+  const stop = actions.getByRole('button', { name: 'Stop reading' })
+  await expect(stop).toBeVisible()
+  await stop.click()
+
+  await expect(actions.getByRole('button', { name: 'Read aloud' })).toBeVisible()
+})
+
+test('retry resends the prompt that produced a finished reply', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.resetCalls())
+
+  await appPage.locator('.msg.assistant').getByRole('button', { name: 'Retry this turn' }).click()
+
+  const call = await lastBackendCall(appPage, 'thread.send')
+  expect(call.request).toMatchObject({ type: 'thread.send', threadId: 'thread-source' })
+  const text = (call.request as { parts: { type: string; text?: string }[] }).parts
+    .find((part) => part.type === 'text')?.text ?? ''
+  expect(text).toBe('Search marker: first result.')
+  const file = (call.request as { parts: { type: string; mime?: string; filename?: string; url?: string }[] }).parts
+    .find((part) => part.type === 'file')
+  expect(file).toMatchObject({
+    type: 'file',
+    mime: 'image/png',
+    filename: 'source.png',
+    url: 'data:image/png;base64,AAAA'
+  })
+})
+
+test('automatic compaction is visible while it runs and remains in the transcript', async ({ appPage }) => {
+  const sessionID = 'thread-source'
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'session.compaction.started',
+    properties: { sessionID, trigger: 'auto' }
+  }))
+  await expect(appPage.locator('.thinking-indicator')).toContainText('Compacting context')
+  await expect(
+    appPage.locator('.session-row').filter({ hasText: 'Source thread' }).locator('.session-state.compacting')
+  ).toHaveAttribute('title', 'Compacting')
+
+  const messageID = 'compaction-notice-e2e'
+  const created = Date.now()
+  await control(appPage).then((item) => item.emit({
+    type: 'message.updated',
+    properties: { info: { id: messageID, sessionID, role: 'user', time: { created, completed: created } } }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: `${messageID}-part`,
+        type: 'compaction',
+        sessionID,
+        messageID,
+        auto: true,
+        state: { status: 'completed', metadata: { trigger: 'auto', preTokens: 180_000, postTokens: 24_000 } }
+      }
+    }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'session.compacted',
+    properties: { sessionID, trigger: 'auto', preTokens: 180_000, postTokens: 24_000 }
+  }))
+
+  await expect(appPage.locator('.thinking-indicator')).toHaveCount(0)
+  const notice = appPage.locator('.compaction-divider-label')
+  await expect(notice).toHaveText('Context compacted automatically — earlier messages were summarized. 180K → 24K tokens.')
+
+  // Completion reloads native history. The marker must survive that reload and
+  // revisiting the thread, or background compaction remains easy to miss.
+  await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(notice).toHaveText('Context compacted automatically — earlier messages were summarized. 180K → 24K tokens.')
+})
+
+test('a failed automatic compaction clears progress and reports the reason', async ({ appPage }) => {
+  const sessionID = 'thread-source'
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'session.compaction.started',
+    properties: { sessionID, trigger: 'auto' }
+  }))
+  await expect(appPage.locator('.thinking-indicator')).toContainText('Compacting context')
+
+  await control(appPage).then((item) => item.emit({
+    type: 'session.error',
+    properties: { sessionID, error: 'The context could not be compacted.' }
+  }))
+
+  await expect(appPage.locator('.thinking-indicator')).toHaveCount(0)
+  await expect(appPage.locator('.chat-error')).toContainText('The context could not be compacted.')
+  await expect(appPage.locator('.session-row').filter({ hasText: 'Source thread' })).not.toContainText('Compacting')
 })

@@ -58,9 +58,9 @@ function viewItems(views: Array<{ id: string; name: string }>): PaletteItem[] {
   }))
 }
 
-function projectItems(projects: Project[]): PaletteItem[] {
+function projectItems(projects: Project[], currentProjectPath: string): PaletteItem[] {
   return projects
-    .filter((project) => project.path && project.path !== appStore.getState().projectPath)
+    .filter((project) => project.path && project.path !== currentProjectPath)
     .map((project) => ({
       id: `project.${project.path}`,
       label: project.title || projectName(project.path!),
@@ -88,6 +88,7 @@ export function CommandPalette(): React.JSX.Element | null {
   const open = useStore(appStore, (s) => s.paletteOpen)
   const sessions = useStore(appStore, (s) => s.sessions)
   const projects = useStore(appStore, (s) => s.projects)
+  const projectPath = useStore(appStore, (s) => s.projectPath)
   const workspace = useStore(appStore, (s) => s.projectWorkspace)
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -95,8 +96,8 @@ export function CommandPalette(): React.JSX.Element | null {
   const listRef = useRef<HTMLUListElement>(null)
 
   const items = useMemo(
-    () => [...commandItems(), ...pageItems(), ...viewItems(workspace?.views ?? []), ...threadItems(sessions), ...projectItems(projects)],
-    [sessions, projects, workspace?.views]
+    () => [...commandItems(), ...pageItems(), ...viewItems(workspace?.views ?? []), ...threadItems(sessions), ...projectItems(projects, projectPath)],
+    [sessions, projects, projectPath, workspace?.views]
   )
   const results = useMemo(() => rank(items, query), [items, query])
 
@@ -113,41 +114,31 @@ export function CommandPalette(): React.JSX.Element | null {
     setActiveIndex(0)
   }, [query])
 
-  // Capture phase, as Find does: Esc must dismiss the palette before the
-  // app-level handler can read it as "abort the running thread".
+  // Capture phase keeps Escape from reaching the app-level abort handler. The
+  // shortcut opens idempotently because Electron's native menu accelerator can
+  // dispatch the same command; toggling in both places could immediately close
+  // a palette that had just opened.
   useEffect(() => {
-    if (!open) return
     const onKey = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k') {
+      const shortcut = (event.metaKey || event.ctrlKey)
+        && !event.altKey
+        && !event.shiftKey
+        && event.key.toLocaleLowerCase() === 'k'
+      if (shortcut) {
+        const target = event.target as HTMLElement | null
+        if (target?.isContentEditable) return
         event.preventDefault()
         event.stopPropagation()
         event.stopImmediatePropagation()
-        appStore.setState({ paletteOpen: false })
+        appStore.setState({ paletteOpen: true })
         return
       }
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && appStore.getState().paletteOpen) {
         event.preventDefault()
         event.stopPropagation()
         event.stopImmediatePropagation()
         appStore.setState({ paletteOpen: false })
       }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [open])
-
-  // The shortcut works wherever focus sits — including inside inputs, which
-  // is why this lives at the window rather than on a button.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
-      if (event.key.toLocaleLowerCase() !== 'k') return
-      const target = event.target as HTMLElement | null
-      if (target?.isContentEditable) return
-      event.preventDefault()
-      event.stopPropagation()
-      event.stopImmediatePropagation()
-      appStore.setState((state) => ({ paletteOpen: !state.paletteOpen }))
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
