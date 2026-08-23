@@ -12,7 +12,7 @@
  */
 
 export type SettingsSectionId =
-  | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile'
+  | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram'
   | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
 export interface SettingsEntry {
@@ -52,6 +52,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { label: 'Read-only sharing token', section: 'mobile', keywords: ['viewer', 'share', 'review'] },
   { label: 'Paired devices', section: 'mobile', keywords: ['revoke', 'forget', 'unpair'] },
   { label: 'Push notifications', section: 'mobile', keywords: ['webhook', 'alert', 'away'] },
+
+  // Telegram
+  { label: 'Telegram inbox', section: 'telegram', keywords: ['bot', 'message', 'channel', 'chat', 'enable'] },
+  { label: 'Bot token', section: 'telegram', keywords: ['botfather', 'keychain', 'api', 'forget'] },
+  { label: 'Deliver into thread', section: 'telegram', keywords: ['steer', 'queue', 'destination'] },
+  { label: 'Allowed chats', section: 'telegram', keywords: ['chat id', 'allowlist', 'who can write'] },
 
   // Collaboration
   { label: 'Thread collaboration', section: 'collaboration', keywords: ['thread bus', 'message', 'discover', 'agents talking'] },
