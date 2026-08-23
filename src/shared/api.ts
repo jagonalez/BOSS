@@ -144,4 +144,7 @@ export interface BossApi {
   updateChannelSet(channel: UpdateChannel): Promise<UpdateStatus>
   /** A menu item was chosen. The menu names the action; the renderer runs it. */
   onMenuCommand(cb: (command: import('./ipc').MenuCommand) => void): () => void
+  /** Save Markdown the renderer serialized under a path the user picks.
+   *  Resolves with that path, or null when the dialog was cancelled. */
+  exportThreadMarkdown(req: import('./ipc').ThreadExportRequest): Promise<string | null>
 }

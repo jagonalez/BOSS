@@ -281,6 +281,12 @@ export type BackendRequest =
   /** Hide a thread from the default list, or bring it back. Recorded on the
    *  thread so every client agrees, rather than in one window's storage. */
   | { type: 'thread.archive'; threadId: string; archived: boolean }
+  /** Keep a thread at the top of its section, or stop keeping it there.
+   *  Recorded on the thread like archiving is, for the same reason. */
+  | { type: 'thread.pin'; threadId: string; pinned: boolean }
+  /** What this thread has spent, as the backend reported it, and what its
+   *  budget still allows. Numbers a backend never reported stay absent. */
+  | { type: 'thread.usage'; threadId: string }
   | { type: 'thread.policy.get'; threadId: string }
   | { type: 'thread.policy.set'; threadId: string; policy: import('./task-policy').TaskPolicy }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }

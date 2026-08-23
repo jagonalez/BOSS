@@ -89,6 +89,18 @@ export interface SupervisionSnapshot {
   totals: ThreadUsageTotals
 }
 
+/** What one thread has spent, for the meter beside its composer.
+ *
+ *  Only numbers a backend actually reported are present: `tokens` is absent
+ *  until a run reports any, and the budget is absent until a policy sets one.
+ *  A surface renders what is there and hides itself when nothing is. */
+export interface ThreadUsageReport {
+  threadId: string
+  totals: ThreadUsageTotals
+  lastRun?: RunMetrics
+  budget?: import('./task-policy').TaskBudget
+}
+
 export interface TranscriptSearchResult {
   threadId: string
   messageId: string

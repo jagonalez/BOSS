@@ -1,6 +1,7 @@
 import { BrowserWindow, clipboard, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import {
   IpcChannels,
   type ApiRequest,
@@ -122,6 +123,19 @@ export function registerIpc(deps: IpcDeps): void {
   )
 
   ipcMain.handle(IpcChannels.BackendRequest, (_e, req: BackendRequest) => deps.backends.handle(req))
+
+  // The renderer serializes; main asks where to keep the file and writes it.
+  // A cancelled dialog is a normal outcome, not a failure, so it resolves null.
+  ipcMain.handle(IpcChannels.ThreadExportMarkdown, async (_e, body: import('@shared/ipc').ThreadExportRequest) => {
+    const result = await dialog.showSaveDialog({
+      title: `Export “${body.title}”`,
+      defaultPath: body.defaultName,
+      filters: [{ name: 'Markdown', extensions: ['md'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    await writeFile(result.filePath, body.markdown, 'utf8')
+    return result.filePath
+  })
 
   ipcMain.handle(IpcChannels.EventSubscribe, (e) => {
     subscribers.add(e.sender)
