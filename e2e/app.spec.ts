@@ -432,7 +432,7 @@ test('annotating a passage quotes it back to the model with the note', async ({ 
   await expect(appPage.locator('.msg.assistant')).toContainText('second result')
 
   await selectInAssistantReply(appPage, 'second result')
-  await appPage.getByRole('button', { name: 'Annotate' }).click()
+  await appPage.locator('.annotation-popover').getByRole('button', { name: 'Add to chat' }).click()
   await appPage.getByLabel('Annotation note').fill('Why this one?')
   await appPage.getByLabel('Annotation note').press('Enter')
 
@@ -463,7 +463,7 @@ test('an annotation alone is a complete message', async ({ appPage }) => {
   await expect(appPage.locator('.msg.assistant')).toContainText('second result')
 
   await selectInAssistantReply(appPage, 'second result')
-  await appPage.getByRole('button', { name: 'Annotate' }).click()
+  await appPage.locator('.annotation-popover').getByRole('button', { name: 'Add to chat' }).click()
   await appPage.getByLabel('Annotation note').fill('Say more.')
   await appPage.getByLabel('Annotation note').press('Enter')
   await expect(appPage.locator('.annotation-pill')).toHaveCount(1)
@@ -484,7 +484,7 @@ test('a removed annotation is not carried into the next prompt', async ({ appPag
   await expect(appPage.locator('.msg.assistant')).toContainText('second result')
 
   await selectInAssistantReply(appPage, 'second result')
-  await appPage.getByRole('button', { name: 'Annotate' }).click()
+  await appPage.locator('.annotation-popover').getByRole('button', { name: 'Add to chat' }).click()
   await appPage.getByLabel('Annotation note').fill('Never mind.')
   await appPage.getByLabel('Annotation note').press('Enter')
   await appPage.getByRole('button', { name: 'Remove annotation 1' }).click()
@@ -507,7 +507,7 @@ test('a side chat forks the thread and opens seeded with the passage', async ({ 
   await control(appPage).then((item) => item.resetCalls())
 
   await selectInAssistantReply(appPage, 'second result')
-  await appPage.getByRole('button', { name: 'Side chat' }).click()
+  await appPage.locator('.annotation-popover').getByRole('button', { name: 'Add to side chat' }).click()
 
   // Forked, not freshly created: the side chat inherits the conversation the
   // passage came from, so the seed only has to point at it.
@@ -538,6 +538,61 @@ test('a side chat forks the thread and opens seeded with the passage', async ({ 
 
   // The passage went to the side chat, so nothing is left pending here.
   await expect(appPage.locator('.annotation-pill')).toHaveCount(0)
+})
+
+test('a placed annotation is editable from its marker in the transcript', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  await selectInAssistantReply(appPage, 'second result')
+  await appPage.locator('.annotation-popover').getByRole('button', { name: 'Add to chat' }).click()
+  await appPage.getByLabel('Annotation note').fill('First thought.')
+  await appPage.getByLabel('Annotation note').press('Enter')
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(1)
+
+  // The marker is what makes a placed highlight reachable again: without it the
+  // only way to revise a note is to remove the pill and re-select the words.
+  const marker = appPage.locator('.annotation-marker')
+  await expect(marker).toHaveCount(1)
+  await expect(marker).toHaveText('1')
+  await marker.click()
+
+  // Reopens on the existing annotation rather than starting a new one, so the
+  // note it already carries is there to edit.
+  const note = appPage.getByLabel('Annotation note')
+  await expect(note).toHaveValue('First thought.')
+  await note.fill('Actually, why this one?')
+  await note.press('Enter')
+
+  // Revised in place: still one annotation, carrying the new note.
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(1)
+  await expect(appPage.locator('.annotation-pill-note')).toHaveText('Actually, why this one?')
+
+  await control(appPage).then((item) => item.resetCalls())
+  await appPage.getByPlaceholder(/^Ask /).press('Enter')
+  const call = await lastBackendCall(appPage, 'thread.send')
+  const text = (call.request as { parts: { type: string; text?: string }[] }).parts
+    .find((part) => part.type === 'text')?.text ?? ''
+  expect(text).toContain('Actually, why this one?')
+  expect(text).not.toContain('First thought.')
+})
+
+test('an annotation can be removed from its own editor', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  await selectInAssistantReply(appPage, 'second result')
+  await appPage.locator('.annotation-popover').getByRole('button', { name: 'Add to chat' }).click()
+  await appPage.getByLabel('Annotation note').press('Enter')
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(1)
+
+  await appPage.locator('.annotation-marker').click()
+  await appPage.getByRole('button', { name: 'Remove annotation' }).click()
+
+  // Gone from the transcript and the composer together: the highlight, its
+  // marker, and the pending quote are one thing seen from three places.
+  await expect(appPage.locator('.annotation-pill')).toHaveCount(0)
+  await expect(appPage.locator('.annotation-marker')).toHaveCount(0)
 })
 
 test('a selection spanning two messages offers no annotation', async ({ appPage }) => {
