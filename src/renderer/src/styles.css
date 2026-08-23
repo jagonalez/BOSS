@@ -42,6 +42,10 @@
   --type-thread: 13px;
   --type-meta: 11px;
   --type-label: 10.5px;
+  /* The only two sizes a person can change. Everything above is chrome and keeps the size it was
+     designed at, so a larger reading size never moves a row height or reflows a list. */
+  --type-reading: 14.5px;
+  --type-terminal: 13px;
   --leading-body: 1.5;
   --leading-compact: 1.35;
   /* Semantic workspace tokens. Themes only need to redefine the base tokens above. */
@@ -1339,6 +1343,22 @@ textarea {
 
 .settings-theme-grid .theme-swatch-preview {
   height: 78px;
+}
+
+/* A size, with a nudge either side of it. The number sits between the two so the pair reads as
+   one control rather than as two buttons that happen to be adjacent. */
+.settings-size-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-size-stepper > span {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--type-control);
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-theme-families {
@@ -4950,7 +4970,7 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .md {
-  font-size: 14.5px;
+  font-size: var(--type-reading);
   line-height: 1.65;
   color: var(--text);
   word-break: break-word;

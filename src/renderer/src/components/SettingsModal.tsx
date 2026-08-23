@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
+import { loadTypography, saveTypography, stepReadingSize, stepTerminalSize } from '../lib/typography'
+import { MONO_FONTS, READING_SIZE, TERMINAL_SIZE, UI_FONTS } from '@shared/typography'
 import { KOKORO_VOICES } from '@shared/speech'
 import type { ViewMode } from '@shared/workspace'
 import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
@@ -657,6 +659,7 @@ export function SettingsModal(): React.JSX.Element | null {
   const viewMode = useStore(appStore, (s) => s.viewMode)
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
+  const [typography, setTypography] = useState(loadTypography)
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
   const [threadTitleSettings, setThreadTitleSettings] = useState<ThreadTitleSettings | null>(null)
   const [sandboxSettings, setSandboxSettings] = useState<SandboxSettings | null>(null)
@@ -1196,6 +1199,38 @@ export function SettingsModal(): React.JSX.Element | null {
                     </div>
                   ))}
                 </div>
+              </section>
+              <section className="settings-card settings-group-stack">
+                <div className="settings-card-heading">
+                  <div>
+                    <h2>Type</h2>
+                    <p>Only the conversation and the terminal follow these. The rest of the window keeps the sizes it was designed at, so a larger reading size never moves a row.</p>
+                  </div>
+                </div>
+                <SettingsRow title="Interface font" description="Used for everything except code, diffs and the terminal.">
+                  <Select value={typography.uiFont} onChange={(event) => setTypography(saveTypography({ ...typography, uiFont: event.target.value }))}>
+                    {UI_FONTS.map((font) => <option key={font.id} value={font.id}>{font.label}</option>)}
+                  </Select>
+                </SettingsRow>
+                <SettingsRow title="Monospace font" description="Code, diffs and the terminal. A face the machine does not have falls back to the system's own.">
+                  <Select value={typography.monoFont} onChange={(event) => setTypography(saveTypography({ ...typography, monoFont: event.target.value }))}>
+                    {MONO_FONTS.map((font) => <option key={font.id} value={font.id}>{font.label}</option>)}
+                  </Select>
+                </SettingsRow>
+                <SettingsRow title="Reading size" description={`How large a reply is drawn. ${typography.readingSize}px.`}>
+                  <div className="settings-size-stepper">
+                    <Button size="small" variant="ghost" disabled={typography.readingSize <= READING_SIZE.min} onClick={() => setTypography(stepReadingSize(-1))}>−</Button>
+                    <span>{typography.readingSize}px</span>
+                    <Button size="small" variant="ghost" disabled={typography.readingSize >= READING_SIZE.max} onClick={() => setTypography(stepReadingSize(1))}>+</Button>
+                  </div>
+                </SettingsRow>
+                <SettingsRow title="Terminal size" description={`How large a terminal is drawn. ${typography.terminalSize}px.`}>
+                  <div className="settings-size-stepper">
+                    <Button size="small" variant="ghost" disabled={typography.terminalSize <= TERMINAL_SIZE.min} onClick={() => setTypography(stepTerminalSize(-1))}>−</Button>
+                    <span>{typography.terminalSize}px</span>
+                    <Button size="small" variant="ghost" disabled={typography.terminalSize >= TERMINAL_SIZE.max} onClick={() => setTypography(stepTerminalSize(1))}>+</Button>
+                  </div>
+                </SettingsRow>
               </section>
               </>
             ) : null}
