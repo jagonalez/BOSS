@@ -55,7 +55,9 @@ const capabilities = {
   images: true,
   mcp: true,
   interactiveQuestions: true,
-  nativeAutoMode: true
+  nativeAutoMode: true,
+  // Only opencode implements revert in main; the others are no-ops there.
+  revert: false
 }
 
 const backends: BackendDescriptor[] = [
@@ -68,7 +70,7 @@ const backends: BackendDescriptor[] = [
     version: 'e2e',
     // Opencode has no native steering: BOSS stops the run and sends the queued
     // instruction next, which is what makes it report an abort.
-    capabilities: { ...capabilities, nativeAutoMode: false, steering: 'stop-and-redirect' },
+    capabilities: { ...capabilities, nativeAutoMode: false, steering: 'stop-and-redirect', revert: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
       { id: 'auto', label: 'Auto', description: 'Approve supported actions.' },
@@ -203,7 +205,12 @@ function sourceMessages(): MessageWithParts[] {
     },
     {
       info: { id: 'source-search-agent', sessionID, role: 'assistant', time: { created: Date.now() - 49_000, completed: Date.now() - 48_000 } },
-      parts: [{ id: 'source-search-agent-text', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Search marker: second result.' }]
+      parts: [
+        { id: 'source-search-agent-text', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Search marker: second result.' },
+        // A fenced block, so the transcript exercises what agents actually send:
+        // code the reader may want to copy, with a language tag to highlight by.
+        { id: 'source-search-agent-code', type: 'text', sessionID, messageID: 'source-search-agent', text: 'Here is how to count:\n```ts\nconst answer = 42\nconsole.log(answer)\n```' }
+      ]
     }
   ]
 }
@@ -246,6 +253,7 @@ export function installE2EApi(boss: BossApi): void {
     }]
   }
   let calls: RecordedCall[] = []
+  const clipboardWrites: string[] = []
   // The real manager persists this in BOSS's data store. Keep the fixture's
   // equivalent in session storage so a renderer reload exercises that contract.
   let threadTitleSettings = savedThreadTitleSettings()
@@ -258,6 +266,35 @@ export function installE2EApi(boss: BossApi): void {
 
   const recordBackend = (request: BackendRequest): void => {
     calls.push({ channel: 'backend', request: structuredClone(request) })
+  }
+
+  /** A real WAV the browser will actually play, so speakText() reaches its
+   *  playing state without any audio hardware or network. Pure silence: the
+   *  bytes after the header are all zero. */
+  const silentWavDataUrl = (durationMs: number): string => {
+    const rate = 8000
+    const samples = Math.max(1, Math.floor((rate * durationMs) / 1000))
+    const bytes = new Uint8Array(44 + samples * 2)
+    const view = new DataView(bytes.buffer)
+    const tag = (offset: number, value: string): void => {
+      for (let i = 0; i < value.length; i++) bytes[offset + i] = value.charCodeAt(i)
+    }
+    tag(0, 'RIFF')
+    view.setUint32(4, 36 + samples * 2, true)
+    tag(8, 'WAVE')
+    tag(12, 'fmt ')
+    view.setUint32(16, 16, true)
+    view.setUint16(20, 1, true)
+    view.setUint16(22, 1, true)
+    view.setUint32(24, rate, true)
+    view.setUint32(28, rate * 2, true)
+    view.setUint16(32, 2, true)
+    view.setUint16(34, 16, true)
+    tag(36, 'data')
+    view.setUint32(40, samples * 2, true)
+    let binary = ''
+    for (const byte of bytes) binary += String.fromCharCode(byte)
+    return `data:audio/wav;base64,${btoa(binary)}`
   }
 
   const createThread = (backendId: BackendId, title?: string): SessionInfo => {
@@ -520,6 +557,10 @@ export function installE2EApi(boss: BossApi): void {
     projectCurrent: async () => projectInfo,
     projectSet: async () => projectInfo,
     projectChoose: async () => PROJECT,
+    // Recorded rather than written: the suite asserts what the renderer asked
+    // to copy and never touches a real system clipboard.
+    clipboardWrite: (text: string) => { clipboardWrites.push(text) },
+    ttsSpeak: async () => ({ ok: true, dataUrl: silentWavDataUrl(1_500) }),
     backendRequest,
     ttsStatus: async () => ({ available: false, ready: false, speaking: false }),
     onSpeechStatusChanged: () => () => {},
@@ -543,6 +584,7 @@ export function installE2EApi(boss: BossApi): void {
     calls: () => structuredClone(calls),
     sessions: () => structuredClone(sessions),
     defaults: () => structuredClone(defaults),
+    clipboardWrites: () => structuredClone(clipboardWrites),
     resetCalls: () => { calls = [] },
     /** Add a thread the way an agent's spawn does: created in main, carrying
      *  the model main resolved, and never passing through renderer state.

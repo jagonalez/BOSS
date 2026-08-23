@@ -157,6 +157,10 @@ export interface AppState {
   asrTargetId: string | null
   ttsVoice: string
   speakAloud: boolean
+  /** The turn being read aloud in this window, keyed by its last message id.
+   *  Renderer-side playback state: main's TTS status cannot see the audio
+   *  elements speakText() plays here, so the stop control reads this. */
+  speakingKey: string | null
   sites: SiteInfo[]
   cloudflare: CloudflareSettings
   siteDeploying: Record<string, boolean>
@@ -261,6 +265,7 @@ export const initialState: AppState = {
   asrTargetId: null,
   ttsVoice: 'af_heart',
   speakAloud: false,
+  speakingKey: null,
   sites: [],
   cloudflare: { configured: false },
   siteDeploying: {},

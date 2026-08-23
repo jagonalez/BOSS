@@ -617,3 +617,96 @@ test('a selection spanning two messages offers no annotation', async ({ appPage 
 
   await expect(appPage.locator('.annotation-popover')).toHaveCount(0)
 })
+
+test('a fenced code block in chat highlights and copies raw code', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  const block = appPage.locator('.md .code-block').first()
+  await expect(block.locator('span.hljs-keyword')).toHaveText('const')
+
+  // The label is the button text, which reads Copy before it flips to Copied.
+  const copy = block.getByRole('button', { name: 'Copy', exact: true })
+  await copy.click()
+  await expect(copy).toHaveText(/Copied/)
+
+  // The clipboard carries the raw code, never the highlight markup.
+  const writes = await control(appPage).then((item) => item.clipboardWrites())
+  expect(writes.at(-1)).toBe('const answer = 42\nconsole.log(answer)')
+})
+
+test('compact asks before summarizing and then compacts the thread', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  const menu = appPage.locator('.ctx-menu')
+  const compactItem = menu.getByRole('button', { name: 'Compact context…' })
+
+  // Cancel keeps the transcript untouched.
+  await appPage.locator('.msg.user .msg-more').first().click()
+  await compactItem.click()
+  const modal = appPage.locator('.modal-backdrop')
+  await expect(modal.getByRole('heading', { name: 'Compact this thread?' })).toBeVisible()
+  await modal.getByRole('button', { name: 'Cancel' }).click()
+  await expect(modal).toHaveCount(0)
+
+  await control(appPage).then((item) => item.resetCalls())
+  await appPage.locator('.msg.user .msg-more').first().click()
+  await compactItem.click()
+  await modal.getByRole('button', { name: 'Compact' }).click()
+  expect((await lastBackendCall(appPage, 'thread.compact')).request).toMatchObject({
+    type: 'thread.compact',
+    threadId: 'thread-source'
+  })
+})
+
+test('undo to here reverts on an opencode thread and restores again', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.resetCalls())
+
+  const more = appPage.locator('.msg.assistant .msg-more').last()
+  const menu = appPage.locator('.ctx-menu')
+
+  await more.click()
+  await menu.getByRole('button', { name: 'Undo to here' }).click()
+  expect((await lastBackendCall(appPage, 'thread.revert')).request).toMatchObject({
+    type: 'thread.revert',
+    threadId: 'thread-source',
+    messageId: 'source-search-agent'
+  })
+
+  await more.click()
+  await menu.getByRole('button', { name: 'Restore undone messages' }).click()
+  expect((await lastBackendCall(appPage, 'thread.unrevert')).request).toMatchObject({
+    type: 'thread.unrevert',
+    threadId: 'thread-source'
+  })
+})
+
+test('reading a reply aloud swaps its speaker button for a stop control', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  const actions = appPage.locator('.msg.assistant .msg-actions')
+  await actions.getByRole('button', { name: 'Read aloud' }).click()
+
+  const stop = actions.getByRole('button', { name: 'Stop reading' })
+  await expect(stop).toBeVisible()
+  await stop.click()
+
+  await expect(actions.getByRole('button', { name: 'Read aloud' })).toBeVisible()
+})
+
+test('retry resends the prompt that produced a finished reply', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.resetCalls())
+
+  await appPage.locator('.msg.assistant').getByRole('button', { name: 'Retry this turn' }).click()
+
+  const call = await lastBackendCall(appPage, 'thread.send')
+  expect(call.request).toMatchObject({ type: 'thread.send', threadId: 'thread-source' })
+  const text = (call.request as { parts: { type: string; text?: string }[] }).parts
+    .find((part) => part.type === 'text')?.text ?? ''
+  expect(text).toBe('Search marker: first result.')
+})

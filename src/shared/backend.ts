@@ -26,6 +26,10 @@ export interface BackendCapabilities {
   interactiveQuestions: boolean
   /** The backend enforces its own Auto policy; escalations must still be shown to the user. */
   nativeAutoMode: boolean
+  /** The backend can revert a thread to a message and restore what was reverted.
+   *  Without it the transcript offers no undo, because pretending would drop
+   *  nothing but report it dropped. */
+  revert: boolean
 }
 
 export interface QueuedFollowUpAttachment {
