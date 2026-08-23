@@ -30,7 +30,9 @@ export function TelegramSettings(): React.JSX.Element {
   useEffect(() => {
     let live = true
     void OpenCode.telegramStatus().then((next) => {
-      if (live) setChatsInput(next.allowedChatIds.join(', '))
+      if (!live) return
+      setStatus(next)
+      setChatsInput(next.allowedChatIds.join(', '))
     }).catch(() => {})
     return () => {
       live = false

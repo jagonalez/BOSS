@@ -82,5 +82,5 @@ test('Telegram messaging is wired through settings and off until fully configure
   await section.getByRole('button', { name: 'Enable' }).click()
   const enabledCall = await lastBackendCall(appPage, 'telegram.set')
   expect(enabledCall.request).toMatchObject({ type: 'telegram.set', patch: { enabled: true } })
-  await expect(section.getByText('Running')).toBeVisible()
+  await expect(section.getByText('Running', { exact: true })).toBeVisible()
 })
