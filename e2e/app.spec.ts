@@ -1048,7 +1048,9 @@ test('automatic compaction is visible while it runs and remains in the transcrip
     properties: { sessionID, trigger: 'auto' }
   }))
   await expect(appPage.locator('.thinking-indicator')).toContainText('Compacting context')
-  await expect(appPage.locator('.session-row').filter({ hasText: 'Source thread' })).toContainText('Compacting')
+  await expect(
+    appPage.locator('.session-row').filter({ hasText: 'Source thread' }).locator('.session-state.compacting')
+  ).toHaveAttribute('title', 'Compacting')
 
   const messageID = 'compaction-notice-e2e'
   const created = Date.now()
