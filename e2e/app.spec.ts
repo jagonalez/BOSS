@@ -34,6 +34,47 @@ test('boots the real Electron renderer without covering it with a modal', async 
   })).toEqual({ count: 1, visible: false })
 })
 
+test('keeps a theme family while light, dark, and system appearance change', async ({ appPage }) => {
+  await appPage.emulateMedia({ colorScheme: 'dark' })
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+
+  const familyChoices = appPage.getByRole('radiogroup', { name: 'Theme family' })
+  await expect(familyChoices.getByRole('radio')).toHaveCount(10)
+  for (const name of ['Gruvbox', 'Everforest', 'Kanagawa', 'Ayu']) {
+    await expect(familyChoices.getByRole('radio', { name: new RegExp(`^${name}`) })).toBeVisible()
+  }
+
+  const family = appPage.getByRole('radio', { name: /^Catppuccin/ })
+  await family.click()
+  await appPage.getByRole('radio', { name: /^Light/ }).click()
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-family', 'catppuccin')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-appearance', 'light')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-latte')
+
+  await appPage.getByRole('radio', { name: /^Dark/ }).click()
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-mocha')
+
+  await appPage.getByRole('radio', { name: /^System/ }).click()
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-appearance', 'system')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-mocha')
+  await expect(appPage.getByText('Following system · currently dark')).toBeVisible()
+
+  await appPage.emulateMedia({ colorScheme: 'light' })
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-latte')
+  await expect(appPage.getByText('Following system · currently light')).toBeVisible()
+  expect(await appPage.evaluate(() => ({
+    family: localStorage.getItem('boss.themeFamily'),
+    appearance: localStorage.getItem('boss.themeAppearance')
+  }))).toEqual({ family: 'catppuccin', appearance: 'system' })
+
+  await appPage.getByRole('button', { name: 'Done' }).click()
+  await appPage.reload()
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-family', 'catppuccin')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-appearance', 'system')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-latte')
+})
+
 test('a deleted checkout returns a review snapshot without rejecting the IPC handler', async ({ appPage }) => {
   const checkout = '/tmp/boss-e2e/deleted-worktree'
   const snapshot = await appPage.evaluate(
@@ -73,6 +114,56 @@ test('shows an attached image and one copy of a response echoed under two messag
   await expect(appPage.getByRole('img', { name: 'duplicate-example.png' })).toBeVisible()
   await expect(appPage.getByText('Critical find. Let me inspect it.')).toHaveCount(1)
   await expect(appPage.locator('.step-card')).toHaveCount(2)
+})
+
+test('shows Lab reasoning separately from the final answer', async ({ appPage }) => {
+  const sessionID = 'thread-source'
+  const messageID = 'lab-reasoning-e2e'
+  const created = Date.now()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: messageID,
+        sessionID,
+        role: 'assistant',
+        model: { id: 'ox-alpha' },
+        time: { created, completed: created + 1 }
+      }
+    }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: `${messageID}-reasoning`,
+        type: 'reasoning',
+        sessionID,
+        messageID,
+        text: 'I should inspect Workspace.tsx before answering.'
+      }
+    }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: `${messageID}-text`,
+        type: 'text',
+        sessionID,
+        messageID,
+        text: 'The workspace selection is now fixed.'
+      }
+    }
+  }))
+
+  const reply = appPage.locator(`.msg-body[data-message-id="${messageID}"]`)
+  await expect(reply).toContainText('The workspace selection is now fixed.')
+  await expect(reply).not.toContainText('<think>')
+  await reply.locator('.thought-head').click()
+  await expect(reply.locator('.thought-body')).toContainText('I should inspect Workspace.tsx before answering.')
 })
 
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {

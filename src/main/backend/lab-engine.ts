@@ -25,7 +25,6 @@ export interface LabEngineConfig {
   defaultModel: string
   contextChars: number
   maxToolIterations: number
-  maxReadOnlyRounds: number
   tools: 'core' | 'all' | 'assistant'
 }
 
@@ -535,17 +534,26 @@ export class LabEngine {
   ): Promise<void> {
     let previousSignature: string | undefined
     let repeatStreak = 0
-    let readOnlyRounds = 0
+    let toolRounds = 0
+    let requestedClosingReply = false
     /** Whether this turn has done anything the user can see: streamed text or
      *  run a tool. Reasoning alone does not count — it is visible, but it is
      *  not work. */
     let producedOutput = false
     let retriedEmptyRound = false
-    for (let iteration = 0; iteration < this.config.maxToolIterations; iteration++) {
+    for (;;) {
       const steers = this.pendingSteers.get(sessionId)
       if (steers?.length) {
         for (const steer of steers) messages.push({ role: 'user', content: steer })
         this.pendingSteers.delete(sessionId)
+      }
+      const closingReply = toolRounds >= this.config.maxToolIterations
+      if (closingReply && !requestedClosingReply) {
+        messages.push({
+          role: 'user',
+          content: '[The tool budget is exhausted. Do not call more tools. Give a concise final response describing what you completed, what remains, and any blockers.]'
+        })
+        requestedClosingReply = true
       }
       const assistantId = randomUUID()
       let reasoning = ''
@@ -553,7 +561,7 @@ export class LabEngine {
         baseUrl: ctx.baseUrl,
         model: ctx.model,
         messages,
-        tools: this.tools,
+        tools: closingReply ? undefined : this.tools,
         apiKey: ctx.apiKey,
         signal,
         onText: (delta) => {
@@ -577,7 +585,16 @@ export class LabEngine {
       }
       const parts: Part[] = []
       if (reasoning.trim()) {
-        parts.push({ id: `${assistantId}-reasoning`, type: 'reasoning', sessionID: sessionId, messageID: assistantId, text: reasoning })
+        parts.push({
+          id: `${assistantId}-reasoning`,
+          type: 'reasoning',
+          sessionID: sessionId,
+          messageID: assistantId,
+          text: reasoning,
+          ...(turn.reasoningDetails.length > 0
+            ? { state: { metadata: { labReasoningDetails: turn.reasoningDetails } } }
+            : {})
+        })
       }
 
       // A round with no text and no tool calls is a degenerate completion —
@@ -615,25 +632,38 @@ export class LabEngine {
         toolArgs.push(args)
         parts.push(toolRunningPart(sessionId, assistantId, call, args))
       }
+      if (closingReply && turn.toolCalls.length > 0) {
+        parts.push({
+          id: `${assistantId}-budget`,
+          type: 'text',
+          sessionID: sessionId,
+          messageID: assistantId,
+          text: '[The tool budget was exhausted before the model produced a final reply.]'
+        })
+      }
       this.store.upsertMessage(sessionId, { info, parts })
       this.sink.onAssistantMessage(sessionId, { info, parts })
 
       if (turn.toolCalls.length === 0) return
-      // A model stuck reading and never answering wastes the whole budget.
-      // If it has spent several rounds on read-only tools without producing a
-      // single token, stop and say so instead of grinding to the cap.
-      const readOnly = turn.toolCalls.every((call) => permissionForTool(call.name) === 'read')
-      if (readOnly && !turn.content) {
-        readOnlyRounds += 1
-        if (readOnlyRounds >= this.config.maxReadOnlyRounds) {
-          throw new Error(`The model only read files for ${readOnlyRounds} rounds without answering; stopping.`)
+      if (closingReply) {
+        for (let index = 0; index < turn.toolCalls.length; index++) {
+          const call = turn.toolCalls[index]
+          this.reportToolResult(sessionId, assistantId, call.id, {
+            status: 'error',
+            tool: call.name,
+            input: toolArgs[index],
+            output: `Tool not run: the ${this.config.maxToolIterations}-round tool budget was exhausted.`
+          })
         }
-      } else {
-        readOnlyRounds = 0
+        return
       }
+      toolRounds += 1
       messages.push({
         role: 'assistant',
         content: turn.content || null,
+        ...(turn.reasoningDetails.length > 0
+          ? { reasoning_details: turn.reasoningDetails }
+          : turn.reasoning.trim() ? { reasoning_content: turn.reasoning } : {}),
         tool_calls: turn.toolCalls.map((call) => ({
           id: call.id,
           type: 'function',
@@ -668,7 +698,6 @@ export class LabEngine {
         messages.push({ role: 'tool', tool_call_id: call.id, content: output })
       }
     }
-    throw new Error(`The model kept calling tools beyond ${this.config.maxToolIterations} rounds; stopping.`)
   }
 
   private safeArgs(call: LabFunctionCall): Record<string, unknown> {

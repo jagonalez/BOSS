@@ -87,11 +87,38 @@ export interface ThemeDef {
   terminal: TerminalPalette
 }
 
+export type ThemeAppearance = 'system' | 'light' | 'dark'
+export type ResolvedThemeAppearance = Exclude<ThemeAppearance, 'system'>
+
+export interface ThemePreference {
+  family: string
+  appearance: ThemeAppearance
+}
+
+export interface ThemeFamily {
+  id: string
+  label: string
+  description: string
+  category: ThemeDef['category']
+  light: string
+  dark: string
+}
+
+export interface ThemeChangedDetail extends ThemePreference {
+  id: string
+  resolvedAppearance: ResolvedThemeAppearance
+}
+
 // Community palettes follow their upstream projects so BOSS, Highlight.js,
 // and xterm share one visual source of truth:
 // - Tokyo Night Moon: github.com/folke/tokyonight.nvim (Apache-2.0)
 // - Catppuccin: github.com/catppuccin/palette (MIT)
 // - Rosé Pine: github.com/rose-pine/palette (MIT)
+// - Solarized: github.com/altercation/solarized (MIT)
+// - Gruvbox: github.com/morhetz/gruvbox (MIT/X11)
+// - Everforest: github.com/sainnhe/everforest (MIT)
+// - Kanagawa: github.com/rebelot/kanagawa.nvim (MIT)
+// - Ayu: github.com/ayu-theme/ayu-colors (MIT)
 export const THEMES: ThemeDef[] = [
   {
     id: 'boss-dark',
@@ -138,6 +165,28 @@ export const THEMES: ThemeDef[] = [
     }
   },
   {
+    id: 'tokyo-night-day',
+    label: 'Tokyo Night Day',
+    description: 'Clear, cool daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#e1e2e7', sidebar: '#d8dbe5', surface: '#f2f3f5', surfaceRaised: '#d0d5e3', inset: '#c9cddd', hover: '#d5d9e5', selected: '#c4c8da',
+      border: '#b4b8ca', borderStrong: '#9699a8', text: '#3760bf', textMuted: '#4c5c88', textSubtle: '#737aa2', accent: '#2868c7', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#1f55aa',
+      accentSoft: 'rgba(46, 125, 233, 0.13)', success: '#587539', successSoft: 'rgba(88, 117, 57, 0.13)', warning: '#8c6c3e', warningInk: '#ffffff', warningSoft: 'rgba(140, 108, 62, 0.13)',
+      danger: '#c21f52', dangerInk: '#ffffff', dangerSoft: 'rgba(194, 31, 82, 0.12)', purple: '#7847bd', cyan: '#007197', shadow: 'rgba(76, 92, 136, 0.22)',
+      diffAdditionBg: '#d8e5d1', diffAdditionGutter: '#bfd2b5', diffAdditionText: '#29421b', diffDeletionBg: '#f1d4dc', diffDeletionGutter: '#e5b6c4', diffDeletionText: '#65112c', diffHunkBg: '#ccd9ed', diffHunkText: '#244d8f'
+    },
+    syntax: {
+      foreground: '#3760bf', comment: '#737aa2', keyword: '#7847bd', string: '#587539', number: '#b15c00', title: '#2e7de9', variable: '#9854a8',
+      type: '#007197', literal: '#8c6c3e', meta: '#166775', addition: '#587539', deletion: '#c21f52'
+    },
+    terminal: {
+      black: '#0f0f14', red: '#c21f52', green: '#587539', yellow: '#8c6c3e', blue: '#2e7de9', magenta: '#7847bd', cyan: '#007197', white: '#9699a8',
+      brightBlack: '#6172b0', brightRed: '#f52a65', brightGreen: '#658c3d', brightYellow: '#b15c00', brightBlue: '#2e7de9', brightMagenta: '#9854f1', brightCyan: '#007197', brightWhite: '#3760bf'
+    }
+  },
+  {
     id: 'tokyo-night-moon',
     label: 'Tokyo Night Moon',
     description: 'Official Moon palette',
@@ -157,6 +206,28 @@ export const THEMES: ThemeDef[] = [
     terminal: {
       black: '#444a73', red: '#ff757f', green: '#c3e88d', yellow: '#ffc777', blue: '#82aaff', magenta: '#c099ff', cyan: '#86e1fc', white: '#c8d3f5',
       brightBlack: '#737aa2', brightRed: '#ff98a4', brightGreen: '#d5f3a6', brightYellow: '#ffdc97', brightBlue: '#a3bdff', brightMagenta: '#d2b6ff', brightCyan: '#b4f9f8', brightWhite: '#ffffff'
+    }
+  },
+  {
+    id: 'catppuccin-latte',
+    label: 'Catppuccin Latte',
+    description: 'Soft pastel daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#eff1f5', sidebar: '#e6e9ef', surface: '#ffffff', surfaceRaised: '#dce0e8', inset: '#e6e9ef', hover: '#dce0e8', selected: '#ccd0da',
+      border: '#ccd0da', borderStrong: '#9ca0b0', text: '#4c4f69', textMuted: '#6c6f85', textSubtle: '#8c8fa1', accent: '#1e66f5', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#1a56cf',
+      accentSoft: 'rgba(30, 102, 245, 0.12)', success: '#317521', successSoft: 'rgba(64, 160, 43, 0.12)', warning: '#985f00', warningInk: '#ffffff', warningSoft: 'rgba(223, 142, 29, 0.14)',
+      danger: '#d20f39', dangerInk: '#ffffff', dangerSoft: 'rgba(210, 15, 57, 0.11)', purple: '#8839ef', cyan: '#0d7374', shadow: 'rgba(76, 79, 105, 0.2)',
+      diffAdditionBg: '#dcebd7', diffAdditionGutter: '#bdd9b5', diffAdditionText: '#254a1e', diffDeletionBg: '#f5d8df', diffDeletionGutter: '#edb8c4', diffDeletionText: '#6d0b21', diffHunkBg: '#d8e3fa', diffHunkText: '#174ba9'
+    },
+    syntax: {
+      foreground: '#4c4f69', comment: '#8c8fa1', keyword: '#8839ef', string: '#317521', number: '#c55400', title: '#1e66f5', variable: '#a53689',
+      type: '#0d7374', literal: '#985f00', meta: '#5367bd', addition: '#317521', deletion: '#d20f39'
+    },
+    terminal: {
+      black: '#5c5f77', red: '#d20f39', green: '#317521', yellow: '#985f00', blue: '#1e66f5', magenta: '#8839ef', cyan: '#0d7374', white: '#bcc0cc',
+      brightBlack: '#7c7f93', brightRed: '#d20f39', brightGreen: '#317521', brightYellow: '#b36b00', brightBlue: '#1e66f5', brightMagenta: '#8839ef', brightCyan: '#179299', brightWhite: '#ffffff'
     }
   },
   {
@@ -182,6 +253,28 @@ export const THEMES: ThemeDef[] = [
     }
   },
   {
+    id: 'rose-pine-dawn',
+    label: 'Rosé Pine Dawn',
+    description: 'Warm, quiet daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#faf4ed', sidebar: '#f2e9e1', surface: '#fffaf3', surfaceRaised: '#f4ede8', inset: '#f2e9e1', hover: '#eee5df', selected: '#dfdad9',
+      border: '#dfdad9', borderStrong: '#b8b3bd', text: '#575279', textMuted: '#797593', textSubtle: '#9893a5', accent: '#286983', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#1f5368',
+      accentSoft: 'rgba(40, 105, 131, 0.12)', success: '#3d7680', successSoft: 'rgba(86, 148, 159, 0.13)', warning: '#a5650f', warningInk: '#ffffff', warningSoft: 'rgba(234, 157, 52, 0.14)',
+      danger: '#a94f69', dangerInk: '#ffffff', dangerSoft: 'rgba(180, 99, 122, 0.12)', purple: '#785f91', cyan: '#3d7680', shadow: 'rgba(87, 82, 121, 0.18)',
+      diffAdditionBg: '#deebe7', diffAdditionGutter: '#bed8d2', diffAdditionText: '#285159', diffDeletionBg: '#f1dce1', diffDeletionGutter: '#dfbdc7', diffDeletionText: '#6c2c3e', diffHunkBg: '#e1ddea', diffHunkText: '#58466d'
+    },
+    syntax: {
+      foreground: '#575279', comment: '#9893a5', keyword: '#785f91', string: '#8a5a11', number: '#a95755', title: '#286983', variable: '#a95570',
+      type: '#3d7680', literal: '#a5650f', meta: '#785f91', addition: '#3d7680', deletion: '#a94f69'
+    },
+    terminal: {
+      black: '#575279', red: '#a94f69', green: '#3d7680', yellow: '#a5650f', blue: '#286983', magenta: '#785f91', cyan: '#a95755', white: '#dfdad9',
+      brightBlack: '#797593', brightRed: '#b4637a', brightGreen: '#56949f', brightYellow: '#d38928', brightBlue: '#3e7c95', brightMagenta: '#907aa9', brightCyan: '#d7827e', brightWhite: '#fffaf3'
+    }
+  },
+  {
     id: 'rose-pine-moon',
     label: 'Rosé Pine Moon',
     description: 'Warm, quiet contrast',
@@ -204,9 +297,251 @@ export const THEMES: ThemeDef[] = [
     }
   },
   {
+    id: 'solarized-light',
+    label: 'Solarized Light',
+    description: 'Precision warm daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#fdf6e3', sidebar: '#eee8d5', surface: '#fffaf0', surfaceRaised: '#e8e2cf', inset: '#eee8d5', hover: '#e5deca', selected: '#d9e4df',
+      border: '#d5cfbd', borderStrong: '#a9a99d', text: '#586e75', textMuted: '#657b83', textSubtle: '#839496', accent: '#1476a8', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#0d5e88',
+      accentSoft: 'rgba(38, 139, 210, 0.12)', success: '#697a00', successSoft: 'rgba(133, 153, 0, 0.13)', warning: '#966f00', warningInk: '#ffffff', warningSoft: 'rgba(181, 137, 0, 0.13)',
+      danger: '#c32927', dangerInk: '#ffffff', dangerSoft: 'rgba(220, 50, 47, 0.11)', purple: '#6c71c4', cyan: '#167c75', shadow: 'rgba(88, 110, 117, 0.2)',
+      diffAdditionBg: '#e4e9c8', diffAdditionGutter: '#d1d9a6', diffAdditionText: '#3d4900', diffDeletionBg: '#f5d6cc', diffDeletionGutter: '#edb9aa', diffDeletionText: '#671916', diffHunkBg: '#d8e7eb', diffHunkText: '#185b78'
+    },
+    syntax: {
+      foreground: '#586e75', comment: '#839496', keyword: '#6c71c4', string: '#697a00', number: '#a33b11', title: '#1476a8', variable: '#b82c70',
+      type: '#167c75', literal: '#966f00', meta: '#6c71c4', addition: '#697a00', deletion: '#c32927'
+    },
+    terminal: {
+      black: '#073642', red: '#c32927', green: '#697a00', yellow: '#966f00', blue: '#1476a8', magenta: '#b82c70', cyan: '#167c75', white: '#eee8d5',
+      brightBlack: '#586e75', brightRed: '#dc322f', brightGreen: '#859900', brightYellow: '#b58900', brightBlue: '#268bd2', brightMagenta: '#d33682', brightCyan: '#2aa198', brightWhite: '#fdf6e3'
+    }
+  },
+  {
+    id: 'solarized-dark',
+    label: 'Solarized Dark',
+    description: 'Precision low-light palette',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#002b36', sidebar: '#00242d', surface: '#073642', surfaceRaised: '#124552', inset: '#001f27', hover: '#0d3e49', selected: '#164c58',
+      border: '#164753', borderStrong: '#3e6269', text: '#d3dedc', textMuted: '#a7b8b7', textSubtle: '#839496', accent: '#4aa3d8', accentInk: '#001820', backendClaude: '#d8916f', backendCodex: '#77c7a4', backendPi: '#d4a75e', accentHover: '#70b9e2',
+      accentSoft: 'rgba(38, 139, 210, 0.18)', success: '#9aae24', successSoft: 'rgba(133, 153, 0, 0.17)', warning: '#d5a719', warningInk: '#181100', warningSoft: 'rgba(181, 137, 0, 0.17)',
+      danger: '#ee5b58', dangerInk: '#210504', dangerSoft: 'rgba(220, 50, 47, 0.17)', purple: '#8c91dc', cyan: '#4bbab0', shadow: 'rgba(0, 20, 25, 0.74)',
+      diffAdditionBg: '#233f31', diffAdditionGutter: '#385842', diffAdditionText: '#e2edbf', diffDeletionBg: '#4a2929', diffDeletionGutter: '#673536', diffDeletionText: '#ffd9d5', diffHunkBg: '#193f50', diffHunkText: '#b7ddeb'
+    },
+    syntax: {
+      foreground: '#d3dedc', comment: '#839496', keyword: '#b0a7e8', string: '#b4c94b', number: '#ef8354', title: '#69b7e5', variable: '#ed70ad',
+      type: '#65c8be', literal: '#e3bd4b', meta: '#a5a9e8', addition: '#b4c94b', deletion: '#ee7774'
+    },
+    terminal: {
+      black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900', blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+      brightBlack: '#586e75', brightRed: '#ee5b58', brightGreen: '#9aae24', brightYellow: '#d5a719', brightBlue: '#4aa3d8', brightMagenta: '#df5a9a', brightCyan: '#4bbab0', brightWhite: '#fdf6e3'
+    }
+  },
+  {
+    id: 'gruvbox-light',
+    label: 'Gruvbox Light',
+    description: 'Warm retro daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#fbf1c7', sidebar: '#ebdbb2', surface: '#f9f5d7', surfaceRaised: '#d5c4a1', inset: '#f2e5bc', hover: '#ebdbb2', selected: '#d5c4a1',
+      border: '#d5c4a1', borderStrong: '#a89984', text: '#3c3836', textMuted: '#504945', textSubtle: '#665c54', accent: '#076678', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#427b58', backendPi: '#8f5d10', accentHover: '#055263',
+      accentSoft: 'rgba(7, 102, 120, 0.13)', success: '#79740e', successSoft: 'rgba(121, 116, 14, 0.13)', warning: '#8f5d10', warningInk: '#ffffff', warningSoft: 'rgba(181, 118, 20, 0.13)',
+      danger: '#9d0006', dangerInk: '#ffffff', dangerSoft: 'rgba(157, 0, 6, 0.11)', purple: '#8f3f71', cyan: '#427b58', shadow: 'rgba(80, 73, 69, 0.22)',
+      diffAdditionBg: '#e1e3b7', diffAdditionGutter: '#cbd096', diffAdditionText: '#3f4508', diffDeletionBg: '#efcbc0', diffDeletionGutter: '#dfa99e', diffDeletionText: '#650005', diffHunkBg: '#cfe0d5', diffHunkText: '#064d59'
+    },
+    syntax: {
+      foreground: '#3c3836', comment: '#7c6f64', keyword: '#9d0006', string: '#79740e', number: '#af3a03', title: '#076678', variable: '#8f3f71',
+      type: '#427b58', literal: '#8f5d10', meta: '#8f3f71', addition: '#79740e', deletion: '#9d0006'
+    },
+    terminal: {
+      black: '#282828', red: '#cc241d', green: '#98971a', yellow: '#d79921', blue: '#458588', magenta: '#b16286', cyan: '#689d6a', white: '#a89984',
+      brightBlack: '#928374', brightRed: '#9d0006', brightGreen: '#79740e', brightYellow: '#b57614', brightBlue: '#076678', brightMagenta: '#8f3f71', brightCyan: '#427b58', brightWhite: '#3c3836'
+    }
+  },
+  {
+    id: 'gruvbox-dark',
+    label: 'Gruvbox Dark',
+    description: 'Warm retro low light',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#282828', sidebar: '#1d2021', surface: '#32302f', surfaceRaised: '#3c3836', inset: '#1d2021', hover: '#3c3836', selected: '#504945',
+      border: '#504945', borderStrong: '#7c6f64', text: '#ebdbb2', textMuted: '#d5c4a1', textSubtle: '#a89984', accent: '#83a598', accentInk: '#15201c', backendClaude: '#d8916f', backendCodex: '#8ec07c', backendPi: '#d4a75e', accentHover: '#a4c2b7',
+      accentSoft: 'rgba(131, 165, 152, 0.17)', success: '#b8bb26', successSoft: 'rgba(184, 187, 38, 0.15)', warning: '#fabd2f', warningInk: '#211700', warningSoft: 'rgba(250, 189, 47, 0.15)',
+      danger: '#fb4934', dangerInk: '#260604', dangerSoft: 'rgba(251, 73, 52, 0.15)', purple: '#d3869b', cyan: '#8ec07c', shadow: 'rgba(20, 18, 17, 0.72)',
+      diffAdditionBg: '#3a411f', diffAdditionGutter: '#505a25', diffAdditionText: '#eef0b6', diffDeletionBg: '#4b2925', diffDeletionGutter: '#6c342d', diffDeletionText: '#ffd5cd', diffHunkBg: '#304445', diffHunkText: '#c5ded5'
+    },
+    syntax: {
+      foreground: '#ebdbb2', comment: '#928374', keyword: '#fb4934', string: '#b8bb26', number: '#fe8019', title: '#83a598', variable: '#d3869b',
+      type: '#8ec07c', literal: '#fabd2f', meta: '#d3869b', addition: '#b8bb26', deletion: '#fb4934'
+    },
+    terminal: {
+      black: '#282828', red: '#cc241d', green: '#98971a', yellow: '#d79921', blue: '#458588', magenta: '#b16286', cyan: '#689d6a', white: '#a89984',
+      brightBlack: '#928374', brightRed: '#fb4934', brightGreen: '#b8bb26', brightYellow: '#fabd2f', brightBlue: '#83a598', brightMagenta: '#d3869b', brightCyan: '#8ec07c', brightWhite: '#ebdbb2'
+    }
+  },
+  {
+    id: 'everforest-light',
+    label: 'Everforest Light',
+    description: 'Calm forest daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#fdf6e3', sidebar: '#efebd4', surface: '#fffaf0', surfaceRaised: '#f4f0d9', inset: '#efebd4', hover: '#e6e2cc', selected: '#eaedc8',
+      border: '#e0dcc7', borderStrong: '#a6b0a0', text: '#5c6a72', textMuted: '#64737a', textSubtle: '#829181', accent: '#246f94', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#30785d', backendPi: '#86610b', accentHover: '#195875',
+      accentSoft: 'rgba(58, 148, 197, 0.13)', success: '#718501', successSoft: 'rgba(141, 161, 1, 0.13)', warning: '#9b6b00', warningInk: '#ffffff', warningSoft: 'rgba(223, 160, 0, 0.13)',
+      danger: '#c53f3d', dangerInk: '#ffffff', dangerSoft: 'rgba(248, 85, 82, 0.11)', purple: '#a04486', cyan: '#217a5c', shadow: 'rgba(92, 106, 114, 0.2)',
+      diffAdditionBg: '#f0f1d2', diffAdditionGutter: '#d9deae', diffAdditionText: '#405000', diffDeletionBg: '#fde3da', diffDeletionGutter: '#efbdaf', diffDeletionText: '#681c1a', diffHunkBg: '#e9f0e9', diffHunkText: '#225a74'
+    },
+    syntax: {
+      foreground: '#5c6a72', comment: '#829181', keyword: '#a04486', string: '#718501', number: '#b45113', title: '#246f94', variable: '#a04486',
+      type: '#217a5c', literal: '#9b6b00', meta: '#596a9a', addition: '#718501', deletion: '#c53f3d'
+    },
+    terminal: {
+      black: '#5c6a72', red: '#c53f3d', green: '#718501', yellow: '#9b6b00', blue: '#246f94', magenta: '#a04486', cyan: '#217a5c', white: '#e0dcc7',
+      brightBlack: '#829181', brightRed: '#df4d4a', brightGreen: '#8da101', brightYellow: '#b98200', brightBlue: '#3a94c5', brightMagenta: '#c04fa0', brightCyan: '#35a77c', brightWhite: '#fffaf0'
+    }
+  },
+  {
+    id: 'everforest-dark',
+    label: 'Everforest Dark',
+    description: 'Calm forest low light',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#2d353b', sidebar: '#232a2e', surface: '#343f44', surfaceRaised: '#3d484d', inset: '#1e2326', hover: '#3d484d', selected: '#475258',
+      border: '#475258', borderStrong: '#56635f', text: '#d3c6aa', textMuted: '#b8b39f', textSubtle: '#859289', accent: '#7fbbb3', accentInk: '#102522', backendClaude: '#d8916f', backendCodex: '#83c092', backendPi: '#d4a75e', accentHover: '#9bcac4',
+      accentSoft: 'rgba(127, 187, 179, 0.17)', success: '#a7c080', successSoft: 'rgba(167, 192, 128, 0.14)', warning: '#dbbc7f', warningInk: '#251a06', warningSoft: 'rgba(219, 188, 127, 0.14)',
+      danger: '#e67e80', dangerInk: '#2a0c0d', dangerSoft: 'rgba(230, 126, 128, 0.14)', purple: '#d699b6', cyan: '#83c092', shadow: 'rgba(20, 25, 27, 0.7)',
+      diffAdditionBg: '#425047', diffAdditionGutter: '#536358', diffAdditionText: '#e4efd7', diffDeletionBg: '#514045', diffDeletionGutter: '#684e54', diffDeletionText: '#ffe0df', diffHunkBg: '#3a515d', diffHunkText: '#c9e3df'
+    },
+    syntax: {
+      foreground: '#d3c6aa', comment: '#859289', keyword: '#d699b6', string: '#a7c080', number: '#e69875', title: '#7fbbb3', variable: '#d699b6',
+      type: '#83c092', literal: '#dbbc7f', meta: '#a8a5d6', addition: '#a7c080', deletion: '#e67e80'
+    },
+    terminal: {
+      black: '#2d353b', red: '#e67e80', green: '#a7c080', yellow: '#dbbc7f', blue: '#7fbbb3', magenta: '#d699b6', cyan: '#83c092', white: '#d3c6aa',
+      brightBlack: '#859289', brightRed: '#f09a9c', brightGreen: '#b9d394', brightYellow: '#e8ca91', brightBlue: '#95ccc5', brightMagenta: '#e2acc5', brightCyan: '#9bd1a8', brightWhite: '#f4ead0'
+    }
+  },
+  {
+    id: 'kanagawa-lotus',
+    label: 'Kanagawa Lotus',
+    description: 'Painterly warm daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#f2ecbc', sidebar: '#e5ddb0', surface: '#fbf4c7', surfaceRaised: '#e7dba0', inset: '#dcd5ac', hover: '#e4d794', selected: '#c9cbd1',
+      border: '#d5cea3', borderStrong: '#a09cac', text: '#43436c', textMuted: '#5f5d78', textSubtle: '#716e61', accent: '#4d699b', accentInk: '#ffffff', backendClaude: '#9d5b42', backendCodex: '#486c48', backendPi: '#83600d', accentHover: '#3d547d',
+      accentSoft: 'rgba(77, 105, 155, 0.14)', success: '#6f894e', successSoft: 'rgba(111, 137, 78, 0.14)', warning: '#cc6d00', warningInk: '#251300', warningSoft: 'rgba(204, 109, 0, 0.14)',
+      danger: '#b63245', dangerInk: '#ffffff', dangerSoft: 'rgba(200, 64, 83, 0.12)', purple: '#624c83', cyan: '#597b75', shadow: 'rgba(67, 67, 108, 0.2)',
+      diffAdditionBg: '#b7d0ae', diffAdditionGutter: '#98b990', diffAdditionText: '#304323', diffDeletionBg: '#e6b9aa', diffDeletionGutter: '#d99f91', diffDeletionText: '#681d29', diffHunkBg: '#d7e3d8', diffHunkText: '#3b5f63'
+    },
+    syntax: {
+      foreground: '#43436c', comment: '#716e61', keyword: '#624c83', string: '#59713d', number: '#a64261', title: '#4d699b', variable: '#5d57a3',
+      type: '#597b75', literal: '#836f4a', meta: '#766b90', addition: '#59713d', deletion: '#b63245'
+    },
+    terminal: {
+      black: '#1f1f28', red: '#b63245', green: '#59713d', yellow: '#77713f', blue: '#4d699b', magenta: '#a64261', cyan: '#597b75', white: '#716e61',
+      brightBlack: '#8a8980', brightRed: '#d7474b', brightGreen: '#6e915f', brightYellow: '#836f4a', brightBlue: '#6693bf', brightMagenta: '#624c83', brightCyan: '#5e857a', brightWhite: '#43436c'
+    }
+  },
+  {
+    id: 'kanagawa-wave',
+    label: 'Kanagawa Wave',
+    description: 'Painterly ocean low light',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#1f1f28', sidebar: '#181820', surface: '#2a2a37', surfaceRaised: '#363646', inset: '#16161d', hover: '#2a2a37', selected: '#223249',
+      border: '#363646', borderStrong: '#54546d', text: '#dcd7ba', textMuted: '#c8c093', textSubtle: '#727169', accent: '#7e9cd8', accentInk: '#111722', backendClaude: '#d8916f', backendCodex: '#7aa89f', backendPi: '#d4a75e', accentHover: '#9bb4e3',
+      accentSoft: 'rgba(126, 156, 216, 0.17)', success: '#98bb6c', successSoft: 'rgba(152, 187, 108, 0.14)', warning: '#e6c384', warningInk: '#211805', warningSoft: 'rgba(230, 195, 132, 0.14)',
+      danger: '#e46876', dangerInk: '#28090d', dangerSoft: 'rgba(228, 104, 118, 0.14)', purple: '#957fb8', cyan: '#7aa89f', shadow: 'rgba(10, 10, 15, 0.74)',
+      diffAdditionBg: '#2b3328', diffAdditionGutter: '#3f4a3b', diffAdditionText: '#dce8ce', diffDeletionBg: '#43242b', diffDeletionGutter: '#5d3039', diffDeletionText: '#ffd8dc', diffHunkBg: '#252535', diffHunkText: '#c2c7e3'
+    },
+    syntax: {
+      foreground: '#dcd7ba', comment: '#727169', keyword: '#957fb8', string: '#98bb6c', number: '#d27e99', title: '#7e9cd8', variable: '#b8b4d0',
+      type: '#7aa89f', literal: '#e6c384', meta: '#9cabca', addition: '#98bb6c', deletion: '#e46876'
+    },
+    terminal: {
+      black: '#16161d', red: '#c34043', green: '#76946a', yellow: '#c0a36e', blue: '#7e9cd8', magenta: '#957fb8', cyan: '#6a9589', white: '#c8c093',
+      brightBlack: '#727169', brightRed: '#e82424', brightGreen: '#98bb6c', brightYellow: '#e6c384', brightBlue: '#7fb4ca', brightMagenta: '#938aa9', brightCyan: '#7aa89f', brightWhite: '#dcd7ba'
+    }
+  },
+  {
+    id: 'ayu-light',
+    label: 'Ayu Light',
+    description: 'Clean amber daylight',
+    category: 'Community',
+    appearance: 'light',
+    colors: {
+      canvas: '#f8f9fa', sidebar: '#ebeef0', surface: '#fcfcfc', surfaceRaised: '#f0f1f2', inset: '#ebeef0', hover: '#e7eaed', selected: '#dce9f8',
+      border: '#dde1e5', borderStrong: '#a7afb8', text: '#5c6166', textMuted: '#68727f', textSubtle: '#828e9f', accent: '#f29718', accentInk: '#342000', backendClaude: '#9d5b42', backendCodex: '#26785b', backendPi: '#86610b', accentHover: '#d17d08',
+      accentSoft: 'rgba(242, 151, 24, 0.14)', success: '#6f9200', successSoft: 'rgba(134, 179, 0, 0.13)', warning: '#d17d08', warningInk: '#2c1900', warningSoft: 'rgba(235, 164, 0, 0.14)',
+      danger: '#d03f3f', dangerInk: '#ffffff', dangerSoft: 'rgba(230, 80, 80, 0.11)', purple: '#7a57a5', cyan: '#278b76', shadow: 'rgba(92, 97, 102, 0.18)',
+      diffAdditionBg: '#e2eecf', diffAdditionGutter: '#c6dda5', diffAdditionText: '#385000', diffDeletionBg: '#f7d9dc', diffDeletionGutter: '#ecb7bd', diffDeletionText: '#711d25', diffHunkBg: '#dce9f6', diffHunkText: '#275c84'
+    },
+    syntax: {
+      foreground: '#5c6166', comment: '#828e9f', keyword: '#b6531b', string: '#668a00', number: '#7a57a5', title: '#a36d00', variable: '#aa5143',
+      type: '#1883b7', literal: '#7a57a5', meta: '#3c7f96', addition: '#668a00', deletion: '#c23f3f'
+    },
+    terminal: {
+      black: '#5c6166', red: '#c23f3f', green: '#668a00', yellow: '#a36d00', blue: '#1883b7', magenta: '#7a57a5', cyan: '#278b76', white: '#d7dadd',
+      brightBlack: '#828e9f', brightRed: '#dc5555', brightGreen: '#7fa500', brightYellow: '#c18400', brightBlue: '#22a4e6', brightMagenta: '#9168ba', brightCyan: '#35a98d', brightWhite: '#ffffff'
+    }
+  },
+  {
+    id: 'ayu-dark',
+    label: 'Ayu Dark',
+    description: 'Clean amber low light',
+    category: 'Community',
+    appearance: 'dark',
+    colors: {
+      canvas: '#0d1017', sidebar: '#0a0d13', surface: '#10141c', surfaceRaised: '#141821', inset: '#080b10', hover: '#161a24', selected: '#252d3b',
+      border: '#1b1f29', borderStrong: '#475266', text: '#bfbdb6', textMuted: '#8b919d', textSubtle: '#5a6378', accent: '#e6b450', accentInk: '#251a03', backendClaude: '#d8916f', backendCodex: '#77c7a4', backendPi: '#d4a75e', accentHover: '#f0c56e',
+      accentSoft: 'rgba(230, 180, 80, 0.17)', success: '#aad94c', successSoft: 'rgba(170, 217, 76, 0.14)', warning: '#ffb454', warningInk: '#271700', warningSoft: 'rgba(255, 180, 84, 0.14)',
+      danger: '#f07178', dangerInk: '#2a090c', dangerSoft: 'rgba(240, 113, 120, 0.14)', purple: '#d2a6ff', cyan: '#95e6cb', shadow: 'rgba(2, 4, 8, 0.78)',
+      diffAdditionBg: '#26351e', diffAdditionGutter: '#394c27', diffAdditionText: '#dcf0b6', diffDeletionBg: '#412328', diffDeletionGutter: '#5d3037', diffDeletionText: '#ffd8dc', diffHunkBg: '#223448', diffHunkText: '#c3dff0'
+    },
+    syntax: {
+      foreground: '#bfbdb6', comment: '#6c7986', keyword: '#ff8f40', string: '#aad94c', number: '#d2a6ff', title: '#ffb454', variable: '#f29668',
+      type: '#59c2ff', literal: '#d2a6ff', meta: '#39bae6', addition: '#aad94c', deletion: '#f07178'
+    },
+    terminal: {
+      black: '#0a0000', red: '#d45d64', green: '#8fb93d', yellow: '#d89a45', blue: '#499fd5', magenta: '#b48bd9', cyan: '#78c5af', white: '#bfbdb6',
+      brightBlack: '#5a6673', brightRed: '#f07178', brightGreen: '#aad94c', brightYellow: '#ffb454', brightBlue: '#59c2ff', brightMagenta: '#d2a6ff', brightCyan: '#95e6cb', brightWhite: '#ffffff'
+    }
+  },
+  {
+    id: 'high-contrast-light',
+    label: 'High Contrast Light',
+    description: 'Maximum daylight separation',
+    category: 'Accessibility',
+    appearance: 'light',
+    colors: {
+      canvas: '#ffffff', sidebar: '#f3f4f5', surface: '#ffffff', surfaceRaised: '#e7e9ec', inset: '#f0f1f3', hover: '#e2e5e8', selected: '#d3e5fa',
+      border: '#b6bbc1', borderStrong: '#59616a', text: '#000000', textMuted: '#343a40', textSubtle: '#606870', accent: '#005fc5', accentInk: '#ffffff', backendClaude: '#864127', backendCodex: '#176143', backendPi: '#735000', accentHover: '#004a9c',
+      accentSoft: 'rgba(0, 95, 197, 0.14)', success: '#126a2d', successSoft: 'rgba(18, 106, 45, 0.12)', warning: '#8a5b00', warningInk: '#ffffff', warningSoft: 'rgba(138, 91, 0, 0.13)',
+      danger: '#b10e1b', dangerInk: '#ffffff', dangerSoft: 'rgba(177, 14, 27, 0.11)', purple: '#6632a8', cyan: '#006b72', shadow: 'rgba(31, 35, 40, 0.24)',
+      diffAdditionBg: '#d6f2dc', diffAdditionGutter: '#a8dfb4', diffAdditionText: '#0b4319', diffDeletionBg: '#f9d9dc', diffDeletionGutter: '#efabb1', diffDeletionText: '#650710', diffHunkBg: '#d8eaff', diffHunkText: '#003f85'
+    },
+    syntax: {
+      foreground: '#111418', comment: '#606870', keyword: '#6632a8', string: '#126a2d', number: '#8a4700', title: '#005fc5', variable: '#961145',
+      type: '#006b72', literal: '#795000', meta: '#4c409f', addition: '#126a2d', deletion: '#b10e1b'
+    },
+    terminal: {
+      black: '#111418', red: '#b10e1b', green: '#126a2d', yellow: '#795000', blue: '#005fc5', magenta: '#6632a8', cyan: '#006b72', white: '#d7dade',
+      brightBlack: '#59616a', brightRed: '#d91b29', brightGreen: '#18893a', brightYellow: '#986600', brightBlue: '#0878ef', brightMagenta: '#8647cf', brightCyan: '#008b94', brightWhite: '#ffffff'
+    }
+  },
+  {
     id: 'high-contrast',
-    label: 'High Contrast',
-    description: 'Maximum separation',
+    label: 'High Contrast Dark',
+    description: 'Maximum low-light separation',
     category: 'Accessibility',
     appearance: 'dark',
     colors: {
@@ -227,10 +562,54 @@ export const THEMES: ThemeDef[] = [
   }
 ]
 
+export const THEME_FAMILIES: ThemeFamily[] = [
+  { id: 'boss', label: 'BOSS', description: 'Neutral and understated', category: 'BOSS', light: 'boss-light', dark: 'boss-dark' },
+  { id: 'tokyo-night', label: 'Tokyo Night', description: 'Cool city blues', category: 'Community', light: 'tokyo-night-day', dark: 'tokyo-night-moon' },
+  { id: 'catppuccin', label: 'Catppuccin', description: 'Soothing pastels', category: 'Community', light: 'catppuccin-latte', dark: 'catppuccin-mocha' },
+  { id: 'rose-pine', label: 'Rosé Pine', description: 'Warm, quiet contrast', category: 'Community', light: 'rose-pine-dawn', dark: 'rose-pine-moon' },
+  { id: 'solarized', label: 'Solarized', description: 'Precision colors for long sessions', category: 'Community', light: 'solarized-light', dark: 'solarized-dark' },
+  { id: 'gruvbox', label: 'Gruvbox', description: 'Warm retro groove', category: 'Community', light: 'gruvbox-light', dark: 'gruvbox-dark' },
+  { id: 'everforest', label: 'Everforest', description: 'Calm natural greens', category: 'Community', light: 'everforest-light', dark: 'everforest-dark' },
+  { id: 'kanagawa', label: 'Kanagawa', description: 'Painterly Japanese tones', category: 'Community', light: 'kanagawa-lotus', dark: 'kanagawa-wave' },
+  { id: 'ayu', label: 'Ayu', description: 'Clean modern amber', category: 'Community', light: 'ayu-light', dark: 'ayu-dark' },
+  { id: 'high-contrast', label: 'High Contrast', description: 'Maximum separation', category: 'Accessibility', light: 'high-contrast-light', dark: 'high-contrast' }
+]
+
+const DEFAULT_PREFERENCE: ThemePreference = { family: 'boss', appearance: 'system' }
+const THEME_FAMILY_KEY = 'boss.themeFamily'
+const THEME_APPEARANCE_KEY = 'boss.themeAppearance'
+const LEGACY_THEME_KEY = 'boss.theme'
+
 function resolveTheme(id: string): ThemeDef {
-  // An unknown id falls back to the first theme, which is all a renamed one
-  // needed. Nothing has shipped, so those names only ever existed here.
   return THEMES.find((theme) => theme.id === id) ?? THEMES[0]
+}
+
+function resolveFamily(id: string): ThemeFamily {
+  return THEME_FAMILIES.find((family) => family.id === id) ?? THEME_FAMILIES[0]
+}
+
+function isAppearance(value: string | null): value is ThemeAppearance {
+  return value === 'system' || value === 'light' || value === 'dark'
+}
+
+function currentSystemAppearance(): ResolvedThemeAppearance {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  }
+  return 'dark'
+}
+
+export function themeForPreference(
+  preference: ThemePreference,
+  systemAppearance: ResolvedThemeAppearance = currentSystemAppearance()
+): ThemeDef {
+  const family = resolveFamily(preference.family)
+  const appearance = preference.appearance === 'system' ? systemAppearance : preference.appearance
+  return resolveTheme(family[appearance])
+}
+
+export function themeForFamily(familyId: string, appearance: ResolvedThemeAppearance): ThemeDef {
+  return resolveTheme(resolveFamily(familyId)[appearance])
 }
 
 function themeTokens(theme: ThemeDef): Record<`--${string}`, string> {
@@ -316,7 +695,8 @@ function syntaxCss(theme: ThemeDef): string {
 }
 
 export function getTheme(id?: string): ThemeDef {
-  return resolveTheme(id ?? document.documentElement.dataset.theme ?? 'boss-dark')
+  const applied = typeof document === 'undefined' ? undefined : document.documentElement.dataset.theme
+  return resolveTheme(id ?? applied ?? 'boss-dark')
 }
 
 export function getXtermTheme(id?: string): Record<string, string> {
@@ -331,9 +711,15 @@ export function getXtermTheme(id?: string): Record<string, string> {
   }
 }
 
-export function applyTheme(id: string): void {
-  const theme = resolveTheme(id)
+export function applyTheme(preference: ThemePreference): ThemeChangedDetail {
+  const normalized: ThemePreference = {
+    family: resolveFamily(preference.family).id,
+    appearance: isAppearance(preference.appearance) ? preference.appearance : DEFAULT_PREFERENCE.appearance
+  }
+  const theme = themeForPreference(normalized)
   document.documentElement.dataset.theme = theme.id
+  document.documentElement.dataset.themeFamily = normalized.family
+  document.documentElement.dataset.themeAppearance = normalized.appearance
   document.documentElement.style.colorScheme = theme.appearance
   for (const [name, value] of Object.entries(themeTokens(theme))) {
     document.documentElement.style.setProperty(name, value)
@@ -348,21 +734,55 @@ export function applyTheme(id: string): void {
   style.textContent = syntaxCss(theme)
 
   try {
-    localStorage.setItem('boss.theme', theme.id)
+    localStorage.setItem(THEME_FAMILY_KEY, normalized.family)
+    localStorage.setItem(THEME_APPEARANCE_KEY, normalized.appearance)
+    // Keep the resolved id for builds from before family/appearance were separate.
+    localStorage.setItem(LEGACY_THEME_KEY, theme.id)
   } catch {
     /* ignore */
   }
-  window.dispatchEvent(new CustomEvent('boss:theme-changed', { detail: { id: theme.id } }))
+  const detail: ThemeChangedDetail = {
+    ...normalized,
+    id: theme.id,
+    resolvedAppearance: theme.appearance
+  }
+  window.dispatchEvent(new CustomEvent('boss:theme-changed', { detail }))
+  return detail
 }
 
-export function loadTheme(): string {
+export function loadTheme(): ThemePreference {
   try {
-    const saved = localStorage.getItem('boss.theme')
-    if (saved) return resolveTheme(saved).id
+    const family = localStorage.getItem(THEME_FAMILY_KEY)
+    const appearance = localStorage.getItem(THEME_APPEARANCE_KEY)
+    if (family && isAppearance(appearance)) {
+      return { family: resolveFamily(family).id, appearance }
+    }
+
+    // Preserve the exact mode selected by versions that stored a variant id.
+    const legacyId = localStorage.getItem(LEGACY_THEME_KEY)
+    const legacyTheme = THEMES.find((theme) => theme.id === legacyId)
+    const legacyFamily = legacyTheme && THEME_FAMILIES.find(
+      (candidate) => candidate.light === legacyTheme.id || candidate.dark === legacyTheme.id
+    )
+    if (legacyTheme && legacyFamily) {
+      return { family: legacyFamily.id, appearance: legacyTheme.appearance }
+    }
   } catch {
     /* ignore */
   }
-  return 'boss-dark'
+  return { ...DEFAULT_PREFERENCE }
+}
+
+/** Reapply a system-following preference whenever the operating system changes. */
+export function watchSystemTheme(): () => void {
+  if (typeof window.matchMedia !== 'function') return () => {}
+  const media = window.matchMedia('(prefers-color-scheme: dark)')
+  const sync = (): void => {
+    const preference = loadTheme()
+    if (preference.appearance === 'system') applyTheme(preference)
+  }
+  media.addEventListener('change', sync)
+  return () => media.removeEventListener('change', sync)
 }
 
 /** Base font size and UI density, layered over the theme.

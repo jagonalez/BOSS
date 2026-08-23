@@ -4,7 +4,7 @@ import { SseDecoder } from './lab-sse.ts'
 // @ts-expect-error Application builds use bundler resolution.
 import { ToolCallAccumulator, type LabFunctionCall, type StreamedToolCallDelta } from './lab-tool-call.ts'
 // @ts-expect-error Application builds use bundler resolution.
-import { parseChatChunk, type LabChatMessage } from './lab-openai.ts'
+import { parseChatChunk, type LabChatMessage, type LabReasoningDetail } from './lab-openai.ts'
 import type { LabToolFunction } from './lab-tools'
 
 /** HTTP for Lab: a streaming OpenAI-compatible client built only on fetch and
@@ -57,11 +57,94 @@ export class StreamText {
   }
 }
 
+export interface SplitReasoningDelta {
+  text?: string
+  reasoning?: string
+}
+
+/** Split the raw leading `<think>...</think>` convention used by some local
+ *  and frontier-compatible endpoints. It waits only while the opening or
+ *  closing tag is ambiguous, so tags may be divided across SSE chunks without
+ *  leaking into the answer. Tags later in ordinary prose/code stay literal. */
+export class ReasoningTagSplitter {
+  private mode: 'prefix' | 'reasoning' | 'text' = 'prefix'
+  private buffer = ''
+  private closingTag = ''
+
+  push(delta: string): SplitReasoningDelta {
+    if (!delta) return {}
+    if (this.mode === 'text') return { text: delta }
+    this.buffer += delta
+    if (this.mode === 'reasoning') return this.drainReasoning()
+
+    const leading = this.buffer.match(/^\s*/)?.[0] ?? ''
+    const candidate = this.buffer.slice(leading.length)
+    const lower = candidate.toLowerCase()
+    const openings = [
+      { open: '<think>', close: '</think>' },
+      { open: '<thinking>', close: '</thinking>' }
+    ]
+    const matched = openings.find(({ open }) => lower.startsWith(open))
+    if (matched) {
+      this.mode = 'reasoning'
+      this.closingTag = matched.close
+      this.buffer = candidate.slice(matched.open.length)
+      return this.drainReasoning()
+    }
+    if (openings.some(({ open }) => open.startsWith(lower))) return {}
+
+    this.mode = 'text'
+    const text = this.buffer
+    this.buffer = ''
+    return { text }
+  }
+
+  flush(): SplitReasoningDelta {
+    if (!this.buffer) return {}
+    const value = this.buffer
+    this.buffer = ''
+    return this.mode === 'reasoning' ? { reasoning: value } : { text: value }
+  }
+
+  private drainReasoning(): SplitReasoningDelta {
+    const lower = this.buffer.toLowerCase()
+    const closeAt = lower.indexOf(this.closingTag)
+    if (closeAt >= 0) {
+      const reasoning = this.buffer.slice(0, closeAt)
+      const text = this.buffer.slice(closeAt + this.closingTag.length)
+      this.buffer = ''
+      this.mode = 'text'
+      return {
+        ...(reasoning ? { reasoning } : {}),
+        ...(text ? { text } : {})
+      }
+    }
+
+    // Retain the longest suffix that could still become the closing tag when
+    // the next SSE chunk arrives; the rest is known reasoning and can stream.
+    let retained = 0
+    const max = Math.min(this.buffer.length, this.closingTag.length - 1)
+    for (let length = max; length > 0; length--) {
+      if (this.closingTag.startsWith(lower.slice(-length))) {
+        retained = length
+        break
+      }
+    }
+    const end = this.buffer.length - retained
+    const reasoning = this.buffer.slice(0, end)
+    this.buffer = this.buffer.slice(end)
+    return reasoning ? { reasoning } : {}
+  }
+}
+
 export interface ChatStreamResult {
   content: string
   /** Reasoning text streamed alongside the answer, under either provider
    *  field name. Empty when the model did not reason. */
   reasoning: string
+  /** Structured provider reasoning blocks, preserved byte-for-byte at the
+   *  JSON value level for the assistant's next tool-result turn. */
+  reasoningDetails: LabReasoningDetail[]
   toolCalls: LabFunctionCall[]
   finishReason?: string
 }
@@ -119,26 +202,67 @@ export async function streamChatCompletion(options: ChatStreamOptions): Promise<
   const reader = response.body.getReader()
   const accumulator = new ToolCallAccumulator()
   const textTracker = new StreamText()
+  const reasoningSplitter = new ReasoningTagSplitter()
   let content = ''
   let reasoning = ''
+  const reasoningDetails: LabReasoningDetail[] = []
+  let finishReason: string | undefined
+
+  const emitSplit = (split: SplitReasoningDelta): void => {
+    if (split.reasoning) {
+      reasoning += split.reasoning
+      options.onReasoning?.(split.reasoning)
+    }
+    if (split.text) {
+      content += split.text
+      options.onText?.(split.text)
+    }
+  }
+
+  const finish = (): ChatStreamResult => {
+    emitSplit(reasoningSplitter.flush())
+    return {
+      content,
+      reasoning,
+      reasoningDetails,
+      toolCalls: accumulator.calls(),
+      ...(finishReason ? { finishReason } : {})
+    }
+  }
 
   const handleData = (data: string): void => {
     const parsed = parseChatChunk(data)
     if (!parsed) return
-    if (parsed.text) {
-      const delta = textTracker.push(parsed.text)
-      content += delta
-      options.onText?.(delta)
-    }
     if (parsed.reasoning) {
       reasoning += parsed.reasoning
       options.onReasoning?.(parsed.reasoning)
+    }
+    if (parsed.reasoningDetails) {
+      reasoningDetails.push(...parsed.reasoningDetails)
+      // A provider can supply both a compatibility reasoning string and its
+      // structured source. Only display one copy, but always preserve blocks.
+      if (!parsed.reasoning) {
+        const detailText = parsed.reasoningDetails
+          .map((detail) => typeof detail.text === 'string' ? detail.text : typeof detail.summary === 'string' ? detail.summary : '')
+          .join('')
+        if (detailText) {
+          reasoning += detailText
+          options.onReasoning?.(detailText)
+        }
+      }
+    }
+    if (parsed.text) {
+      const delta = textTracker.push(parsed.text)
+      emitSplit(reasoningSplitter.push(delta))
     }
     for (const delta of parsed.toolCalls ?? []) {
       accumulator.push(delta)
       options.onToolCallDelta?.(delta)
     }
-    if (parsed.finishReason) options.onFinishReason?.(parsed.finishReason)
+    if (parsed.finishReason) {
+      finishReason = parsed.finishReason
+      options.onFinishReason?.(parsed.finishReason)
+    }
   }
 
   for (;;) {
@@ -146,7 +270,7 @@ export async function streamChatCompletion(options: ChatStreamOptions): Promise<
     if (done) break
     const text = textDecoder.decode(value, { stream: true })
     for (const event of decoder.push(text)) {
-      if (event.type === 'done') return { content, reasoning, toolCalls: accumulator.calls() }
+      if (event.type === 'done') return finish()
       handleData(event.data)
     }
   }
@@ -154,7 +278,7 @@ export async function streamChatCompletion(options: ChatStreamOptions): Promise<
   for (const event of decoder.flush()) {
     if (event.type === 'data') handleData(event.data)
   }
-  return { content, reasoning, toolCalls: accumulator.calls() }
+  return finish()
 }
 
 /** Adapt an LLM server's model catalogue into BOSS model entries. Tries

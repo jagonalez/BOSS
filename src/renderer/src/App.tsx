@@ -7,7 +7,7 @@ import { CommandCenter } from './components/CommandCenter'
 import { SitesPage } from './components/SitesPage'
 import { AutomationsPage } from './components/AutomationsPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
-import { applyTheme, loadTheme } from './lib/themes'
+import { applyTheme, loadTheme, watchSystemTheme } from './lib/themes'
 import { applyTypography, loadTypography } from './lib/typography'
 import { CommitDialog } from './components/CommitDialog'
 import { RenameModal } from './components/RenameModal'
@@ -92,6 +92,7 @@ export function App(): React.JSX.Element {
     loadActivity()
     loadAppearance()
     applyTypography(loadTypography())
+    return watchSystemTheme()
   }, [])
 
   // Views load once and stay. They belong to the app, not to a project, so

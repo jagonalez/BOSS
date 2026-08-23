@@ -1410,6 +1410,56 @@ textarea {
   height: 78px;
 }
 
+.settings-theme-appearance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+  padding: 4px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.settings-theme-appearance button {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-theme-appearance button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.settings-theme-appearance button.active {
+  border-color: var(--line-soft);
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-theme-appearance strong {
+  font-size: var(--type-control);
+  font-weight: 650;
+}
+
+.settings-theme-appearance small {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A size, with a nudge either side of it. The number sits between the two so the pair reads as
    one control rather than as two buttons that happen to be adjacent. */
 .settings-size-stepper {
@@ -9388,6 +9438,8 @@ select:hover {
 .file-preview .code-view-wrap {
   flex: 1;
   min-height: 0;
+}
+
 /* Annotations
    ---------------------------------------------------------------------------
    Highlighting a passage of an assistant reply raises a toolbar over the

@@ -40,7 +40,6 @@ test('Lab health checks authenticate with the configured API key', async () => {
         defaultModel: 'test-model',
         contextChars: 1_000,
         maxToolIterations: 1,
-        maxReadOnlyRounds: 1,
         tools: 'core'
       },
       gate: { request: async () => 'deny' }
