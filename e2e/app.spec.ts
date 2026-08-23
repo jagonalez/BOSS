@@ -1,4 +1,4 @@
-import { backendCalls, control, expect, lastBackendCall, test } from './fixtures'
+import { backendCalls, control, expect, gitCalls, lastBackendCall, test } from './fixtures'
 import type { BossApi } from '../src/shared/api'
 
 async function openSettings(page: Parameters<typeof control>[0]): Promise<void> {
@@ -633,4 +633,304 @@ test('a selection spanning two messages offers no annotation', async ({ appPage 
   await appPage.dispatchEvent('.messages', 'pointerup')
 
   await expect(appPage.locator('.annotation-popover')).toHaveCount(0)
+})
+
+/** Open the review surface for the source thread's checkout. */
+async function openReviewTab(page: Parameters<typeof control>[0]): Promise<void> {
+  await page.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await page.locator('.workspace-tab-add-inline[title="Add a terminal, files or review to this thread"]').click()
+  await page.locator('.workspace-add-menu-item').filter({ hasText: 'Review' }).click()
+}
+
+test('the diff view toggles between unified and split and remembers it', async ({ appPage }) => {
+  await openReviewTab(appPage)
+
+  // The fixture checkout holds one modified file whose middle line changed by
+  // a single word — enough to see both layouts and word-level marking.
+  const card = appPage.locator('.diff-card')
+  await expect(card).toHaveCount(1)
+  const view = card.locator('.diff-view')
+  await expect(view).toHaveAttribute('data-mode', 'unified')
+
+  await expect(view.locator('.word-del')).toContainText('total')
+  await expect(view.locator('.word-add')).toContainText('sum')
+
+  const toggle = appPage.getByRole('group', { name: 'Diff layout' })
+  await toggle.getByRole('button', { name: 'Split' }).click()
+  await expect(view).toHaveAttribute('data-mode', 'split')
+
+  // Two gutters side by side inside the one file block: the modified pair sits
+  // on one row, old left and new right, each carrying its own word mark.
+  const row = view.locator('.diff-split-row:has(.word-del)').first()
+  await expect(row.locator('.diff-line.half')).toHaveCount(2)
+  await expect(row.locator('.diff-line.half.left')).toContainText('total')
+  await expect(row.locator('.diff-line.half.right')).toContainText('sum')
+  await expect(card.locator('.diff-line.hunk.span')).toHaveCount(1)
+
+  await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffMode'))).toBe('split')
+
+  // The choice survives leaving and re-entering the workspace: a fresh
+  // DiffReview reads it back when it mounts.
+  await appPage.reload()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
+  await expect(appPage.locator('.diff-view.split').first()).toBeVisible()
+
+  await appPage.getByRole('group', { name: 'Diff layout' }).getByRole('button', { name: 'Unified' }).click()
+  await expect(appPage.locator('.diff-view[data-mode="unified"]').first()).toBeVisible()
+})
+
+test('the whitespace toggle is offered on the diff toolbar and persists', async ({ appPage }) => {
+  await openReviewTab(appPage)
+  await expect(appPage.locator('.diff-card')).toHaveCount(1)
+
+  const whitespace = appPage.locator('.diff-whitespace-toggle')
+  await expect(whitespace).toHaveText('Ignore whitespace')
+  await whitespace.click()
+  await expect(whitespace).toHaveText('Whitespace hidden')
+  await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffIgnoreWhitespace'))).toBe('1')
+
+  // A freshly mounted diff reads the preference back.
+  await appPage.reload()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
+  await expect(appPage.locator('.diff-whitespace-toggle')).toHaveText('Whitespace hidden')
+})
+
+test('committing stages a chosen subset and commits only it', async ({ appPage }) => {
+  // The row labels projects by folder name; its title carries the full path.
+  const project = appPage.locator('.sidebar-section.projects .project-row[title="/tmp/boss-e2e/project"]')
+  await expect(project).toBeVisible()
+  await project.click({ button: 'right' })
+  await appPage.getByRole('button', { name: 'Commit & push…' }).click()
+
+  const dialog = appPage.locator('.modal')
+  const staged = dialog.locator('.commit-section.staged')
+  const unstaged = dialog.locator('.commit-section.unstaged')
+  await expect(staged).toContainText('src/staged.ts')
+  await expect(unstaged).toContainText('src/edited.ts')
+  await expect(unstaged).toContainText('scratch.ts')
+
+  // Nothing staged means nothing to commit: the buttons stand down, and the
+  // labels lose their counts.
+  await dialog.getByRole('button', { name: 'Unstage src/staged.ts' }).click()
+  await expect(dialog.getByRole('button', { name: 'Commit', exact: true })).toBeDisabled()
+
+  // Recording starts here, so everything below is asserted against the exact
+  // git traffic this test caused.
+  const e2e = await control(appPage)
+  await e2e.resetCalls()
+  await dialog.locator('.commit-input').fill('Just the scratch file')
+  await e2e.holdGit('add')
+  await dialog.getByRole('button', { name: 'Stage scratch.ts' }).click()
+  const commitButton = dialog.getByRole('button', { name: 'Commit (1)', exact: true })
+  // The optimistic row move must not let Commit or another toggle overtake the
+  // still-running git add.
+  await expect.poll(async () => gitCalls(appPage).then((calls) => calls.some((args) => args[0] === 'add'))).toBe(true)
+  await expect(commitButton).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Stage src/edited.ts' })).toBeDisabled()
+  await e2e.releaseGit('add')
+  await expect(commitButton).toBeEnabled()
+  await commitButton.click()
+
+  await expect(dialog.locator('.commit-output')).toContainText('Committed ✓')
+  // Exactly one targeted add — no sweep of everything with -A.
+  await expect.poll(async () => gitCalls(appPage).then((calls) => calls.filter((args) => args[0] === 'add'))).toEqual([['add', '--', 'scratch.ts']])
+  const calls = await gitCalls(appPage)
+  expect(calls).toContainEqual(['commit', '-m', 'Just the scratch file'])
+  expect(calls.some((args) => args.includes('-A'))).toBe(false)
+})
+
+test('branch switching blocks conflicts and restores a targeted stash on a safe branch', async ({ appPage }) => {
+  await openReviewTab(appPage)
+  const branch = appPage.getByRole('combobox', { name: 'Switch branch' })
+  await expect(branch).toBeEnabled()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+
+  // The fixture's conflict branch changes src/edited.ts, which is also dirty
+  // locally. The guard must stop before checkout.
+  await branch.selectOption('conflict')
+  const blocked = appPage.locator('.modal').filter({ hasText: "Can't switch to conflict" })
+  await expect(blocked).toContainText('src/edited.ts')
+  await blocked.getByRole('button', { name: 'Stay' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+
+  await control(appPage).then((item) => item.resetCalls())
+  await branch.selectOption('feature')
+  const confirm = appPage.locator('.modal').filter({ hasText: 'Switch to feature?' })
+  await confirm.getByRole('button', { name: 'Stash & switch' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('feature')
+
+  const calls = await gitCalls(appPage)
+  expect(calls).toContainEqual(['stash', 'push', '--include-untracked', '-m', 'BOSS branch switch'])
+  expect(calls).toContainEqual(['checkout', 'feature'])
+  expect(calls).toContainEqual(['stash', 'pop', 'stash@{0}'])
+
+  // Restoration is observable in the UI too: the feature checkout still has
+  // the same local working-tree change after the targeted stash is popped.
+  await expect(appPage.locator('.diff-card-path')).toContainText('src/edited.ts')
+
+  // Reproduce the confirmation-time race: after BOSS planned a stash switch,
+  // another Git client stashes the changes first. Revalidation must switch the
+  // now-clean tree directly and leave that pre-existing stash untouched.
+  await branch.selectOption('main')
+  const back = appPage.locator('.modal').filter({ hasText: 'Switch to main?' })
+  await expect(back).toBeVisible()
+  await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['stash', 'push', '--include-untracked', '-m', 'manual existing stash']))
+  await control(appPage).then((item) => item.resetCalls())
+  await back.getByRole('button', { name: 'Stash & switch' }).click()
+  await expect(appPage.locator('.git-branch-current')).toContainText('main')
+  const retryCalls = await gitCalls(appPage)
+  expect(retryCalls.some((args) => args[0] === 'stash')).toBe(false)
+  const existing = await appPage.evaluate(() => (window as unknown as { boss: BossApi }).boss.gitRun('/tmp/boss-e2e/project/checkout', ['rev-parse', '--verify', 'refs/stash']))
+  expect(existing.code).toBe(0)
+})
+
+test('a fenced code block in chat highlights and copies raw code', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  const block = appPage.locator('.md .code-block').first()
+  await expect(block.locator('span.hljs-keyword')).toHaveText('const')
+
+  // The label is the button text, which reads Copy before it flips to Copied.
+  const copy = block.locator('.code-copy')
+  await expect(copy).toHaveAccessibleName('Copy')
+  await copy.click()
+  await expect(copy).toHaveText(/Copied/)
+
+  // The clipboard carries the raw code, never the highlight markup.
+  const writes = await control(appPage).then((item) => item.clipboardWrites())
+  expect(writes.at(-1)).toBe('const answer = 42\nconsole.log(answer)')
+})
+
+test('compact asks before summarizing and then compacts the thread', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  const menu = appPage.locator('.ctx-menu')
+  const compactItem = menu.getByRole('button', { name: 'Compact context…' })
+
+  // Cancel keeps the transcript untouched.
+  await appPage.locator('.msg.user .msg-more').first().click()
+  await compactItem.click()
+  const modal = appPage.locator('.modal-backdrop')
+  await expect(modal.getByRole('heading', { name: 'Compact this thread?' })).toBeVisible()
+  await modal.getByRole('button', { name: 'Cancel' }).click()
+  await expect(modal).toHaveCount(0)
+
+  await control(appPage).then((item) => item.resetCalls())
+  await appPage.locator('.msg.user .msg-more').first().click()
+  await compactItem.click()
+  await modal.getByRole('button', { name: 'Compact' }).click()
+  expect((await lastBackendCall(appPage, 'thread.compact')).request).toMatchObject({
+    type: 'thread.compact',
+    threadId: 'thread-source'
+  })
+  await expect(appPage.locator('.msg.assistant .msg-body')).toHaveText('Compacted context summary.')
+  await expect(appPage.locator('.messages')).not.toContainText('second result')
+})
+
+test('undo to here reverts on an opencode thread and restores again', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.resetCalls())
+
+  const more = appPage.locator('.msg.assistant .msg-more').last()
+  const menu = appPage.locator('.ctx-menu')
+
+  await more.click()
+  await menu.getByRole('button', { name: 'Undo to here' }).click()
+  expect((await lastBackendCall(appPage, 'thread.revert')).request).toMatchObject({
+    type: 'thread.revert',
+    threadId: 'thread-source',
+    messageId: 'source-search-agent'
+  })
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+
+  await appPage.locator('.msg.user .msg-more').click()
+  await menu.getByRole('button', { name: 'Restore undone messages' }).click()
+  expect((await lastBackendCall(appPage, 'thread.unrevert')).request).toMatchObject({
+    type: 'thread.unrevert',
+    threadId: 'thread-source'
+  })
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+})
+
+test('history controls stay hidden when the backend cannot perform them', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Claude stop thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('Claude history controls are unavailable.')
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  const menu = appPage.locator('.ctx-menu')
+  await expect(menu.getByRole('button', { name: 'Undo to here' })).toHaveCount(0)
+  await expect(menu.getByRole('button', { name: 'Restore undone messages' })).toHaveCount(0)
+  await expect(menu.getByRole('button', { name: 'Compact context…' })).toHaveCount(0)
+})
+
+test('a failed undo leaves the transcript and restore state unchanged', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.failNextBackendRequest('thread.revert', 'Fixture revert failed.'))
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Undo to here' }).click()
+
+  await expect(appPage.locator('.chat-error')).toContainText('Fixture revert failed.')
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await expect(appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' })).toHaveCount(0)
+})
+
+test('a failed restore keeps the undone transcript restorable', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  await appPage.locator('.msg.assistant .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Undo to here' }).click()
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+  await control(appPage).then((item) => item.failNextBackendRequest('thread.unrevert', 'Fixture restore failed.'))
+
+  await appPage.locator('.msg.user .msg-more').click()
+  await appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' }).click()
+
+  await expect(appPage.locator('.chat-error')).toContainText('Fixture restore failed.')
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+  await appPage.locator('.msg.user .msg-more').click()
+  await expect(appPage.locator('.ctx-menu').getByRole('button', { name: 'Restore undone messages' })).toBeVisible()
+})
+
+test('reading a reply aloud swaps its speaker button for a stop control', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+
+  const actions = appPage.locator('.msg.assistant .msg-actions')
+  await actions.getByRole('button', { name: 'Read aloud' }).click()
+
+  const stop = actions.getByRole('button', { name: 'Stop reading' })
+  await expect(stop).toBeVisible()
+  await stop.click()
+
+  await expect(actions.getByRole('button', { name: 'Read aloud' })).toBeVisible()
+})
+
+test('retry resends the prompt that produced a finished reply', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.locator('.msg.assistant')).toContainText('second result')
+  await control(appPage).then((item) => item.resetCalls())
+
+  await appPage.locator('.msg.assistant').getByRole('button', { name: 'Retry this turn' }).click()
+
+  const call = await lastBackendCall(appPage, 'thread.send')
+  expect(call.request).toMatchObject({ type: 'thread.send', threadId: 'thread-source' })
+  const text = (call.request as { parts: { type: string; text?: string }[] }).parts
+    .find((part) => part.type === 'text')?.text ?? ''
+  expect(text).toBe('Search marker: first result.')
+  const file = (call.request as { parts: { type: string; mime?: string; filename?: string; url?: string }[] }).parts
+    .find((part) => part.type === 'file')
+  expect(file).toMatchObject({
+    type: 'file',
+    mime: 'image/png',
+    filename: 'source.png',
+    url: 'data:image/png;base64,AAAA'
+  })
 })

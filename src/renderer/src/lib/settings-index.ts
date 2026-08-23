@@ -1,7 +1,7 @@
 /**
  * What lives in each settings section, so a name can be typed instead of guessed at.
  *
- * Nine sections and forty-odd settings is more than a sidebar of category names can answer for:
+ * Eleven sections and forty-odd settings is more than a sidebar of category names can answer for:
  * knowing that the terminal's start location is filed under "Git worktrees", or that the `boss`
  * command is under "Updates", means already knowing the answer. This is the index that makes
  * those findable, and it is written by hand on purpose — the sections are JSX, and a filter that
@@ -12,7 +12,7 @@
  */
 
 export type SettingsSectionId =
-  | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile'
+  | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram'
   | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
 export interface SettingsEntry {
@@ -52,6 +52,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { label: 'Read-only sharing token', section: 'mobile', keywords: ['viewer', 'share', 'review'] },
   { label: 'Paired devices', section: 'mobile', keywords: ['revoke', 'forget', 'unpair'] },
   { label: 'Push notifications', section: 'mobile', keywords: ['webhook', 'alert', 'away'] },
+
+  // Telegram
+  { label: 'Telegram inbox', section: 'telegram', keywords: ['bot', 'message', 'messages', 'channel', 'chat', 'enable', 'botfather'] },
+  { label: 'Bot token', section: 'telegram', keywords: ['telegram', 'botfather', 'keychain', 'api', 'forget', 'password', 'secret'] },
+  { label: 'Deliver into thread', section: 'telegram', keywords: ['telegram', 'steer', 'queue', 'destination', 'routing', 'chat'] },
+  { label: 'Allowed chats', section: 'telegram', keywords: ['telegram', 'chat id', 'allowlist', 'who can write', 'pair'] },
 
   // Collaboration
   { label: 'Thread collaboration', section: 'collaboration', keywords: ['thread bus', 'message', 'discover', 'agents talking'] },

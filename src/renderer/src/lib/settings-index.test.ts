@@ -25,6 +25,7 @@ test('the settings people cannot find are findable', () => {
   assert.ok(cli.includes('updates') && cli.includes('connections'), `expected both cli settings, saw ${cli}`)
   assert.equal(searchSettings('boss command')[0]?.section, 'updates')
   assert.equal(searchSettings('binary path')[0]?.section, 'connections')
+  assert.equal(searchSettings('bot token')[0]?.section, 'telegram')
 })
 
 test('a word people use is found even when the label does not contain it', () => {

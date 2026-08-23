@@ -2100,8 +2100,9 @@ export async function removeSessionWorktree(id: string): Promise<void> {
 export async function revertMessage(sessionID: string, messageID: string): Promise<void> {
   try {
     await OpenCode.revertMessage(sessionID, messageID)
-  } catch {
-    /* ignore */
+  } catch (error) {
+    setSessionError(sessionID, errorSummary(error))
+    return
   }
   const state = appStore.getState()
   const msgs = state.messages[sessionID] ?? []
@@ -2122,8 +2123,9 @@ export async function revertMessage(sessionID: string, messageID: string): Promi
 export async function unrevertSession(sessionID: string): Promise<void> {
   try {
     await OpenCode.unrevert(sessionID)
-  } catch {
-    /* ignore */
+  } catch (error) {
+    setSessionError(sessionID, errorSummary(error))
+    return
   }
   appStore.setState((s) => {
     const reverted = { ...s.reverted }
@@ -2700,7 +2702,12 @@ export function setSpeakAloud(on: boolean): void {
 
 let ttsAudio: HTMLAudioElement | null = null
 
-export async function speakText(text: string): Promise<void> {
+/** Speak one passage, optionally tagged with the turn it came from.
+ *
+ *  The tag is what lets the transcript swap its speaker button for a stop
+ *  control while this audio plays and only then: a second speakText() call
+ *  replaces the audio, so the key moves with it. */
+export async function speakText(text: string, key?: string): Promise<void> {
   const cur = appStore.getState()
   const trimmed = text.trim()
   if (!trimmed) return
@@ -2712,16 +2719,29 @@ export async function speakText(text: string): Promise<void> {
     }
     if (!result.dataUrl) return
     ttsAudio?.pause()
-    ttsAudio = new Audio(result.dataUrl)
-    void ttsAudio.play()
+    const audio = new Audio(result.dataUrl)
+    ttsAudio = audio
+    appStore.setState({ speakingKey: key ?? null })
+    const settle = (): void => {
+      // A newer utterance owns the field by now; leave it alone.
+      if (ttsAudio === audio) {
+        ttsAudio = null
+        appStore.setState((s) => (s.speakingKey === (key ?? null) ? { speakingKey: null } : {}))
+      }
+    }
+    audio.onended = settle
+    audio.onerror = settle
+    void audio.play().catch(settle)
   } catch (err) {
     appStore.setState({ lastError: errorSummary(err) })
   }
 }
 
 export function stopSpeaking(): void {
+  const hadAudio = ttsAudio !== null
   ttsAudio?.pause()
   ttsAudio = null
+  if (hadAudio || appStore.getState().speakingKey !== null) appStore.setState({ speakingKey: null })
 }
 
 let micSession: ReturnType<typeof startMicCapture> extends Promise<infer T> ? T | null : null = null
