@@ -128,7 +128,11 @@ export function App(): React.JSX.Element {
   }, [modalOpen])
 
   useEffect(() => {
-    let refreshTimer: number | undefined
+    // Keyed per session: a single shared timer let every thread cancel every
+    // other thread's pending refetch, so under concurrent streaming the
+    // trailing refresh could be starved indefinitely and, when it did fire,
+    // only refreshed whichever thread emitted last.
+    const refreshTimers = new Map<string, number>()
 
     document.documentElement.dataset.platform = window.boss.platform()
     void window.boss.subscribeEvents()
@@ -228,17 +232,18 @@ export function App(): React.JSX.Element {
         case 'message.updated':
         case 'message.part.updated':
         case 'message.part.created':
-          window.clearTimeout(refreshTimer)
           const props = (ev.properties ?? {}) as { sessionID?: string; part?: { sessionID?: string } }
           const eventSessionId = props.sessionID ?? props.part?.sessionID ?? appStore.getState().activeSessionId ?? undefined
           refreshStreaming(eventSessionId)
-          refreshTimer = window.setTimeout(() => {
+          if (eventSessionId) {
             const id = eventSessionId
-            if (id) {
+            window.clearTimeout(refreshTimers.get(id))
+            refreshTimers.set(id, window.setTimeout(() => {
+              refreshTimers.delete(id)
               void loadMessages(id)
               void loadTodos(id)
-            }
-          }, 300)
+            }, 300))
+          }
           break
         case 'config.updated':
           void refreshConfig()
@@ -322,7 +327,8 @@ export function App(): React.JSX.Element {
       offSpeech()
       offBrowseAgent()
       offSites()
-      window.clearTimeout(refreshTimer)
+      for (const timer of refreshTimers.values()) window.clearTimeout(timer)
+      refreshTimers.clear()
       void window.boss.unsubscribeEvents()
     }
   }, [])

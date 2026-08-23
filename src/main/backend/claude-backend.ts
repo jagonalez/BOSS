@@ -60,6 +60,8 @@ interface ClaudeStore {
   sessions: Record<string, { title?: string; projectPath: string; createdAt: number; updatedAt: number; messages: MessageWithParts[] }>
 }
 
+const SAVE_DEBOUNCE_MS = 100
+
 function storeFile(): string {
   return join(app.getPath('userData'), 'claude-threads.json')
 }
@@ -128,6 +130,7 @@ export class ClaudeBackend implements Backend {
    *  settled. Claude outlives its own result, so cleanup needs its own list. */
   private lingering = new Set<ClaudeRun>()
   private store: ClaudeStore = { version: 1, sessions: {} }
+  private saveTimer?: ReturnType<typeof setTimeout>
   private threadBus?: ThreadBusConnection
 
   constructor(cwd?: string, command = resolveBackendBin('claude')) {
@@ -156,6 +159,9 @@ export class ClaudeBackend implements Backend {
     for (const run of this.lingering) void run.query.interrupt().catch(() => {})
     this.lingering.clear()
     this.runs.clear()
+    // A debounced write may still be pending; shutting down without it would
+    // drop the tail of the last turn.
+    if (this.saveTimer) this.save()
     this.healthy = false
   }
 
@@ -177,8 +183,29 @@ export class ClaudeBackend implements Backend {
   }
 
   private emit(event: EventMessage): void { this.eventCb?.(event) }
+  /** Write the whole store synchronously. Callers on the hot streaming path
+   *  must use saveSoon() instead: this serialises every session and blocks the
+   *  main process, which also serves IPC, so a per-token call here freezes the
+   *  UI once the store grows. Indentation is dropped because nothing reads this
+   *  file by eye and it is a third of the bytes. */
   private save(): void {
-    try { writeFileSync(storeFile(), JSON.stringify(this.store, null, 2)) } catch { /* keep in memory */ }
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = undefined
+    }
+    try { writeFileSync(storeFile(), JSON.stringify(this.store)) } catch { /* keep in memory */ }
+  }
+
+  /** Coalesce bursts of streaming writes into one flush. Deltas arrive per
+   *  token per thread; persisting each one is pure waste when the next
+   *  supersedes it milliseconds later. */
+  private saveSoon(): void {
+    if (this.saveTimer) return
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined
+      this.save()
+    }, SAVE_DEBOUNCE_MS)
+    this.saveTimer.unref?.()
   }
 
   private record(sessionId: string) {
@@ -255,7 +282,7 @@ export class ClaudeBackend implements Backend {
     if (index >= 0) record.messages[index] = message
     else record.messages.push(message)
     record.updatedAt = Date.now()
-    this.save()
+    this.saveSoon()
     this.emit({ type: 'message.updated', message: message.info })
     message.parts.forEach((part) => this.emit({ type: 'message.part.updated', part }))
   }
@@ -287,7 +314,7 @@ export class ClaudeBackend implements Backend {
     }
     if (changed) {
       record.updatedAt = Date.now()
-      this.save()
+      this.saveSoon()
     }
   }
 
