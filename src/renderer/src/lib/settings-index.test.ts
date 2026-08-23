@@ -33,6 +33,10 @@ test('a word people use is found even when the label does not contain it', () =>
   assert.equal(searchSettings('quota')[0]?.section, 'usage')
   assert.equal(searchSettings('password')[0]?.section, 'mobile')
   assert.equal(searchSettings('dark')[0]?.section, 'appearance')
+  assert.equal(searchSettings('system')[0]?.label, 'Theme')
+  assert.equal(searchSettings('solarized')[0]?.label, 'Theme')
+  assert.equal(searchSettings('gruvbox')[0]?.label, 'Theme')
+  assert.equal(searchSettings('kanagawa')[0]?.label, 'Theme')
 })
 
 test('an empty query offers nothing rather than everything', () => {

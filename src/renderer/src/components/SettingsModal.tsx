@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import { THEMES, applyTheme, loadTheme } from '../lib/themes'
+import { THEME_FAMILIES, applyTheme, loadTheme, themeForPreference, themeForFamily, type ThemeAppearance, type ThemeChangedDetail } from '../lib/themes'
 import { loadTypography, saveTypography, stepReadingSize, stepTerminalSize } from '../lib/typography'
 import { searchSettings, type SettingsMatch } from '../lib/settings-index'
 import { SearchIcon } from './icons'
@@ -182,6 +182,11 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
 }
 
 const THEME_CATEGORIES = ['BOSS', 'Community', 'Accessibility'] as const
+const THEME_APPEARANCES: Array<{ id: ThemeAppearance; label: string; description: string }> = [
+  { id: 'system', label: 'System', description: 'Match your operating system' },
+  { id: 'light', label: 'Light', description: 'Keep the daylight variant' },
+  { id: 'dark', label: 'Dark', description: 'Keep the low-light variant' }
+]
 
 /** Which releases this copy installs.
  *
@@ -671,7 +676,8 @@ export function SettingsModal(): React.JSX.Element | null {
   const terminalStartLocation = useStore(appStore, (s) => s.terminalStartLocation)
   const viewMode = useStore(appStore, (s) => s.viewMode)
   const [section, setSection] = useState<SettingsSection>('connections')
-  const [currentTheme, setCurrentTheme] = useState(loadTheme)
+  const [themePreference, setThemePreference] = useState(loadTheme)
+  const [currentTheme, setCurrentTheme] = useState(() => themeForPreference(loadTheme()))
   const [typography, setTypography] = useState(loadTypography)
   const [query, setQuery] = useState('')
   const matches = useMemo(() => searchSettings(query), [query])
@@ -701,7 +707,10 @@ export function SettingsModal(): React.JSX.Element | null {
 
   useEffect(() => {
     const syncTheme = (event: Event): void => {
-      setCurrentTheme((event as CustomEvent<{ id?: string }>).detail?.id ?? loadTheme())
+      const detail = (event as CustomEvent<ThemeChangedDetail>).detail
+      if (!detail) return
+      setThemePreference({ family: detail.family, appearance: detail.appearance })
+      setCurrentTheme(themeForFamily(detail.family, detail.resolvedAppearance))
     }
     window.addEventListener('boss:theme-changed', syncTheme)
     return () => window.removeEventListener('boss:theme-changed', syncTheme)
@@ -1218,35 +1227,58 @@ export function SettingsModal(): React.JSX.Element | null {
                 <div className="settings-card-heading">
                   <div>
                     <h2>Theme</h2>
-                    <p>Applied immediately across every BOSS window.</p>
+                    <p>Choose a color family, then let BOSS follow the system or keep one appearance.</p>
                   </div>
                 </div>
-                <div className="settings-theme-families">
+                <div className="settings-theme-appearance" role="radiogroup" aria-label="Theme appearance">
+                  {THEME_APPEARANCES.map((appearance) => (
+                    <button
+                      key={appearance.id}
+                      role="radio"
+                      aria-checked={themePreference.appearance === appearance.id}
+                      className={themePreference.appearance === appearance.id ? 'active' : ''}
+                      onClick={() => applyTheme({ ...themePreference, appearance: appearance.id })}
+                    >
+                      <strong>{appearance.label}</strong>
+                      <small>
+                        {appearance.id === 'system' && themePreference.appearance === 'system'
+                          ? `Following system · currently ${currentTheme.appearance}`
+                          : appearance.description}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+                <div className="settings-theme-families" role="radiogroup" aria-label="Theme family">
                   {THEME_CATEGORIES.map((category) => (
                     <div className="settings-theme-family" key={category}>
                       <div className="settings-theme-family-label">{category}</div>
                       <div className="theme-grid settings-theme-grid">
-                        {THEMES.filter((theme) => theme.category === category).map((theme) => (
-                          <button
-                            key={theme.id}
-                            className={`theme-swatch ${theme.id === currentTheme ? 'active' : ''}`}
-                            onClick={() => applyTheme(theme.id)}
-                            title={theme.label}
-                          >
-                            <span className="theme-swatch-preview" style={{ background: theme.colors.canvas }}>
-                              <span style={{ background: theme.colors.sidebar }} />
-                              <span style={{ background: theme.colors.surface }}>
-                                <i style={{ background: theme.colors.accent }} />
-                                <i style={{ background: theme.colors.textMuted }} />
-                                <i style={{ background: theme.colors.success }} />
+                        {THEME_FAMILIES.filter((family) => family.category === category).map((family) => {
+                          const theme = themeForFamily(family.id, currentTheme.appearance)
+                          return (
+                            <button
+                              key={family.id}
+                              role="radio"
+                              aria-checked={family.id === themePreference.family}
+                              className={`theme-swatch ${family.id === themePreference.family ? 'active' : ''}`}
+                              onClick={() => applyTheme({ ...themePreference, family: family.id })}
+                              title={`${family.label} · ${theme.appearance}`}
+                            >
+                              <span className="theme-swatch-preview" style={{ background: theme.colors.canvas }}>
+                                <span style={{ background: theme.colors.sidebar }} />
+                                <span style={{ background: theme.colors.surface }}>
+                                  <i style={{ background: theme.colors.accent }} />
+                                  <i style={{ background: theme.colors.textMuted }} />
+                                  <i style={{ background: theme.colors.success }} />
+                                </span>
                               </span>
-                            </span>
-                            <span className="theme-swatch-copy">
-                              <span><strong>{theme.label}</strong><em>{theme.appearance}</em></span>
-                              <small>{theme.description}</small>
-                            </span>
-                          </button>
-                        ))}
+                              <span className="theme-swatch-copy">
+                                <span><strong>{family.label}</strong><em>{theme.appearance}</em></span>
+                                <small>{family.description}</small>
+                              </span>
+                            </button>
+                          )
+                        })}
                       </div>
                     </div>
                   ))}

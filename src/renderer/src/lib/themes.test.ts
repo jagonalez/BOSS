@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { THEMES } from './themes.ts'
+import { THEMES, THEME_FAMILIES, themeForPreference } from './themes.ts'
 
 function rgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '')
@@ -23,6 +23,32 @@ function contrast(foreground: string, background: string): number {
   const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a)
   return (values[0] + 0.05) / (values[1] + 0.05)
 }
+
+test('every theme family offers a real light and dark variant', () => {
+  const ids = new Set(THEMES.map((theme) => theme.id))
+  assert.equal(ids.size, THEMES.length, 'theme ids should be unique')
+
+  for (const family of THEME_FAMILIES) {
+    assert.ok(ids.has(family.light), `${family.id} is missing its light theme`)
+    assert.ok(ids.has(family.dark), `${family.id} is missing its dark theme`)
+    assert.equal(themeForPreference({ family: family.id, appearance: 'light' }).appearance, 'light')
+    assert.equal(themeForPreference({ family: family.id, appearance: 'dark' }).appearance, 'dark')
+  }
+})
+
+test('system appearance resolves within the selected family', () => {
+  assert.equal(themeForPreference({ family: 'catppuccin', appearance: 'system' }, 'light').id, 'catppuccin-latte')
+  assert.equal(themeForPreference({ family: 'catppuccin', appearance: 'system' }, 'dark').id, 'catppuccin-mocha')
+  for (const [family, light, dark] of [
+    ['gruvbox', 'gruvbox-light', 'gruvbox-dark'],
+    ['everforest', 'everforest-light', 'everforest-dark'],
+    ['kanagawa', 'kanagawa-lotus', 'kanagawa-wave'],
+    ['ayu', 'ayu-light', 'ayu-dark']
+  ] as const) {
+    assert.equal(themeForPreference({ family, appearance: 'system' }, 'light').id, light)
+    assert.equal(themeForPreference({ family, appearance: 'system' }, 'dark').id, dark)
+  }
+})
 
 test('every theme gives diff text WCAG-readable contrast', () => {
   for (const theme of THEMES) {
