@@ -90,3 +90,55 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 }
+
+/** The language tag on a fenced block, from the `language-*` class
+ *  react-markdown puts on the code element. */
+export function langFromClassName(className?: string): string | undefined {
+  const match = /language-([\w+#.-]+)/.exec(className ?? '')
+  return match?.[1]
+}
+
+/** Resolve a fence tag to a registered hljs language.
+ *
+ *  Fences use short aliases — ts, js, sh, yml — that are extensions, not
+ *  language ids. The extension table already maps them onto the real ids, so a
+ *  tag is read as one. Unknown tags return undefined rather than guessing. */
+export function langForFence(tag?: string): string | undefined {
+  if (!tag) return undefined
+  const candidate = EXT_TO_LANG[tag.toLowerCase()] ?? tag.toLowerCase()
+  return hljs.getLanguage(candidate) ? candidate : undefined
+}
+
+/** Highlight one fenced chat code block by its tag.
+ *
+ *  Same fallback ladder as highlightCode(): exact language, then auto-detect,
+ *  then plain escaping — a fence the tag table does not know still renders,
+ *  just without colors. */
+export function highlightFence(code: string, tag?: string): string {
+  const lang = langForFence(tag)
+  if (lang) {
+    try {
+      return hljs.highlight(code, { language: lang }).value
+    } catch {
+      /* fall through */
+    }
+  }
+  try {
+    return hljs.highlightAuto(code).value
+  } catch {
+    return escapeHtml(code)
+  }
+}
+
+/** Flatten React children to their text.
+ *
+ *  A fenced block's code arrives as a string in practice, but children are
+ *  typed loosely and can be arrays or numbers; anything else (an element) has
+ *  no business inside a code fence, so it contributes nothing rather than
+ *  rendering as [object Object]. */
+export function nodeText(value: unknown): string {
+  if (value === null || value === undefined || typeof value === 'boolean') return ''
+  if (typeof value === 'string' || typeof value === 'number') return String(value)
+  if (Array.isArray(value)) return value.map(nodeText).join('')
+  return ''
+}
