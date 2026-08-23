@@ -20,8 +20,19 @@
   --yellow-soft: rgba(187, 128, 9, 0.16);
   --purple: #8957e5;
   --cyan: #39c5cf;
-  --radius: 10px;
-  --radius-sm: 7px;
+  /* Corner radii, as a scale rather than a value picked per component. The old pair sat a step
+     tighter than the platform draws its own controls, which is most of what made the window read
+     as a utility rather than an app. */
+  --radius: 12px;
+  --radius-sm: 9px;
+  --radius-xs: 6px;
+  --radius-pill: 999px;
+  /* Hit targets. macOS asks for 28pt before a control is comfortable to hit; the smallest here is
+     the floor for anything clickable, and toolbar controls take the larger one. A control gets its
+     height from padding wherever it can, so text that grows is not clipped by a fixed box. */
+  --control-min: 26px;
+  --control-h: 30px;
+  --control-h-lg: 34px;
   --font-mono: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --type-page-title: 24px;
@@ -31,6 +42,10 @@
   --type-thread: 13px;
   --type-meta: 11px;
   --type-label: 10.5px;
+  /* The only two sizes a person can change. Everything above is chrome and keeps the size it was
+     designed at, so a larger reading size never moves a row height or reflows a list. */
+  --type-reading: 14.5px;
+  --type-terminal: 13px;
   --leading-body: 1.5;
   --leading-compact: 1.35;
   /* Semantic workspace tokens. Themes only need to redefine the base tokens above. */
@@ -60,6 +75,8 @@
   --traffic-light-inset: 46px;
   --traffic-light-width: 78px;
   --traffic-light-gutter: 84px;
+  /* How wide a splitter is to grab. The canvas no longer insets by this: with the pane
+     drawn as a surface rather than a card, a margin around it only floated it. */
   --workspace-gap: 5px;
   --workspace-tab-height: 34px;
   --workspace-tab-min-width: 124px;
@@ -125,8 +142,8 @@ textarea {
   cursor: pointer;
 }
 
-.ui-button-medium { min-height: 34px; padding: 7px 13px; font-size: var(--type-control); }
-.ui-button-small { min-height: 29px; padding: 5px 10px; font-size: 12px; }
+.ui-button-medium { min-height: var(--control-h-lg); padding: 9px 14px; font-size: var(--type-control); }
+.ui-button-small { min-height: var(--control-h); padding: 7px 12px; font-size: 12px; }
 .ui-button:hover:not(:disabled),
 .ui-icon-button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--surface-hover); }
 .ui-button:active:not(:disabled),
@@ -152,8 +169,8 @@ textarea {
 .ui-icon-button-small { width: 26px; height: 26px; }
 
 .ui-select {
-  min-height: 34px;
-  padding: 5px 30px 5px 10px;
+  min-height: var(--control-h-lg);
+  padding: 7px 30px 7px 12px;
   border-radius: 7px;
   font: inherit;
   font-size: var(--type-control);
@@ -535,6 +552,62 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 22px;
+}
+
+/* Search sits above the categories, because a name is easier to recall than which of nine
+   sections somebody decided a setting belonged in. */
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-faint);
+}
+
+.settings-search:focus-within {
+  border-color: color-mix(in srgb, var(--focus-ring) 55%, var(--line-subtle));
+}
+
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--type-control);
+  outline: none;
+}
+
+.settings-nav-results {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-results button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/* Where the result will take you, since a match is often found under a heading you did not
+   expect — which is the reason for searching in the first place. */
+.settings-nav-results small {
+  color: var(--text-faint);
+  font-size: var(--type-label);
+}
+
+.settings-nav-empty {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-faint);
+  font-size: var(--type-label);
 }
 
 .settings-nav-group {
@@ -1030,10 +1103,15 @@ textarea {
    find the backend or the user has pinned a location, so it stays out of the way in
    the common case. */
 .settings-runtime-path {
+  /* Spans every column of the connection grid: a filesystem path has nothing to do with the
+     145px the first column gives it, and the placeholder alone was wider than the field. */
+  grid-column: 1 / -1;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
+  align-items: end;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-subtle);
   min-width: 0;
 }
 
@@ -1042,7 +1120,7 @@ textarea {
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .settings-runtime-path label > span {
@@ -1054,7 +1132,9 @@ textarea {
 .settings-runtime-path .settings-input {
   min-width: 0;
   width: 100%;
-  font-size: 11.5px;
+  /* Monospaced, because it holds a path: proportional type makes a long one harder to check. */
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .settings-access {
@@ -1321,6 +1401,22 @@ textarea {
   height: 78px;
 }
 
+/* A size, with a nudge either side of it. The number sits between the two so the pair reads as
+   one control rather than as two buttons that happen to be adjacent. */
+.settings-size-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-size-stepper > span {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--type-control);
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-theme-families {
   display: flex;
   flex-direction: column;
@@ -1362,6 +1458,12 @@ textarea {
 
   .settings-runtime {
     grid-row: 1 / 4;
+  }
+
+  /* The runtime block spans the first three rows of column one, so the path row has to be told
+     to start after them rather than being packed into the gap beside it. */
+  .settings-runtime-path {
+    grid-row: 4;
   }
 
   .settings-access,
@@ -1474,7 +1576,7 @@ textarea {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 8px 9px;
+  padding: 9px 11px;
   border: 0;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
@@ -1668,11 +1770,11 @@ textarea {
 }
 
 .workspace-view-close {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
-  flex: 0 0 16px;
+  flex: 0 0 24px;
   margin-left: auto;
   border-radius: 4px;
   color: var(--text-faint);
@@ -1821,7 +1923,6 @@ textarea {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: var(--workspace-gap);
   background: var(--surface-inset);
 }
 
@@ -1982,18 +2083,20 @@ textarea {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 2px;
+  left: 50%;
   width: 1px;
+  transform: translateX(-50%);
   background: var(--line-default);
 }
 
 .workspace-split.vertical > .workspace-splitter::after {
   content: '';
   position: absolute;
-  top: 2px;
+  top: 50%;
   right: 0;
   left: 0;
   height: 1px;
+  transform: translateY(-50%);
   background: var(--line-default);
 }
 
@@ -2015,28 +2118,27 @@ textarea {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: visible;
-  border: 1px solid var(--line-default);
-  border-radius: var(--radius-sm);
+  overflow: hidden;
+  /* No border and no radius: panes are told apart by the seam between them, which the splitter
+     already draws, and by the window edge. A rounded bordered card inside a padded canvas drew
+     three lines where one was wanted, and its corners could not be honoured by children while
+     the box let them overflow. */
   background: var(--surface-pane);
-  transition: border-color 100ms ease, box-shadow 100ms ease;
+  transition: box-shadow 100ms ease;
 }
 
 .workspace-group.focused {
-  border-color: color-mix(in srgb, var(--focus-ring) 78%, var(--line-default));
-  box-shadow: inset 0 0 0 1px var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--focus-ring) 70%, transparent);
 }
 
 /* A pane that just received a resource. The move often lands in a view the
    user was not looking at, so the flash answers "where did it go". */
 @keyframes workspace-arrived {
   0% {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+    box-shadow: inset 0 0 0 2px var(--accent);
   }
   100% {
-    border-color: var(--line-default);
-    box-shadow: none;
+    box-shadow: inset 0 0 0 2px transparent;
   }
 }
 
@@ -2047,7 +2149,7 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .workspace-group.arrived {
     animation: none;
-    border-color: var(--accent);
+    box-shadow: inset 0 0 0 2px var(--accent);
   }
 }
 
@@ -2063,8 +2165,7 @@ textarea {
   flex: 0 0 var(--workspace-tab-height);
   min-width: 0;
   border-bottom: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  background: var(--surface-app);
+  background: var(--surface-pane);
 }
 
 .workspace-tabs {
@@ -2249,11 +2350,11 @@ textarea {
 }
 
 .workspace-tab-close {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
-  flex: 0 0 16px;
+  flex: 0 0 24px;
   margin-left: auto;
   border-radius: 4px;
   opacity: 0;
@@ -3153,6 +3254,22 @@ body.workspace-dragging .workspace-tab-slot {
   font-size: 12px;
 }
 
+.automation-webhook-events {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.automation-hook-url {
+  display: block;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 11px;
+  word-break: break-all;
+  user-select: all;
+}
+
 .automation-error {
   margin: 4px 0;
   color: var(--red);
@@ -3939,7 +4056,7 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 7px 8px;
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-muted);
@@ -4171,6 +4288,12 @@ body.workspace-dragging .workspace-tab-slot {
   white-space: nowrap;
 }
 
+/* One line now, but not a cramped one: the row keeps roughly the height its second line used to
+   give it, so the list reads as spaced rather than merely shorter. */
+.session-row {
+  min-height: 34px;
+}
+
 .session-row .meta {
   padding-top: 2px;
 }
@@ -4212,8 +4335,8 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   min-width: 0;
   flex: 1;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 8px;
 }
 
 .session-copy .name {
@@ -4227,6 +4350,21 @@ body.workspace-dragging .workspace-tab-slot {
 .session-row:hover .session-copy .name {
   color: var(--text);
 }
+
+/* The backend, as its own mark rather than a word: "OpenCode" spelled out takes width the title
+   needs, and the tabs already carry these marks for the same reason. Tinted, not filled — a chip
+   with a background on every row shouts louder than the titles it sits beside. */
+.session-backend {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  opacity: 0.85;
+}
+
+.session-backend.backend-claude { color: var(--backend-claude); }
+.session-backend.backend-codex { color: var(--backend-codex); }
+.session-backend.backend-pi { color: var(--backend-pi); }
 
 .session-details {
   overflow: hidden;
@@ -4587,8 +4725,8 @@ body.workspace-dragging .workspace-tab-slot {
 
 .thread-search-button {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   place-items: center;
   padding: 0;
   border: 0;
@@ -4697,9 +4835,11 @@ body.workspace-dragging .workspace-tab-slot {
 
 .msg.user .msg-body {
   background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px 14px 4px 14px;
-  padding: 10px 14px;
+  /* No border: the fill already separates it from the canvas, and the two together drew the
+     bubble twice. The corners are even, rather than notched toward the speaker — the alignment
+     already says who is talking. */
+  border-radius: 16px;
+  padding: 11px 15px;
   max-width: 82%;
 }
 
@@ -4911,7 +5051,7 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .md {
-  font-size: 14.5px;
+  font-size: var(--type-reading);
   line-height: 1.65;
   color: var(--text);
   word-break: break-word;
@@ -5142,9 +5282,11 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .step-card {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
-  background: var(--bg-inset);
+  /* Transparent rather than inset: a filled panel behind every run of steps cut the transcript
+     into bands, where the reply above and below it sits straight on the canvas. */
+  background: transparent;
   overflow: hidden;
 }
 
@@ -5322,9 +5464,14 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .tool-detail {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  /* No frame of its own: these sit inside a step card that already has one, and a border per
+     row turned a run of tool calls into a stack of boxes. They are told apart by a hairline
+     between them instead. */
   overflow: hidden;
+}
+
+.tool-detail + .tool-detail {
+  border-top: 1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent);
 }
 
 .tool-detail-head {
@@ -5596,8 +5743,8 @@ body.workspace-dragging .workspace-tab-slot {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 6px;
   background: var(--bg-inset);
   color: var(--text-faint);
@@ -5913,8 +6060,8 @@ body.workspace-dragging .workspace-tab-slot {
   position: absolute;
   top: 2px;
   right: 2px;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: none;
   /* A scrim over the user's own image, which is not a themed surface. */
@@ -6247,8 +6394,8 @@ body.workspace-dragging .workspace-tab-slot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 4px;
   color: var(--text-faint);
   cursor: pointer;
@@ -6357,15 +6504,16 @@ select:hover {
   background: var(--accent);
   color: var(--ink-on-accent);
   border: none;
-  border-radius: 10px;
+  /* Round, like the platform draws a send affordance, rather than a rounded square. */
+  border-radius: var(--radius-pill);
   padding: 8px;
   font-size: 13px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   align-self: end;
   flex: 0 0 36px;
   transition: background 0.12s ease, opacity 0.12s ease;
@@ -6688,7 +6836,7 @@ select:hover {
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
   color: var(--text);
-  padding: 8px 9px;
+  padding: 9px 11px;
   font: 12.5px/1.45 var(--font-ui);
 }
 
@@ -8177,7 +8325,7 @@ select:hover {
   border-radius: var(--radius-sm);
   background: var(--bg-inset);
   color: var(--text);
-  padding: 8px 9px;
+  padding: 9px 11px;
   font: inherit;
 }
 
@@ -8210,8 +8358,8 @@ select:hover {
 }
 
 .policy-order {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
   border-radius: 50%;

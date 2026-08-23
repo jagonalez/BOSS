@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, parseClaudeQuestions } from './claude-protocol.ts'
+import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol.ts'
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -46,6 +46,22 @@ test('an image sent with no text is still a block array', () => {
     claudeMessageContent([{ type: 'file', mime: 'image/png', url: `data:image/png;base64,${PNG}` }]),
     [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } }]
   )
+})
+
+test('the user transcript keeps the image that Claude receives', () => {
+  const url = `data:image/png;base64,${PNG}`
+  const parts = claudeTranscriptParts([
+    { type: 'file', mime: 'image/png', filename: 'shot.png', url },
+    { type: 'text', text: 'What is this?' }
+  ], 'session', 'message')
+
+  assert.deepEqual(parts, [
+    {
+      id: 'message-file-0', type: 'file', sessionID: 'session', messageID: 'message',
+      state: { status: 'completed', path: 'shot.png', name: 'shot.png', mime: 'image/png', url }
+    },
+    { id: 'message-text-1', type: 'text', sessionID: 'session', messageID: 'message', text: 'What is this?' }
+  ])
 })
 
 test('maps BOSS modes to current Claude permission modes', () => {

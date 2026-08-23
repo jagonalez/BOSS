@@ -66,6 +66,14 @@ test('Ctrl+F searches the active thread and moves between its matches', async ({
   await expect(search).toHaveCount(0)
 })
 
+test('shows an attached image and one copy of a response echoed under two message ids', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
+
+  await expect(appPage.getByRole('img', { name: 'duplicate-example.png' })).toBeVisible()
+  await expect(appPage.getByText('Critical find. Let me inspect it.')).toHaveCount(1)
+  await expect(appPage.locator('.step-card')).toHaveCount(2)
+})
+
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
 

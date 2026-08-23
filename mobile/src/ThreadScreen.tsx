@@ -129,6 +129,11 @@ export function ThreadScreen({
 }): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const list = useRef<FlatList<Message>>(null)
+  /** Whether the view is parked at the newest message. Only then does new
+   *  content scroll; otherwise reading history fights the stream. */
+  const atTail = useRef(true)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const modeLabel = modes.find((m) => m.id === mode)?.label
 
   const send = (): void => {
     const text = draft.trim()
@@ -152,7 +157,20 @@ export function ThreadScreen({
         data={visible}
         keyExtractor={(m, i) => m.id ?? String(i)}
         contentContainerStyle={styles.list}
-        onContentSizeChange={() => list.current?.scrollToEnd({ animated: false })}
+        // Follow the tail only while the user is already at it.
+        //
+        // This used to scroll on EVERY content size change, and a streaming run
+        // changes it many times a second: the view was yanked to the bottom
+        // while you were reading further up, which reads as the text jittering.
+        onScroll={(e) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
+          const fromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height
+          atTail.current = fromBottom < 80
+        }}
+        scrollEventThrottle={100}
+        onContentSizeChange={() => {
+          if (atTail.current) list.current?.scrollToEnd({ animated: false })
+        }}
         renderItem={({ item }) => {
           const role = item.info?.role === 'user' ? 'user' : 'assistant'
           const text = textOf(item)
@@ -193,52 +211,82 @@ export function ThreadScreen({
         </View>
       ) : null}
 
-      {busy ? (
-        <Pressable style={styles.working} onPress={onStop}>
-          <ActivityIndicator size="small" color={theme.green} />
-          <Text style={styles.workingText}>Working — tap to stop</Text>
-        </Pressable>
-      ) : null}
+      {/* Always mounted, hidden when idle.
+          Mounting this on `busy` made everything below it jump by the banner's
+          height every time it appeared — and session.status fires repeatedly
+          during a run (busy, retry, busy), so it appeared and vanished over and
+          over. Reserving the row costs one hidden view and holds the layout
+          still. */}
+      <Pressable
+        style={[styles.working, !busy && styles.workingIdle]}
+        onPress={busy ? onStop : undefined}
+        pointerEvents={busy ? 'auto' : 'none'}
+        accessibilityElementsHidden={!busy}
+      >
+        {busy ? (
+          <>
+            <ActivityIndicator size="small" color={theme.green} />
+            <Text style={styles.workingText}>Working — tap to stop</Text>
+          </>
+        ) : null}
+      </Pressable>
 
-      {modes.length > 1 ? (
-        <View style={styles.modes}>
-          {modes.map((m) => (
-            <Pressable
-              key={m.id}
-              onPress={() => onMode(m.id)}
-              style={[styles.modeChip, m.id === mode && styles.modeChipOn]}
-            >
-              <Text style={[styles.modeText, m.id === mode && styles.modeTextOn]}>{m.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
+      {/* One line that reads as a sentence, tapped to change.
+          This was three permanent rows — modes, thinking, and a Delegate button
+          duplicated across two branches — sitting above the composer on every
+          thread. They are settings you touch occasionally taking space you look
+          at constantly, so they collapse to their current values and open only
+          when asked. */}
+      <Pressable style={styles.summary} onPress={() => setOptionsOpen((open) => !open)}>
+        <Text style={styles.summaryText} numberOfLines={1}>
+          {[modeLabel, variant].filter(Boolean).join(' · ') || 'Options'}
+        </Text>
+        <Text style={styles.chevron}>{optionsOpen ? '⌄' : '⌃'}</Text>
+      </Pressable>
 
-      {/* Thinking is not stored on the thread — it rides on each message — so
-          this sets what the NEXT message asks for rather than changing state. */}
-      {variants.length ? (
-        <View style={styles.modes}>
-          <Text style={styles.stripLabel}>Thinking</Text>
-          {variants.map((v) => (
-            <Pressable
-              key={v}
-              onPress={() => onVariant(v === variant ? undefined : v)}
-              style={[styles.modeChip, v === variant && styles.modeChipOn]}
-            >
-              <Text style={[styles.modeText, v === variant && styles.modeTextOn]}>{v}</Text>
-            </Pressable>
-          ))}
-          <Pressable onPress={onDelegate} style={styles.modeChip}>
-            <Text style={styles.modeText}>Delegate</Text>
+      {optionsOpen ? (
+        <View style={styles.options}>
+          {modes.length > 1 ? (
+            <View style={styles.optionRow}>
+              <Text style={styles.optionLabel}>Permission</Text>
+              <View style={styles.chips}>
+                {modes.map((m) => (
+                  <Pressable
+                    key={m.id}
+                    onPress={() => onMode(m.id)}
+                    style={[styles.modeChip, m.id === mode && styles.modeChipOn]}
+                  >
+                    <Text style={[styles.modeText, m.id === mode && styles.modeTextOn]}>{m.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {/* Thinking is not stored on the thread — it rides on each message —
+              so this sets what the NEXT message asks for. */}
+          {variants.length ? (
+            <View style={styles.optionRow}>
+              <Text style={styles.optionLabel}>Thinking</Text>
+              <View style={styles.chips}>
+                {variants.map((v) => (
+                  <Pressable
+                    key={v}
+                    onPress={() => onVariant(v === variant ? undefined : v)}
+                    style={[styles.modeChip, v === variant && styles.modeChipOn]}
+                  >
+                    <Text style={[styles.modeText, v === variant && styles.modeTextOn]}>{v}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          <Pressable onPress={onDelegate} style={styles.delegate}>
+            <Text style={styles.delegateText}>Delegate to a new thread</Text>
           </Pressable>
         </View>
-      ) : (
-        <View style={styles.modes}>
-          <Pressable onPress={onDelegate} style={styles.modeChip}>
-            <Text style={styles.modeText}>Delegate</Text>
-          </Pressable>
-        </View>
-      )}
+      ) : null}
 
       <View style={styles.composer}>
         <TextInput
@@ -258,13 +306,24 @@ export function ThreadScreen({
 }
 
 const styles = StyleSheet.create({
-  modes: {
+  summary: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingBottom: 8
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 7
   },
+  summaryText: { color: theme.faint, fontSize: 12.5, flex: 1 },
+  options: { paddingHorizontal: 14, paddingBottom: 10, gap: 10 },
+  optionRow: { gap: 6 },
+  optionLabel: { color: theme.muted, fontSize: 12, fontWeight: '600' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  delegate: {
+    paddingVertical: 9,
+    borderRadius: 8,
+    backgroundColor: theme.inset,
+    alignItems: 'center'
+  },
+  delegateText: { color: theme.text, fontSize: 13.5 },
   modeChip: {
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -275,7 +334,6 @@ const styles = StyleSheet.create({
   },
   modeChipOn: { backgroundColor: theme.accent, borderColor: theme.accent },
   modeText: { color: theme.muted, fontSize: 12 },
-  stripLabel: { color: theme.faint, fontSize: 12, alignSelf: 'center', marginRight: 2 },
   modeTextOn: { color: theme.bg, fontWeight: '700' },
   fill: { flex: 1, backgroundColor: theme.bg },
   list: { padding: 12, paddingBottom: 20 },
@@ -335,7 +393,16 @@ const styles = StyleSheet.create({
   permTitle: { color: theme.yellow, fontWeight: '700', fontSize: 13, marginBottom: 6 },
   permDesc: { color: theme.muted, fontSize: 13, marginBottom: 10 },
   permRow: { flexDirection: 'row', gap: 8 },
-  working: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingBottom: 6 },
+  // A fixed height so the row occupies the same space whether or not the agent
+  // is working. Without it the empty view collapses and the jump returns.
+  working: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 26,
+    paddingHorizontal: 14
+  },
+  workingIdle: { opacity: 0 },
   workingText: { color: theme.green, fontSize: 12.5 },
   composer: {
     flexDirection: 'row',

@@ -259,7 +259,15 @@ export type BackendRequest =
   | { type: 'thread.mode.set'; threadId: string; mode: BackendModeId }
   | { type: 'thread.todos'; threadId: string }
   | { type: 'thread.permission'; threadId: string; permissionId: string; response: 'once' | 'always' | 'reject' }
-  | { type: 'thread.diff'; threadId: string; messageId?: string }
+  /** `path` narrows to one file, and `summary` asks for paths and counts with
+   *  no file contents at all.
+   *
+   *  Both exist for the relay: diffGet returns every changed file in full, and
+   *  a handful of edited files exceeds the frame cap on its own. A diff also
+   *  cannot be trimmed the way a transcript can — dropping files from a list of
+   *  changes silently hides them. So a remote client lists with `summary` and
+   *  fetches one `path` at a time. The desktop passes neither and is unchanged. */
+  | { type: 'thread.diff'; threadId: string; messageId?: string; path?: string; summary?: boolean }
   | { type: 'thread.fork'; threadId: string; messageId?: string }
   | { type: 'thread.revert'; threadId: string; messageId: string }
   | { type: 'thread.unrevert'; threadId: string }
@@ -292,6 +300,9 @@ export type BackendRequest =
   | { type: 'automation.stop'; automationId: string }
   | { type: 'automation.webhook.get' }
   | { type: 'automation.webhook.set'; url?: string; onlyWhenAway?: boolean }
+  /** The per-automation hook secret and full URL. Never included in snapshots,
+   *  so phones and the relay cannot read it. */
+  | { type: 'automation.webhook.token'; automationId: string }
   | { type: 'mcp.list' }
   | { type: 'mcp.add'; input: import('./mcp').McpConnectionInput }
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }
@@ -299,6 +310,8 @@ export type BackendRequest =
   | { type: 'mcp.import.scan' }
   | { type: 'mobile.status' }
   | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean } }
+  | { type: 'telegram.status' }
+  | { type: 'telegram.set'; patch: { enabled?: boolean; threadId?: string; allowedChats?: number[]; token?: string; clearToken?: boolean } }
   | { type: 'remote.status' }
   | { type: 'remote.set'; patch: { enabled?: boolean; relayUrl?: string; forgetDeviceId?: string; revokeAll?: boolean } }
   | { type: 'remote.pair' }

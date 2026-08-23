@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
-import type { BackendId } from '@shared/backend'
+import type { BackendId, QueuedFollowUp } from '@shared/backend'
 import { composerRecovery, retryPayload } from '../lib/send-recovery'
 import { abortRun, addAnnotation, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
@@ -546,6 +546,13 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 const EMPTY_ANNOTATIONS: Annotation[] = []
+// Selectors must return a stable reference when a thread has no entry yet.
+// `?? []` allocates a fresh array per call, and useSyncExternalStore compares
+// with Object.is, so a new array defeats the bail-out and re-renders every
+// mounted Composer on every token from every thread.
+const EMPTY_ATTACHMENTS: Attachment[] = []
+const EMPTY_HISTORY: string[] = []
+const EMPTY_FOLLOW_UPS: QueuedFollowUp[] = []
 
 function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const asrTargetId = React.useId()
@@ -561,7 +568,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const backendLabel = BACKEND_SHORT_LABELS[backendId]
   const supportsAttachments = backends.find((backend) => backend.id === backendId)?.capabilities.images ?? backendId === 'opencode'
   const composerEpoch = useStore(appStore, (s) => s.composerEpoch)
-  const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? [] : []))
+  const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? EMPTY_ATTACHMENTS : EMPTY_ATTACHMENTS))
   const annotations = useStore(appStore, (s) => (effectiveSession ? s.annotations[effectiveSession] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -570,8 +577,8 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const [draftBackup, setDraftBackup] = useState('')
   const [commands, setCommands] = useState<Command[]>([])
   const [completion, setCompletion] = useState<{ type: 'command' | 'file'; query: string; items: string[]; index: number } | null>(null)
-  const history = useStore(appStore, (s) => (effectiveSession ? s.history[effectiveSession] ?? [] : []))
-  const followUps = useStore(appStore, (s) => (effectiveSession ? s.followUps[effectiveSession] ?? [] : []))
+  const history = useStore(appStore, (s) => (effectiveSession ? s.history[effectiveSession] ?? EMPTY_HISTORY : EMPTY_HISTORY))
+  const followUps = useStore(appStore, (s) => (effectiveSession ? s.followUps[effectiveSession] ?? EMPTY_FOLLOW_UPS : EMPTY_FOLLOW_UPS))
   const steering = backends.find((backend) => backend.id === backendId)?.capabilities.steering ?? 'stop-and-redirect'
   const [editingFollowUpId, setEditingFollowUpId] = useState<string | null>(null)
   const [editingFollowUpText, setEditingFollowUpText] = useState('')
@@ -1161,7 +1168,10 @@ function uniqueNarrativeParts(parts: Part[]): Part[] {
     if (part.type !== 'text' && part.type !== 'reasoning') return true
     const text = (part.text ?? part.state?.text ?? '').replace(/\s+/g, ' ').trim()
     if (!text) return true
-    const key = `${part.messageID}\u0000${part.type}\u0000${text}`
+    // `parts` is one assistant turn. A backend can assign its live and history
+    // copies different message ids, so including messageID here preserved the
+    // exact duplicate this helper exists to remove.
+    const key = `${part.type}\u0000${text}`
     if (seen.has(key)) return false
     seen.add(key)
     return true

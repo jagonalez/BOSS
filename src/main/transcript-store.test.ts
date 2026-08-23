@@ -148,6 +148,66 @@ test('does not render duplicate narrative rows already persisted under different
   }
 })
 
+test('deduplicates live and history text across assistant message ids in one turn', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
+  try {
+    store.recordMessage(source, {
+      id: 'live-assistant', sessionID: source.nativeSessionId, role: 'assistant'
+    })
+    store.recordPart(source, {
+      id: 'live-text', type: 'text', sessionID: source.nativeSessionId,
+      messageID: 'live-assistant', text: 'Critical find. Let me inspect it.'
+    })
+    store.recordPart(source, {
+      id: 'live-tool', type: 'tool', sessionID: source.nativeSessionId,
+      messageID: 'live-assistant', state: { status: 'completed', tool: 'shell', output: 'first' }
+    })
+    store.recordMessage(source, {
+      id: 'history-assistant', sessionID: source.nativeSessionId, role: 'assistant'
+    })
+    store.recordPart(source, {
+      id: 'history-text', type: 'text', sessionID: source.nativeSessionId,
+      messageID: 'history-assistant', text: 'Critical  find.\nLet me inspect it.'
+    })
+    store.recordPart(source, {
+      id: 'history-tool', type: 'tool', sessionID: source.nativeSessionId,
+      messageID: 'history-assistant', state: { status: 'completed', tool: 'shell', output: 'second' }
+    })
+
+    const turn = store.messages(source.threadId)
+    assert.equal(turn.flatMap((message) => message.parts).filter((part) => part.type === 'text').length, 1)
+    assert.deepEqual(
+      turn.flatMap((message) => message.parts).filter((part) => part.type === 'tool').map((part) => part.state?.output),
+      ['first', 'second'],
+      'dedupe must not discard the work interleaved with the repeated line'
+    )
+
+    store.recordMessage(source, {
+      id: 'next-user', sessionID: source.nativeSessionId, role: 'user'
+    })
+    store.recordPart(source, {
+      id: 'next-user-text', type: 'text', sessionID: source.nativeSessionId,
+      messageID: 'next-user', text: 'Say that again.'
+    })
+    store.recordMessage(source, {
+      id: 'next-assistant', sessionID: source.nativeSessionId, role: 'assistant'
+    })
+    store.recordPart(source, {
+      id: 'next-assistant-text', type: 'text', sessionID: source.nativeSessionId,
+      messageID: 'next-assistant', text: 'Critical find. Let me inspect it.'
+    })
+    assert.equal(
+      store.messages(source.threadId).flatMap((message) => message.parts).filter((part) => part.type === 'text').length,
+      3,
+      'the same prose remains valid after a new user turn'
+    )
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('recovers an active run and marks unfinished tools as interrupted', () => {
   const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const path = join(directory, 'transcripts.sqlite')
