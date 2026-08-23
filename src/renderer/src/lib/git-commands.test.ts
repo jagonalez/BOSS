@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { StatusFile } from './diff'
-import { gitStageArgs, gitUnstageArgs, planBranchSwitch, stashRefForOid } from './git-commands.ts'
+import { gitStageArgs, gitUnstageArgs, planBranchSwitch, preferredCompareBranch, stashRefForOid } from './git-commands.ts'
 
 function file(path: string, extra: Partial<StatusFile> = {}): StatusFile {
   return { path, staged: false, unstaged: false, untracked: false, ...extra }
@@ -76,4 +76,16 @@ test('file-directory collisions block a stash switch', () => {
 test('captured stash commits resolve to their current reflog entry', () => {
   assert.equal(stashRefForOid(['newer', 'ours', 'older'], 'ours'), 'stash@{1}')
   assert.equal(stashRefForOid(['newer', 'older'], 'ours'), null)
+})
+
+test('compare prefers the remote default branch over the current branch', () => {
+  assert.equal(
+    preferredCompareBranch(['feature', 'main', 'origin/main', 'origin/HEAD'], 'feature', 'origin/main'),
+    'origin/main'
+  )
+})
+
+test('compare falls back to a different local branch when no remote base exists', () => {
+  assert.equal(preferredCompareBranch(['feature', 'main'], 'feature'), 'main')
+  assert.equal(preferredCompareBranch(['only'], 'only'), '')
 })

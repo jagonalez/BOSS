@@ -6,8 +6,10 @@ import {
   gitChangedBetween,
   gitCheckout,
   gitCommitFiles,
+  gitCompareBranches,
   gitCreateBranch,
   gitCurrentBranch,
+  gitDefaultCompareBranch,
   gitDiffFiles,
   gitFileDiff,
   gitLog,
@@ -19,7 +21,7 @@ import {
 } from '../lib/git'
 import { markStaleReviews, runCheckoutReview } from '../lib/actions'
 import { DiffReview, type DiffFileData } from './DiffReview'
-import { ReviewIcon } from './icons'
+import { BranchIcon, ReviewIcon } from './icons'
 import type { AddReviewCommentInput, ReviewSnapshot, SubmitReviewEvent } from '@shared/review'
 import { ReviewConversation } from './ReviewConversation'
 
@@ -52,6 +54,7 @@ export function GitView({
   const reviews = useStore(appStore, (s) => (activeSessionId ? s.sessionMeta[activeSessionId]?.reviews ?? [] : []))
   const [scope, setScope] = useState<Scope>('worktree')
   const [branches, setBranches] = useState<string[]>([])
+  const [compareBranches, setCompareBranches] = useState<string[]>([])
   const [current, setCurrent] = useState('')
   const [branchBusy, setBranchBusy] = useState(false)
   const [branchError, setBranchError] = useState('')
@@ -109,25 +112,34 @@ export function GitView({
 
   useEffect(() => { void loadReview() }, [projectPath, gitRefresh])
 
-  useEffect(() => {
-    void (async () => {
-      if (!projectPath) return
-      try {
-        const [list, branch] = await Promise.all([gitBranches(projectPath), gitCurrentBranch(projectPath)])
-        setCurrent(branch)
-        setBranches([...list, branch].filter(Boolean))
-        if (!list.includes('origin/main')) setBaseBranch(branch || 'origin/main')
-      } catch {
-        setBranches([])
-      }
-    })()
-  }, [projectPath])
+  async function loadBranches(): Promise<void> {
+    if (!projectPath) return
+    try {
+      const [list, refs, branch] = await Promise.all([
+        gitBranches(projectPath),
+        gitCompareBranches(projectPath),
+        gitCurrentBranch(projectPath)
+      ])
+      const comparisons = refs.filter((candidate) => candidate !== branch)
+      const defaultBase = await gitDefaultCompareBranch(projectPath, comparisons, branch)
+      setCurrent(branch)
+      setBranches([...new Set([...list, branch].filter(Boolean))])
+      setCompareBranches(comparisons)
+      setBaseBranch((selected) => comparisons.includes(selected) ? selected : defaultBase)
+    } catch {
+      setBranches([])
+      setCompareBranches([])
+    }
+  }
+
+  useEffect(() => { void loadBranches() }, [projectPath])
 
   const refreshBranchData = (): void => {
     // The scope diff and the review snapshot both describe the checkout that
     // just changed underneath them; the current branch drives loadScope.
     void loadScope()
     void loadReview()
+    void loadBranches()
   }
 
   async function branchSwitchPlan(target: string): Promise<ReturnType<typeof planBranchSwitch>> {
@@ -169,14 +181,12 @@ export function GitView({
       // A no-op push returns no oid, so it must never pop the user's existing
       // top stash. When a stash exists, resolve that captured commit exactly.
       if (stashOid) await gitStashPop(projectPath, stashOid)
-      setCurrent(await gitCurrentBranch(projectPath))
       refreshBranchData()
     } catch (err) {
       // Checkout may have succeeded before stash restoration failed. Reflect
       // the actual branch and conflicted worktree instead of leaving old data.
       if (checkedOut) {
         try {
-          setCurrent(await gitCurrentBranch(projectPath))
           refreshBranchData()
         } catch { /* preserve the original switch error */ }
       }
@@ -248,9 +258,6 @@ export function GitView({
       await gitCreateBranch(projectPath, name)
       setCreatingBranch(false)
       setNewBranchName('')
-      const [list, branch] = await Promise.all([gitBranches(projectPath), gitCurrentBranch(projectPath)])
-      setCurrent(branch)
-      setBranches([...list, branch].filter(Boolean))
       refreshBranchData()
     } catch (err) {
       setBranchError(String((err as Error).message ?? err))
@@ -389,77 +396,92 @@ export function GitView({
   return (
     <div className="git-view">
       <div className="git-toolbar">
-        <div className="git-scope">
-          {(Object.keys(SCOPE_LABELS) as Scope[]).filter((item) => item !== 'change-request' || reviewSnapshot?.changeRequest).map((s) => (
-            <button key={s} className={`git-scope-btn ${scope === s ? 'active' : ''}`} onClick={() => setScope(s)}>
-              {SCOPE_LABELS[s]}
-            </button>
-          ))}
-        </div>
-        {scope === 'compare' && (
-          <select value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} title="Compare against">
-            {branches.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
+        <div className="git-toolbar-primary">
+          <div className="git-scope" role="tablist" aria-label="Review scope">
+            {(Object.keys(SCOPE_LABELS) as Scope[]).filter((item) => item !== 'change-request' || reviewSnapshot?.changeRequest).map((s) => (
+              <button
+                key={s}
+                role="tab"
+                aria-selected={scope === s}
+                className={`git-scope-btn ${scope === s ? 'active' : ''}`}
+                onClick={() => setScope(s)}
+              >
+                {SCOPE_LABELS[s]}
+              </button>
             ))}
-          </select>
-        )}
-        {projectPath && scope !== 'conversation' ? (
-          <div className="git-branch" title="Local branches">
-            <span className={`git-branch-current ${branchBusy ? 'busy' : ''}`}>⎇ {current || '—'}</span>
-            <select
-              aria-label="Switch branch"
-              value={current}
-              disabled={branchBusy || branches.length === 0}
-              onChange={(e) => void requestSwitch(e.target.value)}
-            >
-              {branches.map((b) => (
-                <option key={b} value={b} className={b === current ? 'current' : ''}>
-                  {b === current ? `${b} (current)` : b}
-                </option>
-              ))}
-            </select>
+          </div>
+          {projectPath && scope !== 'conversation' ? (
             <button
-              className="btn-ghost git-branch-new"
-              onClick={() => setCreatingBranch((open) => !open)}
-              disabled={branchBusy}
+              className="btn-ghost git-run-review"
+              onClick={() => {
+                setError('')
+                void runCheckoutReview(
+                  groupId,
+                  reviewTabId,
+                  SCOPE_LABELS[scope] + (scope === 'compare' ? ` vs ${baseBranch}` : ''),
+                  projectPath,
+                  activeSessionId
+                ).catch((err) => setError(String((err as Error).message ?? err)))
+              }}
+              title="Run an agent review in this checkout"
             >
-              + New
+              <ReviewIcon size={14} /> Run review
             </button>
-            {creatingBranch ? (
-              <input
-                className="git-branch-name"
-                placeholder="New branch from HEAD"
-                value={newBranchName}
-                onChange={(e) => setNewBranchName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void createBranch()
-                  if (e.key === 'Escape') setCreatingBranch(false)
-                }}
-                autoFocus
-                spellCheck={false}
-              />
+          ) : null}
+        </div>
+        {projectPath && scope !== 'conversation' ? (
+          <div className="git-checkout-bar">
+            <div className={`git-branch ${branchBusy ? 'busy' : ''}`} role="group" aria-label="Checkout branch">
+              <span className="git-control-label"><BranchIcon size={13} /> Branch</span>
+              <select
+                aria-label="Switch branch"
+                value={current}
+                disabled={branchBusy || branches.length === 0}
+                onChange={(e) => void requestSwitch(e.target.value)}
+              >
+                {branches.map((b) => (
+                  <option key={b} value={b} className={b === current ? 'current' : ''}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn-ghost git-branch-new"
+                onClick={() => setCreatingBranch((open) => !open)}
+                disabled={branchBusy}
+                aria-expanded={creatingBranch}
+              >
+                New branch
+              </button>
+              {creatingBranch ? (
+                <input
+                  className="git-branch-name"
+                  placeholder="New branch from HEAD"
+                  value={newBranchName}
+                  onChange={(e) => setNewBranchName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void createBranch()
+                    if (e.key === 'Escape') setCreatingBranch(false)
+                  }}
+                  autoFocus
+                  spellCheck={false}
+                />
+              ) : null}
+            </div>
+            {scope === 'compare' ? (
+              <label className="git-compare">
+                <span className="git-control-label">Compare against</span>
+                <select
+                  aria-label="Compare against"
+                  value={baseBranch}
+                  disabled={compareBranches.length === 0}
+                  onChange={(e) => setBaseBranch(e.target.value)}
+                >
+                  {compareBranches.map((branch) => <option key={branch} value={branch}>{branch}</option>)}
+                </select>
+              </label>
             ) : null}
           </div>
-        ) : null}
-        {projectPath && scope !== 'conversation' ? (
-          <button
-            className="btn-ghost"
-            onClick={() => {
-              setError('')
-              void runCheckoutReview(
-                groupId,
-                reviewTabId,
-                SCOPE_LABELS[scope] + (scope === 'compare' ? ` vs ${baseBranch}` : ''),
-                projectPath,
-                activeSessionId
-              ).catch((err) => setError(String((err as Error).message ?? err)))
-            }}
-            title="Run an agent review in this checkout"
-          >
-            <ReviewIcon size={14} /> Run review
-          </button>
         ) : null}
       </div>
       {branchError ? <div className="review-sync-error">{branchError}</div> : null}

@@ -54,3 +54,11 @@ export function stashRefForOid(stashOids: string[], oid: string): string | null 
   const index = stashOids.indexOf(oid)
   return index < 0 ? null : `stash@{${index}}`
 }
+
+/** Pick a useful comparison base instead of ever comparing a branch to itself. */
+export function preferredCompareBranch(branches: string[], current: string, remoteHead?: string): string {
+  const available = [...new Set(branches)].filter((branch) => branch && branch !== current)
+  const preferred = [remoteHead, 'origin/main', 'origin/master', 'main', 'master']
+    .find((branch): branch is string => Boolean(branch && available.includes(branch)))
+  return preferred ?? available.find((branch) => branch.includes('/')) ?? available[0] ?? ''
+}

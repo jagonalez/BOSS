@@ -4,12 +4,33 @@ import type { SessionInfo } from '@shared/opencode'
 import type { ChangeRequestSummary } from '@shared/review'
 import { BranchIcon, ExternalIcon, FolderIcon, ForkIcon, ReviewIcon } from './icons'
 
-/** Pull request lookups already made, kept for as long as the app runs.
+/** Pull request lookups already made.
  *
  *  The main process caches these too, and that is the cache that matters. This
  *  one only stops a second hover from crossing the IPC boundary again, which
- *  would otherwise re-render the card for an answer it already had. */
-const lookups = new Map<string, ChangeRequestSummary | null>()
+ *  would otherwise re-render the card for an answer it already had.
+ *
+ *  Entries expire on the same horizon as the main process's, because they used
+ *  to expire never: hovering a thread before its pull request existed cached
+ *  the "none" answer for the lifetime of the app, and opening one afterwards
+ *  could not dislodge it. */
+const LOOKUP_TTL_MS = 60_000
+const lookups = new Map<string, { at: number; changeRequest: ChangeRequestSummary | null }>()
+
+function cachedLookup(key: string | undefined): ChangeRequestSummary | null | undefined {
+  if (!key) return undefined
+  const entry = lookups.get(key)
+  if (!entry) return undefined
+  if (Date.now() - entry.at >= LOOKUP_TTL_MS) {
+    lookups.delete(key)
+    return undefined
+  }
+  return entry.changeRequest
+}
+
+function rememberLookup(key: string, changeRequest: ChangeRequestSummary | null): void {
+  lookups.set(key, { at: Date.now(), changeRequest })
+}
 
 function directoryLabel(path: string | undefined): string | undefined {
   if (!path) return undefined
@@ -42,26 +63,39 @@ export function ThreadCard({
 }): React.JSX.Element | null {
   const path = session.executionPath ?? session.projectPath ?? session.directory ?? session.path
   const branch = session.worktree?.branch
-  const key = path && branch ? `${path} ${branch}` : undefined
+  // Keyed on the checkout alone, because the checkout is what decides the
+  // answer: the snapshot reads the branch with git rather than trusting the
+  // thread's record, so two threads sharing a path share a pull request.
+  const key = path && session.worktree?.status !== 'removed' ? path : undefined
   const [changeRequest, setChangeRequest] = useState<ChangeRequestSummary | null | undefined>(
-    key ? lookups.get(key) : undefined
+    () => cachedLookup(key)
   )
 
   useEffect(() => {
-    // Only worktree threads get a lookup. A thread on the main checkout is
-    // usually on the default branch, where a pull request would be surprising.
-    if (!key || !path || !branch || lookups.has(key)) return
+    // Any live checkout gets a lookup, not just a worktree one. The branch is
+    // resolved by the snapshot itself, so gating on the thread's stored
+    // worktree only ever hid pull requests that were really there — a thread
+    // handed off from another workflow keeps its checkout but not always the
+    // record, and a branch checked out by hand never had one. A checkout with
+    // no pull request answers awaitingChangeRequest and renders nothing, which
+    // is what the main checkout did before.
+    if (!key) return
+    const cached = cachedLookup(key)
+    if (cached !== undefined) {
+      setChangeRequest(cached)
+      return
+    }
     let live = true
-    void window.boss.reviewSnapshot(path)
+    void window.boss.reviewSnapshot(key)
       .then((snapshot) => {
         const found = snapshot.changeRequest ?? null
-        lookups.set(key, found)
+        rememberLookup(key, found)
         if (live) setChangeRequest(found)
       })
       // A thread whose checkout has gone is not worth complaining about here.
-      .catch(() => lookups.set(key, null))
+      .catch(() => rememberLookup(key, null))
     return () => { live = false }
-  }, [key, path, branch])
+  }, [key])
 
   const project = projectName(session.projectPath ?? session.directory ?? session.path)
   const directory = directoryLabel(path)

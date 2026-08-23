@@ -1401,6 +1401,56 @@ textarea {
   height: 78px;
 }
 
+.settings-theme-appearance {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+  padding: 4px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface-inset);
+}
+
+.settings-theme-appearance button {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-theme-appearance button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.settings-theme-appearance button.active {
+  border-color: var(--line-soft);
+  color: var(--text);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-theme-appearance strong {
+  font-size: var(--type-control);
+  font-weight: 650;
+}
+
+.settings-theme-appearance small {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A size, with a nudge either side of it. The number sits between the two so the pair reads as
    one control rather than as two buttons that happen to be adjacent. */
 .settings-size-stepper {
@@ -7065,11 +7115,27 @@ select:hover {
 
 .git-toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
+  flex-direction: column;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.git-toolbar-primary,
+.git-checkout-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.git-toolbar-primary {
+  padding: 6px 10px;
+}
+
+.git-checkout-bar {
+  padding: 5px 10px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  flex-wrap: wrap;
 }
 
 .git-reviews {
@@ -7108,6 +7174,14 @@ select:hover {
 .git-scope {
   display: flex;
   gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.git-scope::-webkit-scrollbar {
+  display: none;
 }
 
 .git-scope-btn {
@@ -7129,6 +7203,10 @@ select:hover {
 .git-scope-btn.active {
   color: var(--text);
   background: var(--bg-active);
+}
+
+.git-run-review {
+  flex: 0 0 auto;
 }
 
 .git-commit {
@@ -7779,6 +7857,7 @@ select:hover {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  container-type: inline-size;
 }
 
 .diff-stack-head {
@@ -7799,6 +7878,30 @@ select:hover {
 .diff-stack-total {
   margin-left: auto;
   font-size: 12px;
+}
+
+.diff-stack-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+@container (max-width: 620px) {
+  .diff-stack-head {
+    flex-wrap: wrap;
+    row-gap: 7px;
+  }
+
+  .diff-stack-actions {
+    flex: 1 0 100%;
+  }
+}
+
+@container (max-width: 390px) {
+  .diff-stack-actions {
+    flex-wrap: wrap;
+  }
 }
 
 .diff-stack-body {
@@ -9613,22 +9716,28 @@ select:hover {
 .git-branch {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
+  flex: 1 1 360px;
 }
 
-.git-branch-current {
-  font-size: 12px;
-  color: var(--text-muted);
+.git-control-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
-.git-branch-current.busy {
+.git-branch.busy {
   opacity: 0.6;
 }
 
 .git-branch select {
-  max-width: 180px;
+  min-width: 0;
+  max-width: 220px;
 }
 
 .git-branch select option.current {
@@ -9644,6 +9753,19 @@ select:hover {
   color: var(--text);
   font-size: 12px;
   padding: 4px 8px;
+}
+
+.git-compare {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.git-compare select {
+  min-width: 0;
+  max-width: 220px;
 }
 
 /* Commit dialog staging sections */

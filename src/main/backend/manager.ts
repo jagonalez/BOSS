@@ -22,7 +22,7 @@ import type {
   ThreadTitleSettings
 } from '@shared/backend'
 import { isAbortError, withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
-import { DEFAULT_THREAD_TITLE_SETTINGS, titleFromFirstPrompt } from '@shared/thread-title'
+import { canAutoNameThread, DEFAULT_THREAD_TITLE_SETTINGS, normalizeGeneratedThreadTitle, titleFromFirstPrompt } from '@shared/thread-title'
 import { DEFAULT_SANDBOX_SETTINGS } from '@shared/sandbox'
 import type { SandboxSettings } from '@shared/sandbox'
 import type { EventMessage, FileDiff, MessageWithParts, Part, SessionInfo } from '@shared/opencode'
@@ -1552,6 +1552,31 @@ export class BackendManager {
     return session
   }
 
+  private async autoNameThread(
+    threadId: string,
+    backend: Backend,
+    parts: unknown[],
+    fallback: string,
+    model?: BackendMessageOptions['model']
+  ): Promise<void> {
+    const before = this.bindings.get(threadId)
+    if (!before || !canAutoNameThread(before.title)) return
+    let generated: string | undefined
+    try {
+      generated = await backend.generateTitle?.(before.nativeSessionId, parts, {
+        currentTitle: before.title,
+        model
+      })
+    } catch {
+      // Authentication, an unavailable small model, an old backend protocol,
+      // or a timeout all land on the deterministic local title below.
+    }
+    const binding = this.bindings.get(threadId)
+    if (!binding || !canAutoNameThread(binding.title)) return
+    const title = normalizeGeneratedThreadTitle(generated) ?? fallback
+    await this.sessionRename(threadId, title).catch(() => {})
+  }
+
   async messagesList(threadId: string, limit?: number): Promise<MessageWithParts[]> {
     const binding = this.binding(threadId)
     let messages: MessageWithParts[]
@@ -1597,23 +1622,9 @@ export class BackendManager {
     const violation = budgetViolation(binding.policy, usage)
     if (violation) throw new Error(`${violation} Increase or remove the task budget before continuing.`)
     const backend = await this.ensureStarted(binding.backendId)
-    const generatedTitle = this.threadTitleSettings.autoNameFromFirstPrompt
+    const fallbackTitle = this.threadTitleSettings.autoNameFromFirstPrompt
       ? titleFromFirstPrompt(binding.title, parts)
       : undefined
-    if (generatedTitle) {
-      // Persist BOSS's own title first. A backend-native title may later replace
-      // it through session.updated, but backends without title generation now
-      // have a useful name without a second model turn.
-      binding.title = generatedTitle
-      binding.updatedAt = now()
-      this.save()
-      this.emit({
-        type: 'session.updated',
-        properties: { info: this.session(binding) },
-        backendId: binding.backendId
-      })
-      await backend.sessionRename(binding.nativeSessionId, generatedTitle).catch(() => {})
-    }
     // A caller that names a mode is setting the thread's mode, not passing a
     // one-off. Recording it here keeps the stored mode and the mode the backend
     // launches under from drifting apart.
@@ -1662,6 +1673,7 @@ export class BackendManager {
           worktree: binding.worktree?.status === 'active'
         })
       })
+      if (fallbackTitle) void this.autoNameThread(threadId, backend, parts, fallbackTitle, options?.model)
     } catch (error) {
       // A backend that refuses because it is still running has not started a
       // run to settle. Its own turn slot outlives main's busy flag, so a
@@ -2093,11 +2105,31 @@ export class BackendManager {
     const source = this.binding(threadId)
     const packet = await this.contextPacket(threadId, instruction)
     const title = `${source.title ?? 'Untitled'} · ${DEFINITIONS[backendId].label}`
-    const created = await this.sessionCreate(backendId, title, {
-      kind: 'clone',
+    // Continue where the source left off, not wherever the app happens to be
+    // pointed. sessionCreate resolves the *current* scope, so a clone of a
+    // worktree thread used to land on the project root with no worktree — the
+    // handed-off thread lost the branch it was continuing, and with it the
+    // pull request every review surface looks up from the checkout.
+    const lineage = {
+      kind: 'clone' as const,
       sourceThreadId: threadId,
       sourceBackendId: source.backendId
-    }, source.projectId === 'global' ? 'global' : 'current')
+    }
+    const created = source.projectId === 'global'
+      ? await this.sessionCreate(backendId, title, lineage, 'global')
+      : await this.sessionCreateInScope(
+        backendId,
+        {
+          projectId: source.projectId,
+          projectPath: source.projectPath,
+          executionPath: source.executionPath
+        },
+        title,
+        lineage,
+        // Only a live checkout carries over. A reaped worktree would hand the
+        // clone a path that is no longer there.
+        source.worktree?.status === 'active' ? source.worktree : undefined
+      )
     await this.sendMessage(
       created.id,
       [{ type: 'text', text: packet }],

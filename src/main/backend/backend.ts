@@ -23,6 +23,11 @@ export interface ThinkingLevel {
   level: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 }
 
+export interface ThreadTitleGenerationOptions {
+  currentTitle?: string
+  model?: BackendMessageOptions['model']
+}
+
 import type {
   SessionInfo,
   MessageWithParts,
@@ -73,6 +78,9 @@ export interface Backend {
   sessionDelete(id: string): Promise<void>
   sessionRename(id: string, title: string): Promise<SessionInfo>
   sessionGet(id: string): Promise<SessionInfo>
+  /** Optional inexpensive model-backed title generation. Returning undefined
+   *  asks the manager to use its local fallback. */
+  generateTitle?(sessionId: string, parts: unknown[], options?: ThreadTitleGenerationOptions): Promise<string | undefined>
 
   /** Messages */
   messagesList(sessionId: string, limit?: number): Promise<MessageWithParts[]>
