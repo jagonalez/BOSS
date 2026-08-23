@@ -34,6 +34,7 @@ import {
   findSessionTab,
   findTab,
   loadLayouts,
+  loadSavedWorkspace,
   loadWorkspace,
   mapTabs,
   moveTabAcrossViews,
@@ -50,8 +51,8 @@ import {
   group,
   panelGroupId,
   walkGroups,
-  walkTabs,
   singleThreadView,
+  workspaceForSingleMode,
   workspaceView
 } from './workspaces'
 
@@ -67,17 +68,42 @@ export function initializeWorkspaceState(): void {
   appStore.setState({ layouts: loadLayouts(), terminalStartLocation, viewMode })
 }
 
-/** Switch between the tiling layout and one thread at a time.
- *
- *  The views themselves are untouched. Single mode renders one of them
- *  differently rather than replacing them, so a layout someone arranged is
- *  still there when they switch back. */
-export function setViewMode(value: ViewMode): void {
-  appStore.setState({ viewMode: value })
-  if (value === 'single') {
-    splitThreadsIntoOwnViews()
-    addPanelToSingleViews()
+function singleWorkspaceFrom(workspace: WorkspaceState): WorkspaceState {
+  const sessions = appStore.getState().sessions
+  return {
+    ...workspaceForSingleMode(
+      workspace,
+      (sessionId) => sessions.find((item) => item.id === sessionId)?.title
+    ),
+    updatedAt: Date.now()
   }
+}
+
+/** Live copies keep switching usable even when localStorage is unavailable. */
+const rememberedWorkspaces: Partial<Record<ViewMode, WorkspaceState>> = {}
+
+/** Switch between independently remembered tiling and single-thread views. */
+export function setViewMode(value: ViewMode): void {
+  const state = appStore.getState()
+  if (state.viewMode === value) return
+
+  const current = state.projectWorkspace
+  if (current) {
+    rememberedWorkspaces[state.viewMode] = current
+    saveWorkspace(current, state.viewMode)
+  }
+
+  let target = rememberedWorkspaces[value] ?? loadSavedWorkspace(value)
+  if (!target && current) {
+    target = value === 'single'
+      ? singleWorkspaceFrom(current)
+      : loadWorkspace(undefined, 'multi')
+    saveWorkspace(target, value)
+  }
+  if (target) rememberedWorkspaces[value] = target
+  appStore.setState({ viewMode: value, ...(target ? { projectWorkspace: target } : {}) })
+  if (target) syncFocusedThread()
+
   try {
     localStorage.setItem('boss.viewMode', value)
   } catch {
@@ -110,8 +136,24 @@ export function setNativeViewsSuspended(reason: string, suspended: boolean): voi
 /** Load the app's views. Call once at startup: they are not per project, so
  *  opening a project must not reload them. */
 export function loadProjectWorkspace(preferredSessionId?: string): void {
-  if (appStore.getState().projectWorkspace) return
-  appStore.setState({ projectWorkspace: loadWorkspace(preferredSessionId) })
+  const state = appStore.getState()
+  if (state.projectWorkspace) return
+  if (state.viewMode === 'multi') {
+    const workspace = loadWorkspace(preferredSessionId, 'multi')
+    rememberedWorkspaces.multi = workspace
+    appStore.setState({ projectWorkspace: workspace })
+    return
+  }
+
+  let workspace = loadSavedWorkspace('single')
+  if (!workspace) {
+    const multi = loadWorkspace(preferredSessionId, 'multi')
+    saveWorkspace(multi, 'multi')
+    workspace = singleWorkspaceFrom(multi)
+    saveWorkspace(workspace, 'single')
+  }
+  rememberedWorkspaces.single = workspace
+  appStore.setState({ projectWorkspace: workspace })
 }
 
 export function createWorkspaceView(): void {
@@ -160,7 +202,9 @@ function updateWorkspace(
   const current = currentWorkspace()
   if (!current) return null
   const next = { ...update(current), updatedAt: Date.now() }
-  saveWorkspace(next)
+  const mode = appStore.getState().viewMode
+  rememberedWorkspaces[mode] = next
+  saveWorkspace(next, mode)
   appStore.setState({ projectWorkspace: next })
   return next
 }
@@ -303,7 +347,8 @@ export function addWorkspaceTab(
 export function openBackendLogin(backendId: BackendId): void {
   let workspace = currentWorkspace()
   if (!workspace) {
-    workspace = loadWorkspace()
+    workspace = loadWorkspace(undefined, appStore.getState().viewMode)
+    rememberedWorkspaces[appStore.getState().viewMode] = workspace
     appStore.setState({ projectWorkspace: workspace })
   }
   const view = activeWorkspaceView(workspace)
@@ -441,19 +486,6 @@ function copyThreadPreferences(sourceId: string, targetId: string): void {
   setMode(modeForSession(sourceId), targetId)
 }
 
-/** Give every thread its own view, once, when single mode is turned on.
- *
- *  Views made before the switch hold several threads in one strip, which is the
- *  pile single mode exists to avoid — turning it on and still seeing four tabs
- *  reads as the setting doing nothing. Each extra thread moves to a view of its
- *  own; tabs that are not threads stay with the thread whose pane they are in,
- *  since a terminal belongs to the checkout it was opened against. */
-/** Give a single-mode view the panel it needs beside its conversation.
- *
- *  Views made before the panel existed are one group holding everything. The
- *  thread stays where it is and the rest moves to a new pane beside it, so a
- *  terminal opened earlier ends up where terminals now live rather than
- *  vanishing from a strip that is no longer drawn. */
 /** Make sure a single-mode view has a pane beside its conversation.
  *
  *  A view can reach single mode three ways — created there, carried over from
@@ -479,36 +511,6 @@ export function ensurePanel(viewId: string): void {
   }))
   for (const item of only.tabs.filter((entry) => entry.kind !== 'thread')) {
     sendWorkspaceTabToView(item.id, viewId, panel.id)
-  }
-}
-
-function addPanelToSingleViews(): void {
-  for (const view of currentWorkspace()?.views ?? []) ensurePanel(view.id)
-}
-
-function splitThreadsIntoOwnViews(): void {
-  const workspace = currentWorkspace()
-  if (!workspace) return
-  const sessions = appStore.getState().sessions
-  // Same reasoning: every pass moves one thread out, so the number of extras
-  // strictly falls. The cap guards against an update that does not apply.
-  const limit = workspace.views.reduce((total, view) => total + walkTabs(view.root).length, 0) + 1
-  for (let pass = 0; pass < limit; pass += 1) {
-    const current = currentWorkspace()
-    if (!current) return
-    const extra = current.views.flatMap((view) => {
-      const threads = walkTabs(view.root).filter((item) => item.kind === 'thread')
-      return threads.slice(1).map((item) => ({ viewId: view.id, tab: item }))
-    })
-    if (!extra.length) return
-    const { tab: moving } = extra[0]
-    const title = sessions.find((item) => item.id === moving.sessionId)?.title
-    // Built empty on both sides, then the thread moves in: singleThreadView
-    // would mint a second thread tab for a thread that already exists.
-    const conversation = group([])
-    const created = { ...workspaceView(title || 'Thread', split('horizontal', conversation, group([]), 0.62)), focusedGroupId: conversation.id }
-    updateWorkspace((item) => ({ ...item, views: [...item.views, created] }))
-    sendWorkspaceTabToView(moving.id, created.id, conversation.id)
   }
 }
 
@@ -829,7 +831,8 @@ export function applyLayout(layoutId: string): void {
   rememberViews(`Applied ${layout.name}`)
   const next = updateActiveWorkspaceView(workspace, (view) => arrangeInto(layout, view))
   if (!next) return
-  saveWorkspace(next)
+  rememberedWorkspaces[state.viewMode] = next
+  saveWorkspace(next, state.viewMode)
   appStore.setState({ projectWorkspace: next })
   syncFocusedThread()
 }

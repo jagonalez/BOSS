@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, findSessionTab, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView, singleThreadView, conversationGroupId, panelGroupId } from './workspaces.ts'
+import { BUILTIN_LAYOUTS, arrangeInto, nextWorkspaceViewName, reorderPaths, findOwnedResource, findSessionTab, withUniqueIds, workspaceId, closeGroup, closeTab, group, moveTab, moveTabAcrossViews, placementIndex, resourcesByThread, split, tab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight, workspaceView, singleThreadView, conversationGroupId, panelGroupId, workspaceForSingleMode } from './workspaces.ts'
 
 test('a resource opened from a thread looks at that thread’s checkout', () => {
   // A review opened from a worktree thread fell back to the main project
@@ -432,20 +432,26 @@ test('single mode shows the focused pane, and falls back when focus is stale', (
   assert.equal(walkGroups(stale.root)[0].id, groups[0].id)
 })
 
-test('splitting threads out leaves one thread per view', () => {
-  // The shape splitThreadsIntoOwnViews drives toward. Each pass moves one extra
-  // thread to a new view, so the count of extras strictly falls and the loop
-  // ends — the property that keeps it from spinning.
-  const crowded = workspaceView('View 2', group([
+test('deriving single-thread views leaves the multi-thread workspace untouched', () => {
+  const crowded = workspaceView('Main', group([
     tab('thread', 'a'),
     tab('thread', 'b'),
     tab('terminal', 'a')
   ]))
-  const extras = walkTabs(crowded.root).filter((item) => item.kind === 'thread').slice(1)
-  assert.equal(extras.length, 1)
-  const moved = workspaceView('b', group([tab('thread', 'b')]))
-  const remaining = walkTabs(moved.root).filter((item) => item.kind === 'thread').slice(1)
-  assert.equal(remaining.length, 0)
+  const multi = { views: [crowded], activeViewId: crowded.id, updatedAt: 1 }
+  const before = structuredClone(multi)
+
+  const single = workspaceForSingleMode(multi, (sessionId) => sessionId === 'b' ? 'Second thread' : undefined)
+
+  assert.deepEqual(multi, before, 'single mode must not add views or panels to the tiling workspace')
+  assert.equal(single.views.length, 2)
+  assert.ok(single.views.every((view) => walkTabs(view.root).filter((item) => item.kind === 'thread').length <= 1))
+  assert.equal(single.views[1].name, 'Second thread')
+
+  const originalGroups = walkGroups(single.views[0].root)
+  assert.equal(originalGroups.length, 2)
+  assert.deepEqual(originalGroups[0].tabs.map((item) => item.kind), ['thread'])
+  assert.deepEqual(originalGroups[1].tabs.map((item) => item.kind), ['terminal'])
 })
 
 test('a single-thread view is the conversation beside an empty panel', () => {
