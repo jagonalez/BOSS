@@ -35,7 +35,8 @@
     "plugins": [
       "expo-secure-store",
       "expo-camera",
-      "expo-asset"
+      "expo-asset",
+      "expo-status-bar"
     ],
     "owner": "jeremygonzalez",
     "extra": {
