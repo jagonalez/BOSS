@@ -71,6 +71,8 @@
   --traffic-light-inset: 46px;
   --traffic-light-width: 78px;
   --traffic-light-gutter: 84px;
+  /* How wide a splitter is to grab. The canvas no longer insets by this: with the pane
+     drawn as a surface rather than a card, a margin around it only floated it. */
   --workspace-gap: 5px;
   --workspace-tab-height: 34px;
   --workspace-tab-min-width: 124px;
@@ -1845,7 +1847,6 @@ textarea {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: var(--workspace-gap);
   background: var(--surface-inset);
 }
 
@@ -2006,18 +2007,20 @@ textarea {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 2px;
+  left: 50%;
   width: 1px;
+  transform: translateX(-50%);
   background: var(--line-default);
 }
 
 .workspace-split.vertical > .workspace-splitter::after {
   content: '';
   position: absolute;
-  top: 2px;
+  top: 50%;
   right: 0;
   left: 0;
   height: 1px;
+  transform: translateY(-50%);
   background: var(--line-default);
 }
 
@@ -2039,28 +2042,27 @@ textarea {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: visible;
-  border: 1px solid var(--line-default);
-  border-radius: var(--radius-sm);
+  overflow: hidden;
+  /* No border and no radius: panes are told apart by the seam between them, which the splitter
+     already draws, and by the window edge. A rounded bordered card inside a padded canvas drew
+     three lines where one was wanted, and its corners could not be honoured by children while
+     the box let them overflow. */
   background: var(--surface-pane);
-  transition: border-color 100ms ease, box-shadow 100ms ease;
+  transition: box-shadow 100ms ease;
 }
 
 .workspace-group.focused {
-  border-color: color-mix(in srgb, var(--focus-ring) 78%, var(--line-default));
-  box-shadow: inset 0 0 0 1px var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--focus-ring) 70%, transparent);
 }
 
 /* A pane that just received a resource. The move often lands in a view the
    user was not looking at, so the flash answers "where did it go". */
 @keyframes workspace-arrived {
   0% {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+    box-shadow: inset 0 0 0 2px var(--accent);
   }
   100% {
-    border-color: var(--line-default);
-    box-shadow: none;
+    box-shadow: inset 0 0 0 2px transparent;
   }
 }
 
@@ -2071,7 +2073,7 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .workspace-group.arrived {
     animation: none;
-    border-color: var(--accent);
+    box-shadow: inset 0 0 0 2px var(--accent);
   }
 }
 
@@ -2087,8 +2089,7 @@ textarea {
   flex: 0 0 var(--workspace-tab-height);
   min-width: 0;
   border-bottom: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  background: var(--surface-app);
+  background: var(--surface-pane);
 }
 
 .workspace-tabs {
