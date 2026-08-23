@@ -124,13 +124,14 @@ function parseJson<T>(value: string): T | undefined {
 
 /** Ids BOSS mints itself, for transcript entries no backend will ever report.
  *
- *  A steered message is folded into the run the backend is already doing, and a
- *  tool image is produced by BOSS rather than by the model, so neither comes
- *  back in a native history list. Kept here as a literal rather than imported
+ *  A steered message is folded into the run the backend is already doing, a
+ *  tool image is produced by BOSS rather than by the model, and a compaction
+ *  notice represents an out-of-band event. None comes back in native history.
+ *  Kept here as a literal rather than imported
  *  from @shared: this file is one of the few the node test runner can load, and
  *  a value import from an aliased path is exactly what would break that.
  *  Mirrors isLocallyAuthoredMessageId in src/shared/opencode.ts. */
-const LOCAL_MESSAGE_PREFIXES = ['steer-', 'assistant-tool-image-']
+const LOCAL_MESSAGE_PREFIXES = ['steer-', 'assistant-tool-image-', 'compaction-notice-']
 
 function isLocallyAuthoredMessageId(messageId: string): boolean {
   return LOCAL_MESSAGE_PREFIXES.some((prefix) => messageId.startsWith(prefix))

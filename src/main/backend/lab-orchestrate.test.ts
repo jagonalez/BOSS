@@ -496,6 +496,41 @@ test('compact summarizes older turns and keeps the newest', async () => {
   }
 })
 
+test('context cropping emits one persistent omission warning instead of failing silently', async () => {
+  const originalContextChars = process.env.LAB_CONTEXT_CHARS
+  process.env.LAB_CONTEXT_CHARS = '250'
+  const reply = (res: ServerResponse): void => {
+    res.write(textChunk('done'))
+    res.write(done())
+    res.end()
+  }
+  const fx = await fixture([reply, reply])
+  try {
+    const notices: Array<{ type?: string; overflow?: boolean; auto?: boolean }> = []
+    fx.backend.onEvent((event) => {
+      if (event.type === 'message.part.updated' && event.part.type === 'compaction') {
+        notices.push(event.part)
+      }
+    })
+
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'x'.repeat(400) }], { mode: 'auto' })
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'y'.repeat(400) }], { mode: 'auto' })
+
+    assert.equal(notices.length, 1, 'repeated cropped turns should not spam the same warning')
+    assert.equal(notices[0].overflow, true)
+    assert.equal(notices[0].auto, true)
+    const stored = fx.readStore().messages(fx.sessionId)
+    assert.equal(
+      stored.filter((message) => message.parts.some((part) => part.type === 'compaction' && part.overflow)).length,
+      1
+    )
+  } finally {
+    if (originalContextChars === undefined) delete process.env.LAB_CONTEXT_CHARS
+    else process.env.LAB_CONTEXT_CHARS = originalContextChars
+    await fx.cleanup()
+  }
+})
+
 test('steer folds a message into a running session between tool rounds', async () => {
   let childArrived: () => void = () => {}
   const arrived = new Promise<void>((resolve) => { childArrived = resolve })

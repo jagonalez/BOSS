@@ -10,6 +10,7 @@ import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileN
 import { SessionDirectories } from './session-directory'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from '@shared/sandbox'
 import { toolLabel } from '@shared/tool-label'
+import { compactionCompletedEvents } from './compaction-events'
 
 type RpcId = string | number
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
@@ -408,6 +409,7 @@ export class CodexBackend implements Backend {
   private loadedThreads = new Set<string>()
   private activeTurns = new Map<string, string>()
   private liveText = new Map<string, string>()
+  private manualCompactions = new Set<string>()
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
   private readonly sessionDirectories = new SessionDirectories()
@@ -667,7 +669,9 @@ export class CodexBackend implements Backend {
         this.emit({ type: 'session.error', sessionID: sessionId, error: JSON.stringify(params.error ?? 'Codex error') })
         break
       case 'thread/compacted':
-        this.emit({ type: 'session.compacted', sessionID: sessionId })
+        for (const event of compactionCompletedEvents(sessionId, {
+          trigger: this.manualCompactions.delete(sessionId) ? 'manual' : 'auto'
+        })) this.emit(event)
         break
     }
   }
@@ -865,6 +869,12 @@ export class CodexBackend implements Backend {
   async unrevert(_sessionId: string): Promise<void> {}
   async compact(sessionId: string): Promise<void> {
     await this.ensureLoaded(sessionId)
-    await this.request('thread/compact/start', { threadId: sessionId }, 120_000)
+    this.manualCompactions.add(sessionId)
+    try {
+      await this.request('thread/compact/start', { threadId: sessionId }, 120_000)
+    } catch (error) {
+      this.manualCompactions.delete(sessionId)
+      throw error
+    }
   }
 }

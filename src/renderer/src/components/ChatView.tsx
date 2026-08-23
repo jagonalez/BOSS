@@ -16,6 +16,7 @@ import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { turnCompletedAt } from '../lib/status'
 import { segmentTurn } from '../lib/part-runs'
 import { retryTurnPayload } from '../lib/regenerate'
+import { compactionLabel } from '../lib/compaction'
 import { AnnotationHighlights } from './AnnotationHighlights'
 import { AnnotationMarkers } from './AnnotationMarkers'
 import { AnnotationPopover, type AnnotationPopoverHandle } from './AnnotationPopover'
@@ -120,7 +121,7 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
       return (
         <div className="compaction-note">
           <span className="compaction-note-icon">✂</span>
-          <span>Context compacted — earlier messages were summarized.</span>
+          <span>{compactionLabel(part)}</span>
         </div>
       )
     case 'snapshot':
@@ -336,10 +337,11 @@ function MessageView({
   const hasCompactionPart = item.parts.some((p) => p.type === 'compaction')
   const hasText = item.parts.some((p) => p.type === 'text' && (p.text ?? '').trim().length > 0)
   if (isUser && hasCompactionPart && !hasText) {
+    const compaction = item.parts.find((part) => part.type === 'compaction')!
     return (
       <div className="compaction-divider">
         <span className="compaction-divider-line" />
-        <span className="compaction-divider-label">Context compacted</span>
+        <span className="compaction-divider-label">{compactionLabel(compaction)}</span>
         <span className="compaction-divider-line" />
       </div>
     )
@@ -1366,6 +1368,7 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
   const launcherProject = useStore(appStore, (s) => s.launcherProject)
 
   const streaming = useStore(appStore, (s) => (effectiveId ? Boolean(s.streaming[effectiveId]) : false))
+  const compacting = useStore(appStore, (s) => (effectiveId ? Boolean(s.compacting[effectiveId]) : false))
   const permission = useStore(appStore, (s) => (effectiveId ? s.permissions[effectiveId] ?? null : null))
   const question = useStore(appStore, (s) => (effectiveId ? s.questions[effectiveId] ?? null : null))
   const visible = messages
@@ -1400,7 +1403,11 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
   const waitingForReply = visible[visible.length - 1]?.info.role === 'user'
   // While the thread streams, always show a label: the running tool when one is
   // active, 'Thinking' before any reply text, 'Working' between text and tools.
-  const activity = streaming ? (runningPart ? runningLabel(runningPart) : waitingForReply || !liveText ? 'Thinking' : 'Working') : null
+  const activity = compacting
+    ? 'Compacting context'
+    : streaming
+      ? (runningPart ? runningLabel(runningPart) : waitingForReply || !liveText ? 'Thinking' : 'Working')
+      : null
   const expandingRef = useRef(false)
 
   const closeSearch = useCallback((): void => {

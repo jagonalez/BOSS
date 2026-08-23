@@ -1223,8 +1223,20 @@ export class BackendManager {
       case 'question.replied': return { type: value.type, properties: { sessionID: value.sessionID, requestID: value.requestID } }
       case 'question.rejected': return { type: value.type, properties: { sessionID: value.sessionID, requestID: value.requestID } }
       case 'session.status': return { type: value.type, properties: { sessionID: value.sessionID, status: value.status } }
-      case 'session.idle':
-      case 'session.compacted': return { type: value.type, properties: { sessionID: value.sessionID } }
+      case 'session.idle': return { type: value.type, properties: { sessionID: value.sessionID } }
+      case 'session.compaction.started': return {
+        type: value.type,
+        properties: { sessionID: value.sessionID, trigger: value.trigger }
+      }
+      case 'session.compacted': return {
+        type: value.type,
+        properties: {
+          sessionID: value.sessionID,
+          trigger: value.trigger,
+          preTokens: value.preTokens,
+          postTokens: value.postTokens
+        }
+      }
       case 'session.error': return { type: value.type, properties: { sessionID: value.sessionID, error: value.error } }
       default: return value
     }
