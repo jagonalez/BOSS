@@ -252,6 +252,40 @@ export function installE2EApi(boss: BossApi): void {
   let sandboxSettings = { networkAccess: true }
   let nextThread = 1
   let nextFollowUp = 1
+  let nextAutomation = 1
+  // One webhook-triggered automation ships pre-seeded so cards can be asserted
+  // without driving the whole editor first.
+  let automationsFixture: Array<Record<string, unknown>> = [{
+    id: 'automation-webhook-seed',
+    name: 'Review incoming PRs',
+    prompt: 'Review pull request {{pr_number}} against {{repo}}.',
+    projectPath: PROJECT,
+    backendId: 'opencode',
+    mode: 'auto',
+    schedule: { kind: 'manual' },
+    webhook: { events: ['pull_request'], branch: 'main' },
+    workspace: 'worktree',
+    overlapPolicy: 'skip',
+    catchUp: true,
+    notify: 'events',
+    maxRunMinutes: 30,
+    keepRuns: 50,
+    enabled: true,
+    missedRuns: 0,
+    lastWebhookAt: Date.now() - 300_000,
+    lastWebhookLabel: 'pull_request · #14 · opened · octo/hello',
+    createdAt: Date.now() - 86_400_000,
+    updatedAt: Date.now() - 3_600_000
+  }]
+  // Mirrors TelegramBot.status(): off and tokenless until settings turn it on.
+  const telegramFixture = {
+    enabled: false,
+    running: false,
+    threadId: '',
+    allowedChatIds: [] as number[],
+    tokenSet: false,
+    username: undefined as string | undefined
+  }
   const eventListeners = new Set<(data: string) => void>()
   const intentionallyStopped = new Set<string>()
   const busyThreads = new Set<string>()
@@ -452,8 +486,65 @@ export function installE2EApi(boss: BossApi): void {
       case 'worktree.settings.set': return { autoCleanupEnabled: true, cleanupAfterDays: 30, location: 'app-data', ...request }
       case 'mcp.list': return []
       case 'mcp.import.scan': return []
-      case 'automation.list': return { automations: [], runs: [], webhookUrl: '' }
+      case 'automation.list': return { automations: automationsFixture, runs: [], webhookUrl: '' }
+      case 'automation.create': {
+        const now = Date.now()
+        const created = {
+          ...structuredClone(request.input),
+          id: `automation-created-${nextAutomation++}`,
+          enabled: true,
+          missedRuns: 0,
+          createdAt: now,
+          updatedAt: now
+        }
+        automationsFixture = [...automationsFixture, created]
+        return created
+      }
+      case 'automation.update': {
+        const found = automationsFixture.find((item) => item.id === request.automationId)
+        if (!found) throw new Error(`Unknown fixture automation ${request.automationId}`)
+        const updated = {
+          ...found,
+          ...structuredClone(request.patch),
+          updatedAt: Date.now()
+        }
+        if (updated.webhook == null) delete updated.webhook
+        automationsFixture = automationsFixture.map((item) => item.id === request.automationId ? updated : item)
+        return updated
+      }
+      case 'automation.delete':
+        automationsFixture = automationsFixture.filter((item) => item.id !== request.automationId)
+        return undefined
+      // The real token lives in main's state file; the fixture hands back a
+      // stable stand-in so the editor can render a copyable URL.
+      case 'automation.webhook.token':
+        return {
+          token: `fixture-hook-${request.automationId}`,
+          url: `http://127.0.0.1:4528/hooks/${request.automationId}/fixture-hook-${request.automationId}`
+        }
       case 'automation.webhook.get': return { url: '', onlyWhenAway: true }
+      case 'telegram.status': {
+        const running = telegramFixture.enabled && telegramFixture.tokenSet
+        return { ...telegramFixture, running, ...(running && telegramFixture.username ? { username: telegramFixture.username } : {}) }
+      }
+      case 'telegram.set': {
+        const patch = request.patch
+        if (patch.threadId !== undefined) telegramFixture.threadId = patch.threadId
+        if (patch.allowedChats !== undefined) telegramFixture.allowedChatIds = [...new Set(patch.allowedChats)]
+        if (patch.token !== undefined && patch.token.trim()) {
+          telegramFixture.tokenSet = true
+          telegramFixture.username = 'boss_e2e_bot'
+        }
+        if (patch.clearToken) {
+          telegramFixture.tokenSet = false
+          telegramFixture.enabled = false
+          telegramFixture.username = undefined
+        }
+        if (patch.enabled !== undefined) telegramFixture.enabled = patch.enabled
+        const status = telegramFixture as unknown as Record<string, unknown>
+        status.running = telegramFixture.enabled && telegramFixture.tokenSet
+        return status
+      }
       case 'mobile.status': return { enabled: false, running: false, port: 0, tailscale: false }
       case 'thread.bus.get':
       case 'thread.bus.clear-failures':

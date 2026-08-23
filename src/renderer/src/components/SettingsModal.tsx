@@ -15,9 +15,10 @@ import type { CliStatus, UpdateChannel, UpdateStatus } from '@shared/ipc'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 import { McpSettings } from './McpSettings'
 import { MobileSettings } from './MobileSettings'
+import { TelegramSettings } from './TelegramSettings'
 import { ModelSelect, modelIsLocal } from './ModelSelect'
 
-type SettingsSection = 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
+type SettingsSection = 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram' | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
 const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
   {
@@ -27,7 +28,8 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
       { id: 'connections', label: 'Models & connections' },
       { id: 'usage', label: 'Usage' },
       { id: 'mcp', label: 'MCP connections' },
-      { id: 'mobile', label: 'Mobile access' }
+      { id: 'mobile', label: 'Mobile access' },
+      { id: 'telegram', label: 'Telegram' }
     ]
   },
   {
@@ -143,6 +145,10 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   mobile: {
     title: 'Mobile access',
     description: 'Review threads and automations from your phone over your tailnet or an SSH tunnel.'
+  },
+  telegram: {
+    title: 'Telegram',
+    description: 'Send messages to your own bot and have them delivered into a thread of your choice.'
   },
   collaboration: {
     title: 'Collaboration',
@@ -982,6 +988,8 @@ export function SettingsModal(): React.JSX.Element | null {
             {section === 'mcp' ? <McpSettings /> : null}
 
             {section === 'mobile' ? <MobileSettings /> : null}
+
+            {section === 'telegram' ? <TelegramSettings /> : null}
 
             {section === 'collaboration' ? (
               <div className="settings-group-stack">
