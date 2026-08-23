@@ -96,7 +96,7 @@ test('persists backend, model, permission, and thinking defaults through the UI'
   await expect(row.locator('label').filter({ hasText: 'Thinking' }).getByRole('combobox')).toHaveValue('high')
 })
 
-test('keeps local thread auto-naming opt-in through settings', async ({ appPage }) => {
+test('keeps thread auto-naming opt-in through settings', async ({ appPage }) => {
   await openSettings(appPage)
   await appPage.getByRole('button', { name: 'Agent defaults' }).click()
   const autoName = appPage.getByRole('checkbox', { name: 'Auto-name threads' })
@@ -112,6 +112,35 @@ test('keeps local thread auto-naming opt-in through settings', async ({ appPage 
   await openSettings(appPage)
   await appPage.getByRole('button', { name: 'Agent defaults' }).click()
   await expect(appPage.getByRole('checkbox', { name: 'Auto-name threads' })).toBeChecked()
+})
+
+test('auto-names with a generated title and falls back to a short local label', async ({ appPage }) => {
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Agent defaults' }).click()
+  await appPage.getByRole('checkbox', { name: 'Auto-name threads' }).check()
+  await appPage.getByRole('button', { name: 'Done' }).click()
+
+  await control(appPage).then((item) => item.spawnThread('codex', 'Untitled Codex thread'))
+  await appPage.locator('.session-row').filter({ hasText: 'Untitled Codex thread' }).click()
+  const composer = appPage.getByPlaceholder('Ask Codex…')
+  await composer.fill('We need to fix the "automate" thread names - it is pretty bad, because they are always super long and copy the first sentence.')
+  await composer.press('Enter')
+
+  await expect(appPage.locator('.session-row').filter({ hasText: 'Improve automatic thread naming' })).toBeVisible()
+  const renamed = (await control(appPage).then((item) => item.sessions()))
+    .find((session) => session.id === 'thread-created-1')
+  expect(renamed?.title).toBe('Improve automatic thread naming')
+
+  await control(appPage).then((item) => item.spawnThread('claude', 'Untitled Claude thread'))
+  await appPage.locator('.session-row').filter({ hasText: 'Untitled Claude thread' }).click()
+  const claudeComposer = appPage.getByPlaceholder('Ask Claude…')
+  await claudeComposer.fill('We need to fix the "automate" thread names - it is pretty bad, because they are always super long and copy the first sentence.')
+  await claudeComposer.press('Enter')
+
+  await expect(appPage.locator('.session-row').filter({ hasText: 'Fix "automate" thread names' })).toBeVisible()
+  const fallback = (await control(appPage).then((item) => item.sessions()))
+    .find((session) => session.id === 'thread-created-2')
+  expect(fallback?.title).toBe('Fix "automate" thread names')
 })
 
 test('a backend server can be restarted from settings', async ({ appPage }) => {
