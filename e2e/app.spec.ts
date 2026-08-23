@@ -642,17 +642,21 @@ test('the diff view toggles between unified and split and remembers it', async (
   await toggle.getByRole('button', { name: 'Split' }).click()
   await expect(view).toHaveAttribute('data-mode', 'split')
 
-  // Two gutters side by side inside the one file block.
-  const row = view.locator('.diff-split-row').first()
+  // Two gutters side by side inside the one file block: the modified pair sits
+  // on one row, old left and new right, each carrying its own word mark.
+  const row = view.locator('.diff-split-row:has(.word-del)').first()
   await expect(row.locator('.diff-line.half')).toHaveCount(2)
-  await expect(row.locator('.diff-line.half.left')).toContainText('compute(a, b)')
-  await expect(row.locator('.diff-line.half.right')).toContainText('compute(a, b)')
+  await expect(row.locator('.diff-line.half.left')).toContainText('total')
+  await expect(row.locator('.diff-line.half.right')).toContainText('sum')
   await expect(card.locator('.diff-line.hunk.span')).toHaveCount(1)
 
   await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffMode'))).toBe('split')
 
-  // The choice survives a reload along with the tab that was showing it.
+  // The choice survives leaving and re-entering the workspace: a fresh
+  // DiffReview reads it back when it mounts.
   await appPage.reload()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
   await expect(appPage.locator('.diff-view.split').first()).toBeVisible()
 
   await appPage.getByRole('group', { name: 'Diff layout' }).getByRole('button', { name: 'Unified' }).click()
@@ -669,35 +673,45 @@ test('the whitespace toggle is offered on the diff toolbar and persists', async 
   await expect(whitespace).toHaveText('Whitespace hidden')
   await expect.poll(() => appPage.evaluate(() => localStorage.getItem('boss.diffIgnoreWhitespace'))).toBe('1')
 
+  // A freshly mounted diff reads the preference back.
   await appPage.reload()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab').filter({ hasText: 'Review' }).click()
   await expect(appPage.locator('.diff-whitespace-toggle')).toHaveText('Whitespace hidden')
 })
 
 test('committing stages a chosen subset and commits only it', async ({ appPage }) => {
-  const project = appPage.locator('.sidebar-section.projects .project-row').first()
-  await expect(project).toContainText('/tmp/boss-e2e/project')
+  // The row labels projects by folder name; its title carries the full path.
+  const project = appPage.locator('.sidebar-section.projects .project-row[title="/tmp/boss-e2e/project"]')
+  await expect(project).toBeVisible()
   await project.click({ button: 'right' })
   await appPage.getByRole('button', { name: 'Commit & push…' }).click()
 
   const dialog = appPage.locator('.modal')
-  const staged = dialog.locator('.commit-section').filter({ hasText: 'Staged' })
-  const unstaged = dialog.locator('.commit-section').filter({ hasText: 'Unstaged' })
+  const staged = dialog.locator('.commit-section.staged')
+  const unstaged = dialog.locator('.commit-section.unstaged')
   await expect(staged).toContainText('src/staged.ts')
   await expect(unstaged).toContainText('src/edited.ts')
   await expect(unstaged).toContainText('scratch.ts')
 
-  // Nothing staged means nothing to commit: the buttons stand down.
+  // Nothing staged means nothing to commit: the buttons stand down, and the
+  // labels lose their counts.
   await dialog.getByRole('button', { name: 'Unstage src/staged.ts' }).click()
-  await expect(dialog.getByRole('button', { name: /^Commit \(/ })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: 'Commit', exact: true })).toBeDisabled()
 
-  await dialog.getByRole('button', { name: 'Stage scratch.ts' }).click()
-  await expect(dialog.getByRole('button', { name: 'Commit (1)', exact: true })).toBeEnabled()
-
+  // Recording starts here, so everything below is asserted against the exact
+  // git traffic this test caused.
   await control(appPage).then((item) => item.resetCalls())
   await dialog.locator('.commit-input').fill('Just the scratch file')
-  await dialog.getByRole('button', { name: 'Commit (1)', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Stage scratch.ts' }).click()
+  const commitButton = dialog.getByRole('button', { name: 'Commit (1)', exact: true })
+  await expect(commitButton).toBeEnabled()
+  await commitButton.click()
 
   await expect(dialog.locator('.commit-output')).toContainText('Committed ✓')
+  // Exactly one targeted add — no sweep of everything with -A.
   await expect.poll(async () => gitCalls(appPage).then((calls) => calls.filter((args) => args[0] === 'add'))).toEqual([['add', '--', 'scratch.ts']])
-  expect(await gitCalls(appPage)).toContainEqual(['commit', '-m', 'Just the scratch file'])
+  const calls = await gitCalls(appPage)
+  expect(calls).toContainEqual(['commit', '-m', 'Just the scratch file'])
+  expect(calls.some((args) => args.includes('-A'))).toBe(false)
 })

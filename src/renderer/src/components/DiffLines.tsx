@@ -74,6 +74,9 @@ export function DiffLines({
   const words = React.useMemo(() => {
     const marks = new Map<number, WordSegment[]>()
     for (const [i, j] of pairModifiedCounterparts(lines)) {
+      // Each pair appears twice in the map, once per direction; segmenting it
+      // twice would overwrite both sides with the reversed orientation.
+      if (i > j) continue
       const a = lines[i]
       const b = lines[j]
       if (!a || !b || a.text === b.text) continue

@@ -110,13 +110,13 @@ export function CommitDialog(): React.JSX.Element | null {
             : null}
           {files.length > 0 && (
             <>
-              <div className="commit-section">
+              <div className="commit-section staged">
                 <div className="commit-section-title">Staged<small>{staged.length}</small></div>
                 <div className="commit-files">
                   {staged.length === 0 ? <div className="commit-empty">Nothing staged — commit does nothing yet.</div> : staged.map(row)}
                 </div>
               </div>
-              <div className="commit-section">
+              <div className="commit-section unstaged">
                 <div className="commit-section-title">Unstaged<small>{unstaged.length}</small></div>
                 <div className="commit-files">
                   {unstaged.length === 0 ? <div className="commit-empty">Everything is staged.</div> : unstaged.map(row)}
