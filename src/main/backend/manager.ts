@@ -294,6 +294,7 @@ export class BackendManager {
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
   private remote?: { handle(request: BackendRequest): Promise<unknown> }
+  private telegram?: { handle(request: BackendRequest): Promise<unknown> }
   private binaryOverrides?: BinaryOverrides
   private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
   private threadTitleSettings: ThreadTitleSettings = { ...DEFAULT_THREAD_TITLE_SETTINGS }
@@ -894,6 +895,10 @@ export class BackendManager {
 
   attachRemote(remote: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.remote = remote
+  }
+
+  attachTelegram(telegram: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.telegram = telegram
   }
 
   attachBinaryOverrides(overrides: BinaryOverrides): void {
@@ -2558,6 +2563,10 @@ export class BackendManager {
     if (request.type.startsWith('mobile.')) {
       if (!this.mobile) throw new Error('Mobile access is not available.')
       return this.mobile.handle(request)
+    }
+    if (request.type.startsWith('telegram.')) {
+      if (!this.telegram) throw new Error('Telegram messaging is not available.')
+      return this.telegram.handle(request)
     }
     if (request.type.startsWith('remote.')) {
       if (!this.remote) throw new Error('Remote access is not available.')

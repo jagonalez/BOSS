@@ -294,6 +294,9 @@ export type BackendRequest =
   | { type: 'automation.stop'; automationId: string }
   | { type: 'automation.webhook.get' }
   | { type: 'automation.webhook.set'; url?: string; onlyWhenAway?: boolean }
+  /** The per-automation hook secret and full URL. Never included in snapshots,
+   *  so phones and the relay cannot read it. */
+  | { type: 'automation.webhook.token'; automationId: string }
   | { type: 'mcp.list' }
   | { type: 'mcp.add'; input: import('./mcp').McpConnectionInput }
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }
@@ -301,6 +304,8 @@ export type BackendRequest =
   | { type: 'mcp.import.scan' }
   | { type: 'mobile.status' }
   | { type: 'mobile.set'; patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean } }
+  | { type: 'telegram.status' }
+  | { type: 'telegram.set'; patch: { enabled?: boolean; threadId?: string; allowedChats?: number[]; token?: string; clearToken?: boolean } }
   | { type: 'remote.status' }
   | { type: 'remote.set'; patch: { enabled?: boolean; relayUrl?: string; forgetDeviceId?: string; revokeAll?: boolean } }
   | { type: 'remote.pair' }
