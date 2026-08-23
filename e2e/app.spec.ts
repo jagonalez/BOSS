@@ -39,6 +39,12 @@ test('keeps a theme family while light, dark, and system appearance change', asy
   await openSettings(appPage)
   await appPage.getByRole('button', { name: 'Appearance' }).click()
 
+  const familyChoices = appPage.getByRole('radiogroup', { name: 'Theme family' })
+  await expect(familyChoices.getByRole('radio')).toHaveCount(10)
+  for (const name of ['Gruvbox', 'Everforest', 'Kanagawa', 'Ayu']) {
+    await expect(familyChoices.getByRole('radio', { name: new RegExp(`^${name}`) })).toBeVisible()
+  }
+
   const family = appPage.getByRole('radio', { name: /^Catppuccin/ })
   await family.click()
   await appPage.getByRole('radio', { name: /^Light/ }).click()

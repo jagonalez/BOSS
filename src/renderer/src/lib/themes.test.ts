@@ -39,6 +39,15 @@ test('every theme family offers a real light and dark variant', () => {
 test('system appearance resolves within the selected family', () => {
   assert.equal(themeForPreference({ family: 'catppuccin', appearance: 'system' }, 'light').id, 'catppuccin-latte')
   assert.equal(themeForPreference({ family: 'catppuccin', appearance: 'system' }, 'dark').id, 'catppuccin-mocha')
+  for (const [family, light, dark] of [
+    ['gruvbox', 'gruvbox-light', 'gruvbox-dark'],
+    ['everforest', 'everforest-light', 'everforest-dark'],
+    ['kanagawa', 'kanagawa-lotus', 'kanagawa-wave'],
+    ['ayu', 'ayu-light', 'ayu-dark']
+  ] as const) {
+    assert.equal(themeForPreference({ family, appearance: 'system' }, 'light').id, light)
+    assert.equal(themeForPreference({ family, appearance: 'system' }, 'dark').id, dark)
+  }
 })
 
 test('every theme gives diff text WCAG-readable contrast', () => {
