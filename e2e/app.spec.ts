@@ -122,7 +122,7 @@ test('auto-names with a generated title and falls back to a short local label', 
 
   await control(appPage).then((item) => item.spawnThread('codex', 'Untitled Codex thread'))
   await appPage.locator('.session-row').filter({ hasText: 'Untitled Codex thread' }).click()
-  const composer = appPage.getByPlaceholder(/^Ask /)
+  const composer = appPage.getByPlaceholder('Ask Codex…')
   await composer.fill('We need to fix the "automate" thread names - it is pretty bad, because they are always super long and copy the first sentence.')
   await composer.press('Enter')
 
@@ -133,8 +133,9 @@ test('auto-names with a generated title and falls back to a short local label', 
 
   await control(appPage).then((item) => item.spawnThread('claude', 'Untitled Claude thread'))
   await appPage.locator('.session-row').filter({ hasText: 'Untitled Claude thread' }).click()
-  await appPage.getByPlaceholder(/^Ask /).fill('We need to fix the "automate" thread names - it is pretty bad, because they are always super long and copy the first sentence.')
-  await appPage.getByPlaceholder(/^Ask /).press('Enter')
+  const claudeComposer = appPage.getByPlaceholder('Ask Claude…')
+  await claudeComposer.fill('We need to fix the "automate" thread names - it is pretty bad, because they are always super long and copy the first sentence.')
+  await claudeComposer.press('Enter')
 
   await expect(appPage.locator('.session-row').filter({ hasText: 'Fix "automate" thread names' })).toBeVisible()
   const fallback = (await control(appPage).then((item) => item.sessions()))
