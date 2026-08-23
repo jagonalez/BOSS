@@ -1,9 +1,7 @@
 /**
  * The type the window draws in.
  *
- * Two things resize and nothing else does: the conversation, and the terminal. The chrome around
- * them — the sidebar, the tabs, the settings rows, every badge and label — keeps the sizes it was
- * designed at, so choosing a larger reading size never moves a row or reflows a list. They are
+ * Conversation and terminal sizing are independent from the app chrome around them. They are
  * separate settings because they are read differently: prose is read continuously and wants to be
  * comfortable, while a terminal is scanned in columns and wants to fit.
  */

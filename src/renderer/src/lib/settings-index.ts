@@ -70,11 +70,13 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
 
   // Appearance
   { label: 'Workspace layout', section: 'appearance', keywords: ['single', 'multi', 'thread', 'panes', 'split'] },
-  { label: 'Theme', section: 'appearance', keywords: ['dark', 'light', 'colour', 'color', 'contrast', 'catppuccin', 'tokyo'] },
+  { label: 'Theme', section: 'appearance', keywords: ['dark', 'light', 'system', 'colour', 'color', 'contrast', 'catppuccin', 'tokyo', 'rose pine', 'solarized', 'gruvbox', 'everforest', 'kanagawa', 'ayu'] },
   { label: 'Interface font', section: 'appearance', keywords: ['typeface', 'family', 'ui', 'type'] },
   { label: 'Monospace font', section: 'appearance', keywords: ['code', 'terminal', 'mono', 'typeface', 'type'] },
   { label: 'Reading size', section: 'appearance', keywords: ['font size', 'bigger', 'smaller', 'text size', 'type'] },
   { label: 'Terminal size', section: 'appearance', keywords: ['font size', 'bigger', 'smaller', 'type'] },
+  { label: 'Base font size', section: 'appearance', keywords: ['interface size', 'chrome', 'bigger', 'smaller', 'type'] },
+  { label: 'UI density', section: 'appearance', keywords: ['compact', 'comfortable', 'spacing', 'controls'] },
 
   // Voice
   { label: 'Voice', section: 'voice', keywords: ['speech', 'tts', 'speak', 'read aloud'] },

@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import { THEMES, applyTheme, loadTheme } from '../lib/themes'
+import { THEME_FAMILIES, applyTheme, loadTheme, themeForPreference, themeForFamily, type ThemeAppearance, type ThemeChangedDetail, type UiDensity, type UiFontSize } from '../lib/themes'
 import { loadTypography, saveTypography, stepReadingSize, stepTerminalSize } from '../lib/typography'
 import { searchSettings, type SettingsMatch } from '../lib/settings-index'
 import { SearchIcon } from './icons'
 import { MONO_FONTS, READING_SIZE, TERMINAL_SIZE, UI_FONTS } from '@shared/typography'
 import { KOKORO_VOICES } from '@shared/speech'
 import type { ViewMode } from '@shared/workspace'
-import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
+import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setUiDensity, setUiFontSize, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { projectName } from './CommandCenter'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
@@ -182,6 +182,11 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
 }
 
 const THEME_CATEGORIES = ['BOSS', 'Community', 'Accessibility'] as const
+const THEME_APPEARANCES: Array<{ id: ThemeAppearance; label: string; description: string }> = [
+  { id: 'system', label: 'System', description: 'Match your operating system' },
+  { id: 'light', label: 'Light', description: 'Keep the daylight variant' },
+  { id: 'dark', label: 'Dark', description: 'Keep the low-light variant' }
+]
 
 /** Which releases this copy installs.
  *
@@ -670,8 +675,11 @@ export function SettingsModal(): React.JSX.Element | null {
   const computerUsePerms = useStore(appStore, (s) => s.computerUsePerms)
   const terminalStartLocation = useStore(appStore, (s) => s.terminalStartLocation)
   const viewMode = useStore(appStore, (s) => s.viewMode)
+  const uiFontSize = useStore(appStore, (s) => s.uiFontSize)
+  const uiDensity = useStore(appStore, (s) => s.uiDensity)
   const [section, setSection] = useState<SettingsSection>('connections')
-  const [currentTheme, setCurrentTheme] = useState(loadTheme)
+  const [themePreference, setThemePreference] = useState(loadTheme)
+  const [currentTheme, setCurrentTheme] = useState(() => themeForPreference(loadTheme()))
   const [typography, setTypography] = useState(loadTypography)
   const [query, setQuery] = useState('')
   const matches = useMemo(() => searchSettings(query), [query])
@@ -701,7 +709,10 @@ export function SettingsModal(): React.JSX.Element | null {
 
   useEffect(() => {
     const syncTheme = (event: Event): void => {
-      setCurrentTheme((event as CustomEvent<{ id?: string }>).detail?.id ?? loadTheme())
+      const detail = (event as CustomEvent<ThemeChangedDetail>).detail
+      if (!detail) return
+      setThemePreference({ family: detail.family, appearance: detail.appearance })
+      setCurrentTheme(themeForFamily(detail.family, detail.resolvedAppearance))
     }
     window.addEventListener('boss:theme-changed', syncTheme)
     return () => window.removeEventListener('boss:theme-changed', syncTheme)
@@ -828,7 +839,7 @@ export function SettingsModal(): React.JSX.Element | null {
                 <section className="settings-card settings-card-list">
                   <SettingsRow
                     title="Auto-name threads"
-                    description="Use the first prompt to give new, untitled threads a compact name. This happens locally and never sends an extra model request or uses tokens."
+                    description="Generate a short name from the first request, using a small model call when supported and a local fallback otherwise."
                   >
                     <label className="settings-computer-toggle">
                       <input
@@ -1218,35 +1229,58 @@ export function SettingsModal(): React.JSX.Element | null {
                 <div className="settings-card-heading">
                   <div>
                     <h2>Theme</h2>
-                    <p>Applied immediately across every BOSS window.</p>
+                    <p>Choose a color family, then let BOSS follow the system or keep one appearance.</p>
                   </div>
                 </div>
-                <div className="settings-theme-families">
+                <div className="settings-theme-appearance" role="radiogroup" aria-label="Theme appearance">
+                  {THEME_APPEARANCES.map((appearance) => (
+                    <button
+                      key={appearance.id}
+                      role="radio"
+                      aria-checked={themePreference.appearance === appearance.id}
+                      className={themePreference.appearance === appearance.id ? 'active' : ''}
+                      onClick={() => applyTheme({ ...themePreference, appearance: appearance.id })}
+                    >
+                      <strong>{appearance.label}</strong>
+                      <small>
+                        {appearance.id === 'system' && themePreference.appearance === 'system'
+                          ? `Following system · currently ${currentTheme.appearance}`
+                          : appearance.description}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+                <div className="settings-theme-families" role="radiogroup" aria-label="Theme family">
                   {THEME_CATEGORIES.map((category) => (
                     <div className="settings-theme-family" key={category}>
                       <div className="settings-theme-family-label">{category}</div>
                       <div className="theme-grid settings-theme-grid">
-                        {THEMES.filter((theme) => theme.category === category).map((theme) => (
-                          <button
-                            key={theme.id}
-                            className={`theme-swatch ${theme.id === currentTheme ? 'active' : ''}`}
-                            onClick={() => applyTheme(theme.id)}
-                            title={theme.label}
-                          >
-                            <span className="theme-swatch-preview" style={{ background: theme.colors.canvas }}>
-                              <span style={{ background: theme.colors.sidebar }} />
-                              <span style={{ background: theme.colors.surface }}>
-                                <i style={{ background: theme.colors.accent }} />
-                                <i style={{ background: theme.colors.textMuted }} />
-                                <i style={{ background: theme.colors.success }} />
+                        {THEME_FAMILIES.filter((family) => family.category === category).map((family) => {
+                          const theme = themeForFamily(family.id, currentTheme.appearance)
+                          return (
+                            <button
+                              key={family.id}
+                              role="radio"
+                              aria-checked={family.id === themePreference.family}
+                              className={`theme-swatch ${family.id === themePreference.family ? 'active' : ''}`}
+                              onClick={() => applyTheme({ ...themePreference, family: family.id })}
+                              title={`${family.label} · ${theme.appearance}`}
+                            >
+                              <span className="theme-swatch-preview" style={{ background: theme.colors.canvas }}>
+                                <span style={{ background: theme.colors.sidebar }} />
+                                <span style={{ background: theme.colors.surface }}>
+                                  <i style={{ background: theme.colors.accent }} />
+                                  <i style={{ background: theme.colors.textMuted }} />
+                                  <i style={{ background: theme.colors.success }} />
+                                </span>
                               </span>
-                            </span>
-                            <span className="theme-swatch-copy">
-                              <span><strong>{theme.label}</strong><em>{theme.appearance}</em></span>
-                              <small>{theme.description}</small>
-                            </span>
-                          </button>
-                        ))}
+                              <span className="theme-swatch-copy">
+                                <span><strong>{family.label}</strong><em>{theme.appearance}</em></span>
+                                <small>{family.description}</small>
+                              </span>
+                            </button>
+                          )
+                        })}
                       </div>
                     </div>
                   ))}
@@ -1255,8 +1289,8 @@ export function SettingsModal(): React.JSX.Element | null {
               <section className="settings-card settings-group-stack">
                 <div className="settings-card-heading">
                   <div>
-                    <h2>Type</h2>
-                    <p>Only the conversation and the terminal follow these. The rest of the window keeps the sizes it was designed at, so a larger reading size never moves a row.</p>
+                    <h2>Type &amp; density</h2>
+                    <p>Choose the app’s typefaces and scale, then tune reading, terminal and interface spacing independently.</p>
                   </div>
                 </div>
                 <SettingsRow title="Interface font" description="Used for everything except code, diffs and the terminal.">
@@ -1267,6 +1301,17 @@ export function SettingsModal(): React.JSX.Element | null {
                 <SettingsRow title="Monospace font" description="Code, diffs and the terminal. A face the machine does not have falls back to the system's own.">
                   <Select value={typography.monoFont} onChange={(event) => setTypography(saveTypography({ ...typography, monoFont: event.target.value }))}>
                     {MONO_FONTS.map((font) => <option key={font.id} value={font.id}>{font.label}</option>)}
+                  </Select>
+                </SettingsRow>
+                <SettingsRow title="Base font size" description="Sizes the app chrome. Conversation and terminal text keep their individual sizes.">
+                  <Select
+                    aria-label="Base font size"
+                    value={uiFontSize}
+                    onChange={(event) => setUiFontSize(event.target.value as UiFontSize)}
+                  >
+                    <option value="small">Small</option>
+                    <option value="default">Default</option>
+                    <option value="large">Large</option>
                   </Select>
                 </SettingsRow>
                 <SettingsRow title="Reading size" description={`How large a reply is drawn. ${typography.readingSize}px.`}>
@@ -1282,6 +1327,16 @@ export function SettingsModal(): React.JSX.Element | null {
                     <span>{typography.terminalSize}px</span>
                     <Button size="small" variant="ghost" disabled={typography.terminalSize >= TERMINAL_SIZE.max} onClick={() => setTypography(stepTerminalSize(1))}>+</Button>
                   </div>
+                </SettingsRow>
+                <SettingsRow title="UI density" description="Compact tightens controls and common navigation rows to fit more on screen.">
+                  <Select
+                    aria-label="UI density"
+                    value={uiDensity}
+                    onChange={(event) => setUiDensity(event.target.value as UiDensity)}
+                  >
+                    <option value="comfortable">Comfortable</option>
+                    <option value="compact">Compact</option>
+                  </Select>
                 </SettingsRow>
               </section>
               </>

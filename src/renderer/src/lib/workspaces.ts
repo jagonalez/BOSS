@@ -8,12 +8,14 @@ import type {
   WorkspaceTab,
   WorkspaceCheckoutBinding,
   WorkspaceTabKind,
-  WorkspaceView
+  WorkspaceView,
+  ViewMode
 } from '@shared/workspace'
 
 // Unversioned: nothing has shipped, so there is no other shape in the world to
 // migrate from. Version these at the first release, not before.
 const WORKSPACES_KEY = 'boss.workspace'
+const SINGLE_WORKSPACE_KEY = 'boss.workspace.single'
 /** Drag payload for a workspace tab. Shared so the sidebar can start a drag the
  *  panes already know how to accept. */
 export const TAB_DRAG_TYPE = 'application/x-boss-workspace-tab'
@@ -110,6 +112,76 @@ export function conversationGroupId(view: WorkspaceView): string {
 export function panelGroupId(view: WorkspaceView): string | undefined {
   const conversation = conversationGroupId(view)
   return walkGroups(view.root).find((item) => item.id !== conversation)?.id
+}
+
+function copyWorkspaceNode(node: WorkspaceNode): WorkspaceNode {
+  if (node.type === 'split') {
+    return {
+      ...node,
+      first: copyWorkspaceNode(node.first),
+      second: copyWorkspaceNode(node.second)
+    }
+  }
+  return { ...node, tabs: node.tabs.map((item) => ({ ...item })) }
+}
+
+/** Build single-thread mode without changing the tiling workspace it came from.
+ *
+ *  Extra threads get views of their own, matching single-mode navigation. The
+ *  original tree is copied first, so none of those generated views or panels
+ *  can leak back into the multi-thread layout the user arranged. */
+export function workspaceForSingleMode(
+  workspace: Workspace,
+  sessionName: (sessionId: string | undefined) => string | undefined = () => undefined
+): Workspace {
+  let next: Workspace = {
+    ...workspace,
+    views: workspace.views.map((view) => ({ ...view, root: copyWorkspaceNode(view.root) }))
+  }
+
+  const limit = next.views.reduce((total, view) => total + walkTabs(view.root).length, 0) + 1
+  for (let pass = 0; pass < limit; pass += 1) {
+    const source = next.views.find((view) => walkTabs(view.root).filter((item) => item.kind === 'thread').length > 1)
+    if (!source) break
+    const moving = walkTabs(source.root).filter((item) => item.kind === 'thread')[1]
+    const conversation = group([])
+    const created = {
+      ...workspaceView(
+        sessionName(moving.sessionId) || 'Thread',
+        split('horizontal', conversation, group([]), 0.62)
+      ),
+      focusedGroupId: conversation.id
+    }
+    next = {
+      ...next,
+      views: moveTabAcrossViews([...next.views, created], moving.id, created.id, conversation.id, 'center'),
+      activeViewId: created.id
+    }
+  }
+
+  return {
+    ...next,
+    views: next.views.map((view) => {
+      const groups = walkGroups(view.root)
+      if (groups.length > 1) return view
+      const only = groups[0]
+      const threadTabs = only.tabs.filter((item) => item.kind === 'thread')
+      const panelTabs = only.tabs.filter((item) => item.kind !== 'thread')
+      const conversation: WorkspaceGroup = {
+        ...only,
+        tabs: threadTabs,
+        activeTabId: threadTabs.some((item) => item.id === only.activeTabId)
+          ? only.activeTabId
+          : threadTabs[0]?.id ?? null
+      }
+      const panel = group(panelTabs)
+      return {
+        ...view,
+        root: split('horizontal', conversation, panel, 0.62),
+        focusedGroupId: conversation.id
+      }
+    })
+  }
 }
 
 export function nextWorkspaceViewName(views: Array<Pick<WorkspaceView, 'name'>>): string {
@@ -230,11 +302,15 @@ export function loadLayouts(): Layout[] {
   return BUILTIN_LAYOUTS.map((item) => ({ ...item, root: cloneLayout(item.root, true) }))
 }
 
-export function saveWorkspace(workspace: Workspace): void {
-  writeJson(WORKSPACES_KEY, { ...workspace, updatedAt: Date.now() })
+function workspaceKey(mode: ViewMode): string {
+  return mode === 'single' ? SINGLE_WORKSPACE_KEY : WORKSPACES_KEY
 }
 
-/** One set of views for the whole app.
+export function saveWorkspace(workspace: Workspace, mode: ViewMode = 'multi'): void {
+  writeJson(workspaceKey(mode), { ...workspace, updatedAt: Date.now() })
+}
+
+/** One remembered set of views per display mode for the whole app.
  *
  *  Views used to be stored per project, which fought the model: a view holds
  *  threads from anywhere, so keying the store by project meant switching
@@ -289,8 +365,8 @@ export function withUniqueIds(workspace: Workspace): Workspace {
   return { ...workspace, views, activeViewId }
 }
 
-export function loadWorkspace(sessionId?: string): Workspace {
-  const saved = readJson<Workspace | null>(WORKSPACES_KEY, null)
+export function loadSavedWorkspace(mode: ViewMode = 'multi'): Workspace | null {
+  const saved = readJson<Workspace | null>(workspaceKey(mode), null)
   if (
     Array.isArray(saved?.views) &&
     saved.views.length > 0 &&
@@ -298,6 +374,12 @@ export function loadWorkspace(sessionId?: string): Workspace {
   ) {
     return withUniqueIds(saved)
   }
+  return null
+}
+
+export function loadWorkspace(sessionId?: string, mode: ViewMode = 'multi'): Workspace {
+  const saved = loadSavedWorkspace(mode)
+  if (saved) return saved
   // Anything else is a shape this build does not read, so start fresh rather
   // than carry a reader for it. A layout is an arrangement, not content.
   const root = group(sessionId ? [tab('thread', sessionId)] : [])

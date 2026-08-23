@@ -281,6 +281,7 @@ export type MenuCommand =
   | 'settings.open'
   | 'pane.split-horizontal'
   | 'pane.split-vertical'
+  | 'palette.open'
 
 /** A thread transcript already serialized to Markdown, handed to main so the
  *  user can pick where to keep it. The renderer owns the serialization; main

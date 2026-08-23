@@ -7,6 +7,16 @@ async function openSettings(page: Parameters<typeof control>[0]): Promise<void> 
   await expect(page.locator('.settings-page-title strong')).toHaveText('Settings')
 }
 
+async function chooseWorkspaceLayout(
+  page: Parameters<typeof control>[0],
+  label: 'Single-thread' | 'Multi-thread'
+): Promise<void> {
+  await openSettings(page)
+  await page.getByRole('button', { name: 'Appearance', exact: true }).click()
+  await page.getByRole('radio', { name: new RegExp(`^${label}`) }).click()
+  await page.getByRole('button', { name: 'Done' }).click()
+}
+
 async function configureClaudeDefaults(page: Parameters<typeof control>[0]): Promise<void> {
   await openSettings(page)
   await page.getByRole('button', { name: 'Agent defaults' }).click()
@@ -32,6 +42,82 @@ test('boots the real Electron renderer without covering it with a modal', async 
     const window = BrowserWindow.getAllWindows()[0]
     return { count: BrowserWindow.getAllWindows().length, visible: window?.isVisible() }
   })).toEqual({ count: 1, visible: false })
+})
+
+test('switching workspace layouts restores the views previously shown in each mode', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
+
+  const projectViews = appPage.getByRole('tablist', { name: 'Project views' })
+  const visibleCanvas = appPage.locator('.workspace-canvas:not([hidden])')
+  await expect(projectViews.locator('.workspace-view-tab')).toHaveCount(1)
+  await expect(visibleCanvas.locator('.workspace-tab').filter({ hasText: 'Source thread' })).toHaveCount(1)
+  await expect(visibleCanvas.locator('.workspace-tab').filter({ hasText: 'Duplicate transcript' })).toHaveCount(1)
+
+  await chooseWorkspaceLayout(appPage, 'Single-thread')
+  await expect(projectViews).toBeHidden()
+  const firstSingleViewIds = await appPage.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('boss.workspace.single') ?? '{"views":[]}') as { views: Array<{ id: string }> }
+    return saved.views.map((view) => view.id)
+  })
+  expect(firstSingleViewIds).toHaveLength(2)
+
+  await chooseWorkspaceLayout(appPage, 'Multi-thread')
+  await expect(projectViews).toBeVisible()
+  await expect(projectViews.locator('.workspace-view-tab')).toHaveCount(1)
+  await expect(visibleCanvas.locator('.workspace-tab').filter({ hasText: 'Source thread' })).toHaveCount(1)
+  await expect(visibleCanvas.locator('.workspace-tab').filter({ hasText: 'Duplicate transcript' })).toHaveCount(1)
+
+  await chooseWorkspaceLayout(appPage, 'Single-thread')
+  const restoredSingleViewIds = await appPage.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('boss.workspace.single') ?? '{"views":[]}') as { views: Array<{ id: string }> }
+    return saved.views.map((view) => view.id)
+  })
+  expect(restoredSingleViewIds).toEqual(firstSingleViewIds)
+
+  await chooseWorkspaceLayout(appPage, 'Multi-thread')
+  await expect(projectViews.locator('.workspace-view-tab')).toHaveCount(1)
+})
+
+test('keeps a theme family while light, dark, and system appearance change', async ({ appPage }) => {
+  await appPage.emulateMedia({ colorScheme: 'dark' })
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+
+  const familyChoices = appPage.getByRole('radiogroup', { name: 'Theme family' })
+  await expect(familyChoices.getByRole('radio')).toHaveCount(10)
+  for (const name of ['Gruvbox', 'Everforest', 'Kanagawa', 'Ayu']) {
+    await expect(familyChoices.getByRole('radio', { name: new RegExp(`^${name}`) })).toBeVisible()
+  }
+
+  const family = appPage.getByRole('radio', { name: /^Catppuccin/ })
+  await family.click()
+  await appPage.getByRole('radio', { name: /^Light/ }).click()
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-family', 'catppuccin')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-appearance', 'light')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-latte')
+
+  await appPage.getByRole('radio', { name: /^Dark/ }).click()
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-mocha')
+
+  await appPage.getByRole('radio', { name: /^System/ }).click()
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-appearance', 'system')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-mocha')
+  await expect(appPage.getByText('Following system · currently dark')).toBeVisible()
+
+  await appPage.emulateMedia({ colorScheme: 'light' })
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-latte')
+  await expect(appPage.getByText('Following system · currently light')).toBeVisible()
+  expect(await appPage.evaluate(() => ({
+    family: localStorage.getItem('boss.themeFamily'),
+    appearance: localStorage.getItem('boss.themeAppearance')
+  }))).toEqual({ family: 'catppuccin', appearance: 'system' })
+
+  await appPage.getByRole('button', { name: 'Done' }).click()
+  await appPage.reload()
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-family', 'catppuccin')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme-appearance', 'system')
+  await expect(appPage.locator('html')).toHaveAttribute('data-theme', 'catppuccin-latte')
 })
 
 test('a deleted checkout returns a review snapshot without rejecting the IPC handler', async ({ appPage }) => {
@@ -75,6 +161,56 @@ test('shows an attached image and one copy of a response echoed under two messag
   await expect(appPage.locator('.step-card')).toHaveCount(2)
 })
 
+test('shows Lab reasoning separately from the final answer', async ({ appPage }) => {
+  const sessionID = 'thread-source'
+  const messageID = 'lab-reasoning-e2e'
+  const created = Date.now()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id: messageID,
+        sessionID,
+        role: 'assistant',
+        model: { id: 'ox-alpha' },
+        time: { created, completed: created + 1 }
+      }
+    }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: `${messageID}-reasoning`,
+        type: 'reasoning',
+        sessionID,
+        messageID,
+        text: 'I should inspect Workspace.tsx before answering.'
+      }
+    }
+  }))
+  await control(appPage).then((item) => item.emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: `${messageID}-text`,
+        type: 'text',
+        sessionID,
+        messageID,
+        text: 'The workspace selection is now fixed.'
+      }
+    }
+  }))
+
+  const reply = appPage.locator(`.msg-body[data-message-id="${messageID}"]`)
+  await expect(reply).toContainText('The workspace selection is now fixed.')
+  await expect(reply).not.toContainText('<think>')
+  await reply.locator('.thought-head').click()
+  await expect(reply.locator('.thought-body')).toContainText('I should inspect Workspace.tsx before answering.')
+})
+
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
 
@@ -96,7 +232,7 @@ test('persists backend, model, permission, and thinking defaults through the UI'
   await expect(row.locator('label').filter({ hasText: 'Thinking' }).getByRole('combobox')).toHaveValue('high')
 })
 
-test('keeps local thread auto-naming opt-in through settings', async ({ appPage }) => {
+test('keeps thread auto-naming opt-in through settings', async ({ appPage }) => {
   await openSettings(appPage)
   await appPage.getByRole('button', { name: 'Agent defaults' }).click()
   const autoName = appPage.getByRole('checkbox', { name: 'Auto-name threads' })
@@ -112,6 +248,35 @@ test('keeps local thread auto-naming opt-in through settings', async ({ appPage 
   await openSettings(appPage)
   await appPage.getByRole('button', { name: 'Agent defaults' }).click()
   await expect(appPage.getByRole('checkbox', { name: 'Auto-name threads' })).toBeChecked()
+})
+
+test('auto-names with a generated title and falls back to a short local label', async ({ appPage }) => {
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Agent defaults' }).click()
+  await appPage.getByRole('checkbox', { name: 'Auto-name threads' }).check()
+  await appPage.getByRole('button', { name: 'Done' }).click()
+
+  await control(appPage).then((item) => item.spawnThread('codex', 'Untitled Codex thread'))
+  await appPage.locator('.session-row').filter({ hasText: 'Untitled Codex thread' }).click()
+  const composer = appPage.getByPlaceholder('Ask Codex…')
+  await composer.fill('We need to fix the "automate" thread names - it is pretty bad, because they are always super long and copy the first sentence.')
+  await composer.press('Enter')
+
+  await expect(appPage.locator('.session-row').filter({ hasText: 'Improve automatic thread naming' })).toBeVisible()
+  const renamed = (await control(appPage).then((item) => item.sessions()))
+    .find((session) => session.id === 'thread-created-1')
+  expect(renamed?.title).toBe('Improve automatic thread naming')
+
+  await control(appPage).then((item) => item.spawnThread('claude', 'Untitled Claude thread'))
+  await appPage.locator('.session-row').filter({ hasText: 'Untitled Claude thread' }).click()
+  const claudeComposer = appPage.getByPlaceholder('Ask Claude…')
+  await claudeComposer.fill('We need to fix the "automate" thread names - it is pretty bad, because they are always super long and copy the first sentence.')
+  await claudeComposer.press('Enter')
+
+  await expect(appPage.locator('.session-row').filter({ hasText: 'Fix "automate" thread names' })).toBeVisible()
+  const fallback = (await control(appPage).then((item) => item.sessions()))
+    .find((session) => session.id === 'thread-created-2')
+  expect(fallback?.title).toBe('Fix "automate" thread names')
 })
 
 test('a backend server can be restarted from settings', async ({ appPage }) => {
@@ -634,6 +799,136 @@ test('a selection spanning two messages offers no annotation', async ({ appPage 
   await appPage.dispatchEvent('.messages', 'pointerup')
 
   await expect(appPage.locator('.annotation-popover')).toHaveCount(0)
+})
+
+test('the command palette opens from the keyboard and runs a command', async ({ appPage }) => {
+  await appPage.keyboard.press('Control+k')
+  const palette = appPage.getByRole('dialog', { name: 'Command palette' })
+  await expect(palette).toBeVisible()
+  const input = palette.getByRole('textbox', { name: 'Search commands' })
+  await expect(input).toBeFocused()
+
+  // The renderer shortcut and Electron menu accelerator both mean "open";
+  // receiving both must not toggle the palette closed again.
+  await appPage.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+  await appPage.keyboard.press('Escape')
+  await expect(palette).toHaveCount(0)
+  await appPage.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+
+  // Fuzzy, not substring: a dropped letter still finds the command.
+  await input.fill('sttngs')
+  await appPage.keyboard.press('Enter')
+
+  await expect(palette).toHaveCount(0)
+  await expect(appPage.locator('.settings-page')).toBeVisible()
+  await appPage.getByRole('button', { name: 'Done' }).click()
+  await expect(appPage.locator('.settings-page')).toHaveCount(0)
+
+  // Escape dismisses the palette itself; it must not reach the app-level
+  // handler that reads Escape as "abort the running thread".
+  await appPage.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+  await input.fill('nothing matches this query zzz')
+  await expect(palette.getByText('No matches.')).toBeVisible()
+  await appPage.keyboard.press('Escape')
+  await expect(appPage.locator('.command-palette')).toHaveCount(0)
+})
+
+test('an attention event raises an unread badge that mark-all-read clears', async ({ appPage }) => {
+  const bell = appPage.getByRole('button', { name: 'Activity' })
+  await expect(bell.locator('.inbox-badge')).toHaveCount(0)
+
+  await control(appPage).then((item) => item.emit({
+    type: 'permission.asked',
+    properties: {
+      id: 'permission-inbox',
+      sessionID: 'thread-source',
+      permission: 'shell',
+      patterns: ['npm test'],
+      metadata: { command: 'npm test' }
+    }
+  }))
+
+  await expect(bell.locator('.inbox-badge')).toHaveText('1')
+  await bell.click()
+  const panel = appPage.getByRole('dialog', { name: 'Activity' })
+  await expect(panel).toBeVisible()
+  const row = panel.locator('.inbox-row').filter({ hasText: 'Permission asked' })
+  await expect(row).toContainText('Source thread')
+  await expect(row).toContainText(/ago|just now/)
+
+  // Click-through opens the thread the event came from.
+  await row.click()
+  await expect(panel).toHaveCount(0)
+  await expect(appPage.locator('.workspace-tab.active').filter({ hasText: 'Source thread' })).toBeVisible()
+
+  await control(appPage).then((item) => item.emit({
+    type: 'permission.replied',
+    properties: {
+      sessionID: 'thread-source',
+      permissionID: 'permission-inbox',
+      response: 'once'
+    }
+  }))
+  await expect(bell.locator('.inbox-badge')).toHaveText('2')
+
+  // Visiting leaves both events unread, so the badge stands until read.
+  await bell.click()
+  await expect(panel.locator('.inbox-row').filter({ hasText: 'Permission answered' })).toBeVisible()
+  await panel.getByRole('button', { name: 'Mark all read' }).click()
+  await expect(bell.locator('.inbox-badge')).toHaveCount(0)
+
+  // Main can forward the reply from an Auto/Plan permission whose request it
+  // intentionally swallowed. With no matching prompt in renderer state, that
+  // reply is not user activity and must not resurrect the badge.
+  await control(appPage).then((item) => item.emit({
+    type: 'permission.replied',
+    properties: {
+      sessionID: 'thread-source',
+      permissionID: 'permission-auto',
+      response: 'once'
+    }
+  }))
+  await expect(bell.locator('.inbox-badge')).toHaveCount(0)
+})
+
+test('a base font size choice survives a reload and can be undone', async ({ appPage }) => {
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await appPage.getByLabel('Base font size').selectOption('large')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-font-size', 'large')
+
+  await appPage.reload()
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await expect(appPage.getByLabel('Base font size')).toHaveValue('large')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-font-size', 'large')
+
+  await appPage.getByLabel('Base font size').selectOption('default')
+  await expect(appPage.locator('html')).not.toHaveAttribute('data-ui-font-size')
+})
+
+test('compact density reduces common chrome and survives a reload', async ({ appPage }) => {
+  const toolbar = appPage.locator('.toolbar')
+  const comfortableHeight = await toolbar.evaluate((element) => element.getBoundingClientRect().height)
+
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await appPage.getByLabel('UI density').selectOption('compact')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+  const compactHeight = await toolbar.evaluate((element) => element.getBoundingClientRect().height)
+  expect(compactHeight).toBeLessThan(comfortableHeight)
+
+  await appPage.reload()
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Appearance' }).click()
+  await expect(appPage.getByLabel('UI density')).toHaveValue('compact')
+  await expect(appPage.locator('html')).toHaveAttribute('data-ui-density', 'compact')
+
+  await appPage.getByLabel('UI density').selectOption('comfortable')
+  await expect(appPage.locator('html')).not.toHaveAttribute('data-ui-density')
 })
 
 async function exportCalls(appPage: Parameters<typeof control>[0]): Promise<Array<Record<string, unknown>>> {

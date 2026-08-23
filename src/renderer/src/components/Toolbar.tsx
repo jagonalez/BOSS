@@ -1,6 +1,7 @@
 import React from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { serviceDegradations } from '../lib/status'
+import { ActivityBell, ActivityPanel } from './ActivityInbox'
 
 type AttentionKind = NonNullable<ReturnType<typeof appStore.getState>['attention']>['kind']
 
@@ -29,10 +30,9 @@ export function Toolbar(): React.JSX.Element | null {
   const attention = useStore(appStore, (s) => s.attention)
   const degradations = serviceDegradations(serverUrl, serverHealthy, backends)
 
-  // Nothing to say, no bar. It sits above every page now, so an empty one
-  // would take height from the workspace on all of them.
-  if (!attention && !degradations.length) return null
-
+  // The bell is permanent — it is how you reach the inbox even on a quiet day
+  // — so the bar itself is too. It sits above every page now, so height comes
+  // off the workspace on all of them either way.
   return (
     <div className="toolbar">
       <div className="spacer" />
@@ -48,6 +48,10 @@ export function Toolbar(): React.JSX.Element | null {
           <span>{degradations.length === 1 ? degradations[0] : `${degradations.length} services degraded`}</span>
         </div>
       ) : null}
+      <div className="inbox-anchor">
+        <ActivityBell />
+        <ActivityPanel />
+      </div>
     </div>
   )
 }

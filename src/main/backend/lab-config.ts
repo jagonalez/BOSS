@@ -41,17 +41,17 @@ const PROFILE_DEFAULTS: Record<LabProfile, EnvDefaults> = {
   local: [
     ['LAB_TOOLS', 'core'],
     ['LAB_CONTEXT_CHARS', '12000'],
-    ['LAB_MAX_TOOL_ITERATIONS', '8']
+    ['LAB_MAX_TOOL_ITERATIONS', '32']
   ],
   cloud: [
     ['LAB_TOOLS', 'all'],
     ['LAB_CONTEXT_CHARS', '80000'],
-    ['LAB_MAX_TOOL_ITERATIONS', '8']
+    ['LAB_MAX_TOOL_ITERATIONS', '32']
   ],
   go: [
     ['LAB_TOOLS', 'all'],
     ['LAB_CONTEXT_CHARS', '80000'],
-    ['LAB_MAX_TOOL_ITERATIONS', '8'],
+    ['LAB_MAX_TOOL_ITERATIONS', '32'],
     ['LAB_BASE_URL', 'https://opencode.ai/zen/go/v1'],
     ['LAB_MODEL', 'deepseek-v4-flash']
   ]
@@ -82,10 +82,6 @@ export interface LabEnvConfig {
   defaultModel: string
   contextChars: number
   maxToolIterations: number
-  /** Consecutive read-only rounds before the "never answering" guard stops a
-   *  run. Real investigation legitimately reads a lot; only a model that never
-   *  acts is a problem. */
-  maxReadOnlyRounds: number
   /** Which tool schemas to advertise to the model each turn. `core` is a
    *  fraction of the schemas (search + edit + bash), which cuts prefill on
    *  small local models dramatically. */
@@ -118,16 +114,12 @@ export function envToolSet(): LabToolSet {
   return process.env.LAB_TOOLS?.trim().toLowerCase() === 'core' ? 'core' : 'all'
 }
 
-/** Cap on model rounds per user message. Small models flounder on tools, so a
- *  tight default keeps a degenerate run short instead of grinding. */
+/** Cap on tool-bearing model rounds per user message. Repeated-call detection
+ *  catches obvious loops earlier; this is the final bound for less obvious
+ *  cycles. After reaching it, the engine still asks for one tool-free reply. */
 export function envMaxToolIterations(): number {
   const parsed = Number.parseInt(process.env.LAB_MAX_TOOL_ITERATIONS ?? '', 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 8
-}
-
-export function envMaxReadOnlyRounds(): number {
-  const parsed = Number.parseInt(process.env.LAB_MAX_READ_ONLY_ROUNDS ?? '', 10)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 6
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 32
 }
 
 export function configFromEnv(): LabEnvConfig {
@@ -138,7 +130,6 @@ export function configFromEnv(): LabEnvConfig {
     defaultModel: envDefaultModel(),
     contextChars: envContextChars(),
     maxToolIterations: envMaxToolIterations(),
-    maxReadOnlyRounds: envMaxReadOnlyRounds(),
     tools: envToolSet()
   }
 }
