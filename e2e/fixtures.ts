@@ -5,7 +5,7 @@ import { test as base, expect, type Page } from '@playwright/test'
 import { _electron as electron, type ElectronApplication } from 'playwright'
 
 export interface E2ECall {
-  channel: 'api' | 'backend' | 'git'
+  channel: 'api' | 'backend' | 'git' | 'export'
   request?: Record<string, unknown>
   args?: string[]
 }
@@ -16,6 +16,9 @@ interface E2EControl {
   defaults(): Promise<Record<string, Record<string, unknown>>>
   clipboardWrites(): Promise<string[]>
   resetCalls(): Promise<void>
+  failNextExport(message: string): Promise<void>
+  holdNextPin(): Promise<void>
+  releasePin(): Promise<void>
   holdGit(command: string): Promise<void>
   releaseGit(command: string): Promise<void>
   failNextBackendRequest(type: string, message: string): Promise<void>
@@ -31,6 +34,12 @@ export async function control(page: Page): Promise<E2EControl> {
     defaults: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.defaults()),
     clipboardWrites: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.clipboardWrites()),
     resetCalls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.resetCalls()),
+    failNextExport: (message) => page.evaluate(
+      (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.failNextExport(value),
+      message
+    ),
+    holdNextPin: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.holdNextPin()),
+    releasePin: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.releasePin()),
     holdGit: (command) => page.evaluate((value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.holdGit(value), command),
     releaseGit: (command) => page.evaluate((value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.releaseGit(value), command),
     failNextBackendRequest: (type, message) => page.evaluate(
