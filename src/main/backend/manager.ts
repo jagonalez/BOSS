@@ -294,6 +294,7 @@ export class BackendManager {
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
   private remote?: { handle(request: BackendRequest): Promise<unknown> }
+  private telegram?: { handle(request: BackendRequest): Promise<unknown> }
   private binaryOverrides?: BinaryOverrides
   private defaultModels?: Partial<Record<BackendId, BackendModelPreference>>
   private threadTitleSettings: ThreadTitleSettings = { ...DEFAULT_THREAD_TITLE_SETTINGS }
@@ -894,6 +895,10 @@ export class BackendManager {
 
   attachRemote(remote: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.remote = remote
+  }
+
+  attachTelegram(telegram: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.telegram = telegram
   }
 
   attachBinaryOverrides(overrides: BinaryOverrides): void {
@@ -2559,6 +2564,10 @@ export class BackendManager {
       if (!this.mobile) throw new Error('Mobile access is not available.')
       return this.mobile.handle(request)
     }
+    if (request.type.startsWith('telegram.')) {
+      if (!this.telegram) throw new Error('Telegram messaging is not available.')
+      return this.telegram.handle(request)
+    }
     if (request.type.startsWith('remote.')) {
       if (!this.remote) throw new Error('Remote access is not available.')
       return this.remote.handle(request)
@@ -2616,7 +2625,15 @@ export class BackendManager {
       }
       case 'thread.diff': {
         const binding = this.binding(request.threadId)
-        return (await this.ensureStarted(binding.backendId)).diffGet(binding.nativeSessionId, request.messageId)
+        const diffs = await (await this.ensureStarted(binding.backendId))
+          .diffGet(binding.nativeSessionId, request.messageId)
+        if (request.summary) {
+          // Paths and counts only. The desktop never asks for this; a phone
+          // must, because the full reply does not fit in one relay frame.
+          return diffs.map(({ content: _c, original: _o, after: _a, before: _b, ...rest }) => rest)
+        }
+        if (request.path) return diffs.filter((diff) => diff.path === request.path)
+        return diffs
       }
       case 'thread.fork': return this.fork(request.threadId, request.messageId)
       case 'thread.revert': {

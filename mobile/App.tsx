@@ -8,7 +8,10 @@ import { PairScreen } from './src/PairScreen'
 import { ThreadsScreen, type ThreadRow } from './src/ThreadsScreen'
 import { ProjectsScreen } from './src/ProjectsScreen'
 import { NewThreadScreen, type BackendOption, type ModelOption } from './src/NewThreadScreen'
+import { DelegateScreen } from './src/DelegateScreen'
 import { groupByProject, visibleThreads } from './src/parts'
+import { AutomationsScreen, type AutomationRow, type AutomationRunRow } from './src/AutomationsScreen'
+import { WorkScreen, type DiffFile, type Todo } from './src/WorkScreen'
 import { ThreadScreen, type PendingPermission, type ThreadMessage } from './src/ThreadScreen'
 import { RelayConnection, clearCredentials, loadCredentials, type RelayCredentials } from './src/relay'
 import { theme } from './src/theme'
@@ -38,6 +41,8 @@ export default function App(): React.JSX.Element {
   // Which project's threads are open. null means the project list itself.
   const [openProject, setOpenProject] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
+  /** The thread being delegated from, while its options are being chosen. */
+  const [delegating, setDelegating] = useState<string | null>(null)
   const [backends, setBackends] = useState<BackendOption[]>([])
   const [models, setModels] = useState<ModelOption[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
@@ -45,11 +50,26 @@ export default function App(): React.JSX.Element {
   // Thinking level is not stored on a thread — it rides on each message — so
   // this is what the next send will ask for.
   const [threadVariants, setThreadVariants] = useState<Record<string, string | undefined>>({})
+  const [tab, setTab] = useState<'work' | 'automations'>('work')
+  const [automations, setAutomations] = useState<AutomationRow[]>([])
+  const [runs, setRuns] = useState<AutomationRunRow[]>([])
+  const [automationBusy, setAutomationBusy] = useState<Record<string, boolean>>({})
+  // The plan-and-changes panel for the open thread.
+  const [showWork, setShowWork] = useState(false)
+  const [todos, setTodos] = useState<Todo[]>([])
+  const [diffFiles, setDiffFiles] = useState<DiffFile[]>([])
+  const [openFile, setOpenFile] = useState<string | undefined>()
+  const [fileBody, setFileBody] = useState<DiffFile | undefined>()
+  const [loadingWork, setLoadingWork] = useState(false)
+  const [loadingFile, setLoadingFile] = useState(false)
 
   const relay = useRef<RelayConnection | null>(null)
   // Read inside callbacks that outlive a render, so they never see a stale id.
   const openRef = useRef<string | null>(null)
   openRef.current = openThread
+  // Read inside the event handler, which outlives the render that set it.
+  const workRef = useRef(false)
+  workRef.current = showWork
 
   const refreshThreads = useCallback(async () => {
     const connection = relay.current
@@ -111,6 +131,92 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
+  /**
+   * Refetch a thread's messages soon, and once, however many events arrive.
+   *
+   * The desktop sends an event per streaming token. Refetching on each one
+   * meant dozens of full 60-message loads a second, all but the last of them
+   * discarded before anyone could read them.
+   */
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const queueMessages = useCallback((threadId: string) => {
+    if (messageTimer.current) return
+    messageTimer.current = setTimeout(() => {
+      messageTimer.current = null
+      void refreshMessages(threadId)
+    }, 250)
+  }, [refreshMessages])
+  const refreshAutomations = useCallback(async () => {
+    const connection = relay.current
+    if (!connection) return
+    try {
+      const snapshot = await connection.request<{
+        automations?: AutomationRow[]
+        runs?: AutomationRunRow[]
+      }>({ type: 'automation.list' })
+      setAutomations(snapshot?.automations ?? [])
+      setRuns(snapshot?.runs ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  /** Run or stop an automation, holding the button until the desktop answers. */
+  const commandAutomation = useCallback(async (id: string, action: 'run' | 'stop') => {
+    const connection = relay.current
+    if (!connection) return
+    setAutomationBusy((prev) => ({ ...prev, [id]: true }))
+    try {
+      await connection.request({
+        type: action === 'run' ? 'automation.run' : 'automation.stop',
+        automationId: id
+      })
+      await refreshAutomations()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAutomationBusy((prev) => ({ ...prev, [id]: false }))
+    }
+  }, [refreshAutomations])
+
+  /** The agent's plan, and which files it has changed so far. */
+  const loadWork = useCallback(async (threadId: string) => {
+    const connection = relay.current
+    if (!connection) return
+    setLoadingWork(true)
+    try {
+      const [plan, changes] = await Promise.all([
+        connection.request<Todo[]>({ type: 'thread.todos', threadId }),
+        // summary: paths and counts only. The full reply carries every changed
+        // file's contents and does not fit in one relay frame.
+        connection.request<DiffFile[]>({ type: 'thread.diff', threadId, summary: true })
+      ])
+      setTodos(plan ?? [])
+      setDiffFiles(changes ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingWork(false)
+    }
+  }, [])
+
+  /** One file's contents, fetched only when it is opened. */
+  const loadFile = useCallback(async (threadId: string, path: string) => {
+    const connection = relay.current
+    if (!connection) return
+    setOpenFile(path)
+    setFileBody(undefined)
+    setLoadingFile(true)
+    try {
+      const found = await connection.request<DiffFile[]>({ type: 'thread.diff', threadId, path })
+      setFileBody(found?.[0])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingFile(false)
+    }
+  }, [])
+
   /** One event handler for both the live stream and a resume replay. */
   const applyEvent = useCallback((event: Record<string, unknown>) => {
     const props = (event.properties ?? {}) as Record<string, never>
@@ -136,9 +242,17 @@ export default function App(): React.JSX.Element {
         return next
       })
     }
+    if (type === 'automations.updated') void refreshAutomations()
     if (type.startsWith('session.')) void refreshThreads()
-    if (type.startsWith('message.') && sid && sid === openRef.current) void refreshMessages(sid)
-  }, [refreshMessages, refreshThreads])
+    // Coalesce. A streaming run emits a message event per token, and each one
+    // used to refetch all 60 messages and replace the list — every row
+    // re-rendering many times a second, which is what made the text jitter.
+    // One refetch per burst shows the same result at a fraction of the work.
+    if (type.startsWith('message.') && sid && sid === openRef.current) queueMessages(sid)
+    // The plan changes as the agent works, so a panel left open should follow
+    // it. Guarded on the panel being open: nobody is watching otherwise.
+    if (type === 'session.idle' && sid && sid === openRef.current && workRef.current) void loadWork(sid)
+  }, [loadWork, queueMessages, refreshAutomations, refreshThreads])
 
   // Start the connection once, from whatever is in the Keychain.
   useEffect(() => {
@@ -166,6 +280,7 @@ export default function App(): React.JSX.Element {
         // Backends describe each thread's available modes, so the thread
         // screen needs them too — not just the compose screen.
         void loadBackends()
+        void refreshAutomations()
         void refreshThreads()
         if (openRef.current) void refreshMessages(openRef.current)
       }
@@ -189,8 +304,10 @@ export default function App(): React.JSX.Element {
     return () => {
       subscription.remove()
       connection.stop()
+      // A pending refetch must not fire into a torn-down screen.
+      if (messageTimer.current) clearTimeout(messageTimer.current)
     }
-  }, [applyEvent, loadBackends, refreshMessages, refreshThreads])
+  }, [applyEvent, loadBackends, refreshAutomations, refreshMessages, refreshThreads])
 
   /**
    * Start a thread and send its first message.
@@ -238,6 +355,54 @@ export default function App(): React.JSX.Element {
     }
   }, [openProject, refreshMessages, refreshThreads])
 
+  /**
+   * Delegate to a new worker thread, then open it.
+   *
+   * One request, unlike createThread: the desktop's delegate builds the context
+   * packet and sends the first message itself, so the options ride along with
+   * the delegation rather than following it. Opening the worker is the point —
+   * on a phone there is no second pane to watch it in.
+   */
+  const startDelegate = useCallback(async (from: string, input: {
+    backendId: string
+    instruction: string
+    placement: 'same-checkout' | 'new-worktree'
+    model?: { modelID: string; providerID: string; variant?: string }
+    mode?: string
+  }) => {
+    const connection = relay.current
+    if (!connection) return
+    setSending(true)
+    try {
+      const created = await connection.request<{ id?: string }>({
+        type: 'thread.delegate',
+        threadId: from,
+        backendId: input.backendId,
+        instruction: input.instruction,
+        placement: input.placement,
+        options: {
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.mode ? { mode: input.mode } : {})
+        }
+      })
+      setDelegating(null)
+      setError(undefined)
+      const id = created?.id
+      // A delegate with no id still ran on the desktop; the list will show it.
+      if (id) {
+        setOpenThread(id)
+        await refreshThreads()
+        await refreshMessages(id)
+      } else {
+        await refreshThreads()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSending(false)
+    }
+  }, [refreshMessages, refreshThreads])
+
   if (!loaded) return <View style={styles.fill} />
 
   if (!credentials?.token) {
@@ -255,6 +420,30 @@ export default function App(): React.JSX.Element {
     )
   }
 
+  // Before the thread branch: choosing how to delegate replaces the thread it
+  // was started from, the way composing replaces the list.
+  if (delegating) {
+    const from = threads.find((t) => t.threadId === delegating)
+    return (
+      <SafeAreaView style={styles.fill}>
+        <StatusBar barStyle="light-content" />
+        <DelegateScreen
+          source={from?.title || 'Untitled thread'}
+          sourceBackendId={from?.backendId}
+          backends={backends}
+          models={models}
+          loadingModels={loadingModels}
+          sending={sending}
+          error={error}
+          canWorktree={Boolean(from?.projectPath)}
+          onPickBackend={(id) => void loadModels(id)}
+          onCancel={() => { setDelegating(null); setError(undefined) }}
+          onDelegate={(input) => void startDelegate(delegating, input)}
+        />
+      </SafeAreaView>
+    )
+  }
+
   const threadId = openThread
   if (threadId) {
     const title = threads.find((t) => t.threadId === threadId)?.title ?? 'Thread'
@@ -262,11 +451,36 @@ export default function App(): React.JSX.Element {
       <SafeAreaView style={styles.fill}>
         <StatusBar barStyle="light-content" />
         <View style={styles.header}>
-          <Pressable onPress={() => setOpenThread(null)}>
-            <Text style={styles.back}>‹ Threads</Text>
+          <Pressable onPress={() => (showWork ? setShowWork(false) : setOpenThread(null))}>
+            <Text style={styles.back}>{showWork ? '‹ Chat' : '‹ Threads'}</Text>
           </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+          <Pressable
+            onPress={() => {
+              const next = !showWork
+              setShowWork(next)
+              setOpenFile(undefined)
+              if (next) void loadWork(threadId)
+            }}
+            hitSlop={8}
+          >
+            <Text style={[styles.back, showWork && styles.backOn]}>
+              {diffFiles.length ? `Work · ${diffFiles.length}` : 'Work'}
+            </Text>
+          </Pressable>
         </View>
+        {showWork ? (
+          <WorkScreen
+            todos={todos}
+            files={diffFiles}
+            openFile={openFile}
+            fileBody={fileBody}
+            loading={loadingWork}
+            loadingFile={loadingFile}
+            onOpenFile={(path) => void loadFile(threadId, path)}
+            onCloseFile={() => { setOpenFile(undefined); setFileBody(undefined) }}
+          />
+        ) : (
         <ThreadScreen
           messages={messages[threadId] ?? []}
           busy={Boolean(busy[threadId])}
@@ -278,17 +492,12 @@ export default function App(): React.JSX.Element {
           variant={threadVariants[threadId]}
           onVariant={(next) => setThreadVariants((prev) => ({ ...prev, [threadId]: next }))}
           onDelegate={() => {
-            const instruction = 'Continue this work in a separate thread.'
-            void relay.current
-              ?.request({
-                type: 'thread.delegate',
-                threadId,
-                backendId: threads.find((t) => t.threadId === threadId)?.backendId ?? 'opencode',
-                instruction,
-                placement: 'new-worktree'
-              })
-              .then(() => refreshThreads())
-              .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+            // Only opens the options. Delegating creates a thread, a branch,
+            // and a running agent, which is too much for one unconfirmed tap.
+            setError(undefined)
+            setDelegating(threadId)
+            const backendId = threads.find((t) => t.threadId === threadId)?.backendId
+            if (backendId) void loadModels(backendId)
           }}
           onMode={(next) => {
             // Optimistic: the desktop has no event for a mode change, so the
@@ -332,6 +541,7 @@ export default function App(): React.JSX.Element {
             }).catch((e) => setError(e instanceof Error ? e.message : String(e)))
           }}
         />
+        )}
       </SafeAreaView>
     )
   }
@@ -359,6 +569,60 @@ export default function App(): React.JSX.Element {
 
   // Inside a project: its threads. Otherwise the project list.
   const project = openProject === null ? null : projects.find((p) => p.path === openProject)
+
+  const tabs = (
+    <View style={styles.tabs}>
+      <Pressable
+        style={styles.tab}
+        onPress={() => setTab('work')}
+      >
+        <Text style={[styles.tabText, tab === 'work' && styles.tabTextOn]}>Work</Text>
+      </Pressable>
+      <Pressable
+        style={styles.tab}
+        onPress={() => {
+          setTab('automations')
+          void refreshAutomations()
+        }}
+      >
+        <Text style={[styles.tabText, tab === 'automations' && styles.tabTextOn]}>Automations</Text>
+      </Pressable>
+    </View>
+  )
+
+  if (tab === 'automations') {
+    return (
+      <SafeAreaView style={styles.fill}>
+        <StatusBar barStyle="light-content" />
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Automations</Text>
+          <View style={[styles.statusDot, connected && desktopOnline && styles.statusOk]} />
+        </View>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <AutomationsScreen
+          automations={automations}
+          runs={runs}
+          offline={!desktopOnline}
+          refreshing={refreshing}
+          busy={automationBusy}
+          onRefresh={() => {
+            setRefreshing(true)
+            void refreshAutomations().finally(() => setRefreshing(false))
+          }}
+          onRun={(id) => void commandAutomation(id, 'run')}
+          onStop={(id) => void commandAutomation(id, 'stop')}
+          onOpenThread={(id) => {
+            // Jump straight to the run's thread; the Work tab is where
+            // transcripts live.
+            setTab('work')
+            setOpenThread(id)
+            void refreshMessages(id)
+          }}
+        />
+        {tabs}
+      </SafeAreaView>
+    )
+  }
 
   return (
     <SafeAreaView style={styles.fill}>
@@ -418,11 +682,22 @@ export default function App(): React.JSX.Element {
           }}
         />
       )}
+      {tabs}
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
+  tabs: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.line,
+    paddingTop: 6,
+    paddingBottom: 2
+  },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 8 },
+  tabText: { color: theme.faint, fontSize: 13, fontWeight: '600' },
+  tabTextOn: { color: theme.accent },
   fill: { flex: 1, backgroundColor: theme.bg },
   header: {
     flexDirection: 'row',
@@ -434,6 +709,7 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.line
   },
   headerTitle: { color: theme.text, fontSize: 15, fontWeight: '600', flex: 1 },
+  backOn: { color: theme.accent, fontWeight: '700' },
   back: { color: theme.accent, fontSize: 15 },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.faint },
   statusOk: { backgroundColor: theme.green },

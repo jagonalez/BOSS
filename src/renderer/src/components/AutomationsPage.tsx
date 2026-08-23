@@ -1,12 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import type { Automation, AutomationInput, AutomationNotifyMode, AutomationRun } from '@shared/automation'
+import type { Automation, AutomationInput, AutomationNotifyMode, AutomationRun, AutomationWebhookEvent, AutomationWebhookTrigger } from '@shared/automation'
 import { AUTOMATION_DEFAULTS } from '@shared/automation'
+import { AUTOMATION_WEBHOOK_EVENTS } from '@shared/automation-trigger'
 import type { BackendId, BackendModeId } from '@shared/backend'
 import { OpenCode } from '../lib/opencode'
 import { refreshAutomations, refreshBackendModels, selectSession } from '../lib/actions'
 import { ChatIcon, ChevronIcon, PlusIcon, ReloadIcon, RenameIcon, SendIcon, StopIcon, TrashIcon } from './icons'
 import { ModelSelect } from './ModelSelect'
+
+const WEBHOOK_EVENT_LABELS: Record<AutomationWebhookEvent, string> = {
+  push: 'Push',
+  pull_request: 'Pull request opened'
+}
+
+function webhookTriggerLabel(trigger: AutomationWebhookTrigger): string {
+  if (!trigger.events.length) return 'Any GitHub event'
+  return trigger.events.map((event) => WEBHOOK_EVENT_LABELS[event]).join(', ')
+}
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts
@@ -66,6 +77,7 @@ function scheduleFromDraft(draft: ScheduleDraft): { kind: 'cron' | 'manual'; exp
 }
 
 function scheduleLabel(automation: Automation): string {
+  if (automation.webhook) return `GitHub webhook · ${webhookTriggerLabel(automation.webhook)}${automation.webhook.branch ? ` → ${automation.webhook.branch}` : ''}`
   if (automation.schedule.kind === 'manual') return 'Manual only'
   const draft = draftFromExpression(automation.schedule.expression, 'cron')
   switch (draft.preset) {
@@ -85,7 +97,10 @@ interface EditorState {
   backendId: BackendId
   modelKey: string
   mode: BackendModeId
+  triggerKind: 'schedule' | 'github'
   schedule: ScheduleDraft
+  webhookEvents: AutomationWebhookEvent[]
+  webhookBranch: string
   workspace: 'worktree' | 'project'
   overlapPolicy: 'skip' | 'queue'
   catchUp: boolean
@@ -102,7 +117,10 @@ function emptyEditor(projectPath: string, backendId: BackendId): EditorState {
     backendId,
     modelKey: '',
     mode: AUTOMATION_DEFAULTS.mode,
+    triggerKind: 'schedule',
     schedule: { preset: 'daily', time: '09:00', weekday: 1, cron: '0 9 * * *' },
+    webhookEvents: ['push'],
+    webhookBranch: '',
     workspace: 'worktree',
     overlapPolicy: AUTOMATION_DEFAULTS.overlapPolicy,
     catchUp: AUTOMATION_DEFAULTS.catchUp,
@@ -121,7 +139,10 @@ function editorFromAutomation(automation: Automation): EditorState {
     backendId: automation.backendId,
     modelKey: automation.model ? `${automation.model.providerID}/${automation.model.modelID}` : '',
     mode: automation.mode,
+    triggerKind: automation.webhook ? 'github' : 'schedule',
     schedule: draftFromExpression(automation.schedule.expression, automation.schedule.kind),
+    webhookEvents: automation.webhook ? [...automation.webhook.events] : ['push'],
+    webhookBranch: automation.webhook?.branch ?? '',
     workspace: automation.workspace === 'none' ? 'worktree' : automation.workspace,
     overlapPolicy: automation.overlapPolicy,
     catchUp: automation.catchUp,
@@ -163,6 +184,8 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
   const [draft, setDraft] = useState(editor)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [hookUrl, setHookUrl] = useState('')
+  const [hookVersion, setHookVersion] = useState(0)
 
   const patch = (partial: Partial<EditorState>): void => setDraft((current) => ({ ...current, ...partial }))
   const backend = backends.find((item) => item.id === draft.backendId)
@@ -178,12 +201,40 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
     return [...paths]
   }, [projects, projectPath, draft.projectPath])
 
+  useEffect(() => {
+    if (!draft.id || draft.triggerKind !== 'github') {
+      setHookUrl('')
+      return
+    }
+    let cancelled = false
+    OpenCode.automationWebhookToken(draft.id)
+      .then((hook) => {
+        if (!cancelled) setHookUrl(hook.url)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [draft.id, draft.triggerKind, hookVersion])
+
+  const toggleWebhookEvent = (event: AutomationWebhookEvent): void => {
+    const active = draft.webhookEvents.includes(event)
+    patch({ webhookEvents: active ? draft.webhookEvents.filter((item) => item !== event) : [...draft.webhookEvents, event] })
+  }
+
   const save = async (): Promise<void> => {
     setSaving(true)
     setError(null)
     const model = draft.modelKey
       ? { providerID: draft.modelKey.split('/')[0], modelID: draft.modelKey.split('/').slice(1).join('/') }
       : undefined
+    const github = draft.triggerKind === 'github'
+    const webhook: AutomationInput['webhook'] = github
+      ? {
+          events: draft.webhookEvents,
+          ...(draft.webhookBranch.trim() ? { branch: draft.webhookBranch.trim() } : {})
+        }
+      : null
     const input: AutomationInput = {
       name: draft.name,
       prompt: draft.prompt,
@@ -191,7 +242,8 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
       backendId: draft.backendId,
       model,
       mode: draft.mode,
-      schedule: scheduleFromDraft(draft.schedule),
+      schedule: github ? { kind: 'manual' } : scheduleFromDraft(draft.schedule),
+      webhook,
       workspace: draft.projectPath ? draft.workspace : 'none',
       overlapPolicy: draft.overlapPolicy,
       catchUp: draft.catchUp,
@@ -200,10 +252,18 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
       keepRuns: draft.keepRuns
     }
     try {
-      if (draft.id) await OpenCode.updateAutomation(draft.id, input)
-      else await OpenCode.createAutomation(input)
+      if (github && !draft.webhookEvents.length) throw new Error('Pick at least one GitHub event to fire this automation.')
+      const saved = draft.id
+        ? await OpenCode.updateAutomation(draft.id, input)
+        : await OpenCode.createAutomation(input)
       await refreshAutomations()
-      onClose()
+      if (github) {
+        // Stay open so the freshly generated URL can be copied into GitHub.
+        patch({ id: saved.id })
+        setHookVersion((value) => value + 1)
+      } else {
+        onClose()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -290,10 +350,72 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
         <div className="automation-hint">Runs are unattended. "{backend?.modes.find((m) => m.id === draft.mode)?.label}" mode can stall or block the run; prefer an automatic mode.</div>
       ) : null}
       <label className="settings-row">
+        <span className="settings-row-label">Trigger</span>
+        <select
+          className="settings-select"
+          value={draft.triggerKind}
+          onChange={(e) => patch({ triggerKind: e.target.value as EditorState['triggerKind'] })}
+        >
+          <option value="schedule">Schedule or manual</option>
+          <option value="github">GitHub webhook</option>
+        </select>
+      </label>
+      {draft.triggerKind === 'github' ? (
+        <>
+          <div className="settings-row">
+            <span className="settings-row-label">Fire on</span>
+            <div className="automation-webhook-events">
+              {AUTOMATION_WEBHOOK_EVENTS.map((event) => (
+                <label key={event} className="settings-check">
+                  <input
+                    type="checkbox"
+                    checked={draft.webhookEvents.includes(event)}
+                    onChange={() => toggleWebhookEvent(event)}
+                  />
+                  <span>{WEBHOOK_EVENT_LABELS[event]}</span>
+                </label>
+              ))}
+              {draft.webhookEvents.length === 0 ? (
+                <div className="automation-hint">With nothing checked, every supported event fires the run.</div>
+              ) : null}
+            </div>
+          </div>
+          <label className="settings-row">
+            <span className="settings-row-label">Branch filter</span>
+            <input
+              className="settings-input"
+              value={draft.webhookBranch}
+              placeholder="Any branch (or name one, e.g. main)"
+              onChange={(e) => patch({ webhookBranch: e.target.value })}
+            />
+          </label>
+          {hookUrl ? (
+            <div className="settings-row" aria-label="Webhook URL">
+              <span className="settings-row-label">Webhook URL</span>
+              <code className="automation-hook-url">{hookUrl}</code>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => window.boss.clipboardWrite(hookUrl)}
+                title="Copy the webhook URL for this automation"
+              >
+                Copy
+              </button>
+            </div>
+          ) : (
+            <div className="automation-hint">Save the automation to generate its secret webhook URL, then add it in GitHub → Settings → Webhooks.</div>
+          )}
+          <div className="automation-hint">
+            The prompt can use delivery variables like {'{{event}}'}, {'{{branch}}'}, {'{{pr_title}}'} — they are filled from each GitHub payload.
+          </div>
+        </>
+      ) : null}
+      <label className="settings-row">
         <span className="settings-row-label">Schedule</span>
         <select
           className="settings-select"
           value={draft.schedule.preset}
+          disabled={draft.triggerKind === 'github'}
           onChange={(e) => patch({ schedule: { ...draft.schedule, preset: e.target.value as SchedulePreset } })}
         >
           <option value="manual">Manual only</option>
@@ -304,7 +426,7 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
           <option value="custom">Custom cron</option>
         </select>
       </label>
-      {draft.schedule.preset === 'weekly' ? (
+      {draft.triggerKind !== 'github' && draft.schedule.preset === 'weekly' ? (
         <label className="settings-row">
           <span className="settings-row-label">Day</span>
           <select
@@ -316,7 +438,7 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
           </select>
         </label>
       ) : null}
-      {['daily', 'weekdays', 'weekly'].includes(draft.schedule.preset) ? (
+      {draft.triggerKind !== 'github' && ['daily', 'weekdays', 'weekly'].includes(draft.schedule.preset) ? (
         <label className="settings-row">
           <span className="settings-row-label">Time</span>
           <input
@@ -327,7 +449,7 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
           />
         </label>
       ) : null}
-      {draft.schedule.preset === 'custom' ? (
+      {draft.triggerKind !== 'github' && draft.schedule.preset === 'custom' ? (
         <label className="settings-row">
           <span className="settings-row-label">Cron</span>
           <input
@@ -407,13 +529,17 @@ function AutomationCard({
   onEdit: () => void
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
   const running = runs.some((run) => run.status === 'running')
   const lastRun = runs[0]
   const statusLine = [
     running ? 'Running now' : automation.enabled
-      ? automation.nextRunAt ? `Next run ${new Date(automation.nextRunAt).toLocaleString()}` : scheduleLabel(automation)
+      ? automation.webhook
+        ? scheduleLabel(automation)
+        : automation.nextRunAt ? `Next run ${new Date(automation.nextRunAt).toLocaleString()}` : scheduleLabel(automation)
       : 'Paused',
-    automation.missedRuns > 0 ? `${automation.missedRuns} missed` : ''
+    automation.missedRuns > 0 ? `${automation.missedRuns} missed` : '',
+    automation.lastWebhookAt ? `Webhook ${timeAgo(automation.lastWebhookAt)}` : ''
   ].filter(Boolean).join(' · ')
 
   const act = async (action: () => Promise<unknown>): Promise<void> => {
@@ -425,6 +551,14 @@ function AutomationCard({
     await refreshAutomations()
   }
 
+  const copyHookUrl = async (): Promise<void> => {
+    const hook = await OpenCode.automationWebhookToken(automation.id)
+    if (!hook.url) throw new Error('The webhook endpoint is not running.')
+    window.boss.clipboardWrite(hook.url)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1_500)
+  }
+
   return (
     <div className={`site-card automation-card${running ? ' running' : ''}`}>
       <div className="site-card-head">
@@ -432,6 +566,9 @@ function AutomationCard({
         <div className="command-session-main">
           <strong>{automation.name}</strong>
           <small>{automation.projectPath || 'Global'} · {scheduleLabel(automation)}</small>
+          {automation.lastWebhookAt ? (
+            <small>Last webhook: {automation.lastWebhookLabel ?? 'unknown event'} · {timeAgo(automation.lastWebhookAt)}</small>
+          ) : null}
         </div>
         {running ? <span className="site-badge automation-badge status-running">Running</span> : null}
         {!automation.enabled ? <span className="site-badge">Paused</span> : null}
@@ -483,6 +620,15 @@ function AutomationCard({
           {automation.enabled ? 'Pause' : 'Resume'}
         </button>
         <button className="btn-ghost" onClick={onEdit}><RenameIcon size={13} /> Edit</button>
+        {automation.webhook ? (
+          <button
+            className="btn-ghost"
+            title="Copy this automation's webhook URL"
+            onClick={() => void act(copyHookUrl)}
+          >
+            <SendIcon size={13} /> {copied ? 'Copied' : 'Copy URL'}
+          </button>
+        ) : null}
         <button className="btn-ghost" onClick={() => setExpanded((value) => !value)}>
           <ChevronIcon size={13} /> {expanded ? 'Hide runs' : `Runs (${runs.length})`}
         </button>

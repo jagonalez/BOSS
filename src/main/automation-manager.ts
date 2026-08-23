@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type {
@@ -13,6 +13,14 @@ import { AUTOMATION_DEFAULTS } from '../shared/automation'
 import type { BackendRequest } from '../shared/backend'
 import type { FileDiff, MessageWithParts } from '../shared/opencode'
 import { extractSummary } from '../shared/thread-result'
+import {
+  describeWebhookDelivery,
+  githubPayloadVariables,
+  isWebhookEvent,
+  parseGitHubDelivery,
+  templatePrompt,
+  webhookTriggerMatches
+} from '../shared/automation-trigger'
 import type { NotificationRouter } from './notification-router'
 import type { WebhookSettings } from '../shared/notification'
 import type { WorktreeInfo } from '../shared/worktree'
@@ -27,6 +35,9 @@ interface AutomationState {
   notifyWebhookUrl?: string
   /** Absent means on: a push is for reaching you away from BOSS. */
   notifyWebhookOnlyWhenAway?: boolean
+  /** Per-automation hook secrets, kept out of snapshots so phones and the
+   *  relay never see them. */
+  webhookTokens?: Record<string, string>
 }
 
 interface RunState {
@@ -54,7 +65,7 @@ interface AutomationManagerOptions {
 const TICK_MS = 30_000
 const PERMISSION_GRACE_MS = 2_500
 
-function runHeader(automation: Automation): string {
+function runHeader(automation: Automation, promptVars?: Record<string, string>): string {
   return [
     '[BOSS AUTOMATION RUN]',
     `Automation: ${automation.name}`,
@@ -62,8 +73,18 @@ function runHeader(automation: Automation): string {
     'End your final message with exactly one line in this form:',
     'SUMMARY: <one sentence on what you did and what changed>',
     '',
-    automation.prompt
+    promptVars ? templatePrompt(automation.prompt, promptVars) : automation.prompt
   ].join('\n')
+}
+
+/** What a webhook delivery did to the automation. */
+export type WebhookDeliveryResult = 'started' | 'queued' | 'skipped'
+
+/** Carries the HTTP status the hook endpoint should answer with. */
+export class WebhookDeliveryError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+  }
 }
 
 export class AutomationManager {
@@ -71,6 +92,8 @@ export class AutomationManager {
   private automations: Automation[] = []
   private notifyWebhookUrl = ''
   private notifyWebhookOnlyWhenAway = true
+  private webhookTokens: Record<string, string> = {}
+  private hookUrl?: (automationId: string, token: string) => string
   private notifications?: NotificationRouter
   private runs: AutomationRun[] = []
   private readonly active = new Map<string, ActiveRun>()
@@ -92,6 +115,11 @@ export class AutomationManager {
         this.automations = parsed.automations
         this.notifyWebhookUrl = typeof parsed.notifyWebhookUrl === 'string' ? parsed.notifyWebhookUrl : ''
         this.notifyWebhookOnlyWhenAway = parsed.notifyWebhookOnlyWhenAway !== false
+        if (parsed.webhookTokens && typeof parsed.webhookTokens === 'object') {
+          this.webhookTokens = Object.fromEntries(
+            Object.entries(parsed.webhookTokens).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1]))
+          )
+        }
         // Load may finish after the router is attached, so re-apply here.
         this.applyWebhook()
       }
@@ -151,11 +179,18 @@ export class AutomationManager {
       version: 1,
       automations: this.automations,
       ...(this.notifyWebhookUrl ? { notifyWebhookUrl: this.notifyWebhookUrl } : {}),
-      ...(this.notifyWebhookOnlyWhenAway ? {} : { notifyWebhookOnlyWhenAway: false })
+      ...(this.notifyWebhookOnlyWhenAway ? {} : { notifyWebhookOnlyWhenAway: false }),
+      ...(Object.keys(this.webhookTokens).length ? { webhookTokens: this.webhookTokens } : {})
     }
     const runState: RunState = { version: 1, runs: this.runs }
     await writeFile(this.options.stateFile, JSON.stringify(state, null, 2))
     await writeFile(this.options.runsFile, JSON.stringify(runState, null, 2))
+  }
+
+  /** Lets the hook endpoint hand the manager its public base URL so the
+   *  renderer can copy a ready-to-paste webhook address. */
+  setHookUrl(build: (automationId: string, token: string) => string): void {
+    this.hookUrl = build
   }
 
   snapshot(): AutomationsSnapshot {
@@ -245,6 +280,12 @@ export class AutomationManager {
       const error = cronError(input.schedule.expression ?? '')
       if (error) throw new Error(error)
     }
+    let webhook: AutomationInput['webhook']
+    if (input.webhook) {
+      const events = (Array.isArray(input.webhook.events) ? input.webhook.events : []).filter(isWebhookEvent)
+      const branch = typeof input.webhook.branch === 'string' ? input.webhook.branch.trim() : ''
+      webhook = { events, ...(branch ? { branch } : {}) }
+    }
     const projectPath = input.projectPath.trim()
     const workspace = projectPath ? input.workspace : 'none'
     if (workspace === 'worktree' && !this.worktrees) throw new Error('Git worktrees are not available.')
@@ -253,9 +294,18 @@ export class AutomationManager {
       name,
       projectPath,
       workspace,
+      webhook,
       maxRunMinutes: Math.max(1, Math.min(24 * 60, Math.round(input.maxRunMinutes || AUTOMATION_DEFAULTS.maxRunMinutes))),
       keepRuns: Math.max(1, Math.min(500, Math.round(input.keepRuns || AUTOMATION_DEFAULTS.keepRuns)))
     }
+  }
+
+  private ensureWebhookToken(id: string): string {
+    const existing = this.webhookTokens[id]
+    if (existing) return existing
+    const token = randomBytes(24).toString('base64url')
+    this.webhookTokens[id] = token
+    return token
   }
 
   private automation(id: string): Automation {
@@ -279,6 +329,7 @@ export class AutomationManager {
       createdAt: timestamp,
       updatedAt: timestamp
     }
+    if (clean.webhook) this.ensureWebhookToken(automation.id)
     this.automations.push(automation)
     await this.persistAndEmit()
     return { ...automation }
@@ -289,9 +340,15 @@ export class AutomationManager {
     const automation = this.automation(id)
     const merged = this.normalizeInput({ ...automation, ...patch })
     Object.assign(automation, merged)
+    if (!merged.webhook) delete automation.webhook
     if (patch.enabled !== undefined) automation.enabled = patch.enabled
     automation.updatedAt = Date.now()
     automation.missedRuns = 0
+    if (automation.webhook) {
+      this.ensureWebhookToken(automation.id)
+    } else {
+      delete this.webhookTokens[automation.id]
+    }
     automation.nextRunAt = automation.enabled && automation.schedule.kind === 'cron' && automation.schedule.expression
       ? nextCronTime(automation.schedule.expression, Date.now()) ?? undefined
       : undefined
@@ -306,6 +363,7 @@ export class AutomationManager {
     if (active) await this.stopRun(automation.id).catch(() => {})
     this.automations = this.automations.filter((item) => item.id !== id)
     this.runs = this.runs.filter((run) => run.automationId !== id)
+    delete this.webhookTokens[id]
     await this.persistAndEmit()
   }
 
@@ -352,29 +410,69 @@ export class AutomationManager {
         this.applyWebhook()
         return this.webhookSettings()
       }
+      case 'automation.webhook.token': {
+        await this.load()
+        const automation = this.automation(request.automationId)
+        if (!automation.webhook) throw new Error('This automation has no GitHub webhook trigger.')
+        const token = this.ensureWebhookToken(automation.id)
+        return { token, url: this.hookUrl?.(automation.id, token) ?? '' }
+      }
       default: throw new Error(`Unsupported automation request: ${request.type}`)
     }
   }
 
-  private async startRun(automation: Automation, trigger: AutomationRunTrigger): Promise<void> {
+  /**
+   * Entry point for the hook endpoint. The token is compared constant-time;
+   * unknown ids and unknown tokens are indistinguishable to the caller.
+   * Overlap policy and the run budget apply exactly as they do to scheduled
+   * runs, because both go through startRun.
+   */
+  async deliverWebhook(
+    id: string,
+    token: string,
+    eventHeader: string | undefined,
+    body: unknown
+  ): Promise<WebhookDeliveryResult> {
+    await this.load()
+    const automation = this.automations.find((item) => item.id === id)
+    const stored = this.webhookTokens[id]
+    const given = Buffer.from(String(token))
+    const expected = Buffer.from(stored ?? '')
+    if (!stored || !automation || given.length !== expected.length || !timingSafeEqual(given, expected)) {
+      throw new WebhookDeliveryError('Unknown automation or token.', 404)
+    }
+    const delivery = parseGitHubDelivery(eventHeader, body)
+    if (!delivery) throw new WebhookDeliveryError('The payload must be a JSON object with a GitHub event header.', 400)
+    automation.lastWebhookAt = Date.now()
+    automation.lastWebhookLabel = describeWebhookDelivery(delivery)
+    await this.persistAndEmit()
+    if (!automation.enabled || !webhookTriggerMatches(automation.webhook, delivery)) return 'skipped'
+    return this.startRun(automation, 'webhook', githubPayloadVariables(delivery))
+  }
+
+  private async startRun(
+    automation: Automation,
+    trigger: AutomationRunTrigger,
+    promptVars?: Record<string, string>
+  ): Promise<WebhookDeliveryResult> {
     const existing = this.active.get(automation.id)
     if (existing) {
       if (automation.overlapPolicy === 'queue') {
         existing.queuedTrigger = trigger
-      } else {
-        this.runs.push({
-          id: randomUUID(),
-          automationId: automation.id,
-          trigger,
-          status: 'skipped',
-          error: 'The previous run was still active.',
-          changedFiles: 0,
-          startedAt: Date.now(),
-          finishedAt: Date.now()
-        })
-        await this.persistAndEmit()
+        return 'queued'
       }
-      return
+      this.runs.push({
+        id: randomUUID(),
+        automationId: automation.id,
+        trigger,
+        status: 'skipped',
+        error: 'The previous run was still active.',
+        changedFiles: 0,
+        startedAt: Date.now(),
+        finishedAt: Date.now()
+      })
+      await this.persistAndEmit()
+      return 'skipped'
     }
 
     const run: AutomationRun = {
@@ -426,7 +524,7 @@ export class AutomationManager {
       await this.backends.handle({
         type: 'thread.send',
         threadId: thread.id,
-        parts: [{ type: 'text', text: runHeader(automation) }],
+        parts: [{ type: 'text', text: runHeader(automation, promptVars) }],
         options: {
           mode: automation.mode,
           model: preference ? { providerID: preference.providerID, modelID: preference.modelID } : undefined,
@@ -439,10 +537,12 @@ export class AutomationManager {
       if (active.run.status === 'running' && active.sawIdle && !this.backends.isThreadBusy(thread.id)) {
         await this.finishRun(active, 'success')
       }
+      return 'started'
     } catch (error) {
       await this.finishRun(active, 'failure', {
         error: error instanceof Error ? error.message : String(error)
       })
+      return 'started'
     }
   }
 

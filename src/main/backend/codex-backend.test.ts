@@ -103,6 +103,19 @@ test('a reloaded turn reports every message the user sent, not just the first', 
   )
 })
 
+test('a Codex user image remains a renderable transcript part', () => {
+  const helperStart = source.indexOf('function userParts(')
+  assert.ok(helperStart > 0, 'expected user content to have a transcript adapter')
+  const helper = source.slice(helperStart, source.indexOf('\n}', helperStart))
+  assert.ok(helper.includes("type: 'file'"), 'an image should become the renderer\'s file part')
+  assert.ok(helper.includes('mime,') && helper.includes('url'), 'the file part must retain its data URL and MIME type')
+
+  const history = source.slice(source.indexOf('function turnMessages('), source.indexOf('export class CodexBackend'))
+  assert.ok(history.includes('parts: userParts(sessionId, id, user.content)'), 'history reloads must retain the image')
+  const live = source.slice(source.indexOf("case 'item/started':"), source.indexOf("case 'thread/name/updated':"))
+  assert.ok(live.includes('userParts(sessionId, messageId, item.content)'), 'live user events must retain the image')
+})
+
 test('a tool image becomes a content block rather than base64 in the text', () => {
   // Codex hands an image back as the data URL BOSS sent it. Returning
   // {text, images} put that URL somewhere neither the manager nor the renderer
