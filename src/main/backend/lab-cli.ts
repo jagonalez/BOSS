@@ -192,7 +192,7 @@ const HELP = [
   'Interactive commands: /new /sessions /models /model <id> /mode <m> /help /exit',
   '',
   '  Env: LAB_BASE_URL (default http://localhost:11434/v1), LAB_MODEL, LAB_API_KEY, LAB_CONTEXT_CHARS (default 20000),',
-  '       LAB_TOOLS=core (search+edit only, faster on small local models), LAB_MAX_TOOL_ITERATIONS (default 8)',
+  '       LAB_TOOLS=core (search+edit only, faster on small local models), LAB_MAX_TOOL_ITERATIONS (default 32)',
   '  LAB_PROFILE=local|cloud|go applies tier defaults (go = OpenCode Zen, DeepSeek V4 Flash).',
   '  Keys may live in ~/.lab/.env (LAB_API_KEY=..., LAB_PROFILE=...) instead of your shell profile.'
 ].join('\n')

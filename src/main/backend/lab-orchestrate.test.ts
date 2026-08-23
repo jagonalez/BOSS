@@ -410,9 +410,7 @@ test('the tool loop stops early when the model repeats the same call', async () 
     await fx.cleanup()
   }
 })
-test('the tool loop stops when the model only reads and never answers', async () => {
-  // The mock asks for a *different* read_file each round, so the repeat guard
-  // cannot fire; the read-only flounder guard must stop it.
+test('the tool loop permits useful investigation beyond six read-only rounds', async () => {
   let calls = 0
   const readNext = (res: ServerResponse): void => {
     calls += 1
@@ -420,19 +418,101 @@ test('the tool loop stops when the model only reads and never answers', async ()
     res.write(done())
     res.end()
   }
-  const fx = await fixture(Array.from({ length: 6 }, () => readNext))
+  const finalTurn = (res: ServerResponse): void => {
+    res.write(textChunk('I found the relevant code after reading seven files.'))
+    res.write(done())
+    res.end()
+  }
+  const fx = await fixture([...Array.from({ length: 7 }, () => readNext), finalTurn])
   try {
     const events: string[] = []
     fx.backend.onEvent((event) => {
       if (event.type === 'session.error') events.push(event.error)
     })
+    for (let index = 1; index <= 7; index++) writeFileSync(join(fx.cwd, `f${index}.txt`), `file ${index}`)
     await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'do something' }], { mode: 'auto' })
-    assert.ok(
-      events.some((error) => /only read files/.test(error)),
-      `expected a read-only-loop error, got: ${JSON.stringify(events)}`
-    )
+    assert.deepEqual(events, [])
+    assert.equal(fx.readStore().lastAssistantText(fx.sessionId), 'I found the relevant code after reading seven files.')
   } finally {
     await fx.cleanup()
+  }
+})
+
+test('the tool budget allows one final reply with tools disabled', async () => {
+  const originalMax = process.env.LAB_MAX_TOOL_ITERATIONS
+  process.env.LAB_MAX_TOOL_ITERATIONS = '2'
+  const bodies: Record<string, unknown>[] = []
+  const toolTurn = (id: string, path: string) => (res: ServerResponse): void => {
+    res.write(toolCallChunk({ id, name: 'read_file', arguments: JSON.stringify({ path }) }))
+    res.write(done())
+    res.end()
+  }
+  const finalTurn = (res: ServerResponse): void => {
+    res.write(textChunk('I reached the tool budget; here is what remains.'))
+    res.write(done())
+    res.end()
+  }
+  const responses = [toolTurn('read-1', 'one.txt'), toolTurn('read-2', 'two.txt'), finalTurn]
+  const fx = await bodyFixture((index, body) => {
+    bodies.push(body)
+    return responses[index]
+  })
+  try {
+    writeFileSync(join(fx.cwd, 'one.txt'), 'one')
+    writeFileSync(join(fx.cwd, 'two.txt'), 'two')
+    const errors: string[] = []
+    fx.backend.onEvent((event) => {
+      if (event.type === 'session.error') errors.push(event.error)
+    })
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'inspect both files' }], { mode: 'auto' })
+
+    assert.deepEqual(errors, [])
+    assert.equal(bodies.length, 3)
+    assert.ok(Array.isArray(bodies[0].tools))
+    assert.equal(bodies[2].tools, undefined)
+    const finalMessages = bodies[2].messages as Array<{ role?: string; content?: string }>
+    assert.match(finalMessages.at(-1)?.content ?? '', /tool budget is exhausted/i)
+    assert.equal(fx.readStore().lastAssistantText(fx.sessionId), 'I reached the tool budget; here is what remains.')
+  } finally {
+    await fx.cleanup()
+    if (originalMax === undefined) delete process.env.LAB_MAX_TOOL_ITERATIONS
+    else process.env.LAB_MAX_TOOL_ITERATIONS = originalMax
+  }
+})
+
+test('a tool hallucinated in the closing reply is refused without leaving a running step', async () => {
+  const originalMax = process.env.LAB_MAX_TOOL_ITERATIONS
+  process.env.LAB_MAX_TOOL_ITERATIONS = '1'
+  const firstTool = (res: ServerResponse): void => {
+    res.write(toolCallChunk({ id: 'read-1', name: 'read_file', arguments: '{"path":"one.txt"}' }))
+    res.write(done())
+    res.end()
+  }
+  const hallucinatedTool = (res: ServerResponse): void => {
+    res.write(toolCallChunk({ id: 'read-2', name: 'read_file', arguments: '{"path":"two.txt"}' }))
+    res.write(done())
+    res.end()
+  }
+  const fx = await fixture([firstTool, hallucinatedTool])
+  try {
+    writeFileSync(join(fx.cwd, 'one.txt'), 'one')
+    writeFileSync(join(fx.cwd, 'two.txt'), 'two')
+    const errors: string[] = []
+    fx.backend.onEvent((event) => {
+      if (event.type === 'session.error') errors.push(event.error)
+    })
+    await fx.backend.sendMessage(fx.sessionId, [{ type: 'text', text: 'inspect files' }], { mode: 'auto' })
+
+    assert.deepEqual(errors, [])
+    const last = fx.readStore().messages(fx.sessionId).at(-1)
+    assert.ok(last?.parts.some((part) => part.type === 'text' && /tool budget was exhausted/i.test(part.text ?? '')))
+    const tool = last?.parts.find((part) => part.type === 'tool')
+    assert.equal(tool?.state?.status, 'error')
+    assert.match(String(tool?.state?.output ?? ''), /Tool not run/)
+  } finally {
+    await fx.cleanup()
+    if (originalMax === undefined) delete process.env.LAB_MAX_TOOL_ITERATIONS
+    else process.env.LAB_MAX_TOOL_ITERATIONS = originalMax
   }
 })
 
