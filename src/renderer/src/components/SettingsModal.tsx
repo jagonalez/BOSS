@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { THEMES, applyTheme, loadTheme } from '../lib/themes'
 import { loadTypography, saveTypography, stepReadingSize, stepTerminalSize } from '../lib/typography'
+import { searchSettings, type SettingsMatch } from '../lib/settings-index'
+import { SearchIcon } from './icons'
 import { MONO_FONTS, READING_SIZE, TERMINAL_SIZE, UI_FONTS } from '@shared/typography'
 import { KOKORO_VOICES } from '@shared/speech'
 import type { ViewMode } from '@shared/workspace'
@@ -48,6 +50,11 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
     ]
   }
 ]
+
+/** What each section is called, so a result can say where it will take you. */
+const SECTION_LABELS: Record<SettingsSection, string> = Object.fromEntries(
+  SETTINGS_GROUPS.flatMap((group) => group.items.map((item) => [item.id, item.label]))
+) as Record<SettingsSection, string>
 
 function resetDescription(usage: BackendSubscriptionUsage['windows'][number]): string {
   if (usage.resetLabel) return `Resets ${usage.resetLabel}`
@@ -660,6 +667,8 @@ export function SettingsModal(): React.JSX.Element | null {
   const [section, setSection] = useState<SettingsSection>('connections')
   const [currentTheme, setCurrentTheme] = useState(loadTheme)
   const [typography, setTypography] = useState(loadTypography)
+  const [query, setQuery] = useState('')
+  const matches = useMemo(() => searchSettings(query), [query])
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
   const [threadTitleSettings, setThreadTitleSettings] = useState<ThreadTitleSettings | null>(null)
   const [sandboxSettings, setSandboxSettings] = useState<SandboxSettings | null>(null)
@@ -714,6 +723,40 @@ export function SettingsModal(): React.JSX.Element | null {
 
       <div className="settings-page-body">
         <aside className="settings-sidebar" aria-label="Settings categories">
+          <div className="settings-search">
+            <SearchIcon size={13} />
+            <input
+              value={query}
+              placeholder="Search settings"
+              aria-label="Search settings"
+              spellCheck={false}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setQuery('')
+                // Enter takes the first offer, so a search can be finished without the mouse.
+                if (event.key === 'Enter' && matches.length) {
+                  setSection(matches[0].section)
+                  setQuery('')
+                }
+              }}
+            />
+          </div>
+          {query.trim() ? (
+            <nav className="settings-nav-results" aria-label="Search results">
+              {matches.length ? matches.map((match: SettingsMatch) => (
+                <button
+                  key={`${match.section}:${match.label}`}
+                  onClick={() => {
+                    setSection(match.section)
+                    setQuery('')
+                  }}
+                >
+                  <span>{match.label}</span>
+                  <small>{SECTION_LABELS[match.section as SettingsSection]}</small>
+                </button>
+              )) : <p className="settings-nav-empty">Nothing matches “{query.trim()}”.</p>}
+            </nav>
+          ) : (
           <nav>
             {SETTINGS_GROUPS.map((group) => (
               <div className="settings-nav-group" key={group.label}>
@@ -730,6 +773,7 @@ export function SettingsModal(): React.JSX.Element | null {
               </div>
             ))}
           </nav>
+          )}
         </aside>
 
         <main className="settings-content">
