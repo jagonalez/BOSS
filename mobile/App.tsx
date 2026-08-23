@@ -116,6 +116,21 @@ export default function App(): React.JSX.Element {
     }
   }, [])
 
+  /**
+   * Refetch a thread's messages soon, and once, however many events arrive.
+   *
+   * The desktop sends an event per streaming token. Refetching on each one
+   * meant dozens of full 60-message loads a second, all but the last of them
+   * discarded before anyone could read them.
+   */
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const queueMessages = useCallback((threadId: string) => {
+    if (messageTimer.current) return
+    messageTimer.current = setTimeout(() => {
+      messageTimer.current = null
+      void refreshMessages(threadId)
+    }, 250)
+  }, [refreshMessages])
   const refreshAutomations = useCallback(async () => {
     const connection = relay.current
     if (!connection) return
@@ -176,8 +191,12 @@ export default function App(): React.JSX.Element {
     }
     if (type === 'automations.updated') void refreshAutomations()
     if (type.startsWith('session.')) void refreshThreads()
-    if (type.startsWith('message.') && sid && sid === openRef.current) void refreshMessages(sid)
-  }, [refreshMessages, refreshThreads])
+    // Coalesce. A streaming run emits a message event per token, and each one
+    // used to refetch all 60 messages and replace the list — every row
+    // re-rendering many times a second, which is what made the text jitter.
+    // One refetch per burst shows the same result at a fraction of the work.
+    if (type.startsWith('message.') && sid && sid === openRef.current) queueMessages(sid)
+  }, [queueMessages, refreshAutomations, refreshThreads])
 
   // Start the connection once, from whatever is in the Keychain.
   useEffect(() => {
@@ -229,6 +248,8 @@ export default function App(): React.JSX.Element {
     return () => {
       subscription.remove()
       connection.stop()
+      // A pending refetch must not fire into a torn-down screen.
+      if (messageTimer.current) clearTimeout(messageTimer.current)
     }
   }, [applyEvent, loadBackends, refreshAutomations, refreshMessages, refreshThreads])
 
