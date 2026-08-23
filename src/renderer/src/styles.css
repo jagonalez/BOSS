@@ -1030,10 +1030,15 @@ textarea {
    find the backend or the user has pinned a location, so it stays out of the way in
    the common case. */
 .settings-runtime-path {
+  /* Spans every column of the connection grid: a filesystem path has nothing to do with the
+     145px the first column gives it, and the placeholder alone was wider than the field. */
+  grid-column: 1 / -1;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
+  align-items: end;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-subtle);
   min-width: 0;
 }
 
@@ -1042,7 +1047,7 @@ textarea {
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .settings-runtime-path label > span {
@@ -1054,7 +1059,9 @@ textarea {
 .settings-runtime-path .settings-input {
   min-width: 0;
   width: 100%;
-  font-size: 11.5px;
+  /* Monospaced, because it holds a path: proportional type makes a long one harder to check. */
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .settings-access {
@@ -1362,6 +1369,12 @@ textarea {
 
   .settings-runtime {
     grid-row: 1 / 4;
+  }
+
+  /* The runtime block spans the first three rows of column one, so the path row has to be told
+     to start after them rather than being packed into the gap beside it. */
+  .settings-runtime-path {
+    grid-row: 4;
   }
 
   .settings-access,
