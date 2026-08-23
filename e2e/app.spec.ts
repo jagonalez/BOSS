@@ -666,7 +666,7 @@ test('compact asks before summarizing and then compacts the thread', async ({ ap
     type: 'thread.compact',
     threadId: 'thread-source'
   })
-  await expect(appPage.locator('.msg.assistant')).toHaveText('Compacted context summary.')
+  await expect(appPage.locator('.msg.assistant .msg-body')).toHaveText('Compacted context summary.')
   await expect(appPage.locator('.messages')).not.toContainText('second result')
 })
 
