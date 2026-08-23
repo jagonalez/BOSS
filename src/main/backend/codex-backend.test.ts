@@ -103,6 +103,53 @@ test('a reloaded turn reports every message the user sent, not just the first', 
   )
 })
 
+test('a user message keeps one id whether it streamed or was reloaded', () => {
+  // Codex names the same user message two ways: item/completed carries a fresh
+  // uuid, while thread/read renumbers the turn's items as item-1, item-2, …
+  // Storing the streamed uuid meant the reload never reported that id, and
+  // reconcile — which deletes what native history omits — dropped every user
+  // message in the thread. Only the assistant text, keyed by the stable turn
+  // id, survived; that is the "scroll up and my messages are gone" report.
+  // Both sides must derive the id from the turn id, which the live event and
+  // the reload agree on.
+  assert.ok(
+    /function codexUserMessageId\(turnId: string, index: number\)/.test(source),
+    'expected a shared user message id helper'
+  )
+
+  const live = source.slice(source.indexOf("case 'item/started':"), source.indexOf("case 'item/agentMessage/delta':"))
+  assert.ok(
+    live.includes('codexUserMessageId('),
+    'the live path must derive the user message id from the turn, not item.id'
+  )
+  assert.ok(
+    !/item\.type === 'userMessage' \? item\.id/.test(live),
+    'the live path must not key a user message by the volatile item id'
+  )
+
+  const turn = source.slice(source.indexOf('function turnMessages('), source.indexOf('\n}', source.indexOf('const assistantItems')))
+  assert.ok(
+    turn.includes('codexUserMessageId('),
+    'the reload path must derive the user message id the same way'
+  )
+  assert.ok(!/const id = user\.id/.test(turn), 'the reload must not key a user message by item.id')
+})
+
+test('streamed user ordinals are per turn and do not outlive it', () => {
+  // item/started and item/completed both fire for one item, so the ordinal is
+  // keyed by item id rather than incremented per event — counting twice would
+  // give the same message two ids and reintroduce the prune. The entries are
+  // only useful while the turn streams, so the turn's end releases them.
+  const ordinal = source.slice(source.indexOf('private userMessageOrdinal('))
+  assert.ok(ordinal.includes('seen.indexOf(itemId)'), 'a repeated item must reuse its ordinal')
+
+  const completed = source.slice(source.indexOf("case 'turn/completed':"), source.indexOf("case 'item/started':"))
+  assert.ok(completed.includes('this.turnUserItems.delete('), 'a finished turn should release its ordinals')
+
+  const forget = source.slice(source.indexOf('private forgetServerState('))
+  assert.ok(forget.includes('turnUserItems.clear()'), 'a lost server should forget streamed ordinals')
+})
+
 test('a Codex user image remains a renderable transcript part', () => {
   const helperStart = source.indexOf('function userParts(')
   assert.ok(helperStart > 0, 'expected user content to have a transcript adapter')

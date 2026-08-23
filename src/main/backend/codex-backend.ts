@@ -368,6 +368,20 @@ function itemPart(sessionId: string, messageId: string, item: CodexItem): Part |
   return null
 }
 
+/** A user message id both the live stream and a reload can compute.
+ *
+ *  Codex identifies the same user message two different ways: `item/completed`
+ *  carries a freshly minted uuid, while `thread/read` renumbers the turn's
+ *  items as `item-1`, `item-2`, … So the id BOSS stored while the run streamed
+ *  never appeared in the reload, and reconcile — which deletes anything native
+ *  history does not report — dropped every user message in the thread. The
+ *  turn id is the one identifier both paths agree on (live `turnId` equals the
+ *  history `turn.id`), and Codex reports a turn's user items in the order they
+ *  were said, so turn + ordinal is stable across both. */
+function codexUserMessageId(turnId: string, index: number): string {
+  return `user-${turnId}-${index}`
+}
+
 function turnMessages(sessionId: string, turn: CodexTurn): MessageWithParts[] {
   const messages: MessageWithParts[] = []
   // Every userMessage, not just the first. Codex folds a steered message into
@@ -375,13 +389,14 @@ function turnMessages(sessionId: string, turn: CodexTurn): MessageWithParts[] {
   // said. Reading only the first dropped every steered message from the reload,
   // and the reload prunes what it does not report — so the message the user
   // watched appear during the run was deleted the moment the run ended.
-  for (const user of (turn.items ?? []).filter((item) => item.type === 'userMessage')) {
-    const id = user.id
+  const userItems = (turn.items ?? []).filter((item) => item.type === 'userMessage')
+  userItems.forEach((user, index) => {
+    const id = codexUserMessageId(turn.id, index)
     messages.push({
       info: { id, sessionID: sessionId, role: 'user', time: { created: turn.startedAt ? turn.startedAt * 1000 : undefined } },
       parts: userParts(sessionId, id, user.content)
     })
-  }
+  })
   const assistantItems = (turn.items ?? []).filter((item) => item.type !== 'userMessage' && item.type !== 'hookPrompt')
   if (assistantItems.length) {
     const id = `assistant-${turn.id}`
@@ -410,6 +425,11 @@ export class CodexBackend implements Backend {
   private loadedThreads = new Set<string>()
   private activeTurns = new Map<string, string>()
   private liveText = new Map<string, string>()
+  /** turnId -> the turn's user item ids, in arrival order. Gives a streaming
+   *  user message the same ordinal the reload will derive from turn.items, and
+   *  keys off the item id so item/started and item/completed — which both fire
+   *  for one item — agree rather than counting it twice. */
+  private turnUserItems = new Map<string, string[]>()
   private titleRuns = new Map<string, TitleRun>()
   private manualCompactions = new Set<string>()
   private eventCb?: (event: EventMessage) => void
@@ -487,6 +507,7 @@ export class CodexBackend implements Backend {
     this.loadedThreads.clear()
     this.activeTurns.clear()
     this.liveText.clear()
+    this.turnUserItems.clear()
     this.approvals.clear()
     for (const [threadId] of this.titleRuns) this.finishTitleRun(threadId)
   }
@@ -619,6 +640,17 @@ export class CodexBackend implements Backend {
     }
   }
 
+  /** The position of this user item within its turn, counting from zero. */
+  private userMessageOrdinal(sessionId: string, turnId: string, itemId: string): number {
+    const key = `${sessionId}:${turnId}`
+    const seen = this.turnUserItems.get(key) ?? []
+    const existing = seen.indexOf(itemId)
+    if (existing >= 0) return existing
+    seen.push(itemId)
+    this.turnUserItems.set(key, seen)
+    return seen.length - 1
+  }
+
   private mapNotification(method: string, params: Record<string, unknown>): void {
     const sessionId = String(params.threadId ?? '')
     const titleRun = this.titleRuns.get(sessionId)
@@ -646,6 +678,10 @@ export class CodexBackend implements Backend {
       case 'turn/completed': {
         const turn = params.turn as CodexTurn | undefined
         if (turn?.status === 'failed') this.emit({ type: 'session.error', sessionID: sessionId, error: JSON.stringify((turn as unknown as { error?: unknown }).error ?? 'Codex turn failed') })
+        // The ordinals only matter while the turn is streaming; the reload
+        // derives them from turn.items. Dropping them here keeps a long-lived
+        // server from retaining one entry per turn for the whole session.
+        if (turn?.id) this.turnUserItems.delete(`${sessionId}:${turn.id}`)
         this.activeTurns.delete(sessionId)
         this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'idle' } })
         this.emit({ type: 'session.idle', sessionID: sessionId })
@@ -655,7 +691,10 @@ export class CodexBackend implements Backend {
       case 'item/completed': {
         const item = params.item as CodexItem | undefined
         if (!item) break
-        const messageId = item.type === 'userMessage' ? item.id : `assistant-${String(params.turnId ?? '')}`
+        const turnId = String(params.turnId ?? '')
+        const messageId = item.type === 'userMessage'
+          ? codexUserMessageId(turnId, this.userMessageOrdinal(sessionId, turnId, item.id))
+          : `assistant-${turnId}`
         if (item.type === 'userMessage') {
           this.emit({ type: 'message.updated', message: { id: messageId, sessionID: sessionId, role: 'user', time: { created: Number(params.startedAtMs ?? Date.now()) } } })
           for (const part of userParts(sessionId, messageId, item.content)) {
