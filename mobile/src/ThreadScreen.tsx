@@ -132,6 +132,8 @@ export function ThreadScreen({
   /** Whether the view is parked at the newest message. Only then does new
    *  content scroll; otherwise reading history fights the stream. */
   const atTail = useRef(true)
+  const [optionsOpen, setOptionsOpen] = useState(false)
+  const modeLabel = modes.find((m) => m.id === mode)?.label
 
   const send = (): void => {
     const text = draft.trim()
@@ -229,45 +231,62 @@ export function ThreadScreen({
         ) : null}
       </Pressable>
 
-      {modes.length > 1 ? (
-        <View style={styles.modes}>
-          {modes.map((m) => (
-            <Pressable
-              key={m.id}
-              onPress={() => onMode(m.id)}
-              style={[styles.modeChip, m.id === mode && styles.modeChipOn]}
-            >
-              <Text style={[styles.modeText, m.id === mode && styles.modeTextOn]}>{m.label}</Text>
-            </Pressable>
-          ))}
+      {/* One line that reads as a sentence, tapped to change.
+          This was three permanent rows — modes, thinking, and a Delegate button
+          duplicated across two branches — sitting above the composer on every
+          thread. They are settings you touch occasionally taking space you look
+          at constantly, so they collapse to their current values and open only
+          when asked. */}
+      <Pressable style={styles.summary} onPress={() => setOptionsOpen((open) => !open)}>
+        <Text style={styles.summaryText} numberOfLines={1}>
+          {[modeLabel, variant].filter(Boolean).join(' · ') || 'Options'}
+        </Text>
+        <Text style={styles.chevron}>{optionsOpen ? '⌄' : '⌃'}</Text>
+      </Pressable>
+
+      {optionsOpen ? (
+        <View style={styles.options}>
+          {modes.length > 1 ? (
+            <View style={styles.optionRow}>
+              <Text style={styles.optionLabel}>Permission</Text>
+              <View style={styles.chips}>
+                {modes.map((m) => (
+                  <Pressable
+                    key={m.id}
+                    onPress={() => onMode(m.id)}
+                    style={[styles.modeChip, m.id === mode && styles.modeChipOn]}
+                  >
+                    <Text style={[styles.modeText, m.id === mode && styles.modeTextOn]}>{m.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {/* Thinking is not stored on the thread — it rides on each message —
+              so this sets what the NEXT message asks for. */}
+          {variants.length ? (
+            <View style={styles.optionRow}>
+              <Text style={styles.optionLabel}>Thinking</Text>
+              <View style={styles.chips}>
+                {variants.map((v) => (
+                  <Pressable
+                    key={v}
+                    onPress={() => onVariant(v === variant ? undefined : v)}
+                    style={[styles.modeChip, v === variant && styles.modeChipOn]}
+                  >
+                    <Text style={[styles.modeText, v === variant && styles.modeTextOn]}>{v}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          <Pressable onPress={onDelegate} style={styles.delegate}>
+            <Text style={styles.delegateText}>Delegate to a new thread</Text>
+          </Pressable>
         </View>
       ) : null}
-
-      {/* Thinking is not stored on the thread — it rides on each message — so
-          this sets what the NEXT message asks for rather than changing state. */}
-      {variants.length ? (
-        <View style={styles.modes}>
-          <Text style={styles.stripLabel}>Thinking</Text>
-          {variants.map((v) => (
-            <Pressable
-              key={v}
-              onPress={() => onVariant(v === variant ? undefined : v)}
-              style={[styles.modeChip, v === variant && styles.modeChipOn]}
-            >
-              <Text style={[styles.modeText, v === variant && styles.modeTextOn]}>{v}</Text>
-            </Pressable>
-          ))}
-          <Pressable onPress={onDelegate} style={styles.modeChip}>
-            <Text style={styles.modeText}>Delegate</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View style={styles.modes}>
-          <Pressable onPress={onDelegate} style={styles.modeChip}>
-            <Text style={styles.modeText}>Delegate</Text>
-          </Pressable>
-        </View>
-      )}
 
       <View style={styles.composer}>
         <TextInput
@@ -287,13 +306,24 @@ export function ThreadScreen({
 }
 
 const styles = StyleSheet.create({
-  modes: {
+  summary: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingBottom: 8
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 7
   },
+  summaryText: { color: theme.faint, fontSize: 12.5, flex: 1 },
+  options: { paddingHorizontal: 14, paddingBottom: 10, gap: 10 },
+  optionRow: { gap: 6 },
+  optionLabel: { color: theme.muted, fontSize: 12, fontWeight: '600' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  delegate: {
+    paddingVertical: 9,
+    borderRadius: 8,
+    backgroundColor: theme.inset,
+    alignItems: 'center'
+  },
+  delegateText: { color: theme.text, fontSize: 13.5 },
   modeChip: {
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -304,7 +334,6 @@ const styles = StyleSheet.create({
   },
   modeChipOn: { backgroundColor: theme.accent, borderColor: theme.accent },
   modeText: { color: theme.muted, fontSize: 12 },
-  stripLabel: { color: theme.faint, fontSize: 12, alignSelf: 'center', marginRight: 2 },
   modeTextOn: { color: theme.bg, fontWeight: '700' },
   fill: { flex: 1, backgroundColor: theme.bg },
   list: { padding: 12, paddingBottom: 20 },
