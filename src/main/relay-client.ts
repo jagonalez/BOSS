@@ -60,6 +60,8 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'thread.create',
   'thread.models',
   'thread.mode.set',
+  'thread.archive',
+  'thread.delegate',
   'thread.rename',
   'thread.delete',
   'automation.list',

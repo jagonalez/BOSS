@@ -13,6 +13,9 @@ export interface SessionInfo {
   projectPath?: string
   /** Directory in which this thread's backend actually runs. */
   executionPath?: string
+  /** Hidden from the default list. Recorded on the thread rather than in one
+   *  window's storage, so every client agrees on what is visible. */
+  archived?: boolean
   worktree?: import('./worktree').WorktreeInfo
   title?: string
   time?: SessionTime

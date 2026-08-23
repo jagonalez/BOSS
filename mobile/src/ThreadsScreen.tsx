@@ -14,15 +14,15 @@ function ago(ts?: number): string {
   return `${Math.floor(d / 86_400_000)}d`
 }
 
-/** Attention drives the row's colour, because it is the reason to look. */
+/**
+ * One colour, one meaning: yellow means this thread cannot continue without
+ * you. Red for failed and green for finished told you the past rather than
+ * what to do, and with three colours in play neither the list order nor the
+ * dots read as anything without a key.
+ */
 function tone(thread: ThreadRow): string {
-  switch (thread.attention?.kind) {
-    case 'permission':
-    case 'question': return theme.yellow
-    case 'error': return theme.red
-    case 'completed': return theme.green
-    default: return theme.faint
-  }
+  const kind = thread.attention?.kind
+  return kind === 'permission' || kind === 'question' ? theme.yellow : theme.faint
 }
 
 export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen, onNew }: {

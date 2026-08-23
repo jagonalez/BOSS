@@ -8,7 +8,7 @@ import { PairScreen } from './src/PairScreen'
 import { ThreadsScreen, type ThreadRow } from './src/ThreadsScreen'
 import { ProjectsScreen } from './src/ProjectsScreen'
 import { NewThreadScreen, type BackendOption, type ModelOption } from './src/NewThreadScreen'
-import { groupByProject } from './src/parts'
+import { groupByProject, visibleThreads } from './src/parts'
 import { ThreadScreen, type PendingPermission, type ThreadMessage } from './src/ThreadScreen'
 import { RelayConnection, clearCredentials, loadCredentials, type RelayCredentials } from './src/relay'
 import { theme } from './src/theme'
@@ -42,6 +42,9 @@ export default function App(): React.JSX.Element {
   const [models, setModels] = useState<ModelOption[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
   const [threadModes, setThreadModes] = useState<Record<string, string>>({})
+  // Thinking level is not stored on a thread — it rides on each message — so
+  // this is what the next send will ask for.
+  const [threadVariants, setThreadVariants] = useState<Record<string, string | undefined>>({})
 
   const relay = useRef<RelayConnection | null>(null)
   // Read inside callbacks that outlive a render, so they never see a stale id.
@@ -53,7 +56,9 @@ export default function App(): React.JSX.Element {
     if (!connection) return
     try {
       const snapshot = await connection.request<{ threads?: ThreadRow[] }>({ type: 'supervision.snapshot' })
-      setThreads(snapshot?.threads ?? [])
+      // Archived and delegated-worker threads are hidden on the desktop, so
+      // they are hidden here: the phone used to list every thread ever created.
+      setThreads(visibleThreads(snapshot?.threads ?? []))
       setBusy((prev) => {
         const next = { ...prev }
         for (const t of snapshot?.threads ?? []) next[t.threadId] = Boolean(t.running)
@@ -268,7 +273,23 @@ export default function App(): React.JSX.Element {
           permission={permissions[threadId]}
           sending={sending}
           modes={backends.find((b) => b.id === threads.find((t) => t.threadId === threadId)?.backendId)?.modes ?? []}
-          mode={threadModes[threadId]}
+          mode={threadModes[threadId] ?? threads.find((t) => t.threadId === threadId)?.mode}
+          variants={models.find((m) => m.id === threads.find((t) => t.threadId === threadId)?.model?.modelID)?.variants ?? []}
+          variant={threadVariants[threadId]}
+          onVariant={(next) => setThreadVariants((prev) => ({ ...prev, [threadId]: next }))}
+          onDelegate={() => {
+            const instruction = 'Continue this work in a separate thread.'
+            void relay.current
+              ?.request({
+                type: 'thread.delegate',
+                threadId,
+                backendId: threads.find((t) => t.threadId === threadId)?.backendId ?? 'opencode',
+                instruction,
+                placement: 'new-worktree'
+              })
+              .then(() => refreshThreads())
+              .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          }}
           onMode={(next) => {
             // Optimistic: the desktop has no event for a mode change, so the
             // chip would not move until a refresh that never comes.
@@ -278,9 +299,20 @@ export default function App(): React.JSX.Element {
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
           }}
           onSend={(text) => {
+            const current = threads.find((t) => t.threadId === threadId)
             setSending(true)
             void relay.current
-              ?.request({ type: 'thread.send', threadId, parts: [{ type: 'text', text }] })
+              ?.request({
+                type: 'thread.send',
+                threadId,
+                parts: [{ type: 'text', text }],
+                // A variant alone is not a legal model: providerID and
+                // modelID are required beside it, so the thread's current
+                // model is carried through unchanged.
+                ...(threadVariants[threadId] && current?.model
+                  ? { options: { model: { ...current.model, variant: threadVariants[threadId] } } }
+                  : {})
+              })
               .then(() => refreshMessages(threadId))
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
               .finally(() => setSending(false))
@@ -358,6 +390,10 @@ export default function App(): React.JSX.Element {
           onOpen={(id) => {
             setOpenThread(id)
             void refreshMessages(id)
+            // The thinking chips come from the thread's own model, which means
+            // this thread's backend must be the one loaded.
+            const backendId = threads.find((t) => t.threadId === id)?.backendId
+            if (backendId) void loadModels(backendId)
           }}
           onNew={() => {
             setError(undefined)

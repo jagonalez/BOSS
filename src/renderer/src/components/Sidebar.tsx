@@ -425,8 +425,12 @@ export function Sidebar(): React.JSX.Element {
     const where = session.projectPath ?? session.directory ?? session.path ?? ''
     return `${session.title ?? ''} ${where}`.toLowerCase().includes(query)
   }
-  const visibleSessions = sessions.filter((s) => !archivedSet.has(s.id) && !s.parentID && matches(s))
-  const archivedSessions = sessions.filter((s) => archivedSet.has(s.id) && matches(s))
+  // Archived now lives on the thread so every client agrees. The local set is
+  // still consulted while the one-time migration from localStorage is in
+  // flight, and for the optimistic update before the snapshot lands.
+  const isArchived = (session: SessionInfo): boolean => session.archived === true || archivedSet.has(session.id)
+  const visibleSessions = sessions.filter((s) => !isArchived(s) && !s.parentID && matches(s))
+  const archivedSessions = sessions.filter((s) => isArchived(s) && matches(s))
 
   const sessionsByPath = new Map<string, SessionInfo[]>()
   for (const session of visibleSessions) {

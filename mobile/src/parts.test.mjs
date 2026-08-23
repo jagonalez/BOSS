@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { groupByProject } from './parts.ts'
+import { groupByProject, sortThreads, visibleThreads } from './parts.ts'
 
 const row = (threadId, projectPath, extra = {}) => ({ threadId, projectPath, ...extra })
 
@@ -41,4 +41,36 @@ test('running and waiting counts are per project', () => {
   const x = groups.find((g) => g.name === 'x')
   assert.equal(x.running, 1)
   assert.equal(x.waiting, 1)
+})
+
+test('archived and delegated threads are hidden, as they are on the desktop', () => {
+  // The reported bug: 58 threads on the phone against 26 on the desktop.
+  // Archiving lived in one browser's localStorage, so no other client could
+  // know, and delegated workers were listed as peers of their parent.
+  const rows = [
+    { threadId: 'plain' },
+    { threadId: 'archived', archived: true },
+    { threadId: 'worker', parentID: 'plain' }
+  ]
+  assert.deepEqual(visibleThreads(rows).map((t) => t.threadId), ['plain'])
+})
+
+test('threads sort by time, except those blocked on a person', () => {
+  const rows = [
+    { threadId: 'old', updatedAt: 1 },
+    { threadId: 'new', updatedAt: 9 },
+    { threadId: 'asking', updatedAt: 2, attention: { kind: 'permission' } }
+  ]
+  assert.deepEqual(sortThreads(rows).map((t) => t.threadId), ['asking', 'new', 'old'])
+})
+
+test('a finished or failed thread does not jump the queue', () => {
+  // These used to rank above merely-recent threads and colour the row red or
+  // green, which told you the past rather than what to do.
+  const rows = [
+    { threadId: 'failed', updatedAt: 1, attention: { kind: 'error' } },
+    { threadId: 'done', updatedAt: 2, attention: { kind: 'completed' } },
+    { threadId: 'recent', updatedAt: 8 }
+  ]
+  assert.deepEqual(sortThreads(rows).map((t) => t.threadId), ['recent', 'done', 'failed'])
 })

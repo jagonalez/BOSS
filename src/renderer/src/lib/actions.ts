@@ -1942,21 +1942,48 @@ function persistArchived(archived: string[]): void {
   }
 }
 
+/**
+ * Move anything archived in this browser's storage onto the threads themselves.
+ *
+ * Archiving used to live only here, so the window that archived a thread was
+ * the only place that knew: the phone and the mobile page both listed every
+ * thread ever created, and the counts disagreed with the sidebar. The list is
+ * cleared once main has it, so this runs at most once per machine.
+ */
 export function loadArchived(): void {
+  let stored: string[] = []
   try {
     const parsed = JSON.parse(localStorage.getItem('boss.archived') ?? '[]')
-    if (Array.isArray(parsed)) appStore.setState({ archived: parsed.filter((x) => typeof x === 'string') })
+    if (Array.isArray(parsed)) stored = parsed.filter((x) => typeof x === 'string')
   } catch {
-    /* ignore */
+    /* A damaged list is not worth failing startup over. */
   }
+  if (stored.length === 0) return
+  appStore.setState({ archived: stored })
+  void Promise.all(
+    stored.map((threadId) => OpenCode.archiveThread(threadId, true))
+  ).then(() => {
+    persistArchived([])
+    void refreshSessions()
+  }).catch(() => {
+    /* Keep the local list so the next launch tries again. */
+  })
 }
 
 export function toggleArchive(id: string): void {
-  appStore.setState((s) => {
-    const archived = s.archived.includes(id) ? s.archived.filter((x) => x !== id) : [...s.archived, id]
-    persistArchived(archived)
-    return { archived }
-  })
+  const next = !appStore.getState().archived.includes(id)
+  // Optimistic, so the row moves under the thumb; the snapshot confirms it.
+  appStore.setState((s) => ({
+    archived: next ? [...s.archived, id] : s.archived.filter((x) => x !== id)
+  }))
+  void OpenCode.archiveThread(id, next)
+    .then(() => refreshSessions())
+    .catch((error: unknown) => {
+      appStore.setState((s) => ({
+        archived: next ? s.archived.filter((x) => x !== id) : [...s.archived, id],
+        lastError: error instanceof Error ? error.message : 'Could not archive the thread.'
+      }))
+    })
 }
 
 /**

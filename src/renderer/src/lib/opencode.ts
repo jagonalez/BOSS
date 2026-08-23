@@ -190,6 +190,8 @@ export const OpenCode = {
     backendRequest<TranscriptSearchResult[]>({ type: 'supervision.search', query, limit }),
   acknowledgeAttention: (threadId: string) =>
     backendRequest<SupervisionSnapshot>({ type: 'supervision.acknowledge', threadId }),
+  archiveThread: (threadId: string, archived: boolean) =>
+    backendRequest<SupervisionSnapshot>({ type: 'thread.archive', threadId, archived }),
   taskPolicy: (threadId: string) =>
     backendRequest<TaskPolicy | undefined>({ type: 'thread.policy.get', threadId }),
   setTaskPolicy: (threadId: string, policy: TaskPolicy) =>

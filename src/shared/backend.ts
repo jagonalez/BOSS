@@ -264,6 +264,9 @@ export type BackendRequest =
   | { type: 'supervision.snapshot' }
   | { type: 'supervision.search'; query: string; limit?: number }
   | { type: 'supervision.acknowledge'; threadId: string }
+  /** Hide a thread from the default list, or bring it back. Recorded on the
+   *  thread so every client agrees, rather than in one window's storage. */
+  | { type: 'thread.archive'; threadId: string; archived: boolean }
   | { type: 'thread.policy.get'; threadId: string }
   | { type: 'thread.policy.set'; threadId: string; policy: import('./task-policy').TaskPolicy }
   | { type: 'thread.clone'; threadId: string; backendId: BackendId; instruction?: string; options?: BackendMessageOptions }
