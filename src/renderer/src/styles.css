@@ -4736,9 +4736,11 @@ body.workspace-dragging .workspace-tab-slot {
 
 .msg.user .msg-body {
   background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: 14px 14px 4px 14px;
-  padding: 10px 14px;
+  /* No border: the fill already separates it from the canvas, and the two together drew the
+     bubble twice. The corners are even, rather than notched toward the speaker — the alignment
+     already says who is talking. */
+  border-radius: 16px;
+  padding: 11px 15px;
   max-width: 82%;
 }
 
@@ -5139,9 +5141,11 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .step-card {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--line-subtle);
   border-radius: var(--radius);
-  background: var(--bg-inset);
+  /* Transparent rather than inset: a filled panel behind every run of steps cut the transcript
+     into bands, where the reply above and below it sits straight on the canvas. */
+  background: transparent;
   overflow: hidden;
 }
 
@@ -5319,9 +5323,14 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .tool-detail {
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  /* No frame of its own: these sit inside a step card that already has one, and a border per
+     row turned a run of tool calls into a stack of boxes. They are told apart by a hairline
+     between them instead. */
   overflow: hidden;
+}
+
+.tool-detail + .tool-detail {
+  border-top: 1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent);
 }
 
 .tool-detail-head {
