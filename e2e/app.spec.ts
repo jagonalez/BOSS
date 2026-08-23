@@ -897,7 +897,7 @@ test('branch switching blocks conflicts and restores a targeted stash on a safe 
 
   // Restoration is observable in the UI too: the feature checkout still has
   // the same local working-tree change after the targeted stash is popped.
-  await expect(appPage.locator('.diff-card-path')).toContainText('src/edited.ts')
+  await expect(appPage.locator('.diff-card-path').filter({ hasText: 'src/edited.ts' })).toHaveCount(1)
 
   // Reproduce the confirmation-time race: after BOSS planned a stash switch,
   // another Git client stashes the changes first. Revalidation must switch the
