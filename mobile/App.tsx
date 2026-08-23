@@ -6,6 +6,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native'
 import { PairScreen } from './src/PairScreen'
 import { ThreadsScreen, type ThreadRow } from './src/ThreadsScreen'
+import { ProjectsScreen } from './src/ProjectsScreen'
+import { NewThreadScreen, type BackendOption, type ModelOption } from './src/NewThreadScreen'
+import { groupByProject, visibleThreads } from './src/parts'
 import { ThreadScreen, type PendingPermission, type ThreadMessage } from './src/ThreadScreen'
 import { RelayConnection, clearCredentials, loadCredentials, type RelayCredentials } from './src/relay'
 import { theme } from './src/theme'
@@ -32,6 +35,16 @@ export default function App(): React.JSX.Element {
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [permissions, setPermissions] = useState<Record<string, PendingPermission>>({})
   const [sending, setSending] = useState(false)
+  // Which project's threads are open. null means the project list itself.
+  const [openProject, setOpenProject] = useState<string | null>(null)
+  const [composing, setComposing] = useState(false)
+  const [backends, setBackends] = useState<BackendOption[]>([])
+  const [models, setModels] = useState<ModelOption[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [threadModes, setThreadModes] = useState<Record<string, string>>({})
+  // Thinking level is not stored on a thread — it rides on each message — so
+  // this is what the next send will ask for.
+  const [threadVariants, setThreadVariants] = useState<Record<string, string | undefined>>({})
 
   const relay = useRef<RelayConnection | null>(null)
   // Read inside callbacks that outlive a render, so they never see a stale id.
@@ -43,7 +56,9 @@ export default function App(): React.JSX.Element {
     if (!connection) return
     try {
       const snapshot = await connection.request<{ threads?: ThreadRow[] }>({ type: 'supervision.snapshot' })
-      setThreads(snapshot?.threads ?? [])
+      // Archived and delegated-worker threads are hidden on the desktop, so
+      // they are hidden here: the phone used to list every thread ever created.
+      setThreads(visibleThreads(snapshot?.threads ?? []))
       setBusy((prev) => {
         const next = { ...prev }
         for (const t of snapshot?.threads ?? []) next[t.threadId] = Boolean(t.running)
@@ -64,6 +79,35 @@ export default function App(): React.JSX.Element {
       setMessages((prev) => ({ ...prev, [threadId]: list ?? [] }))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  /** Which agents this desktop can run, and what each one allows. */
+  const loadBackends = useCallback(async () => {
+    const connection = relay.current
+    if (!connection) return
+    try {
+      const list = await connection.request<BackendOption[]>({ type: 'backend.list' })
+      setBackends(list ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
+
+  /** Models belong to a backend, so this reloads whenever the agent changes. */
+  const loadModels = useCallback(async (backendId: string) => {
+    const connection = relay.current
+    if (!connection) return
+    setLoadingModels(true)
+    try {
+      const list = await connection.request<ModelOption[]>({ type: 'thread.models', backendId })
+      setModels(list ?? [])
+    } catch {
+      // A backend that cannot list models is not an error worth a banner —
+      // the screen says so and the thread still starts on the default.
+      setModels([])
+    } finally {
+      setLoadingModels(false)
     }
   }, [])
 
@@ -119,6 +163,9 @@ export default function App(): React.JSX.Element {
       },
       onReady: () => {
         setError(undefined)
+        // Backends describe each thread's available modes, so the thread
+        // screen needs them too — not just the compose screen.
+        void loadBackends()
         void refreshThreads()
         if (openRef.current) void refreshMessages(openRef.current)
       }
@@ -143,7 +190,53 @@ export default function App(): React.JSX.Element {
       subscription.remove()
       connection.stop()
     }
-  }, [applyEvent, refreshMessages, refreshThreads])
+  }, [applyEvent, loadBackends, refreshMessages, refreshThreads])
+
+  /**
+   * Start a thread and send its first message.
+   *
+   * Two requests, because the desktop models them separately: create returns a
+   * thread, send puts the first message in it with the chosen model and mode.
+   * The thread opens either way — if the send fails, an empty thread the user
+   * can retry in beats losing what they typed.
+   */
+  const createThread = useCallback(async (input: {
+    backendId: string
+    prompt: string
+    model?: { modelID: string; providerID: string; variant?: string }
+    mode?: string
+  }) => {
+    const connection = relay.current
+    if (!connection) return
+    setSending(true)
+    try {
+      const created = await connection.request<{ id?: string }>({
+        type: 'thread.create',
+        backendId: input.backendId,
+        ...(openProject ? { executionPath: openProject } : {})
+      })
+      const id = created?.id
+      if (!id) throw new Error('The desktop did not return a thread.')
+
+      setComposing(false)
+      setOpenThread(id)
+      await connection.request({
+        type: 'thread.send',
+        threadId: id,
+        parts: [{ type: 'text', text: input.prompt }],
+        options: {
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.mode ? { mode: input.mode } : {})
+        }
+      })
+      await refreshThreads()
+      await refreshMessages(id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSending(false)
+    }
+  }, [openProject, refreshMessages, refreshThreads])
 
   if (!loaded) return <View style={styles.fill} />
 
@@ -179,10 +272,47 @@ export default function App(): React.JSX.Element {
           busy={Boolean(busy[threadId])}
           permission={permissions[threadId]}
           sending={sending}
+          modes={backends.find((b) => b.id === threads.find((t) => t.threadId === threadId)?.backendId)?.modes ?? []}
+          mode={threadModes[threadId] ?? threads.find((t) => t.threadId === threadId)?.mode}
+          variants={models.find((m) => m.id === threads.find((t) => t.threadId === threadId)?.model?.modelID)?.variants ?? []}
+          variant={threadVariants[threadId]}
+          onVariant={(next) => setThreadVariants((prev) => ({ ...prev, [threadId]: next }))}
+          onDelegate={() => {
+            const instruction = 'Continue this work in a separate thread.'
+            void relay.current
+              ?.request({
+                type: 'thread.delegate',
+                threadId,
+                backendId: threads.find((t) => t.threadId === threadId)?.backendId ?? 'opencode',
+                instruction,
+                placement: 'new-worktree'
+              })
+              .then(() => refreshThreads())
+              .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          }}
+          onMode={(next) => {
+            // Optimistic: the desktop has no event for a mode change, so the
+            // chip would not move until a refresh that never comes.
+            setThreadModes((prev) => ({ ...prev, [threadId]: next }))
+            void relay.current
+              ?.request({ type: 'thread.mode.set', threadId, mode: next })
+              .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          }}
           onSend={(text) => {
+            const current = threads.find((t) => t.threadId === threadId)
             setSending(true)
             void relay.current
-              ?.request({ type: 'thread.send', threadId, parts: [{ type: 'text', text }] })
+              ?.request({
+                type: 'thread.send',
+                threadId,
+                parts: [{ type: 'text', text }],
+                // A variant alone is not a legal model: providerID and
+                // modelID are required beside it, so the thread's current
+                // model is carried through unchanged.
+                ...(threadVariants[threadId] && current?.model
+                  ? { options: { model: { ...current.model, variant: threadVariants[threadId] } } }
+                  : {})
+              })
               .then(() => refreshMessages(threadId))
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
               .finally(() => setSending(false))
@@ -206,30 +336,88 @@ export default function App(): React.JSX.Element {
     )
   }
 
+  if (composing) {
+    return (
+      <SafeAreaView style={styles.fill}>
+        <StatusBar barStyle="light-content" />
+        <NewThreadScreen
+          backends={backends}
+          models={models}
+          loadingModels={loadingModels}
+          sending={sending}
+          error={error}
+          project={openProject ? openProject.split('/').filter(Boolean).pop() : undefined}
+          onPickBackend={(id) => void loadModels(id)}
+          onCancel={() => { setComposing(false); setError(undefined) }}
+          onCreate={(input) => void createThread(input)}
+        />
+      </SafeAreaView>
+    )
+  }
+
+  const projects = groupByProject(threads)
+
+  // Inside a project: its threads. Otherwise the project list.
+  const project = openProject === null ? null : projects.find((p) => p.path === openProject)
+
   return (
     <SafeAreaView style={styles.fill}>
       <StatusBar barStyle="light-content" />
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>BOSS</Text>
+        {project ? (
+          <Pressable onPress={() => setOpenProject(null)}>
+            <Text style={styles.back}>‹ Projects</Text>
+          </Pressable>
+        ) : null}
+        <Text style={styles.headerTitle} numberOfLines={1}>{project ? project.name : 'BOSS'}</Text>
         <View style={[styles.statusDot, connected && desktopOnline && styles.statusOk]} />
-        <Pressable onPress={() => void clearCredentials().then(() => setCredentials(null))}>
-          <Text style={styles.back}>Unpair</Text>
-        </Pressable>
+        {project ? null : (
+          <Pressable onPress={() => void clearCredentials().then(() => setCredentials(null))}>
+            <Text style={styles.back}>Unpair</Text>
+          </Pressable>
+        )}
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <ThreadsScreen
-        threads={threads}
-        offline={!desktopOnline}
-        refreshing={refreshing}
-        onRefresh={() => {
-          setRefreshing(true)
-          void refreshThreads().finally(() => setRefreshing(false))
-        }}
-        onOpen={(id) => {
-          setOpenThread(id)
-          void refreshMessages(id)
-        }}
-      />
+      {project ? (
+        <ThreadsScreen
+          threads={project.threads}
+          offline={!desktopOnline}
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true)
+            void refreshThreads().finally(() => setRefreshing(false))
+          }}
+          onOpen={(id) => {
+            setOpenThread(id)
+            void refreshMessages(id)
+            // The thinking chips come from the thread's own model, which means
+            // this thread's backend must be the one loaded.
+            const backendId = threads.find((t) => t.threadId === id)?.backendId
+            if (backendId) void loadModels(backendId)
+          }}
+          onNew={() => {
+            setError(undefined)
+            setComposing(true)
+            void loadBackends()
+          }}
+        />
+      ) : (
+        <ProjectsScreen
+          projects={projects}
+          offline={!desktopOnline}
+          refreshing={refreshing}
+          onRefresh={() => {
+            setRefreshing(true)
+            void refreshThreads().finally(() => setRefreshing(false))
+          }}
+          onOpen={(path) => setOpenProject(path)}
+          onNew={() => {
+            setError(undefined)
+            setComposing(true)
+            void loadBackends()
+          }}
+        />
+      )}
     </SafeAreaView>
   )
 }

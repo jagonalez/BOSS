@@ -82,6 +82,15 @@ interface ThreadBinding {
    *  and a reload rebuilds the transcript from the recorded parts anyway. */
   lastAssistantMessageId?: string
   attention?: ThreadAttention
+  /**
+   * Hidden from the default thread list.
+   *
+   * This used to live in the renderer's localStorage, which meant only the
+   * window that archived a thread knew about it: the phone and the mobile page
+   * both showed every thread ever created, and the counts disagreed. Archiving
+   * is a property of the thread, so it belongs here where every client sees it.
+   */
+  archived?: boolean
   policy?: TaskPolicy
   /** What the policy has already done for this thread. Separate from the
    *  policy itself so editing the configuration never rewrites history. */
@@ -1146,6 +1155,7 @@ export class BackendManager {
       projectId: binding.projectId,
       projectPath: binding.projectPath,
       executionPath: binding.executionPath,
+      archived: binding.archived === true,
       title: binding.title ?? native?.title,
       directory: binding.executionPath || native?.directory,
       path: binding.executionPath || native?.path,
@@ -2480,6 +2490,13 @@ export class BackendManager {
         lastRun: usage.lastRun,
         usage: usage.totals,
         policy: binding.policy,
+        archived: binding.archived === true,
+        mode: binding.mode,
+        // The model a client needs to send a valid options.model: a variant
+        // alone is not a legal request, since providerID and modelID are
+        // required alongside it.
+        model: binding.model,
+        parentID: binding.parentID,
         lineage: binding.lineage,
         result: binding.result,
         policyState: binding.policyState
@@ -2622,6 +2639,12 @@ export class BackendManager {
       case 'supervision.snapshot': return this.supervisionSnapshot()
       case 'supervision.search': return this.searchTranscripts(request.query, request.limit)
       case 'supervision.acknowledge': return this.acknowledgeAttention(request.threadId)
+      case 'thread.archive': {
+        const binding = this.binding(request.threadId)
+        binding.archived = request.archived
+        this.save()
+        return this.supervisionSnapshot()
+      }
       case 'thread.policy.get': return this.taskPolicy(request.threadId)
       case 'thread.policy.set': return this.setTaskPolicy(request.threadId, request.policy)
       case 'thread.clone': return this.clone(request.threadId, request.backendId, request.instruction, request.options)

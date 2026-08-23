@@ -14,24 +14,25 @@ function ago(ts?: number): string {
   return `${Math.floor(d / 86_400_000)}d`
 }
 
-/** Attention drives the row's colour, because it is the reason to look. */
+/**
+ * One colour, one meaning: yellow means this thread cannot continue without
+ * you. Red for failed and green for finished told you the past rather than
+ * what to do, and with three colours in play neither the list order nor the
+ * dots read as anything without a key.
+ */
 function tone(thread: ThreadRow): string {
-  switch (thread.attention?.kind) {
-    case 'permission':
-    case 'question': return theme.yellow
-    case 'error': return theme.red
-    case 'completed': return theme.green
-    default: return theme.faint
-  }
+  const kind = thread.attention?.kind
+  return kind === 'permission' || kind === 'question' ? theme.yellow : theme.faint
 }
 
-export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen }: {
+export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen, onNew }: {
   threads: ThreadRow[]
   /** The desktop is asleep or unreachable; say so rather than showing an empty list. */
   offline: boolean
   refreshing: boolean
   onRefresh(): void
   onOpen(threadId: string): void
+  onNew(): void
 }): React.JSX.Element {
   const sorted = sortThreads(threads)
   const waiting = sorted.filter((t) => t.attention?.kind === 'permission' || t.attention?.kind === 'question').length
@@ -87,11 +88,26 @@ export function ThreadsScreen({ threads, offline, refreshing, onRefresh, onOpen 
           )
         }}
       />
+      <Pressable style={styles.fab} onPress={onNew} accessibilityLabel="New thread">
+        <Text style={styles.fabText}>+</Text>
+      </Pressable>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 28,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: theme.accent,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  fabText: { color: theme.bg, fontSize: 30, fontWeight: '700', marginTop: -3 },
   fill: { flex: 1, backgroundColor: theme.bg },
   list: { padding: 12, paddingBottom: 40 },
   waiting: {

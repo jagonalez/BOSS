@@ -1,4 +1,4 @@
-import type { BackendId } from './backend'
+import type { BackendModeId, BackendId } from './backend'
 import type { TaskPolicy, TaskPolicyState } from './task-policy'
 
 export type RunStatus = 'running' | 'completed' | 'error' | 'interrupted'
@@ -58,6 +58,16 @@ export interface SupervisedThread {
   worktreeBranch?: string
   running: boolean
   attention?: ThreadAttention
+  /** Hidden from the default list. Lives on the thread, not in one window's
+   *  localStorage, so every client agrees on what is visible. */
+  archived?: boolean
+  /** How much the agent may do without asking, when it has been set. */
+  mode?: BackendModeId
+  /** What this thread last ran on. A client changing only the thinking level
+   *  still has to send a whole model, so it needs this to build one. */
+  model?: { providerID: string; modelID: string; variant?: string }
+  /** The thread this one was spawned from, when it was delegated. */
+  parentID?: string
   lastRun?: RunMetrics
   usage: ThreadUsageTotals
   policy?: TaskPolicy

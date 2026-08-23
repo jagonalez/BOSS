@@ -162,6 +162,27 @@ export interface ThreadRow {
   updatedAt?: number
   attention?: { kind: AttentionKind; detail?: string }
   lastRun?: { status?: string; toolCalls?: number }
+  /** Hidden on the desktop, so hidden here. Before this was reported the phone
+   *  listed every thread ever created and disagreed with the desktop's count. */
+  archived?: boolean
+  /** Set on a delegated worker. Shown under its parent rather than as a peer. */
+  parentID?: string
+  /** How much this thread's agent may do without asking. */
+  mode?: string
+  /** What the thread last ran on. Changing only the thinking level still means
+   *  sending a whole model, because providerID and modelID are required. */
+  model?: { providerID: string; modelID: string; variant?: string }
+}
+
+/**
+ * What the thread list should show: not archived, and not a delegated worker.
+ *
+ * The desktop hides both, and until it reported them the phone could not: 58
+ * threads on the phone against 26 on the desktop, with no way to tell which
+ * were which.
+ */
+export function visibleThreads(threads: ThreadRow[]): ThreadRow[] {
+  return threads.filter((t) => !t.archived && !t.parentID)
 }
 
 /** What a row needs you to know, in the order a glance should find it. */
@@ -177,15 +198,18 @@ export function attentionLabel(kind: AttentionKind): string {
 
 /** Attention first, then running, then most recent. A phone list is read from
  *  the top and rarely scrolled, so what needs a decision has to be up there. */
+/**
+ * Most recent first, except for threads blocked on a person.
+ *
+ * The five-way ranking this replaced sorted by a status the row then coloured,
+ * which meant the list order kept changing for reasons that were not obvious
+ * and a thread you had just touched could be anywhere. Only a thread that
+ * cannot continue without you earns a place out of order.
+ */
 export function sortThreads(threads: ThreadRow[]): ThreadRow[] {
-  const rank = (t: ThreadRow): number => {
-    if (t.attention?.kind === 'permission' || t.attention?.kind === 'question') return 0
-    if (t.attention?.kind === 'error') return 1
-    if (t.running) return 2
-    if (t.attention) return 3
-    return 4
-  }
-  return [...threads].sort((a, b) => rank(a) - rank(b) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+  const blocked = (t: ThreadRow): number =>
+    t.attention?.kind === 'permission' || t.attention?.kind === 'question' ? 0 : 1
+  return [...threads].sort((a, b) => blocked(a) - blocked(b) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
 }
 
 /** The project a thread works in, short enough for a phone row. */
@@ -194,4 +218,53 @@ export function projectLabel(thread: ThreadRow): string {
   const project = thread.projectPath?.split('/').filter(Boolean).pop()
   if (project && branch) return `${project} · ${branch}`
   return project ?? branch ?? ''
+}
+
+export interface ProjectGroup {
+  /** Absolute path, and the key the UI addresses this group by. */
+  path: string
+  name: string
+  threads: ThreadRow[]
+  /** Threads in this project that need a person. Drives the badge. */
+  waiting: number
+  running: number
+  updatedAt: number
+}
+
+/**
+ * Group threads by the project they run in.
+ *
+ * The desktop's project list lives on a separate IPC channel the relay does not
+ * carry, but every thread already reports its projectPath — so the phone can
+ * reconstruct the same grouping without any new protocol. Threads with no
+ * project (a scratch thread, or one whose checkout has gone) collect under a
+ * single group rather than vanishing.
+ */
+export function groupByProject(threads: ThreadRow[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>()
+  for (const thread of threads) {
+    const path = thread.projectPath ?? ''
+    let group = groups.get(path)
+    if (!group) {
+      group = {
+        path,
+        name: path ? path.split('/').filter(Boolean).pop() ?? path : 'No project',
+        threads: [],
+        waiting: 0,
+        running: 0,
+        updatedAt: 0
+      }
+      groups.set(path, group)
+    }
+    group.threads.push(thread)
+    if (thread.attention?.kind === 'permission' || thread.attention?.kind === 'question') group.waiting += 1
+    if (thread.running) group.running += 1
+    group.updatedAt = Math.max(group.updatedAt, thread.updatedAt ?? 0)
+  }
+  for (const group of groups.values()) group.threads = sortThreads(group.threads)
+  // Projects needing a person come first, then by recency — the same rule the
+  // thread list uses, applied a level up.
+  return [...groups.values()].sort((a, b) =>
+    (b.waiting > 0 ? 1 : 0) - (a.waiting > 0 ? 1 : 0) || b.updatedAt - a.updatedAt
+  )
 }

@@ -106,14 +106,26 @@ function Thinking({ text }: { text: string }): React.JSX.Element {
   )
 }
 
-export function ThreadScreen({ messages, busy, permission, sending, onSend, onStop, onPermission }: {
+export function ThreadScreen({
+  messages, busy, permission, sending, modes, mode, variants, variant,
+  onSend, onStop, onPermission, onMode, onVariant, onDelegate
+}: {
   messages: Message[]
   busy: boolean
   permission?: PendingPermission
   sending: boolean
+  /** What this thread's backend allows. Empty when the backend has one mode. */
+  modes: { id: string; label: string }[]
+  mode?: string
+  /** Thinking levels the thread's model offers, when it offers any. */
+  variants: string[]
+  variant?: string
   onSend(text: string): void
+  onVariant(variant?: string): void
+  onDelegate(): void
   onStop(): void
   onPermission(response: 'once' | 'always' | 'reject'): void
+  onMode(mode: string): void
 }): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const list = useRef<FlatList<Message>>(null)
@@ -188,6 +200,46 @@ export function ThreadScreen({ messages, busy, permission, sending, onSend, onSt
         </Pressable>
       ) : null}
 
+      {modes.length > 1 ? (
+        <View style={styles.modes}>
+          {modes.map((m) => (
+            <Pressable
+              key={m.id}
+              onPress={() => onMode(m.id)}
+              style={[styles.modeChip, m.id === mode && styles.modeChipOn]}
+            >
+              <Text style={[styles.modeText, m.id === mode && styles.modeTextOn]}>{m.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      {/* Thinking is not stored on the thread — it rides on each message — so
+          this sets what the NEXT message asks for rather than changing state. */}
+      {variants.length ? (
+        <View style={styles.modes}>
+          <Text style={styles.stripLabel}>Thinking</Text>
+          {variants.map((v) => (
+            <Pressable
+              key={v}
+              onPress={() => onVariant(v === variant ? undefined : v)}
+              style={[styles.modeChip, v === variant && styles.modeChipOn]}
+            >
+              <Text style={[styles.modeText, v === variant && styles.modeTextOn]}>{v}</Text>
+            </Pressable>
+          ))}
+          <Pressable onPress={onDelegate} style={styles.modeChip}>
+            <Text style={styles.modeText}>Delegate</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.modes}>
+          <Pressable onPress={onDelegate} style={styles.modeChip}>
+            <Text style={styles.modeText}>Delegate</Text>
+          </Pressable>
+        </View>
+      )}
+
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
@@ -206,6 +258,25 @@ export function ThreadScreen({ messages, busy, permission, sending, onSend, onSt
 }
 
 const styles = StyleSheet.create({
+  modes: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingBottom: 8
+  },
+  modeChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: theme.inset,
+    borderWidth: 1,
+    borderColor: theme.line
+  },
+  modeChipOn: { backgroundColor: theme.accent, borderColor: theme.accent },
+  modeText: { color: theme.muted, fontSize: 12 },
+  stripLabel: { color: theme.faint, fontSize: 12, alignSelf: 'center', marginRight: 2 },
+  modeTextOn: { color: theme.bg, fontWeight: '700' },
   fill: { flex: 1, backgroundColor: theme.bg },
   list: { padding: 12, paddingBottom: 20 },
   msg: { marginBottom: 16 },
