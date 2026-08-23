@@ -3,7 +3,7 @@ import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId } from '@shared/backend'
 import { composerRecovery, retryPayload } from '../lib/send-recovery'
-import { abortRun, addAnnotation, clearFailedSend, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, startSideChat, steerFollowUp, toggleAsr, updateFollowUp } from '../lib/actions'
+import { abortRun, addAnnotation, clearFailedSend, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, startSideChat, steerFollowUp, toggleAsr, updateAnnotationNote, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -15,7 +15,8 @@ import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { turnCompletedAt } from '../lib/status'
 import { segmentTurn } from '../lib/part-runs'
 import { AnnotationHighlights } from './AnnotationHighlights'
-import { AnnotationPopover } from './AnnotationPopover'
+import { AnnotationMarkers } from './AnnotationMarkers'
+import { AnnotationPopover, type AnnotationPopoverHandle } from './AnnotationPopover'
 import { AnnotationRow } from './AnnotationRow'
 import { createAnnotation, type Annotation, type AnnotationAnchor } from '@shared/annotations'
 import { anchorFromSelection } from '../lib/annotation-anchor'
@@ -1331,6 +1332,9 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
   )
   const turns = useMemo(() => groupTurns(windowed), [windowed])
   const annotationsForThread = useStore(appStore, (s) => (effectiveId ? s.annotations[effectiveId] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
+  // Lets a numbered marker in the transcript reopen the note editor on the
+  // annotation it belongs to, which is what makes a placed highlight editable.
+  const annotationPopoverRef = useRef<AnnotationPopoverHandle>(null)
   const lastTurnAssistants = turns[turns.length - 1]?.assistants ?? []
   const allParts = lastTurnAssistants.flatMap((m) => m.parts)
   const liveText = allParts.some((p) => p.type === 'text' && (p.text ?? '').trim().length > 0)
@@ -1655,9 +1659,20 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
           />
         ) : null}
         {effectiveId ? (
+          <AnnotationMarkers
+            annotations={annotationsForThread}
+            scrollRef={scrollRef}
+            revision={turns}
+            onEdit={(annotation, at) => annotationPopoverRef.current?.edit(annotation, at)}
+          />
+        ) : null}
+        {effectiveId ? (
           <AnnotationPopover
+            handleRef={annotationPopoverRef}
             scrollRef={scrollRef}
             onAnnotate={(quote, anchor, note) => addAnnotation(effectiveId, quote, anchor, note)}
+            onUpdateNote={(id, note) => updateAnnotationNote(effectiveId, id, note)}
+            onRemove={(id) => removeAnnotation(effectiveId, id)}
             onSideChat={(quote, anchor) => {
               // Built without touching the composer: a side chat carries the
               // passage somewhere else, so pinning it to this thread's draft
@@ -1732,7 +1747,10 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
           ) : null}
           {/* The affordance people reach for first. The selection toolbar is
               easy to miss, so the passage is annotatable from the menu too —
-              absent, rather than inert, when there is nothing selected here. */}
+              absent, rather than inert, when there is nothing selected here.
+              Attaches the quote with no note, which is a complete annotation on
+              its own; the marker it leaves in the transcript is how a note gets
+              added afterwards. */}
           {msgCtx.selection ? (
             <button
               className="ctx-item"

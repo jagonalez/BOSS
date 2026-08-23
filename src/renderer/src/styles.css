@@ -9155,3 +9155,66 @@ select:hover {
   background-color: var(--accent-soft);
   color: var(--text);
 }
+
+/* The numbered handle at the tail of a highlight. Fixed, like the popover, so
+   it tracks its words as the transcript scrolls beneath it; the component
+   re-measures on scroll rather than relying on a containing block. */
+.annotation-marker {
+  position: fixed;
+  /* Sits just past the last character and rides slightly above the line, so it
+     reads as a marginal note rather than as part of the sentence. */
+  transform: translate(2px, -35%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--ink-on-accent);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  /* Under the popover and editor (210), above the transcript. */
+  z-index: 205;
+}
+
+.annotation-marker:hover {
+  filter: brightness(1.12);
+}
+
+/* Where a note is written, for a new highlight or one being revised. Matches
+   the toolbar's placement rules so the editor opens where the toolbar was. */
+.annotation-editor {
+  position: fixed;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-menu);
+  padding: 4px;
+  z-index: 210;
+}
+
+.annotation-note-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.annotation-note-remove:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
