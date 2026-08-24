@@ -1557,16 +1557,31 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
     void speakText(text, lastAssistant.info.id)
   }, [turns, speakAloud, effectiveId])
 
-  const onScroll = (): void => {
+  const viewportKey = tabId ?? effectiveId ?? 'launcher'
+  const captureBookmark = useCallback((): void => {
     const el = scrollRef.current
-    if (!el) return
+    // A hidden mounted tab reports zero geometry. Its last visible bookmark is
+    // more trustworthy than anything calculated while display:none is active.
+    if (!el || el.clientHeight === 0) return
     // Scrolling up to read stops the follow; coming back resumes it. The
     // threshold is generous because a streamed line can land between the
     // scroll and this handler.
-    followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
-  }
+    const following = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    followRef.current = following
+    const item = virtualizer.getVirtualItemForOffset(el.scrollTop)
+    viewportBookmarks.set(viewportKey, {
+      following,
+      turnKey: item ? String(item.key) : undefined,
+      offsetWithinTurn: item ? el.scrollTop - item.start : 0
+    })
+  }, [viewportKey, virtualizer])
+  const onScroll = useCallback((): void => {
+    // Virtual measurement can emit one last correction after a tab loses
+    // active status but before its host becomes display:none. That correction
+    // must not replace the position captured at the moment the user left.
+    if (active) captureBookmark()
+  }, [active, captureBookmark])
 
-  const viewportKey = tabId ?? effectiveId ?? 'launcher'
   const restoreBookmark = useCallback((bookmark: ViewportBookmark): void => {
     let attempts = 0
     const restore = (): void => {
@@ -1590,20 +1605,14 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
 
   const wasActiveRef = useRef(active)
   useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (wasActiveRef.current && !active && el) {
-      const item = virtualizer.getVirtualItemForOffset(el.scrollTop)
-      viewportBookmarks.set(viewportKey, {
-        following: followRef.current,
-        turnKey: item ? String(item.key) : undefined,
-        offsetWithinTurn: item ? el.scrollTop - item.start : 0
-      })
+    if (wasActiveRef.current && !active) {
+      captureBookmark()
     } else if (!wasActiveRef.current && active) {
       const bookmark = viewportBookmarks.get(viewportKey)
       if (bookmark) restoreBookmark(bookmark)
     }
     wasActiveRef.current = active
-  }, [active, restoreBookmark, viewportKey, virtualizer])
+  }, [active, captureBookmark, restoreBookmark, viewportKey])
 
   useEffect(() => {
     const el = scrollRef.current

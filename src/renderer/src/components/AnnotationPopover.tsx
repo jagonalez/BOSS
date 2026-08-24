@@ -22,7 +22,13 @@
 
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { anchorFromSelection, popoverAnchorPoint } from '../lib/annotation-anchor'
+import {
+  anchorFromSelection,
+  MESSAGE_ID_ATTR,
+  MESSAGE_ROOT_SELECTOR,
+  popoverAnchorPoint,
+  rangeFromAnchor
+} from '../lib/annotation-anchor'
 import { installSelectionListeners } from './annotation-popover-listeners'
 import type { Annotation, AnnotationAnchor } from '@shared/annotations'
 
@@ -150,16 +156,43 @@ export function AnnotationPopover({
     })
   }, [note])
 
-  // A highlight anchored to text that has scrolled away should not leave its
-  // toolbar floating over unrelated content. The editor goes too: it is placed
-  // at the words it belongs to, so it would otherwise drift over other text
-  // with no sign of what it is attached to.
+  // Keep the toolbar attached to its words while the virtual transcript makes
+  // small programmatic scroll corrections. Dismissing on every scroll made a
+  // freshly-created selection race TanStack Virtual's late height measurement:
+  // the toolbar could appear and disappear before the click reached it. A real
+  // scroll away still dismisses once the anchored text leaves the viewport (or
+  // its virtual row unmounts).
   useEffect(() => {
     const root = scrollRef.current
     if (!root || (!pending && !note)) return
-    const onScroll = (): void => dismiss()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onScroll = (): void => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        const draft = pending ?? note
+        if (!draft) return
+        const message = root.querySelector<HTMLElement>(
+          `${MESSAGE_ROOT_SELECTOR}[${MESSAGE_ID_ATTR}="${CSS.escape(draft.anchor.messageId)}"]`
+        )
+        const range = message ? rangeFromAnchor(message, draft.anchor) : null
+        const point = range ? popoverAnchorPoint(range) : null
+        const bounds = root.getBoundingClientRect()
+        if (!point || point.y < bounds.top || point.y > bounds.bottom) {
+          dismiss()
+          return
+        }
+        if (pending) {
+          setPending((current) => current ? { ...current, x: point.x, y: point.y } : current)
+        } else {
+          setNote((current) => current ? { ...current, x: point.x, y: point.y } : current)
+        }
+      }, 0)
+    }
     root.addEventListener('scroll', onScroll, { passive: true })
-    return () => root.removeEventListener('scroll', onScroll)
+    return () => {
+      root.removeEventListener('scroll', onScroll)
+      if (timer) clearTimeout(timer)
+    }
   }, [scrollRef, pending, note, dismiss])
 
   useEffect(() => {

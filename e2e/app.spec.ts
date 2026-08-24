@@ -662,6 +662,12 @@ test('annotating a passage quotes it back to the model with the note', async ({ 
   await expect(appPage.locator('.msg.assistant')).toContainText('second result')
 
   await selectInAssistantReply(appPage, 'second result')
+  // Dynamic virtual-row measurement may correct scrollTop after selection.
+  // The toolbar belongs to the anchored words and must survive that correction
+  // while those words remain in view.
+  await expect(appPage.locator('.annotation-popover')).toBeVisible()
+  await appPage.locator('.messages:visible').dispatchEvent('scroll')
+  await expect(appPage.locator('.annotation-popover')).toBeVisible()
   await appPage.locator('.annotation-popover').getByRole('button', { name: 'Add to chat' }).click()
   await appPage.getByLabel('Annotation note').fill('Why this one?')
   await appPage.getByLabel('Annotation note').press('Enter')
