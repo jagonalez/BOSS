@@ -36,9 +36,7 @@
   },
   "submit": {
     "production": {
-      "ios": {
-        "appleId": "jeremygonzalez@outlook.com"
-      }
+      "ios": {}
     }
   }
 }

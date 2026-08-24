@@ -38,6 +38,23 @@ it works, it is audited, and replacing it buys nothing.
 Prefer a pure-JavaScript dependency, or no dependency, when the difference is
 small. Reach for a native module when it actually earns the rebuild.
 
+## Submitting
+
+`eas.json` carries no Apple ID. The repository is public, and an email address
+in it is a phishing target and a scraping target for no benefit — EAS reads
+`EXPO_APPLE_ID` from the environment, and prompts when it is unset. Export it,
+or type it at the prompt:
+
+    EXPO_APPLE_ID=you@example.com eas submit --profile production --platform ios
+
+`EXPO_APPLE_PASSWORD` works the same way and is only read once a username has
+resolved. Do not put either back in eas.json.
+
+Note this covers the Apple ID only. `appleTeamId` and `ascAppId` are account
+identifiers rather than contact details; `ascApiKeyPath`, `ascApiKeyIssuerId`
+and `ascApiKeyId` are the fields EAS interpolates `$VAR` inside, if a key ever
+lands here.
+
 ## Permissions
 
 Declare a permission only when a feature actually uses it. A usage string for
