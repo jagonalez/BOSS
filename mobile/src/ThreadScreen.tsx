@@ -26,6 +26,7 @@ import {
   type Message,
   type Part
 } from './parts'
+import { FollowUps, type FollowUp } from './FollowUps'
 import { theme } from './theme'
 
 export type { Message as ThreadMessage } from './parts'
@@ -186,6 +187,7 @@ export function ThreadScreen({
   messages, busy, permission, sending, modes, mode, variants, variant,
   models, modelId, onModel,
   find, onFind, findHits, finding,
+  followUps, steering, onEditFollowUp, onMoveFollowUp, onSteerFollowUp, onRemoveFollowUp,
   onSend, onStop, onPermission, onMode, onVariant, onDelegate
 }: {
   messages: Message[]
@@ -209,6 +211,14 @@ export function ThreadScreen({
   onFind(find: string): void
   findHits: { messageId: string; snippet: string }[]
   finding: boolean
+  /** Messages waiting for the current run to end. */
+  followUps: FollowUp[]
+  /** How this thread's backend interrupts a run, which names the steer action. */
+  steering: 'native' | 'stop-and-redirect'
+  onEditFollowUp(id: string, text: string): void
+  onMoveFollowUp(id: string, toIndex: number): void
+  onSteerFollowUp(id: string): void
+  onRemoveFollowUp(id: string): void
   onSend(text: string): void
   onVariant(variant?: string): void
   onDelegate(): void
@@ -465,17 +475,29 @@ export function ThreadScreen({
         </View>
       ) : null}
 
+      <FollowUps
+        items={followUps}
+        busy={busy}
+        steering={steering}
+        onEdit={onEditFollowUp}
+        onMove={onMoveFollowUp}
+        onSteer={onSteerFollowUp}
+        onRemove={onRemoveFollowUp}
+      />
+
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
           value={draft}
           onChangeText={setDraft}
-          placeholder="Reply…"
+          // Say what the button will do before it is pressed: a run in progress
+          // means this joins the queue rather than going out now.
+          placeholder={busy ? 'Queue a follow-up…' : 'Reply…'}
           placeholderTextColor={theme.faint}
           multiline
         />
         <Pressable style={[styles.btn, styles.btnPrimary]} onPress={send} disabled={sending}>
-          <Text style={styles.btnPrimaryText}>{sending ? '…' : 'Send'}</Text>
+          <Text style={styles.btnPrimaryText}>{sending ? '…' : busy ? 'Queue' : 'Send'}</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>

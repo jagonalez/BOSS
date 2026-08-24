@@ -82,7 +82,11 @@ const FORWARDED_EVENTS = new Set([
   'permission.asked',
   'permission.updated',
   'permission.replied',
-  'automations.updated'
+  'automations.updated',
+  // The queue changes from the desktop and from its own draining, not just
+  // from what the phone asked for. Without this a remote client only ever
+  // sees the queue it returned from its own request.
+  'thread.followups.updated'
 ])
 
 export const DEFAULT_RELAY_URL = 'wss://boss-relay.fly.dev'

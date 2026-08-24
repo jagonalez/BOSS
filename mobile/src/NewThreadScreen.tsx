@@ -19,6 +19,9 @@ export interface BackendOption {
   available: boolean
   unavailableReason?: string
   modes: { id: string; label: string }[]
+  /** What this backend can do. Only steering is read on the phone so far: it
+   *  decides whether interrupting a run folds text in or stops it first. */
+  capabilities?: { steering?: 'native' | 'stop-and-redirect' }
 }
 
 export interface ModelOption {

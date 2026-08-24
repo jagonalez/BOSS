@@ -18,6 +18,7 @@ import { groupByProject, visibleThreads } from './src/parts'
 import { AutomationsScreen, type AutomationRow, type AutomationRunRow } from './src/AutomationsScreen'
 import { WorkScreen, type DiffFile, type Todo } from './src/WorkScreen'
 import { ThreadScreen, type PendingPermission, type ThreadMessage } from './src/ThreadScreen'
+import { type FollowUp } from './src/FollowUps'
 import { RelayConnection, clearCredentials, loadCredentials, type RelayCredentials } from './src/relay'
 import { theme } from './src/theme'
 
@@ -63,6 +64,7 @@ export default function App(): React.JSX.Element {
   const [find, setFind] = useState('')
   const [findHits, setFindHits] = useState<{ messageId: string; snippet: string }[]>([])
   const [finding, setFinding] = useState(false)
+  const [followUps, setFollowUps] = useState<Record<string, FollowUp[]>>({})
   const [tab, setTab] = useState<'work' | 'automations'>('work')
   const [automations, setAutomations] = useState<AutomationRow[]>([])
   const [runs, setRuns] = useState<AutomationRunRow[]>([])
@@ -255,6 +257,13 @@ export default function App(): React.JSX.Element {
         return next
       })
     }
+    if (type === 'thread.followups.updated') {
+      // Carries threadId rather than sessionID, and the whole queue rather than
+      // a delta — so this replaces, and does not need a refetch behind it.
+      const threadId = props.threadId as string | undefined
+      const queue = props.followUps as FollowUp[] | undefined
+      if (threadId) setFollowUps((prev) => ({ ...prev, [threadId]: queue ?? [] }))
+    }
     if (type === 'automations.updated') void refreshAutomations()
     if (type.startsWith('session.')) void refreshThreads()
     // Coalesce. A streaming run emits a message event per token, and each one
@@ -322,6 +331,15 @@ export default function App(): React.JSX.Element {
     }
   }, [applyEvent, loadBackends, refreshAutomations, refreshMessages, refreshThreads])
 
+  /** Every queue request answers with the whole new queue, so one path applies
+   *  them all rather than four that differ only in what they ask for. */
+  const queueRequest = useCallback((threadId: string, request: Record<string, unknown>) => {
+    void relay.current
+      ?.request<FollowUp[]>(request as never)
+      .then((queue) => setFollowUps((prev) => ({ ...prev, [threadId]: queue ?? [] })))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [])
+
   // Message text lives in the desktop's transcript database, not on the phone,
   // so the search goes over the relay. Debounced because it runs a scan per
   // keystroke otherwise, and skipped under two characters where every thread
@@ -377,6 +395,16 @@ export default function App(): React.JSX.Element {
     }, 200)
     return () => clearTimeout(timer)
   }, [find, openThread])
+
+  // Events only carry changes, so an already-queued follow-up would be
+  // invisible until something moved it. Load the queue when a thread opens.
+  useEffect(() => {
+    if (!openThread) return
+    void relay.current
+      ?.request<FollowUp[]>({ type: 'thread.followups.list', threadId: openThread } as never)
+      .then((queue) => setFollowUps((prev) => ({ ...prev, [openThread]: queue ?? [] })))
+      .catch(() => {})
+  }, [openThread])
 
   // The open thread needs its backend's models for the picker. Every route into
   // a thread lands here, so this covers them all rather than each caller
@@ -578,6 +606,21 @@ export default function App(): React.JSX.Element {
           onFind={setFind}
           findHits={findHits}
           finding={finding}
+          followUps={followUps[threadId] ?? []}
+          steering={backends.find((b) => b.id === threads.find((t) => t.threadId === threadId)?.backendId)
+            ?.capabilities?.steering ?? 'stop-and-redirect'}
+          onEditFollowUp={(id, text) => queueRequest(threadId, {
+            type: 'thread.followups.update', threadId, followUpId: id, text
+          })}
+          onMoveFollowUp={(id, toIndex) => queueRequest(threadId, {
+            type: 'thread.followups.move', threadId, followUpId: id, toIndex
+          })}
+          onSteerFollowUp={(id) => queueRequest(threadId, {
+            type: 'thread.followups.steer', threadId, followUpId: id
+          })}
+          onRemoveFollowUp={(id) => queueRequest(threadId, {
+            type: 'thread.followups.remove', threadId, followUpId: id
+          })}
           models={models}
           modelId={threadModels[threadId]?.modelID
             ?? threads.find((t) => t.threadId === threadId)?.model?.modelID}
@@ -617,11 +660,19 @@ export default function App(): React.JSX.Element {
             const base = threadModels[threadId] ?? current?.model
             const variant = threadVariants[threadId]
             setSending(true)
+            // Always the queue, never thread.send.
+            //
+            // A busy thread rejects a send, and deciding between the two from
+            // the phone's copy of the busy flag loses the race the desktop
+            // documents: two sends in quick succession both read "idle". The
+            // queue has no such edge — it delivers immediately when the thread
+            // is idle and holds the message when it is not, so one call is
+            // correct in both states.
             void relay.current
               ?.request({
-                type: 'thread.send',
+                type: 'thread.followups.add',
                 threadId,
-                parts: [{ type: 'text', text }],
+                text,
                 // A variant alone is not a legal model: providerID and
                 // modelID are required beside it, so they are always sent
                 // together.
@@ -629,7 +680,10 @@ export default function App(): React.JSX.Element {
                   ? { options: { model: { ...base, ...(variant ? { variant } : {}) } } }
                   : {})
               })
-              .then(() => refreshMessages(threadId))
+              .then((queue) => {
+                setFollowUps((prev) => ({ ...prev, [threadId]: (queue as FollowUp[]) ?? [] }))
+                return refreshMessages(threadId)
+              })
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
               .finally(() => setSending(false))
           }}

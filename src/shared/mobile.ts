@@ -10,6 +10,7 @@ const READ_ONLY_REQUESTS = new Set<BackendRequest['type']>([
   'thread.get',
   'thread.messages',
   'thread.todos',
+  'thread.followups.list',
   'thread.diff',
   'automation.list'
 ])
