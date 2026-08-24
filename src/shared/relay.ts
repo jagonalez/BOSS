@@ -57,6 +57,19 @@ export type RelayMessage =
    * than trust an incomplete stream.
    */
   | { kind: 'resumed'; events: Array<{ event: Record<string, unknown>; seq: number }>; gap: boolean; seq: number }
+  /**
+   * One slice of a response too large for a single frame.
+   *
+   * The relay closes the socket on an oversized frame, so a big transcript used
+   * to take the connection down with it. Trimming what a phone cannot render
+   * gets most threads under the cap; this carries the ones still over it.
+   *
+   * Each chunk is sealed on its own, so the relay sees the same opaque frames
+   * it always did and learns nothing from the split. `index` and `total` let
+   * the receiver reassemble and, more importantly, notice when it cannot: a
+   * missing chunk fails the request rather than yielding half a transcript.
+   */
+  | { kind: 'chunk'; id: string; index: number; total: number; body: string }
   | { kind: 'ping' }
   | { kind: 'claim'; secret: string; label?: string }
   | { kind: 'claimed'; secret: string; token: string; role: string }

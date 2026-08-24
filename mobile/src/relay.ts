@@ -42,6 +42,9 @@ export type RelayMessage =
   | { kind: 'event'; event: Record<string, unknown>; seq: number }
   | { kind: 'resume'; since: number; token: string }
   | { kind: 'resumed'; events: Array<{ event: Record<string, unknown>; seq: number }>; gap: boolean; seq: number }
+  /** One slice of a response too big for a single frame. See the desktop's
+   *  src/shared/relay.ts, which this type must keep matching. */
+  | { kind: 'chunk'; id: string; index: number; total: number; body: string }
   | { kind: 'ping' }
   | { kind: 'claim'; secret: string; label?: string }
   | { kind: 'claimed'; secret: string; token: string; role: string }
@@ -108,6 +111,8 @@ export class RelayConnection {
   private key: Uint8Array | null = null
   private credentials: RelayCredentials | null = null
   private pendingClaim: string | null = null
+  /** Chunks of responses still arriving, keyed by request id. */
+  private readonly chunks = new Map<string, { parts: string[]; have: number; total: number }>()
   private attempt = 0
   private ready = false
   private desktopOnline = false
@@ -287,6 +292,11 @@ export class RelayConnection {
       return
     }
 
+    if (message.kind === 'chunk') {
+      this.collect(message)
+      return
+    }
+
     if (message.kind === 'event') {
       await this.noteSeq(message.seq)
       this.handlers.onEvent(message.event)
@@ -332,6 +342,49 @@ export class RelayConnection {
       previous?.close()
       this.handlers.onPaired(credentials)
       this.connect()
+    }
+  }
+
+  /**
+   * Gather one response's chunks and settle its request when the last arrives.
+   *
+   * Chunks are indexed rather than appended in arrival order, so nothing
+   * depends on the socket delivering them in sequence. The waiter is only
+   * resolved once every index is present; a chunk that never comes leaves the
+   * request to time out like any other, which is the honest outcome — half a
+   * transcript that parses is worse than one that visibly failed.
+   */
+  private collect(message: Extract<RelayMessage, { kind: 'chunk' }>): void {
+    const waiter = this.pending.get(message.id)
+    // Nothing is waiting: a late chunk for a request that already timed out.
+    if (!waiter) { this.chunks.delete(message.id); return }
+
+    let entry = this.chunks.get(message.id)
+    if (!entry) {
+      entry = { parts: new Array<string>(message.total), have: 0, total: message.total }
+      this.chunks.set(message.id, entry)
+    }
+    if (entry.parts[message.index] === undefined) {
+      entry.parts[message.index] = message.body
+      entry.have++
+    }
+    if (entry.have < entry.total) return
+
+    this.chunks.delete(message.id)
+    clearTimeout(waiter.timer)
+    this.pending.delete(message.id)
+    try {
+      // atob gives bytes as a binary string; the payload is UTF-8 and full of
+      // characters that are not one byte, so it has to be decoded as such.
+      const binary = atob(entry.parts.join(''))
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+      const json = new TextDecoder().decode(bytes)
+      const payload = JSON.parse(json) as { ok: boolean; result?: unknown; error?: string }
+      if (payload.ok) waiter.resolve(payload.result)
+      else waiter.reject(new Error(payload.error ?? 'Request failed.'))
+    } catch {
+      waiter.reject(new Error('That response arrived incomplete. Pull to refresh.'))
     }
   }
 

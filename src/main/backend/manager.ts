@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { trimToolOutput } from '../../shared/tool-output'
 import type { Backend } from './backend'
 import { threadContextPrompt } from './thread-context'
 import type {
@@ -2633,7 +2634,21 @@ export class BackendManager {
       case 'thread.get': return this.sessionGet(request.threadId)
       case 'thread.delete': return this.sessionDelete(request.threadId)
       case 'thread.rename': return this.sessionRename(request.threadId, request.title)
-      case 'thread.messages': return this.messagesList(request.threadId, request.limit)
+      case 'thread.messages': {
+        const messages = await this.messagesList(request.threadId, request.limit)
+        return request.trimOutput ? trimToolOutput(messages, request.trimOutput) : messages
+      }
+      case 'thread.part': {
+        // Straight from the store rather than messagesList: that asks the
+        // backend for the whole history and reconciles it, which is a lot of
+        // work to answer "what did this one command print".
+        this.load()
+        const messages = this.transcripts?.messages(request.threadId) ?? []
+        const message = messages.find((m) => m.info?.id === request.messageId)
+        const part = message?.parts.find((p) => (p as { id?: string }).id === request.partId)
+        if (!part) throw new Error('That step is no longer in this thread.')
+        return part
+      }
       case 'thread.send': return this.sendMessage(request.threadId, request.parts, request.options)
       case 'thread.followups.list': return this.followUps(request.threadId)
       case 'thread.followups.add': return this.addFollowUp(request.threadId, request.text, request.attachments, request.options)

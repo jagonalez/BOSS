@@ -109,7 +109,10 @@ export default function App(): React.JSX.Element {
     if (!connection) return
     try {
       const list = await connection.request<ThreadMessage[]>({
-        type: 'thread.messages', threadId, limit: 60
+        // Tool output is most of a transcript's bytes and none of what this
+        // screen draws — a step shows the command that ran. Asking for it
+        // whole is what pushed a Codex thread past the relay's frame cap.
+        type: 'thread.messages', threadId, limit: 60, trimOutput: 2000
       })
       setMessages((prev) => ({ ...prev, [threadId]: list ?? [] }))
     } catch (e) {
@@ -609,6 +612,17 @@ export default function App(): React.JSX.Element {
           followUps={followUps[threadId] ?? []}
           steering={backends.find((b) => b.id === threads.find((t) => t.threadId === threadId)?.backendId)
             ?.capabilities?.steering ?? 'stop-and-redirect'}
+          onToolOutput={async (part) => {
+            const messageId = (part as { messageID?: string }).messageID
+            const partId = part.id
+            if (!messageId || !partId) return 'This step did not keep an id to look up.'
+            const full = await relay.current?.request<{ state?: { output?: unknown } }>({
+              type: 'thread.part', threadId, messageId, partId
+            } as never)
+            const output = full?.state?.output
+            if (output === undefined || output === null) return 'This step recorded no output.'
+            return typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+          }}
           onEditFollowUp={(id, text) => queueRequest(threadId, {
             type: 'thread.followups.update', threadId, followUpId: id, text
           })}

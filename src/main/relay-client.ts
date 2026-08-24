@@ -49,6 +49,7 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'thread.list',
   'thread.get',
   'thread.messages',
+  'thread.part',
   'thread.send',
   'thread.abort',
   'thread.todos',
@@ -73,6 +74,14 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'assistant.task.update',
   'assistant.task.assign'
 ])
+
+/** Ceiling on how many frames one response may take.
+ *
+ *  At ~384KB of payload per chunk this is 12MB, far past any transcript worth
+ *  sending to a phone. It exists so a pathological result — a diff of a
+ *  vendored tree, a tool that returned a binary — fails with a message instead
+ *  of pushing hundreds of frames at a phone on cellular. */
+const MAX_RESPONSE_CHUNKS = 32
 
 const FORWARDED_EVENTS = new Set([
   'session.created',
@@ -559,21 +568,13 @@ export class RelayClient {
       const result = await this.host.handle(request)
       if (await this.sendTo(peerId, { kind: 'response', id: message.id, ok: true, result: result ?? null })) return
 
-      // Too large for the relay. A transcript is a list, and the recent end is
-      // the part worth reading, so drop from the front until it fits rather
-      // than failing the whole thread. Anything that is not a list, or that
-      // will not shrink, gets a message the phone can render — otherwise the
-      // request times out with a blank screen, which is what the user saw.
-      // No marker message: the phone renders only messages with parts it knows,
-      // so a synthetic one is dropped silently and a wrongly-shaped one would
-      // be worse than nothing. Showing fewer messages is the honest outcome.
-      if (Array.isArray(result)) {
-        let kept = result as unknown[]
-        while (kept.length > 1) {
-          kept = kept.slice(Math.ceil(kept.length / 2))
-          if (await this.sendTo(peerId, { kind: 'response', id: message.id, ok: true, result: kept })) return
-        }
-      }
+      // Too large for one frame, so send it in several.
+      //
+      // This used to halve the list until it fit, which is why a Codex thread
+      // arrived with only its last message or two: a transcript whose tool
+      // output ran to megabytes was cut down by a factor of eight and the
+      // result looked like missing history. Chunking sends all of it.
+      if (await this.sendChunked(peerId, message.id, result ?? null)) return
       await this.sendTo(peerId, {
         kind: 'response',
         id: message.id,
@@ -630,6 +631,37 @@ export class RelayClient {
     // the wire payload, and multi-byte characters are common in transcripts.
     if (Buffer.byteLength(frame) > RELAY_MAX_FRAME_BYTES) return false
     socket.send(frame)
+    return true
+  }
+
+  /**
+   * Send one response as a sequence of chunks.
+   *
+   * The payload is serialized once and cut on byte boundaries, then each piece
+   * is sealed and sent as its own frame — so the relay still sees only opaque
+   * frames of a size it accepts. Chunks carry the request id, so a phone with
+   * several requests in flight reassembles the right one.
+   *
+   * Returns false if any chunk fails to send, which leaves the caller to
+   * answer with an error rather than the phone waiting on a stream that
+   * stopped halfway.
+   */
+  private async sendChunked(peerId: string, id: string, result: unknown): Promise<boolean> {
+    // Base64 before cutting. Slicing UTF-8 on a byte boundary splits multi-byte
+    // characters, and a transcript is full of them — the pieces would decode to
+    // replacement characters and the JSON would not parse. Base64 is
+    // single-byte, so any cut is safe.
+    const encoded = Buffer.from(JSON.stringify({ ok: true, result })).toString('base64')
+    // Room for the chunk envelope, and for seal() growing what it is given by
+    // a further third when it base64s the ciphertext.
+    const slice = Math.floor((RELAY_MAX_FRAME_BYTES - 2_000) * 3 / 4)
+    const total = Math.ceil(encoded.length / slice)
+    if (total > MAX_RESPONSE_CHUNKS) return false
+
+    for (let index = 0; index < total; index++) {
+      const piece = encoded.slice(index * slice, (index + 1) * slice)
+      if (!(await this.sendTo(peerId, { kind: 'chunk', id, index, total, body: piece }))) return false
+    }
     return true
   }
 

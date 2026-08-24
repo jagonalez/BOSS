@@ -82,6 +82,10 @@ export interface Part {
     title?: string
     input?: unknown
     output?: unknown
+    /** Full character count of an output that was shortened before sending.
+     *  Set only for remote clients, which ask for tool output trimmed because
+     *  they do not render it; thread.part fetches the whole thing on demand. */
+    outputTruncated?: number
     metadata?: Record<string, unknown>
     name?: string
     path?: string

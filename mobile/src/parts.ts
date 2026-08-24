@@ -16,7 +16,12 @@ export interface Part {
     title?: string
     /** Where some backends put a reasoning part's text. */
     text?: string
+    /** Full length of an output the desktop shortened before sending. Set only
+     *  when it was cut, which is what makes "Show output" worth offering. */
+    outputTruncated?: number
   }
+  /** Present on parts the desktop stored; needed to ask for one by id. */
+  id?: string
   tool?: string
 }
 
