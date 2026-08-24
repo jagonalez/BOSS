@@ -11,9 +11,8 @@ export function ModelSwitchModal(): React.JSX.Element | null {
       <div className="modal">
         <h3>Switch model?</h3>
         <div className="body">
-          Switching to <strong>{pending.to}</strong> mid-conversation may invalidate the cached context for this
-          session, which can increase latency and cost. The new model also won't have the conversation history that the
-          current one has seen.
+          Switching to <strong>{pending.to}</strong> mid-conversation invalidates this session's prompt cache, which can
+          increase the latency and cost of the next turn. The conversation history carries over.
         </div>
         <div className="actions">
           <button className="btn-deny" onClick={() => appStore.setState({ modelSwitch: null })}>

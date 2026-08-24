@@ -1,8 +1,9 @@
-import React, { useRef, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -13,7 +14,9 @@ import {
 } from 'react-native'
 import {
   blocks,
+  spans,
   isError,
+  type Span,
   isRunning,
   reasoningOf,
   summarise,
@@ -23,6 +26,7 @@ import {
   type Message,
   type Part
 } from './parts'
+import { FollowUps, type FollowUp } from './FollowUps'
 import { theme } from './theme'
 
 export type { Message as ThreadMessage } from './parts'
@@ -46,14 +50,87 @@ function CodeBlock({ content, language }: { content: string; language?: string }
   )
 }
 
+/** One run and whatever is nested in it. Nested <Text> inherits, so a span
+ *  sets only what it changes and the size and colour around it carry through —
+ *  which is what makes bold code come out bold *and* monospaced. */
+function Run({ span }: { span: Span }): React.JSX.Element {
+  const inner = span.children
+    ? span.children.map((child, i) => <Run key={i} span={child} />)
+    : span.text
+
+  if (span.kind === 'code') return <Text style={styles.inlineCode}>{span.text}</Text>
+  if (span.kind === 'link') {
+    return (
+      <Text
+        style={styles.link}
+        onPress={() => { void Linking.openURL(span.href ?? span.text).catch(() => {}) }}
+      >
+        {inner}
+      </Text>
+    )
+  }
+  const style = span.kind === 'bold' ? styles.bold
+    : span.kind === 'italic' ? styles.italic
+    : span.kind === 'strike' ? styles.strike
+    : undefined
+  return <Text style={style}>{inner}</Text>
+}
+
+function Inline({ text }: { text: string }): React.JSX.Element {
+  return <>{spans(text).map((span, i) => <Run key={i} span={span} />)}</>
+}
+
 function Body({ text }: { text: string }): React.JSX.Element {
   return (
     <>
-      {blocks(text).map((block, i) =>
-        block.kind === 'code'
-          ? <CodeBlock key={i} content={block.content} language={block.language} />
-          : <Text key={i} style={styles.body} selectable>{block.content}</Text>
-      )}
+      {blocks(text).map((block, i) => {
+        if (block.kind === 'code') {
+          return <CodeBlock key={i} content={block.content} language={block.language} />
+        }
+        if (block.kind === 'rule') return <View key={i} style={styles.rule} />
+        if (block.kind === 'heading') {
+          // Three sizes for six levels: past h3 a phone has no room left to
+          // signal depth, and every deeper heading reads the same anyway.
+          return (
+            <Text
+              key={i}
+              style={[
+                styles.body,
+                [styles.h1, styles.h2, styles.h3][Math.min((block.level ?? 1) - 1, 2)]
+              ]}
+              selectable
+            >
+              <Inline text={block.content} />
+            </Text>
+          )
+        }
+        if (block.kind === 'quote') {
+          return (
+            <View key={i} style={styles.quote}>
+              <Text style={[styles.body, styles.quoteText]} selectable>
+                <Inline text={block.content} />
+              </Text>
+            </View>
+          )
+        }
+        if (block.kind === 'bullet' || block.kind === 'number') {
+          return (
+            <View key={i} style={[styles.item, { marginLeft: 10 + (block.indent ?? 0) * 14 }]}>
+              <Text style={[styles.body, styles.marker]}>
+                {block.kind === 'bullet' ? '•' : `${block.marker ?? ''}.`}
+              </Text>
+              <Text style={[styles.body, styles.itemText]} selectable>
+                <Inline text={block.content} />
+              </Text>
+            </View>
+          )
+        }
+        return (
+          <Text key={i} style={styles.body} selectable>
+            <Inline text={block.content} />
+          </Text>
+        )
+      })}
     </>
   )
 }
@@ -108,6 +185,9 @@ function Thinking({ text }: { text: string }): React.JSX.Element {
 
 export function ThreadScreen({
   messages, busy, permission, sending, modes, mode, variants, variant,
+  models, modelId, onModel,
+  find, onFind, findHits, finding,
+  followUps, steering, onEditFollowUp, onMoveFollowUp, onSteerFollowUp, onRemoveFollowUp,
   onSend, onStop, onPermission, onMode, onVariant, onDelegate
 }: {
   messages: Message[]
@@ -120,6 +200,25 @@ export function ThreadScreen({
   /** Thinking levels the thread's model offers, when it offers any. */
   variants: string[]
   variant?: string
+  /** Models this thread's backend offers. Empty until they load, or when the
+   *  backend offers no choice. */
+  models: { id: string; name?: string }[]
+  modelId?: string
+  onModel(modelId: string): void
+  /** Find-in-thread. Text already on the phone filters locally; the desktop
+   *  searches the rest of the transcript, which the phone has not loaded. */
+  find: string
+  onFind(find: string): void
+  findHits: { messageId: string; snippet: string }[]
+  finding: boolean
+  /** Messages waiting for the current run to end. */
+  followUps: FollowUp[]
+  /** How this thread's backend interrupts a run, which names the steer action. */
+  steering: 'native' | 'stop-and-redirect'
+  onEditFollowUp(id: string, text: string): void
+  onMoveFollowUp(id: string, toIndex: number): void
+  onSteerFollowUp(id: string): void
+  onRemoveFollowUp(id: string): void
   onSend(text: string): void
   onVariant(variant?: string): void
   onDelegate(): void
@@ -129,11 +228,10 @@ export function ThreadScreen({
 }): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const list = useRef<FlatList<Message>>(null)
-  /** Whether the view is parked at the newest message. Only then does new
-   *  content scroll; otherwise reading history fights the stream. */
-  const atTail = useRef(true)
   const [optionsOpen, setOptionsOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
   const modeLabel = modes.find((m) => m.id === mode)?.label
+  const modelLabel = models.find((m) => m.id === modelId)?.name ?? modelId
 
   const send = (): void => {
     const text = draft.trim()
@@ -142,35 +240,82 @@ export function ThreadScreen({
     onSend(text)
   }
 
-  const visible = messages.filter((m) => {
+  const rendered = messages.filter((m) => {
     const parts = m.parts ?? []
     return parts.some((p) => (p.type === 'text' && p.text?.trim()) || p.type === 'tool' || p.type === 'reasoning')
   })
+
+  // While finding, the transcript becomes the result list: the matches, in
+  // order, rather than a cursor stepping through a thread that keeps scrolling
+  // under it. A phone has no room for a match counter and jump arrows.
+  // Inverted lists take the data backwards. useMemo keeps the identity stable
+  // between renders so FlatList is not handed a new array for the same content.
+  const needle = find.trim().toLowerCase()
+  const hitIds = new Set(findHits.map((h) => h.messageId))
+  const visible = needle
+    ? rendered.filter((m) => {
+        if (m.id && hitIds.has(m.id)) return true
+        return `${textOf(m)} ${reasoningOf(m) ?? ''}`.toLowerCase().includes(needle)
+      })
+    : rendered
+  const ordered = useMemo(() => [...visible].reverse(), [visible])
 
   return (
     <KeyboardAvoidingView
       style={styles.fill}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      {findOpen ? (
+        <View style={styles.find}>
+          <TextInput
+            style={styles.findInput}
+            value={find}
+            onChangeText={onFind}
+            placeholder="Find in this thread"
+            placeholderTextColor={theme.faint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {needle ? (
+            <Text style={styles.findCount}>
+              {finding && !visible.length ? '…' : `${visible.length}`}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* Inverted: the newest message sits at the visual bottom because the
+          list is upside down, not because anything scrolled there.
+
+          Chasing the tail by hand could not be made to sit still. The list
+          scrolled to the end on every content size change, and during a run
+          that fires constantly — messages refetch four times a second, each
+          refetch replaces every row, and virtualization re-measures as rows
+          come into view. Each scrollToEnd aimed at a content height that had
+          already changed, and the scroll it performed fed the next one. That
+          feedback loop is the jitter.
+
+          Inverting removes the loop rather than damping it: with offset 0 at
+          the bottom, new content extends away from the viewport and the
+          position you are looking at never moves. */}
       <FlatList
         ref={list}
-        data={visible}
+        inverted
+        data={ordered}
         keyExtractor={(m, i) => m.id ?? String(i)}
         contentContainerStyle={styles.list}
-        // Follow the tail only while the user is already at it.
-        //
-        // This used to scroll on EVERY content size change, and a streaming run
-        // changes it many times a second: the view was yanked to the bottom
-        // while you were reading further up, which reads as the text jittering.
-        onScroll={(e) => {
-          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
-          const fromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height
-          atTail.current = fromBottom < 80
-        }}
-        scrollEventThrottle={100}
-        onContentSizeChange={() => {
-          if (atTail.current) list.current?.scrollToEnd({ animated: false })
-        }}
+        ListEmptyComponent={
+          needle ? (
+            // Counter-rotated: everything inside an inverted list is upside
+            // down, and this is text rather than a message.
+            <Text style={[styles.findEmpty, styles.uninvert]}>
+              {finding ? 'Searching…' : `Nothing in this thread matches “${find.trim()}”.`}
+            </Text>
+          ) : null
+        }
         renderItem={({ item }) => {
           const role = item.info?.role === 'user' ? 'user' : 'assistant'
           const text = textOf(item)
@@ -239,7 +384,7 @@ export function ThreadScreen({
           when asked. */}
       <Pressable style={styles.summary} onPress={() => setOptionsOpen((open) => !open)}>
         <Text style={styles.summaryText} numberOfLines={1}>
-          {[modeLabel, variant].filter(Boolean).join(' · ') || 'Options'}
+          {[modelLabel, modeLabel, variant].filter(Boolean).join(' · ') || 'Options'}
         </Text>
         <Text style={styles.chevron}>{optionsOpen ? '⌄' : '⌃'}</Text>
       </Pressable>
@@ -263,6 +408,41 @@ export function ThreadScreen({
             </View>
           ) : null}
 
+          {/* Like Thinking, the model rides on the next message rather than
+              being set on the thread. Switching keeps the history — every
+              backend resumes the session — but it does drop the prompt cache,
+              so the next turn can cost a little more. */}
+          {models.length ? (
+            <View style={styles.optionRow}>
+              <Text style={styles.optionLabel}>Model</Text>
+              {/* One scrolling line, not a wrapping grid like the rows above.
+                  Those have a handful of short options; a backend can list
+                  every model of every provider it knows, which wrapped would
+                  bury the composer under a wall of chips. */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.modelStrip}
+              >
+                {models.map((m) => (
+                  <Pressable
+                    key={m.id}
+                    onPress={() => onModel(m.id)}
+                    style={[styles.modeChip, m.id === modelId && styles.modeChipOn]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.modeText, m.id === modelId && styles.modeTextOn]}
+                    >
+                      {m.name ?? m.id}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
           {/* Thinking is not stored on the thread — it rides on each message —
               so this sets what the NEXT message asks for. */}
           {variants.length ? (
@@ -282,23 +462,42 @@ export function ThreadScreen({
             </View>
           ) : null}
 
+          <Pressable
+            onPress={() => { setFindOpen((open) => !open); if (findOpen) onFind('') }}
+            style={styles.delegate}
+          >
+            <Text style={styles.delegateText}>{findOpen ? 'Close find' : 'Find in thread'}</Text>
+          </Pressable>
+
           <Pressable onPress={onDelegate} style={styles.delegate}>
             <Text style={styles.delegateText}>Delegate to a new thread</Text>
           </Pressable>
         </View>
       ) : null}
 
+      <FollowUps
+        items={followUps}
+        busy={busy}
+        steering={steering}
+        onEdit={onEditFollowUp}
+        onMove={onMoveFollowUp}
+        onSteer={onSteerFollowUp}
+        onRemove={onRemoveFollowUp}
+      />
+
       <View style={styles.composer}>
         <TextInput
           style={styles.input}
           value={draft}
           onChangeText={setDraft}
-          placeholder="Reply…"
+          // Say what the button will do before it is pressed: a run in progress
+          // means this joins the queue rather than going out now.
+          placeholder={busy ? 'Queue a follow-up…' : 'Reply…'}
           placeholderTextColor={theme.faint}
           multiline
         />
         <Pressable style={[styles.btn, styles.btnPrimary]} onPress={send} disabled={sending}>
-          <Text style={styles.btnPrimaryText}>{sending ? '…' : 'Send'}</Text>
+          <Text style={styles.btnPrimaryText}>{sending ? '…' : busy ? 'Queue' : 'Send'}</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -336,7 +535,10 @@ const styles = StyleSheet.create({
   modeText: { color: theme.muted, fontSize: 12 },
   modeTextOn: { color: theme.bg, fontWeight: '700' },
   fill: { flex: 1, backgroundColor: theme.bg },
-  list: { padding: 12, paddingBottom: 20 },
+  // Inverted, so paddingTop is the gap above the newest message — the one
+  // nearest the composer — and paddingBottom is the breathing room at the top
+  // of the thread. They read backwards here on purpose.
+  list: { padding: 12, paddingTop: 20 },
   msg: { marginBottom: 16 },
   who: {
     color: theme.faint,
@@ -347,6 +549,33 @@ const styles = StyleSheet.create({
     marginBottom: 4
   },
   body: { color: theme.text, fontSize: 15, lineHeight: 22, marginBottom: 6 },
+  bold: { fontWeight: '700' },
+  italic: { fontStyle: 'italic' },
+  strike: { textDecorationLine: 'line-through', color: theme.muted },
+  link: { color: theme.accent, textDecorationLine: 'underline' },
+  inlineCode: {
+    color: theme.green,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    // Menlo runs large beside the body face, and there is no per-span
+    // background in React Native — colour and face carry the distinction.
+    fontSize: 13
+  },
+  h1: { fontSize: 20, fontWeight: '700', lineHeight: 27, marginTop: 8, marginBottom: 4 },
+  h2: { fontSize: 17.5, fontWeight: '700', lineHeight: 24, marginTop: 8, marginBottom: 4 },
+  h3: { fontSize: 15.5, fontWeight: '700', lineHeight: 22, marginTop: 6, marginBottom: 3 },
+  rule: { height: 1, backgroundColor: theme.line, marginVertical: 10 },
+  quote: {
+    borderLeftWidth: 3,
+    borderLeftColor: theme.line,
+    paddingLeft: 10,
+    marginVertical: 2
+  },
+  quoteText: { color: theme.muted, marginBottom: 2 },
+  item: { flexDirection: 'row', gap: 7, marginBottom: 2 },
+  // Fixed width so wrapped text lines up under itself rather than under the
+  // marker, and so 9. and 10. do not shift the column.
+  marker: { color: theme.muted, marginBottom: 0, minWidth: 16, textAlign: 'right' },
+  itemText: { flex: 1, marginBottom: 0 },
   userBody: { backgroundColor: theme.inset, borderRadius: 12, padding: 11 },
   code: {
     backgroundColor: theme.inset,
@@ -433,6 +662,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9
   },
+  modelStrip: { flexDirection: 'row', gap: 6, paddingRight: 12 },
+  find: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.line
+  },
+  findInput: {
+    flex: 1,
+    backgroundColor: theme.inset,
+    borderWidth: 1,
+    borderColor: theme.line,
+    borderRadius: 10,
+    color: theme.text,
+    // 16px or larger, or iOS zooms the view when the field takes focus.
+    fontSize: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  findCount: { color: theme.faint, fontSize: 13, fontWeight: '600', minWidth: 24, textAlign: 'right' },
+  findEmpty: { color: theme.faint, textAlign: 'center', paddingVertical: 40, paddingHorizontal: 24 },
+  uninvert: { transform: [{ scaleY: -1 }] },
   btnPrimary: { backgroundColor: theme.accent, borderColor: theme.accent },
   btnText: { color: theme.text, fontWeight: '600', fontSize: 13.5 },
   btnPrimaryText: { color: theme.bg, fontWeight: '700', fontSize: 13.5 },

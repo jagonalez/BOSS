@@ -100,20 +100,98 @@ export function summarise(tools: Part[]): string {
 }
 
 export interface Block {
-  kind: 'text' | 'code'
+  kind: 'text' | 'code' | 'heading' | 'bullet' | 'number' | 'quote' | 'rule'
   content: string
   /** Fence language, when the block declared one. */
   language?: string
+  /** Heading depth, 1-6. Only on `heading`. */
+  level?: number
+  /** The marker a numbered item was written with, so 3. stays 3. */
+  marker?: string
+  /** Nesting depth of a list item, counted in two-space steps. */
+  indent?: number
+}
+
+/** An inline run within one line: plain text, or a styled span. */
+export interface Span {
+  kind: 'plain' | 'bold' | 'italic' | 'code' | 'link' | 'strike'
+  text: string
+  /** Destination, on `link` only. */
+  href?: string
+  /** Runs inside this one, when it holds more markup. Absent on `code`, whose
+   *  content is literal by definition. Agents write **`thing`** constantly. */
+  children?: Span[]
+}
+
+const INLINE = [
+  // Code first: backticks win over everything they contain, the way markdown
+  // means them to. `**not bold**` inside a fence is literal asterisks.
+  { kind: 'code' as const, re: /`([^`\n]+)`/ },
+  { kind: 'link' as const, re: /\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/ },
+  { kind: 'bold' as const, re: /\*\*([^*\n]+)\*\*/ },
+  { kind: 'bold' as const, re: /__([^_\n]+)__/ },
+  { kind: 'strike' as const, re: /~~([^~\n]+)~~/ },
+  { kind: 'italic' as const, re: /(?<![*\w])\*([^*\n]+)\*(?!\*)/ },
+  { kind: 'italic' as const, re: /(?<![_\w])_([^_\n]+)_(?![_\w])/ }
+]
+
+/**
+ * Split one line into styled runs.
+ *
+ * Leftmost match wins, then the list order above breaks ties, which is what
+ * makes `**a**` inside backticks stay literal. Anything unmatched stays plain,
+ * so a stray asterisk renders as an asterisk instead of eating the rest of the
+ * line — half-written emphasis arrives constantly in a streaming reply.
+ *
+ * A match's own text is parsed again, so **`thing`** is bold code rather than
+ * bold text with the backticks showing. Code is the exception: its content is
+ * literal, which is the whole point of it.
+ */
+export function spans(line: string): Span[] {
+  const out: Span[] = []
+  let rest = line
+
+  while (rest) {
+    let best: { index: number; length: number; span: Span } | undefined
+    for (const { kind, re } of INLINE) {
+      const m = re.exec(rest)
+      if (!m) continue
+      if (best && m.index >= best.index) continue
+      best = {
+        index: m.index,
+        length: m[0].length,
+        span: kind === 'link'
+          ? { kind, text: m[1] || m[2], href: m[2] }
+          : { kind, text: m[1] }
+      }
+    }
+    if (!best) break
+    if (best.index) out.push({ kind: 'plain', text: rest.slice(0, best.index) })
+    if (best.span.kind !== 'code') {
+      const inner = spans(best.span.text)
+      // Only carry children when they say something the text does not: a lone
+      // plain run is the text itself, and nesting it buys an extra <Text>.
+      if (inner.length > 1 || inner[0]?.kind !== 'plain') best.span.children = inner
+    }
+    out.push(best.span)
+    rest = rest.slice(best.index + best.length)
+  }
+
+  if (rest) out.push({ kind: 'plain', text: rest })
+  return out.length ? out : [{ kind: 'plain', text: line }]
 }
 
 /**
- * Split markdown into text and fenced code blocks.
+ * Split markdown into blocks a phone can lay out.
  *
- * Only fences, deliberately: a phone transcript needs code to be readable and
- * selectable, and the rest of markdown adds far more surface than it repays.
- * An unterminated fence — which a streaming reply always has mid-write — is
- * treated as code to the end, so it renders as code while it arrives rather
- * than flickering.
+ * Fences come first and swallow everything until they close — an unterminated
+ * one, which a streaming reply always has mid-write, is treated as code to the
+ * end so it renders as code while it arrives rather than flickering.
+ *
+ * Outside a fence, a line that opens with a marker becomes its own block, and
+ * everything else accumulates into a text paragraph. Inline styling is left to
+ * spans() at render time, because a paragraph's runs depend on nothing but its
+ * own text.
  */
 export function blocks(markdown: string): Block[] {
   const out: Block[] = []
@@ -141,8 +219,57 @@ export function blocks(markdown: string): Block[] {
       }
       continue
     }
-    if (code === null) text.push(line)
-    else code.push(line)
+    if (code !== null) {
+      code.push(line)
+      continue
+    }
+
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line)
+    if (heading) {
+      flushText()
+      out.push({ kind: 'heading', content: heading[2].trim(), level: heading[1].length })
+      continue
+    }
+
+    // Three or more -, * or _ alone on a line. Checked before the bullet rule,
+    // which would otherwise read `---` as a bullet holding two dashes.
+    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
+      flushText()
+      out.push({ kind: 'rule', content: '' })
+      continue
+    }
+
+    const bullet = /^(\s*)[-*+]\s+(.*)$/.exec(line)
+    if (bullet) {
+      flushText()
+      out.push({
+        kind: 'bullet',
+        content: bullet[2].trim(),
+        indent: Math.floor(bullet[1].replace(/\t/g, '  ').length / 2)
+      })
+      continue
+    }
+
+    const numbered = /^(\s*)(\d{1,9})[.)]\s+(.*)$/.exec(line)
+    if (numbered) {
+      flushText()
+      out.push({
+        kind: 'number',
+        content: numbered[3].trim(),
+        marker: numbered[2],
+        indent: Math.floor(numbered[1].replace(/\t/g, '  ').length / 2)
+      })
+      continue
+    }
+
+    const quote = /^\s*>\s?(.*)$/.exec(line)
+    if (quote) {
+      flushText()
+      out.push({ kind: 'quote', content: quote[1].trim() })
+      continue
+    }
+
+    text.push(line)
   }
 
   if (code !== null) out.push({ kind: 'code', content: code.join('\n'), language })

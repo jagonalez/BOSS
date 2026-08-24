@@ -55,7 +55,8 @@ const FORWARDED_EVENTS = new Set([
   'permission.asked',
   'permission.updated',
   'permission.replied',
-  'automations.updated'
+  'automations.updated',
+  'thread.followups.updated'
 ])
 
 const DEFAULT_PORT = 4517

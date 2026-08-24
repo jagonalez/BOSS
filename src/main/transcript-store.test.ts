@@ -269,6 +269,43 @@ test('keeps run history with backend-reported tokens and tool counts', () => {
   }
 })
 
+test('confines a search to one thread when asked', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))
+  const other = { threadId: 'other-thread', backendId: 'codex' as const, nativeSessionId: 'native-other' }
+  try {
+    store.recordMessage(source, {
+      id: 'assistant-scoped', sessionID: source.nativeSessionId, role: 'assistant', time: { created: 1 }
+    })
+    store.recordPart(source, {
+      id: 'text-scoped', type: 'text', sessionID: source.nativeSessionId,
+      messageID: 'assistant-scoped', text: 'A deployment note worth finding.'
+    })
+    store.recordMessage(other, {
+      id: 'assistant-other', sessionID: other.nativeSessionId, role: 'assistant', time: { created: 2 }
+    })
+    store.recordPart(other, {
+      id: 'text-other', type: 'text', sessionID: other.nativeSessionId,
+      messageID: 'assistant-other', text: 'A deployment note in another thread.'
+    })
+
+    assert.equal(store.search('deployment note').length, 2)
+
+    const scoped = store.search('deployment note', 40, source.threadId)
+    assert.equal(scoped.length, 1)
+    assert.equal(scoped[0].threadId, source.threadId)
+
+    // The scope must survive a limit that the busier thread would otherwise
+    // consume, which is the whole reason it is a WHERE and not a post-filter.
+    const tight = store.search('deployment note', 1, source.threadId)
+    assert.equal(tight.length, 1)
+    assert.equal(tight[0].threadId, source.threadId)
+  } finally {
+    store.close()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('searches normalized transcript text and tool activity', () => {
   const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
   const store = new TranscriptStore(join(directory, 'transcripts.sqlite'))

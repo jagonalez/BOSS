@@ -18,7 +18,7 @@
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "test:transcripts": "node --experimental-strip-types --test src/main/transcript-store.test.ts",
     "test:workspaces": "node --experimental-strip-types --test src/renderer/src/lib/workspaces.test.ts",
-    "test:mobile": "node --experimental-strip-types --test src/main/mobile-page.test.ts",
+    "test:mobile": "node --experimental-strip-types --test src/shared/mobile-page.test.ts",
     "test:events": "node --experimental-strip-types --test src/main/event-stream.test.ts src/main/backend/opencode-backend.test.ts",
     "test:policy": "node --experimental-strip-types --test src/shared/task-policy.test.ts",
     "test:version": "node --experimental-strip-types --test src/shared/version.test.ts",

@@ -5,7 +5,12 @@ import './src/polyfills'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native'
 import { PairScreen } from './src/PairScreen'
-import { ThreadsScreen, type ThreadRow } from './src/ThreadsScreen'
+import {
+  ThreadsScreen,
+  type ThreadRow,
+  type TranscriptHit,
+  type TranscriptSearchRow
+} from './src/ThreadsScreen'
 import { ProjectsScreen } from './src/ProjectsScreen'
 import { NewThreadScreen, type BackendOption, type ModelOption } from './src/NewThreadScreen'
 import { DelegateScreen } from './src/DelegateScreen'
@@ -13,6 +18,7 @@ import { groupByProject, visibleThreads } from './src/parts'
 import { AutomationsScreen, type AutomationRow, type AutomationRunRow } from './src/AutomationsScreen'
 import { WorkScreen, type DiffFile, type Todo } from './src/WorkScreen'
 import { ThreadScreen, type PendingPermission, type ThreadMessage } from './src/ThreadScreen'
+import { type FollowUp } from './src/FollowUps'
 import { RelayConnection, clearCredentials, loadCredentials, type RelayCredentials } from './src/relay'
 import { theme } from './src/theme'
 
@@ -48,8 +54,17 @@ export default function App(): React.JSX.Element {
   const [loadingModels, setLoadingModels] = useState(false)
   const [threadModes, setThreadModes] = useState<Record<string, string>>({})
   // Thinking level is not stored on a thread — it rides on each message — so
-  // this is what the next send will ask for.
+  // this is what the next send will ask for. Same for the model: switching one
+  // is a choice about the next turn, not an edit to what already ran.
   const [threadVariants, setThreadVariants] = useState<Record<string, string | undefined>>({})
+  const [threadModels, setThreadModels] = useState<Record<string, { modelID: string; providerID: string }>>({})
+  const [query, setQuery] = useState('')
+  const [hits, setHits] = useState<TranscriptHit[]>([])
+  const [searching, setSearching] = useState(false)
+  const [find, setFind] = useState('')
+  const [findHits, setFindHits] = useState<{ messageId: string; snippet: string }[]>([])
+  const [finding, setFinding] = useState(false)
+  const [followUps, setFollowUps] = useState<Record<string, FollowUp[]>>({})
   const [tab, setTab] = useState<'work' | 'automations'>('work')
   const [automations, setAutomations] = useState<AutomationRow[]>([])
   const [runs, setRuns] = useState<AutomationRunRow[]>([])
@@ -242,6 +257,13 @@ export default function App(): React.JSX.Element {
         return next
       })
     }
+    if (type === 'thread.followups.updated') {
+      // Carries threadId rather than sessionID, and the whole queue rather than
+      // a delta — so this replaces, and does not need a refetch behind it.
+      const threadId = props.threadId as string | undefined
+      const queue = props.followUps as FollowUp[] | undefined
+      if (threadId) setFollowUps((prev) => ({ ...prev, [threadId]: queue ?? [] }))
+    }
     if (type === 'automations.updated') void refreshAutomations()
     if (type.startsWith('session.')) void refreshThreads()
     // Coalesce. A streaming run emits a message event per token, and each one
@@ -308,6 +330,94 @@ export default function App(): React.JSX.Element {
       if (messageTimer.current) clearTimeout(messageTimer.current)
     }
   }, [applyEvent, loadBackends, refreshAutomations, refreshMessages, refreshThreads])
+
+  /** Every queue request answers with the whole new queue, so one path applies
+   *  them all rather than four that differ only in what they ask for. */
+  const queueRequest = useCallback((threadId: string, request: Record<string, unknown>) => {
+    void relay.current
+      ?.request<FollowUp[]>(request as never)
+      .then((queue) => setFollowUps((prev) => ({ ...prev, [threadId]: queue ?? [] })))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }, [])
+
+  // Message text lives in the desktop's transcript database, not on the phone,
+  // so the search goes over the relay. Debounced because it runs a scan per
+  // keystroke otherwise, and skipped under two characters where every thread
+  // would match anyway.
+  useEffect(() => {
+    const clean = query.trim()
+    if (clean.length < 2) {
+      setHits([])
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    const timer = setTimeout(() => {
+      void relay.current
+        ?.request<TranscriptSearchRow[]>({ type: 'supervision.search', query: clean, limit: 40 })
+        .then((results) => setHits((results ?? []).map((r) => ({
+          threadId: r.threadId,
+          title: r.title,
+          snippet: r.snippet,
+          role: r.role
+        }))))
+        .catch(() => setHits([]))
+        .finally(() => setSearching(false))
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  // A find belongs to the thread it was typed in; carrying it to the next one
+  // would open that thread already filtered by a term you have forgotten.
+  useEffect(() => { setFind('') }, [openThread])
+
+  // Find-in-thread. Scoped server-side rather than filtered afterwards: the
+  // limit is spent on the most recent matches anywhere, so a busy neighbour
+  // thread would otherwise crowd this thread's older matches out entirely.
+  useEffect(() => {
+    const clean = find.trim()
+    if (!openThread || clean.length < 2) {
+      setFindHits([])
+      setFinding(false)
+      return
+    }
+    setFinding(true)
+    const timer = setTimeout(() => {
+      void relay.current
+        ?.request<TranscriptSearchRow[]>({
+          type: 'supervision.search', query: clean, limit: 100, threadId: openThread
+        })
+        .then((results) => setFindHits((results ?? []).map((r) => ({
+          messageId: r.messageId, snippet: r.snippet
+        }))))
+        .catch(() => setFindHits([]))
+        .finally(() => setFinding(false))
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [find, openThread])
+
+  // Events only carry changes, so an already-queued follow-up would be
+  // invisible until something moved it. Load the queue when a thread opens.
+  useEffect(() => {
+    if (!openThread) return
+    void relay.current
+      ?.request<FollowUp[]>({ type: 'thread.followups.list', threadId: openThread } as never)
+      .then((queue) => setFollowUps((prev) => ({ ...prev, [openThread]: queue ?? [] })))
+      .catch(() => {})
+  }, [openThread])
+
+  // The open thread needs its backend's models for the picker. Every route into
+  // a thread lands here, so this covers them all rather than each caller
+  // remembering to fetch.
+  //
+  // Keyed on the backend id rather than the thread list: that list refreshes on
+  // every poll, and depending on it would refetch the same models forever.
+  const openBackendId = openThread
+    ? threads.find((t) => t.threadId === openThread)?.backendId
+    : undefined
+  useEffect(() => {
+    if (openBackendId) void loadModels(openBackendId)
+  }, [openBackendId, loadModels])
 
   /**
    * Start a thread and send its first message.
@@ -488,9 +598,44 @@ export default function App(): React.JSX.Element {
           sending={sending}
           modes={backends.find((b) => b.id === threads.find((t) => t.threadId === threadId)?.backendId)?.modes ?? []}
           mode={threadModes[threadId] ?? threads.find((t) => t.threadId === threadId)?.mode}
-          variants={models.find((m) => m.id === threads.find((t) => t.threadId === threadId)?.model?.modelID)?.variants ?? []}
+          variants={models.find((m) => m.id === (threadModels[threadId]?.modelID
+            ?? threads.find((t) => t.threadId === threadId)?.model?.modelID))?.variants ?? []}
           variant={threadVariants[threadId]}
           onVariant={(next) => setThreadVariants((prev) => ({ ...prev, [threadId]: next }))}
+          find={find}
+          onFind={setFind}
+          findHits={findHits}
+          finding={finding}
+          followUps={followUps[threadId] ?? []}
+          steering={backends.find((b) => b.id === threads.find((t) => t.threadId === threadId)?.backendId)
+            ?.capabilities?.steering ?? 'stop-and-redirect'}
+          onEditFollowUp={(id, text) => queueRequest(threadId, {
+            type: 'thread.followups.update', threadId, followUpId: id, text
+          })}
+          onMoveFollowUp={(id, toIndex) => queueRequest(threadId, {
+            type: 'thread.followups.move', threadId, followUpId: id, toIndex
+          })}
+          onSteerFollowUp={(id) => queueRequest(threadId, {
+            type: 'thread.followups.steer', threadId, followUpId: id
+          })}
+          onRemoveFollowUp={(id) => queueRequest(threadId, {
+            type: 'thread.followups.remove', threadId, followUpId: id
+          })}
+          models={models}
+          modelId={threadModels[threadId]?.modelID
+            ?? threads.find((t) => t.threadId === threadId)?.model?.modelID}
+          onModel={(next) => {
+            const picked = models.find((m) => m.id === next)
+            if (!picked) return
+            setThreadModels((prev) => ({
+              ...prev,
+              [threadId]: { modelID: picked.id, providerID: picked.provider ?? '' }
+            }))
+            // A thinking level chosen for the old model means nothing to the
+            // new one, so it goes back to the default rather than being sent
+            // as a level the model may not offer.
+            setThreadVariants((prev) => ({ ...prev, [threadId]: undefined }))
+          }}
           onDelegate={() => {
             // Only opens the options. Delegating creates a thread, a branch,
             // and a running agent, which is too much for one unconfirmed tap.
@@ -509,20 +654,36 @@ export default function App(): React.JSX.Element {
           }}
           onSend={(text) => {
             const current = threads.find((t) => t.threadId === threadId)
+            // A switch picked here outranks what the thread last ran on; the
+            // desktop learns of it from this message, the same way it learns
+            // of a model chosen when the thread was created.
+            const base = threadModels[threadId] ?? current?.model
+            const variant = threadVariants[threadId]
             setSending(true)
+            // Always the queue, never thread.send.
+            //
+            // A busy thread rejects a send, and deciding between the two from
+            // the phone's copy of the busy flag loses the race the desktop
+            // documents: two sends in quick succession both read "idle". The
+            // queue has no such edge — it delivers immediately when the thread
+            // is idle and holds the message when it is not, so one call is
+            // correct in both states.
             void relay.current
               ?.request({
-                type: 'thread.send',
+                type: 'thread.followups.add',
                 threadId,
-                parts: [{ type: 'text', text }],
+                text,
                 // A variant alone is not a legal model: providerID and
-                // modelID are required beside it, so the thread's current
-                // model is carried through unchanged.
-                ...(threadVariants[threadId] && current?.model
-                  ? { options: { model: { ...current.model, variant: threadVariants[threadId] } } }
+                // modelID are required beside it, so they are always sent
+                // together.
+                ...(base && (threadModels[threadId] || variant)
+                  ? { options: { model: { ...base, ...(variant ? { variant } : {}) } } }
                   : {})
               })
-              .then(() => refreshMessages(threadId))
+              .then((queue) => {
+                setFollowUps((prev) => ({ ...prev, [threadId]: (queue as FollowUp[]) ?? [] }))
+                return refreshMessages(threadId)
+              })
               .catch((e) => setError(e instanceof Error ? e.message : String(e)))
               .finally(() => setSending(false))
           }}
@@ -645,6 +806,12 @@ export default function App(): React.JSX.Element {
       {project ? (
         <ThreadsScreen
           threads={project.threads}
+          query={query}
+          onQuery={setQuery}
+          // The list is one project's threads, so results from elsewhere would
+          // point at threads this screen cannot show.
+          hits={hits.filter((h) => project.threads.some((t) => t.threadId === h.threadId))}
+          searching={searching}
           offline={!desktopOnline}
           refreshing={refreshing}
           onRefresh={() => {
