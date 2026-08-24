@@ -156,6 +156,11 @@ The packaged app uses the bundled binary; in dev it uses your PATH `opencode`.
 | `npm run fetch:opencode` | Bundle an `opencode` binary for packaging |
 | `npm run pack` | Package for the current platform (`dist/`) |
 | `npm run dist` | Build installers (dmg/nsis/AppImage) |
+| `npm run eval:lab` | Run real-model Lab coding evaluations in disposable fixtures |
+| `npm run eval:assistant` | Run Lab Assistant orchestration evaluations in a simulated BOSS world |
+
+See [Lab evaluations](docs/lab-evals.md) for scenario design, model
+configuration, trace reports, and adding another runtime.
 
 ## Configuration
 

@@ -25,6 +25,7 @@
     "test:projects": "node --experimental-strip-types --test src/main/project-identity.test.ts",
     "test:review": "node --experimental-strip-types --test src/main/review-manager.test.ts src/main/github-review-provider.test.ts src/renderer/src/lib/themes.test.ts",
     "test:claude": "node --experimental-strip-types --test src/main/backend/claude-backend.test.ts",
+    "test:evals": "node --experimental-strip-types --test src/main/evals/*.test.ts",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:headed": "npm run build && BOSS_E2E_SHOW=1 playwright test --headed",
     "probe:opencode": "esbuild ./src/main/backend/opencode-backend.ts --bundle --platform=node --format=esm --outfile=./out/probe/opencode-backend.js --external:electron --external:@opencode-ai/sdk --alias:@shared=./src/shared && node scripts/probe-opencode-sdk.mjs",
@@ -34,6 +35,8 @@
     "pack": "electron-vite build && electron-builder --dir",
     "dist": "electron-vite build && electron-builder",
     "release": "bash scripts/release.sh",
+    "eval:lab": "node --experimental-strip-types bin/evals.ts lab",
+    "eval:assistant": "node --experimental-strip-types bin/evals.ts lab-assistant",
     "probe:opencode:todos": "esbuild ./src/main/backend/opencode-backend.ts --bundle --platform=node --format=esm --outfile=./out/probe/opencode-backend.js --external:electron --external:@opencode-ai/sdk --alias:@shared=./src/shared && esbuild ./src/shared/opencode.ts --bundle --platform=node --format=esm --outfile=./out/probe/shared-opencode.js && node scripts/probe-opencode-todos.mjs"
   },
   "dependencies": {
