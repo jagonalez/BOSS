@@ -612,6 +612,17 @@ export default function App(): React.JSX.Element {
           followUps={followUps[threadId] ?? []}
           steering={backends.find((b) => b.id === threads.find((t) => t.threadId === threadId)?.backendId)
             ?.capabilities?.steering ?? 'stop-and-redirect'}
+          onToolOutput={async (part) => {
+            const messageId = (part as { messageID?: string }).messageID
+            const partId = part.id
+            if (!messageId || !partId) return 'This step did not keep an id to look up.'
+            const full = await relay.current?.request<{ state?: { output?: unknown } }>({
+              type: 'thread.part', threadId, messageId, partId
+            } as never)
+            const output = full?.state?.output
+            if (output === undefined || output === null) return 'This step recorded no output.'
+            return typeof output === 'string' ? output : JSON.stringify(output, null, 2)
+          }}
           onEditFollowUp={(id, text) => queueRequest(threadId, {
             type: 'thread.followups.update', threadId, followUpId: id, text
           })}

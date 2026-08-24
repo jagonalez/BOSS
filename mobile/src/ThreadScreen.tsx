@@ -136,11 +136,29 @@ function Body({ text }: { text: string }): React.JSX.Element {
   )
 }
 
-/** What the agent did, collapsed by default and openable for the detail. */
-function Steps({ tools }: { tools: Part[] }): React.JSX.Element {
+/** What the agent did, collapsed by default and openable for the detail.
+ *
+ *  Output arrives trimmed — it is most of a transcript's bytes and none of what
+ *  this draws — so a step that was cut says so, and fetches the rest when it is
+ *  opened rather than when the thread loads. */
+function Steps({ tools, onOutput }: {
+  tools: Part[]
+  onOutput(part: Part): Promise<string>
+}): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const [shown, setShown] = useState<Record<number, string>>({})
+  const [loading, setLoading] = useState<number | undefined>()
   const running = tools.some((t) => isRunning(t.state?.status))
   const failed = tools.some((t) => isError(t.state?.status))
+
+  const output = (tool: Part, i: number): void => {
+    if (shown[i] !== undefined) { setShown((prev) => { const next = { ...prev }; delete next[i]; return next }) ; return }
+    setLoading(i)
+    void onOutput(tool)
+      .then((text) => setShown((prev) => ({ ...prev, [i]: text })))
+      .catch((e) => setShown((prev) => ({ ...prev, [i]: e instanceof Error ? e.message : String(e) })))
+      .finally(() => setLoading(undefined))
+  }
 
   return (
     <View style={styles.steps}>
@@ -153,18 +171,34 @@ function Steps({ tools }: { tools: Part[] }): React.JSX.Element {
       </Pressable>
       {open ? (
         <View style={styles.stepsList}>
-          {tools.map((tool, i) => (
-            <View key={i} style={styles.step}>
-              <Text style={styles.stepKind}>{toolKind(tool)}</Text>
-              <Text
-                style={[styles.stepText, isError(tool.state?.status) && styles.failed]}
-                numberOfLines={3}
-                selectable
+          {tools.map((tool, i) => {
+            const hasOutput = Boolean(tool.state?.output) || Boolean(tool.state?.outputTruncated)
+            return (
+              <Pressable
+                key={i}
+                style={styles.step}
+                onPress={hasOutput ? () => output(tool, i) : undefined}
               >
-                {toolSummary(tool)}
-              </Text>
-            </View>
-          ))}
+                <Text style={styles.stepKind}>{toolKind(tool)}</Text>
+                <View style={styles.stepBody}>
+                  <Text
+                    style={[styles.stepText, isError(tool.state?.status) && styles.failed]}
+                    numberOfLines={3}
+                    selectable
+                  >
+                    {toolSummary(tool)}
+                  </Text>
+                  {shown[i] !== undefined ? (
+                    <Text style={styles.stepOutput} selectable>{shown[i]}</Text>
+                  ) : hasOutput ? (
+                    <Text style={styles.stepMore}>
+                      {loading === i ? 'Loading…' : 'Show output'}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+            )
+          })}
         </View>
       ) : null}
     </View>
@@ -189,6 +223,7 @@ export function ThreadScreen({
   models, modelId, onModel,
   find, onFind, findHits, finding,
   followUps, steering, onEditFollowUp, onMoveFollowUp, onSteerFollowUp, onRemoveFollowUp,
+  onToolOutput,
   onSend, onStop, onPermission, onMode, onVariant, onDelegate
 }: {
   messages: Message[]
@@ -220,6 +255,8 @@ export function ThreadScreen({
   onMoveFollowUp(id: string, toIndex: number): void
   onSteerFollowUp(id: string): void
   onRemoveFollowUp(id: string): void
+  /** Fetch one tool call's untrimmed output, for a step the user opened. */
+  onToolOutput(part: Part): Promise<string>
   onSend(text: string): void
   onVariant(variant?: string): void
   onDelegate(): void
@@ -334,7 +371,7 @@ export function ThreadScreen({
                   return <Thinking key={i} text={segment.text ?? ''} />
                 }
                 if (segment.kind === 'tools') {
-                  return <Steps key={i} tools={segment.parts ?? []} />
+                  return <Steps key={i} tools={segment.parts ?? []} onOutput={onToolOutput} />
                 }
                 return (
                   <View key={i} style={role === 'user' ? styles.userBody : styles.said}>
@@ -617,6 +654,17 @@ const styles = StyleSheet.create({
   chevron: { color: theme.faint, fontSize: 12 },
   stepsList: { paddingTop: 4, gap: 6 },
   step: { gap: 2 },
+  stepBody: { flex: 1, gap: 3 },
+  stepOutput: {
+    color: theme.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    backgroundColor: theme.bg,
+    borderRadius: 6,
+    padding: 8
+  },
+  stepMore: { color: theme.accent, fontSize: 12, fontWeight: '600' },
   stepKind: { color: theme.faint, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 },
   stepText: {
     color: theme.muted,

@@ -2639,7 +2639,11 @@ export class BackendManager {
         return request.trimOutput ? trimToolOutput(messages, request.trimOutput) : messages
       }
       case 'thread.part': {
-        const messages = await this.messagesList(request.threadId)
+        // Straight from the store rather than messagesList: that asks the
+        // backend for the whole history and reconciles it, which is a lot of
+        // work to answer "what did this one command print".
+        this.load()
+        const messages = this.transcripts?.messages(request.threadId) ?? []
         const message = messages.find((m) => m.info?.id === request.messageId)
         const part = message?.parts.find((p) => (p as { id?: string }).id === request.partId)
         if (!part) throw new Error('That step is no longer in this thread.')
