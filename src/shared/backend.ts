@@ -311,6 +311,9 @@ export type BackendRequest =
   | { type: 'automation.webhook.token'; automationId: string }
   | { type: 'assistant.snapshot' }
   | { type: 'assistant.answer'; questionId: string; answerId: string }
+  | { type: 'assistant.task.create'; input: import('./lab-assistant').LabAssistantTaskInput }
+  | { type: 'assistant.task.update'; taskId: string; patch: import('./lab-assistant').LabAssistantTaskPatch }
+  | { type: 'assistant.task.assign'; taskId: string; threadId: string }
   | { type: 'mcp.list' }
   | { type: 'mcp.add'; input: import('./mcp').McpConnectionInput }
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }

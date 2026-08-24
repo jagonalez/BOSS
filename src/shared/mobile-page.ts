@@ -154,7 +154,7 @@ var threads = [];
 var supervision = { threads: [], totals: {} };
 var threadTitles = {};
 var automations = { automations: [], runs: [] };
-var assistant = { pullRequests: [], questions: [], activities: [], mergeOrders: {} };
+var assistant = { tasks: [], taskPlans: {}, pullRequests: [], questions: [], activities: [], mergeOrders: {} };
 var messages = {};
 var permissions = {};
 var busy = {};
@@ -332,7 +332,7 @@ function refreshAutomations() {
 
 function refreshAssistant() {
   return api({ type: 'assistant.snapshot' }).then(function (snapshot) {
-    assistant = snapshot || { pullRequests: [], questions: [], activities: [], mergeOrders: {} };
+    assistant = snapshot || { tasks: [], taskPlans: {}, pullRequests: [], questions: [], activities: [], mergeOrders: {} };
     if (view.name === 'assistant') render();
   });
 }
@@ -457,7 +457,12 @@ function renderAutomations() {
 
 function renderAssistant() {
   var open = (assistant.questions || []).filter(function (question) { return question.status === 'open'; });
+  var tasks = (assistant.tasks || []).slice().sort(function (a, b) {
+    var rank = { running: 0, review: 1, ready: 2, blocked: 3, inbox: 4, done: 5 };
+    return (rank[a.status] || 0) - (rank[b.status] || 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
+  });
   var html = '<div class="card"><div class="title">Lab Assistant</div><div class="sub">' +
+    tasks.filter(function (task) { return task.status !== 'done'; }).length + ' active tasks · ' +
     open.length + ' decision' + (open.length === 1 ? '' : 's') + ' waiting</div></div>';
   open.forEach(function (question) {
     html += '<div class="card"><div class="title">' + esc(question.prompt) + '</div>' +
@@ -472,6 +477,48 @@ function renderAssistant() {
     html += '</div>';
   });
   if (!open.length) html += '<div class="empty">Nothing needs a decision.</div>';
+  html += '<div class="section">Task queue</div>';
+  if (accessRole === 'control') {
+    var projects = {};
+    (supervision.threads || []).forEach(function (thread) { if (thread.projectPath) projects[thread.projectPath] = true; });
+    html += '<div class="card"><input id="assistant-task-title" aria-label="New Lab Assistant task" placeholder="Add a task…" style="width:100%;box-sizing:border-box">' +
+      '<select id="assistant-task-project" aria-label="Task project" style="width:100%;margin-top:8px"><option value="">Global</option>';
+    Object.keys(projects).sort().forEach(function (path) {
+      html += '<option value="' + esc(path) + '">' + esc(path.split(/[\\/]/).pop() || path) + '</option>';
+    });
+    html += '</select><select id="assistant-task-dependency" aria-label="Task dependency" style="width:100%;margin-top:8px"><option value="">No dependency</option>';
+    tasks.filter(function (task) { return task.status !== 'done'; }).forEach(function (task) {
+      html += '<option value="' + esc(task.id) + '">After ' + esc(task.title) + '</option>';
+    });
+    html += '</select><button class="btn" style="width:100%;margin-top:8px" onclick="createAssistantTask()">Add task</button></div>';
+  }
+  tasks.slice(0, 12).forEach(function (task) {
+    var dependencies = (task.dependsOn || []).map(function (id) {
+      var found = tasks.find(function (candidate) { return candidate.id === id; });
+      return found && found.title;
+    }).filter(Boolean).join(', ');
+    var thread = (supervision.threads || []).find(function (candidate) { return candidate.threadId === task.assignedThreadId; });
+    html += '<div class="card"><div class="row"><span class="badge ' + esc(task.status) + '">' + esc(task.status) + '</span>' +
+      '<div style="flex:1;min-width:0"><div class="title">' + esc(task.title) + '</div><div class="sub">' +
+      esc(task.projectPath ? task.projectPath.split(/[\\/]/).pop() : 'Global') +
+      (dependencies ? ' · after ' + esc(dependencies) : '') + (thread ? ' · ' + esc(thread.title) : '') + '</div></div></div>';
+    if (accessRole === 'control') {
+      if (task.status === 'ready') {
+        html += '<select aria-label="Assign ' + esc(task.title) + '" style="width:100%;margin-top:8px" onchange="assignAssistantTask(\\\'' + task.id + '\\\',this.value)">' +
+          '<option value="">Assign agent…</option>';
+        (supervision.threads || []).filter(function (candidate) {
+          return !task.projectPath || candidate.projectPath === task.projectPath;
+        }).forEach(function (candidate) {
+          html += '<option value="' + esc(candidate.threadId) + '">' + esc(candidate.title) + '</option>';
+        });
+        html += '</select>';
+      }
+      if (task.status === 'running') html += '<button class="btn" style="width:100%;margin-top:8px" onclick="updateAssistantTask(\\\'' + task.id + '\\\',\\\'review\\\')">Ready for review</button>';
+      else if (task.status !== 'done') html += '<button class="btn" style="width:100%;margin-top:8px" onclick="updateAssistantTask(\\\'' + task.id + '\\\',\\\'done\\\')">Mark done</button>';
+    }
+    html += '</div>';
+  });
+  if (!tasks.length) html += '<div class="empty">No tasks yet.</div>';
   if (assistant.activities && assistant.activities.length) {
     html += '<div class="section">Recent activity</div>';
     assistant.activities.slice(0, 8).forEach(function (activity) {
@@ -602,6 +649,29 @@ window.runAutomation = function (id) { api({ type: 'automation.run', automationI
 window.stopAutomation = function (id) { api({ type: 'automation.stop', automationId: id }).then(refreshAutomations).catch(function (e) { alert(e.message); }); };
 window.answerAssistant = function (questionId, answerId) {
   api({ type: 'assistant.answer', questionId: questionId, answerId: answerId })
+    .then(function (snapshot) { assistant = snapshot || assistant; render(); })
+    .catch(function (e) { alert(e.message); });
+};
+window.createAssistantTask = function () {
+  var title = document.getElementById('assistant-task-title');
+  var project = document.getElementById('assistant-task-project');
+  var dependency = document.getElementById('assistant-task-dependency');
+  var input = { title: (title && title.value || '').trim() };
+  if (!input.title) return;
+  if (project && project.value) input.projectPath = project.value;
+  if (dependency && dependency.value) input.dependsOn = [dependency.value];
+  api({ type: 'assistant.task.create', input: input })
+    .then(function (snapshot) { assistant = snapshot || assistant; render(); })
+    .catch(function (e) { alert(e.message); });
+};
+window.updateAssistantTask = function (taskId, status) {
+  api({ type: 'assistant.task.update', taskId: taskId, patch: { status: status } })
+    .then(function (snapshot) { assistant = snapshot || assistant; render(); })
+    .catch(function (e) { alert(e.message); });
+};
+window.assignAssistantTask = function (taskId, threadId) {
+  if (!threadId) return;
+  api({ type: 'assistant.task.assign', taskId: taskId, threadId: threadId })
     .then(function (snapshot) { assistant = snapshot || assistant; render(); })
     .catch(function (e) { alert(e.message); });
 };

@@ -7,13 +7,21 @@ import type {
   LabAssistantMergeability,
   LabAssistantPullRequest,
   LabAssistantQuestion,
-  LabAssistantSnapshot
+  LabAssistantSnapshot,
+  LabAssistantTask,
+  LabAssistantTaskInput,
+  LabAssistantTaskPatch,
+  LabAssistantTaskPlan,
+  LabAssistantTaskStatus
 } from '../shared/lab-assistant'
+import type { BackendRequest } from '../shared/backend'
 import type { BossEvent } from '../shared/notification'
 import type { SupervisedThread } from '../shared/supervision'
 
 interface StoredLabAssistantState {
   version: 1
+  tasks: LabAssistantTask[]
+  taskPlans: Record<string, LabAssistantTaskPlan>
   pullRequests: LabAssistantPullRequest[]
   questions: LabAssistantQuestion[]
   activities: LabAssistantActivity[]
@@ -38,6 +46,14 @@ function record(value: unknown): Record<string, unknown> {
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function taskGroup(task: Pick<LabAssistantTask, 'projectPath'>): string {
+  return task.projectPath || 'global'
+}
+
+function taskScopeLabel(task: Pick<LabAssistantTask, 'projectPath'>): string {
+  return task.projectPath ? basename(task.projectPath) : 'Global'
 }
 
 function pullRequestFromDelivery(delivery: GitHubDelivery, now: number): LabAssistantPullRequest | undefined {
@@ -80,6 +96,8 @@ export class LabAssistantManager {
   private readonly host: LabAssistantHost
   private readonly clock: () => number
   private loaded = false
+  private tasks: LabAssistantTask[] = []
+  private taskPlans: Record<string, LabAssistantTaskPlan> = {}
   private pullRequests: LabAssistantPullRequest[] = []
   private questions: LabAssistantQuestion[] = []
   private activities: LabAssistantActivity[] = []
@@ -98,6 +116,8 @@ export class LabAssistantManager {
     try {
       const parsed = JSON.parse(await readFile(this.stateFile, 'utf8')) as Partial<StoredLabAssistantState>
       if (parsed.version !== 1) return
+      if (Array.isArray(parsed.tasks)) this.tasks = parsed.tasks
+      if (parsed.taskPlans && typeof parsed.taskPlans === 'object') this.taskPlans = parsed.taskPlans
       if (Array.isArray(parsed.pullRequests)) this.pullRequests = parsed.pullRequests
       if (Array.isArray(parsed.questions)) this.questions = parsed.questions
       if (Array.isArray(parsed.activities)) this.activities = parsed.activities.slice(0, ACTIVITY_CAP)
@@ -111,6 +131,8 @@ export class LabAssistantManager {
     await mkdir(dirname(this.stateFile), { recursive: true })
     const state: StoredLabAssistantState = {
       version: 1,
+      tasks: this.tasks,
+      taskPlans: this.taskPlans,
       pullRequests: this.pullRequests,
       questions: this.questions,
       activities: this.activities,
@@ -128,6 +150,8 @@ export class LabAssistantManager {
   private currentSnapshot(): LabAssistantSnapshot {
     return {
       generatedAt: this.clock(),
+      tasks: clone(this.tasks),
+      taskPlans: clone(this.taskPlans),
       pullRequests: clone(this.pullRequests),
       questions: clone(this.questions),
       activities: clone(this.activities),
@@ -161,6 +185,7 @@ export class LabAssistantManager {
       existing.createdAt = this.clock()
       delete existing.answerId
       delete existing.answeredAt
+      delete existing.dismissedAt
       this.notifyQuestion(existing)
       return existing
     }
@@ -182,6 +207,211 @@ export class LabAssistantManager {
       body: question.prompt,
       createdAt: question.createdAt
     })
+  }
+
+  private task(id: string): LabAssistantTask {
+    const task = this.tasks.find((item) => item.id === id)
+    if (!task) throw new Error(`Lab Assistant task ${id || '(missing)'} does not exist.`)
+    return task
+  }
+
+  private incompleteDependencies(task: LabAssistantTask): LabAssistantTask[] {
+    return task.dependsOn
+      .map((id) => this.tasks.find((candidate) => candidate.id === id))
+      .filter((candidate): candidate is LabAssistantTask => Boolean(candidate && candidate.status !== 'done'))
+  }
+
+  private incompletePlanPredecessors(task: LabAssistantTask): LabAssistantTask[] {
+    const plan = this.taskPlans[taskGroup(task)]
+    if (!plan || plan.mode !== 'ordered') return []
+    const index = plan.taskIds.indexOf(task.id)
+    if (index <= 0) return []
+    return plan.taskIds.slice(0, index)
+      .map((id) => this.tasks.find((candidate) => candidate.id === id))
+      .filter((candidate): candidate is LabAssistantTask => Boolean(candidate && candidate.status !== 'done'))
+  }
+
+  private taskBlockers(task: LabAssistantTask): LabAssistantTask[] {
+    const blockers = [...this.incompleteDependencies(task), ...this.incompletePlanPredecessors(task)]
+    return [...new Map(blockers.map((blocker) => [blocker.id, blocker])).values()]
+  }
+
+  private validateDependencies(candidate: LabAssistantTask): void {
+    if (new Set(candidate.dependsOn).size !== candidate.dependsOn.length) {
+      throw new Error('A task dependency can only be listed once.')
+    }
+    if (candidate.dependsOn.includes(candidate.id)) throw new Error('A task cannot depend on itself.')
+    const missing = candidate.dependsOn.find((id) => !this.tasks.some((task) => task.id === id))
+    if (missing) throw new Error(`Task dependency ${missing} does not exist.`)
+
+    const dependenciesFor = (id: string): string[] => id === candidate.id
+      ? candidate.dependsOn
+      : this.tasks.find((task) => task.id === id)?.dependsOn ?? []
+    const reachesCandidate = (id: string, visited: Set<string>): boolean => {
+      if (id === candidate.id) return true
+      if (visited.has(id)) return false
+      visited.add(id)
+      return dependenciesFor(id).some((dependency) => reachesCandidate(dependency, visited))
+    }
+    if (candidate.dependsOn.some((id) => reachesCandidate(id, new Set()))) {
+      throw new Error('Task dependencies cannot form a cycle.')
+    }
+  }
+
+  private reconcileBlockedTasks(): void {
+    for (const task of this.tasks) {
+      const blocked = this.taskBlockers(task).length > 0
+      if (task.status === 'ready' && blocked) task.status = 'blocked'
+      else if (task.status === 'blocked' && !blocked) task.status = 'ready'
+    }
+  }
+
+  private considerTaskOrders(): void {
+    const readyIds = new Set(this.tasks
+      .filter((task) => task.status === 'ready' && !task.assignedThreadId)
+      .map((task) => task.id))
+    for (const question of this.questions) {
+      if (question.status !== 'open' || !question.key.startsWith('task-order:')) continue
+      const questionTaskIds = question.options.filter((option) => option.id !== 'parallel').map((option) => option.id)
+      if (questionTaskIds.some((id) => !readyIds.has(id))) {
+        question.status = 'dismissed'
+        question.dismissedAt = this.clock()
+      }
+    }
+    const groups = new Set(this.tasks.map((task) => taskGroup(task)))
+    for (const group of groups) {
+      const ready = this.tasks
+        .filter((task) => taskGroup(task) === group && task.status === 'ready' && !task.assignedThreadId)
+        // Array.sort is stable: equal timestamps keep the order the user added
+        // the tasks instead of being shuffled by their random UUIDs.
+        .sort((a, b) => a.createdAt - b.createdAt)
+      if (ready.length < 2) continue
+      const plan = this.taskPlans[group]
+      if (plan && ready.every((task) => plan.taskIds.includes(task.id))) continue
+      const signature = ready.map((task) => task.id).sort().join(',')
+      this.addQuestion({
+        key: `task-order:${group}:${signature}`,
+        repository: group === 'global' ? 'Global' : group,
+        prompt: `${ready.length} ${group === 'global' ? 'global' : taskScopeLabel(ready[0])} tasks are ready. What should Lab Assistant do first?`,
+        options: [
+          ...ready.map((task) => ({ id: task.id, label: task.title })),
+          { id: 'parallel', label: 'Run in parallel' }
+        ]
+      })
+    }
+  }
+
+  private async finishMutation(): Promise<LabAssistantSnapshot> {
+    await this.save()
+    const snapshot = this.currentSnapshot()
+    this.host.emit(snapshot)
+    return snapshot
+  }
+
+  createTask(input: LabAssistantTaskInput): Promise<LabAssistantSnapshot> {
+    return this.mutate(() => this.createTaskNow(input))
+  }
+
+  private async createTaskNow(input: LabAssistantTaskInput): Promise<LabAssistantSnapshot> {
+    await this.load()
+    const title = text(input.title)
+    if (!title) throw new Error('A Lab Assistant task needs a title.')
+    const now = this.clock()
+    const task: LabAssistantTask = {
+      id: randomUUID(),
+      title,
+      ...(text(input.details) ? { details: text(input.details) } : {}),
+      ...(text(input.projectPath) ? { projectPath: text(input.projectPath) } : {}),
+      status: 'ready',
+      dependsOn: [...new Set((input.dependsOn ?? []).map(text).filter(Boolean))],
+      createdAt: now,
+      updatedAt: now
+    }
+    this.validateDependencies(task)
+    if (this.incompleteDependencies(task).length) task.status = 'blocked'
+    this.tasks.push(task)
+    this.considerTaskOrders()
+    this.addActivity({
+      kind: 'task',
+      title: `Added ${task.title}`,
+      detail: `${taskScopeLabel(task)} · ${task.status}`,
+      taskId: task.id
+    })
+    return this.finishMutation()
+  }
+
+  updateTask(taskId: string, patch: LabAssistantTaskPatch): Promise<LabAssistantSnapshot> {
+    return this.mutate(() => this.updateTaskNow(taskId, patch))
+  }
+
+  private async updateTaskNow(taskId: string, patch: LabAssistantTaskPatch): Promise<LabAssistantSnapshot> {
+    await this.load()
+    const task = this.task(taskId)
+    const candidate: LabAssistantTask = {
+      ...task,
+      ...('title' in patch ? { title: text(patch.title) } : {}),
+      ...('details' in patch ? { details: text(patch.details) || undefined } : {}),
+      ...('projectPath' in patch ? { projectPath: text(patch.projectPath) || undefined } : {}),
+      ...('dependsOn' in patch ? { dependsOn: [...new Set((patch.dependsOn ?? []).map(text).filter(Boolean))] } : {}),
+      ...('status' in patch ? { status: patch.status as LabAssistantTaskStatus } : {}),
+      updatedAt: this.clock()
+    }
+    if (!candidate.title) throw new Error('A Lab Assistant task needs a title.')
+    if (!['inbox', 'ready', 'blocked', 'running', 'review', 'done'].includes(candidate.status)) {
+      throw new Error(`Invalid Lab Assistant task status: ${String(candidate.status)}.`)
+    }
+    this.validateDependencies(candidate)
+    const incomplete = this.taskBlockers(candidate)
+    if (incomplete.length && ['ready', 'running', 'review'].includes(candidate.status)) {
+      throw new Error(`Complete ${incomplete.map((item) => item.title).join(', ')} before advancing this task.`)
+    }
+    if (candidate.status === 'done') candidate.completedAt = this.clock()
+    else delete candidate.completedAt
+    Object.assign(task, candidate)
+    this.reconcileBlockedTasks()
+    this.considerTaskOrders()
+    this.addActivity({
+      kind: 'task',
+      title: `${task.title} is ${task.status}`,
+      detail: `${taskScopeLabel(task)} task updated.`,
+      taskId: task.id
+    })
+    return this.finishMutation()
+  }
+
+  assignTask(taskId: string, threadId: string): Promise<LabAssistantSnapshot> {
+    return this.mutate(() => this.assignTaskNow(taskId, threadId))
+  }
+
+  private async assignTaskNow(taskId: string, threadId: string): Promise<LabAssistantSnapshot> {
+    await this.load()
+    const task = this.task(taskId)
+    const thread = this.host.threads().find((candidate) => candidate.threadId === threadId)
+    if (!thread) throw new Error(`Agent thread ${threadId || '(missing)'} does not exist.`)
+    if (task.projectPath && task.projectPath !== thread.projectPath) {
+      throw new Error('Choose an agent working in the same project as this task.')
+    }
+    if (task.assignedThreadId === threadId && task.status === 'running') return this.currentSnapshot()
+    if (task.status !== 'ready') throw new Error('Only a ready task can be assigned to an agent.')
+    const pendingOrder = this.questions.find((question) => question.status === 'open'
+      && question.key.startsWith('task-order:')
+      && question.options.some((option) => option.id === task.id))
+    if (pendingOrder) throw new Error('Choose the task order before assigning this work.')
+    const incomplete = this.taskBlockers(task)
+    if (incomplete.length) throw new Error(`Complete ${incomplete.map((item) => item.title).join(', ')} before assigning this task.`)
+    const details = task.details ? ` Context: ${task.details}` : ''
+    await this.host.messageAgent(threadId, `[Lab Assistant] Take ownership of task: ${task.title}.${details} Report progress and any blocker back to the user.`)
+    task.assignedThreadId = threadId
+    task.status = 'running'
+    task.updatedAt = this.clock()
+    this.addActivity({
+      kind: 'agent-message',
+      title: `Assigned ${task.title}`,
+      detail: `Asked ${thread.title} to take ownership.`,
+      taskId: task.id,
+      threadId
+    })
+    return this.finishMutation()
   }
 
   private ownerThreads(pullRequest: LabAssistantPullRequest): SupervisedThread[] {
@@ -349,6 +579,18 @@ export class LabAssistantManager {
       const pullRequest = this.pullRequests.find((item) => item.id === question.key.slice('conflict-owner:'.length))
       if (pullRequest) pullRequest.conflictRoutedTo = 'manual'
     }
+    if (question.key.startsWith('task-order:')) {
+      const taskIds = question.options.filter((option) => option.id !== 'parallel').map((option) => option.id)
+      const first = this.tasks.find((task) => taskIds.includes(task.id))
+      if (!first) throw new Error('The tasks for that decision are no longer available.')
+      const group = taskGroup(first)
+      this.taskPlans[group] = {
+        mode: answer.id === 'parallel' ? 'parallel' : 'ordered',
+        taskIds: answer.id === 'parallel' ? taskIds : [answer.id, ...taskIds.filter((id) => id !== answer.id)],
+        updatedAt: this.clock()
+      }
+      this.reconcileBlockedTasks()
+    }
     question.status = 'answered'
     question.answerId = answer.id
     question.answeredAt = this.clock()
@@ -372,15 +614,15 @@ export class LabAssistantManager {
       detail: `${question.prompt} ${answer.label}`,
       repository: question.repository
     })
-    await this.save()
-    const snapshot = this.currentSnapshot()
-    this.host.emit(snapshot)
-    return snapshot
+    return this.finishMutation()
   }
 
-  async handle(request: { type: string; questionId?: string; answerId?: string }): Promise<unknown> {
+  async handle(request: BackendRequest): Promise<unknown> {
     if (request.type === 'assistant.snapshot') return this.snapshot()
-    if (request.type === 'assistant.answer') return this.answer(String(request.questionId ?? ''), String(request.answerId ?? ''))
+    if (request.type === 'assistant.answer') return this.answer(request.questionId, request.answerId)
+    if (request.type === 'assistant.task.create') return this.createTask(request.input)
+    if (request.type === 'assistant.task.update') return this.updateTask(request.taskId, request.patch)
+    if (request.type === 'assistant.task.assign') return this.assignTask(request.taskId, request.threadId)
     throw new Error(`Unsupported Lab Assistant request: ${request.type}`)
   }
 }

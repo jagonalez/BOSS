@@ -40,7 +40,10 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'automation.run',
   'automation.stop',
   'assistant.snapshot',
-  'assistant.answer'
+  'assistant.answer',
+  'assistant.task.create',
+  'assistant.task.update',
+  'assistant.task.assign'
 ])
 
 /** Event types the mobile page reacts to; the rest are desktop concerns. */

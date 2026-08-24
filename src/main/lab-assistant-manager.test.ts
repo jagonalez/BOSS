@@ -274,3 +274,107 @@ test('simultaneous webhook deliveries serialize their refresh and persistence wo
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('ready tasks create a durable ordered-or-parallel decision', async () => {
+  const { root, manager } = fixture()
+  try {
+    const first = (await manager.createTask({ title: 'Plan the change', projectPath: '/tmp/BOSS' })).tasks[0]
+    const pending = await manager.createTask({ title: 'Prototype the UI', projectPath: '/tmp/BOSS' })
+    const question = pending.questions.find((item) => item.key.startsWith('task-order:'))
+    assert.ok(question)
+    assert.deepEqual(question.options.map((option) => option.label), [
+      'Plan the change',
+      'Prototype the UI',
+      'Run in parallel'
+    ])
+
+    const answered = await manager.answer(question.id, 'parallel')
+    assert.equal(answered.taskPlans['/tmp/BOSS'].mode, 'parallel')
+    assert.equal(answered.taskPlans['/tmp/BOSS'].taskIds.includes(first.id), true)
+
+    const restored = new LabAssistantManager(join(root, 'assistant.json'), {
+      threads: () => [], messageAgent: async () => {}, emit: () => {}, notify: () => {}
+    })
+    assert.equal((await restored.snapshot()).taskPlans['/tmp/BOSS'].mode, 'parallel')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('an ordered task plan blocks successors until the selected first task completes', async () => {
+  const { root, manager } = fixture()
+  try {
+    const first = (await manager.createTask({ title: 'First task' })).tasks[0]
+    const pending = await manager.createTask({ title: 'Second task' })
+    const second = pending.tasks.find((task) => task.title === 'Second task')!
+    const question = pending.questions.find((item) => item.key.startsWith('task-order:'))!
+
+    const ordered = await manager.answer(question.id, first.id)
+    assert.equal(ordered.tasks.find((task) => task.id === first.id)?.status, 'ready')
+    assert.equal(ordered.tasks.find((task) => task.id === second.id)?.status, 'blocked')
+
+    const advanced = await manager.updateTask(first.id, { status: 'done' })
+    assert.equal(advanced.tasks.find((task) => task.id === second.id)?.status, 'ready')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('completing a dependency moves blocked work to ready', async () => {
+  const { root, manager } = fixture()
+  try {
+    const prerequisite = (await manager.createTask({ title: 'Build the foundation' })).tasks[0]
+    const blocked = await manager.createTask({ title: 'Ship the workflow', dependsOn: [prerequisite.id] })
+    assert.equal(blocked.tasks.find((task) => task.title === 'Ship the workflow')?.status, 'blocked')
+
+    const advanced = await manager.updateTask(prerequisite.id, { status: 'done' })
+    assert.equal(advanced.tasks.find((task) => task.title === 'Ship the workflow')?.status, 'ready')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a task state change dismisses an ordering question that is no longer current', async () => {
+  const { root, manager } = fixture()
+  try {
+    const first = (await manager.createTask({ title: 'Keep' })).tasks[0]
+    const pending = await manager.createTask({ title: 'Finish directly' })
+    const second = pending.tasks.find((task) => task.id !== first.id)!
+    const question = pending.questions.find((item) => item.key.startsWith('task-order:'))!
+
+    const updated = await manager.updateTask(second.id, { status: 'done' })
+    assert.equal(updated.questions.find((item) => item.id === question.id)?.status, 'dismissed')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('task dependencies reject cycles instead of creating permanently blocked work', async () => {
+  const { root, manager } = fixture()
+  try {
+    const first = (await manager.createTask({ title: 'First' })).tasks[0]
+    const second = (await manager.createTask({ title: 'Second', dependsOn: [first.id] })).tasks.find((task) => task.title === 'Second')!
+    await assert.rejects(() => manager.updateTask(first.id, { dependsOn: [second.id] }), /cycle/i)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('explicit assignment hands a ready project task to the selected agent', async () => {
+  const { root, manager, messages } = fixture([thread('feature-task')])
+  try {
+    const task = (await manager.createTask({
+      title: 'Implement the task graph',
+      details: 'Keep the control plane deterministic.',
+      projectPath: '/tmp/BOSS'
+    })).tasks[0]
+    const assigned = await manager.assignTask(task.id, 'agent-codex')
+    assert.equal(assigned.tasks[0].status, 'running')
+    assert.equal(assigned.tasks[0].assignedThreadId, 'agent-codex')
+    assert.equal(messages.length, 1)
+    assert.match(messages[0].message, /Implement the task graph/)
+    assert.match(messages[0].message, /deterministic/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

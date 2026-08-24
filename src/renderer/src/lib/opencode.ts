@@ -25,7 +25,7 @@ import type { TelegramSettingsPatch, TelegramStatus } from '@shared/telegram'
 import type { RemoteAccessStatus } from '@shared/relay'
 import type { SupervisionSnapshot, ThreadUsageReport, TranscriptSearchResult } from '@shared/supervision'
 import type { TaskPolicy } from '@shared/task-policy'
-import type { LabAssistantSnapshot } from '@shared/lab-assistant'
+import type { LabAssistantSnapshot, LabAssistantTaskInput, LabAssistantTaskPatch } from '@shared/lab-assistant'
 
 export class ApiError extends Error {
   constructor(
@@ -195,6 +195,12 @@ export const OpenCode = {
   labAssistant: () => backendRequest<LabAssistantSnapshot>({ type: 'assistant.snapshot' }),
   answerLabAssistant: (questionId: string, answerId: string) =>
     backendRequest<LabAssistantSnapshot>({ type: 'assistant.answer', questionId, answerId }),
+  createLabAssistantTask: (input: LabAssistantTaskInput) =>
+    backendRequest<LabAssistantSnapshot>({ type: 'assistant.task.create', input }),
+  updateLabAssistantTask: (taskId: string, patch: LabAssistantTaskPatch) =>
+    backendRequest<LabAssistantSnapshot>({ type: 'assistant.task.update', taskId, patch }),
+  assignLabAssistantTask: (taskId: string, threadId: string) =>
+    backendRequest<LabAssistantSnapshot>({ type: 'assistant.task.assign', taskId, threadId }),
   archiveThread: (threadId: string, archived: boolean) =>
     backendRequest<SupervisionSnapshot>({ type: 'thread.archive', threadId, archived }),
   pinThread: (threadId: string, pinned: boolean) =>

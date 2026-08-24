@@ -435,6 +435,17 @@ export function installE2EApi(boss: BossApi): void {
   }]
   let assistantFixture: LabAssistantSnapshot = {
     generatedAt: Date.now(),
+    tasks: [
+      {
+        id: 'assistant-task-plan', title: 'Plan task workflow', projectPath: PROJECT,
+        status: 'ready', dependsOn: [], createdAt: Date.now() - 40_000, updatedAt: Date.now() - 40_000
+      },
+      {
+        id: 'assistant-task-ship', title: 'Ship task workflow', projectPath: PROJECT,
+        status: 'blocked', dependsOn: ['assistant-task-plan'], createdAt: Date.now() - 35_000, updatedAt: Date.now() - 35_000
+      }
+    ],
+    taskPlans: {},
     pullRequests: [
       {
         id: 'octo/hello#21', repository: 'octo/hello', number: 21, title: 'Mobile polish',
@@ -967,6 +978,57 @@ export function installE2EApi(boss: BossApi): void {
         }
         const data = JSON.stringify({ type: 'assistant.updated', properties: { snapshot: assistantFixture } })
         for (const listener of eventListeners) listener(data)
+        return structuredClone(assistantFixture)
+      }
+      case 'assistant.task.create': {
+        const now = Date.now()
+        const dependencies = request.input.dependsOn ?? []
+        const blocked = dependencies.some((id) => assistantFixture.tasks.find((task) => task.id === id)?.status !== 'done')
+        assistantFixture = {
+          ...assistantFixture,
+          generatedAt: now,
+          tasks: [...assistantFixture.tasks, {
+            id: `assistant-task-${assistantFixture.tasks.length + 1}`,
+            title: request.input.title,
+            ...(request.input.details ? { details: request.input.details } : {}),
+            ...(request.input.projectPath ? { projectPath: request.input.projectPath } : {}),
+            status: blocked ? 'blocked' : 'ready',
+            dependsOn: dependencies,
+            createdAt: now,
+            updatedAt: now
+          }]
+        }
+        return structuredClone(assistantFixture)
+      }
+      case 'assistant.task.update': {
+        const now = Date.now()
+        const updatedTasks = assistantFixture.tasks.map((task) => task.id === request.taskId
+          ? {
+              ...task,
+              ...request.patch,
+              projectPath: request.patch.projectPath === null ? undefined : request.patch.projectPath ?? task.projectPath,
+              updatedAt: now,
+              ...(request.patch.status === 'done' ? { completedAt: now } : {})
+            }
+          : task)
+        assistantFixture = {
+          ...assistantFixture,
+          generatedAt: now,
+          tasks: updatedTasks.map((task) => task.status === 'blocked' && task.dependsOn.every((id) => updatedTasks.find((candidate) => candidate.id === id)?.status === 'done')
+            ? { ...task, status: 'ready', updatedAt: now }
+            : task)
+        }
+        return structuredClone(assistantFixture)
+      }
+      case 'assistant.task.assign': {
+        const now = Date.now()
+        assistantFixture = {
+          ...assistantFixture,
+          generatedAt: now,
+          tasks: assistantFixture.tasks.map((task) => task.id === request.taskId
+            ? { ...task, status: 'running', assignedThreadId: request.threadId, updatedAt: now }
+            : task)
+        }
         return structuredClone(assistantFixture)
       }
       case 'thread.policy.get': return undefined
