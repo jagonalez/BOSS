@@ -68,7 +68,10 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'automation.run',
   'automation.stop',
   'assistant.snapshot',
-  'assistant.answer'
+  'assistant.answer',
+  'assistant.task.create',
+  'assistant.task.update',
+  'assistant.task.assign'
 ])
 
 const FORWARDED_EVENTS = new Set([

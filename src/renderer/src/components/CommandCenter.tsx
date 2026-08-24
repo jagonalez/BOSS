@@ -150,9 +150,14 @@ export function CommandCenter(): React.JSX.Element {
   const serverUrl = useStore(appStore, (state) => state.serverUrl)
   const backends = useStore(appStore, (state) => state.backends)
   const threadBus = useStore(appStore, (state) => state.threadBus)
+  const projects = useStore(appStore, (state) => state.projects)
+  const currentProjectPath = useStore(appStore, (state) => state.projectPath)
   const [snapshot, setSnapshot] = useState<SupervisionSnapshot | null>(null)
   const [assistant, setAssistant] = useState<LabAssistantSnapshot | null>(null)
   const [assistantError, setAssistantError] = useState('')
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskProject, setNewTaskProject] = useState('')
+  const [newTaskDependency, setNewTaskDependency] = useState('')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<TranscriptSearchResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -278,6 +283,46 @@ export function CommandCenter(): React.JSX.Element {
 
   const totals = snapshot?.totals
   const openAssistantQuestions = assistant?.questions.filter((question) => question.status === 'open') ?? []
+  const assistantTasks = [...(assistant?.tasks ?? [])].sort((a, b) => {
+    const rank = { running: 0, review: 1, ready: 2, blocked: 3, inbox: 4, done: 5 }
+    return rank[a.status] - rank[b.status] || b.updatedAt - a.updatedAt
+  })
+  const activeAssistantTasks = assistantTasks.filter((task) => task.status !== 'done')
+  const projectPaths = [...new Set([
+    currentProjectPath,
+    ...projects.map((project) => project.path || project.directory || project.worktree || ''),
+    ...(snapshot?.threads ?? []).map((thread) => thread.projectPath)
+  ].filter(Boolean))].sort()
+  const createAssistantTask = (event: React.FormEvent): void => {
+    event.preventDefault()
+    const title = newTaskTitle.trim()
+    if (!title) return
+    setAssistantError('')
+    void OpenCode.createLabAssistantTask({
+      title,
+      ...(newTaskProject ? { projectPath: newTaskProject } : {}),
+      ...(newTaskDependency ? { dependsOn: [newTaskDependency] } : {})
+    }).then((value) => {
+      setAssistant(value)
+      setNewTaskTitle('')
+      setNewTaskDependency('')
+    }).catch((error: unknown) => {
+      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not create that task.')
+    })
+  }
+  const updateAssistantTask = (taskId: string, status: 'ready' | 'review' | 'done'): void => {
+    setAssistantError('')
+    void OpenCode.updateLabAssistantTask(taskId, { status }).then(setAssistant).catch((error: unknown) => {
+      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not update that task.')
+    })
+  }
+  const assignAssistantTask = (taskId: string, threadId: string): void => {
+    if (!threadId) return
+    setAssistantError('')
+    void OpenCode.assignLabAssistantTask(taskId, threadId).then(setAssistant).catch((error: unknown) => {
+      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not assign that task.')
+    })
+  }
   const answerAssistant = (questionId: string, answerId: string): void => {
     setAssistantError('')
     void OpenCode.answerLabAssistant(questionId, answerId)
@@ -339,7 +384,7 @@ export function CommandCenter(): React.JSX.Element {
                 <span className="command-eyebrow">Orchestration</span>
                 <h2>Lab Assistant</h2>
               </div>
-              <span>{openAssistantQuestions.length}</span>
+              <span>{activeAssistantTasks.length} tasks · {openAssistantQuestions.length} decisions</span>
             </div>
             <div className="command-assistant-list">
               {assistantError ? <div className="command-assistant-error" role="alert">{assistantError}</div> : null}
@@ -362,6 +407,61 @@ export function CommandCenter(): React.JSX.Element {
                   <span>{assistant?.activities[0]?.detail ?? 'Authenticated GitHub automation events will appear here.'}</span>
                 </div>
               ) : null}
+              <div className="command-assistant-task-head">
+                <div><strong>Task queue</strong><small>Global and project work, ordered by readiness.</small></div>
+              </div>
+              <form className="command-assistant-task-form" onSubmit={createAssistantTask}>
+                <input
+                  aria-label="New Lab Assistant task"
+                  value={newTaskTitle}
+                  onChange={(event) => setNewTaskTitle(event.target.value)}
+                  placeholder="Add a task…"
+                />
+                <select aria-label="Task project" value={newTaskProject} onChange={(event) => setNewTaskProject(event.target.value)}>
+                  <option value="">Global</option>
+                  {projectPaths.map((path) => <option key={path} value={path}>{projectName(path)}</option>)}
+                </select>
+                <select aria-label="Task dependency" value={newTaskDependency} onChange={(event) => setNewTaskDependency(event.target.value)}>
+                  <option value="">No dependency</option>
+                  {assistantTasks.filter((task) => task.status !== 'done').map((task) => (
+                    <option key={task.id} value={task.id}>After {task.title}</option>
+                  ))}
+                </select>
+                <button type="submit" disabled={!newTaskTitle.trim()}>Add task</button>
+              </form>
+              <div className="command-assistant-tasks">
+                {assistantTasks.slice(0, 12).map((task) => {
+                  const dependencyNames = task.dependsOn
+                    .map((id) => assistantTasks.find((candidate) => candidate.id === id)?.title)
+                    .filter(Boolean)
+                    .join(', ')
+                  const eligibleThreads = (snapshot?.threads ?? []).filter((thread) => !task.projectPath || thread.projectPath === task.projectPath)
+                  const assignedThread = (snapshot?.threads ?? []).find((thread) => thread.threadId === task.assignedThreadId)
+                  return (
+                    <article className={`command-assistant-task ${task.status}`} key={task.id}>
+                      <span className="command-assistant-task-state">{task.status}</span>
+                      <div>
+                        <strong>{task.title}</strong>
+                        <small>{task.projectPath ? projectName(task.projectPath) : 'Global'}{dependencyNames ? ` · after ${dependencyNames}` : ''}{assignedThread ? ` · ${assignedThread.title}` : ''}</small>
+                      </div>
+                      <div className="command-assistant-task-actions">
+                        {task.status === 'ready' ? (
+                          <select aria-label={`Assign ${task.title}`} value="" onChange={(event) => assignAssistantTask(task.id, event.target.value)}>
+                            <option value="">Assign agent…</option>
+                            {eligibleThreads.map((thread) => <option key={thread.threadId} value={thread.threadId}>{thread.title}</option>)}
+                          </select>
+                        ) : null}
+                        {task.status === 'running' ? <button type="button" onClick={() => updateAssistantTask(task.id, 'review')}>Ready for review</button> : null}
+                        {task.status === 'review' ? <button type="button" onClick={() => updateAssistantTask(task.id, 'done')}>Complete</button> : null}
+                        {task.status === 'ready' || task.status === 'blocked' || task.status === 'inbox'
+                          ? <button type="button" onClick={() => updateAssistantTask(task.id, 'done')}>Mark done</button>
+                          : null}
+                      </div>
+                    </article>
+                  )
+                })}
+                {assistantTasks.length === 0 ? <div className="command-empty">No tasks yet.</div> : null}
+              </div>
             </div>
           </section>
           <div className="command-grid">

@@ -24,6 +24,7 @@ git, speech. Tokens and credentials stay on the machine.
 - **Worktrees** — give a thread its own git worktree so agents work in parallel without colliding. `.worktreeinclude` and `.worktreesetup` control what a fresh checkout gets (see below).
 - **Delegation & fan-out** — hand a subtask to another backend, or run the same task on several at once in separate worktrees and compare the diffs.
 - **Automations** — cron-scheduled agent runs with their own prompt, backend, workspace strategy, overlap policy, and run history.
+- **Lab Assistant** — a durable orchestration inbox for global and per-project tasks, dependencies, ordered or parallel execution decisions, PR monitoring, and explicit handoff to an existing agent thread.
 - **MCP** — connect stdio or HTTP servers with per-connection env, headers, and encrypted tokens; BOSS also exposes its own tools (browser, computer-use, thread bus, `publish_site`) to agents that support MCP.
 - **Workspace** — a tiling layout of splits and tabs, with named views you can switch between, drag-and-drop between panes, and undo:
   - **Review** — diff of changed files across six scopes (working tree, staged, vs. a branch, per-commit, the open PR, and the review conversation), with inline comments that publish to GitHub.
@@ -32,7 +33,7 @@ git, speech. Tokens and credentials stay on the machine.
   - **Terminal** — a real PTY running your `$SHELL`.
   - **Side chat** — a second, independent thread.
 - **Sites** — publish a folder of static files (or have the agent do it via the `publish_site` tool) and preview it instantly at a localhost URL in BOSS's built-in browser. Optionally deploy to Cloudflare Workers Static Assets for a public `*.workers.dev` URL.
-- **Mobile** — a small PWA served over loopback (pair it with `tailscale serve`) for reviewing and steering threads from a phone. Deliberately narrow: threads, review, and automations only.
+- **Mobile** — a small PWA served over loopback (pair it with `tailscale serve`) for reviewing and steering threads, running automations, and managing the Lab Assistant inbox from a phone.
 - **Security** — sandboxed renderer, context isolation, no node integration for remote content, a narrow typed IPC surface, and the browse view in its own hardened session. Project files reach the UI through a scheme scoped to the open project, never `file:`.
 
 ## Architecture
