@@ -23,6 +23,21 @@ Install that on the phone, then `npm start` and scan the QR exactly as before.
 Fast Refresh and live reload work the same way. Rebuild only when native
 dependencies change — never for a JavaScript change.
 
+Locally, with Xcode installed, `npm run ios` does the same build without
+spending an EAS build.
+
+## Debug needs your Mac; Release does not
+
+`npm run ios` builds Debug, which fetches its JavaScript from Metro at launch.
+That is what buys Fast Refresh, and it means the app cannot start without your
+Mac serving it on the same network.
+
+`npm run ios:release` bundles the JavaScript into the app. No Metro, no Mac, no
+network — it runs on cellular with the laptop shut. That is the build to install
+when the phone is being used rather than developed against, and the one to
+rebuild when phone code changes, because reloading a Release build re-runs the
+bundle it already has.
+
 ## Native modules
 
 Third-party native modules are now allowed: the dev build compiles them in.
