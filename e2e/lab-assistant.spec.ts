@@ -37,11 +37,17 @@ test('Command Center creates, unblocks, and assigns project tasks', async ({ app
       dependsOn: ['assistant-task-plan']
     }
   })
-  const created = assistant.locator('.command-assistant-task').filter({ hasText: 'Monitor test failures' })
+  const created = assistant.locator('article.command-assistant-task').filter({
+    has: appPage.getByText('Monitor test failures', { exact: true })
+  })
   await expect(created).toContainText('blocked')
 
-  const prerequisite = assistant.locator('.command-assistant-task').filter({ hasText: 'Plan task workflow' })
-  await prerequisite.getByRole('button', { name: 'Mark done' }).click()
+  const prerequisite = assistant.locator('article.command-assistant-task').filter({
+    has: appPage.getByText('Plan task workflow', { exact: true })
+  })
+  await prerequisite
+    .getByRole('button', { name: 'Complete task: Plan task workflow', exact: true })
+    .click()
   await expect(created).toContainText('ready')
   await created.getByRole('combobox', { name: 'Assign Monitor test failures' }).selectOption({ label: 'Source thread' })
 

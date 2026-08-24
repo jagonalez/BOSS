@@ -454,7 +454,7 @@ export function CommandCenter(): React.JSX.Element {
                         {task.status === 'running' ? <button type="button" onClick={() => updateAssistantTask(task.id, 'review')}>Ready for review</button> : null}
                         {task.status === 'review' ? <button type="button" onClick={() => updateAssistantTask(task.id, 'done')}>Complete</button> : null}
                         {task.status === 'ready' || task.status === 'blocked' || task.status === 'inbox'
-                          ? <button type="button" onClick={() => updateAssistantTask(task.id, 'done')}>Mark done</button>
+                          ? <button type="button" aria-label={`Complete task: ${task.title}`} onClick={() => updateAssistantTask(task.id, 'done')}>Mark done</button>
                           : null}
                       </div>
                     </article>
