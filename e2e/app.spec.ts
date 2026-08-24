@@ -153,6 +153,53 @@ test('Ctrl+F searches the active thread and moves between its matches', async ({
   await expect(search).toHaveCount(0)
 })
 
+test('a long virtual transcript keeps its exact reading position and searches unmounted history', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  await fixture.installLongThread(320)
+  await appPage.locator('.session-row').filter({ hasText: 'Long performance thread' }).click()
+  await expect(appPage.getByText('Long transcript response 319.')).toBeVisible()
+
+  // The data model contains 640 messages, but only the viewport-sized slice is
+  // allowed into the expensive Markdown/step-card DOM.
+  await expect.poll(() => appPage.locator('.messages .msg').count()).toBeLessThan(50)
+  const scroller = appPage.locator('.messages:visible')
+  await scroller.evaluate((element) => {
+    element.scrollTop = Math.round((element.scrollHeight - element.clientHeight) * 0.46)
+    element.dispatchEvent(new Event('scroll'))
+  })
+
+  const readingAnchor = async (): Promise<{ key: string; offset: number } | null> => scroller.evaluate((element) => {
+    const viewport = element.getBoundingClientRect()
+    const turns = Array.from(element.querySelectorAll<HTMLElement>('.transcript-virtual-turn'))
+      .map((turn) => ({ turn, rect: turn.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.bottom > viewport.top)
+      .sort((left, right) => left.rect.top - right.rect.top)
+    const first = turns[0]
+    if (!first) return null
+    return {
+      key: first.turn.querySelector<HTMLElement>('[data-turn-key]')?.dataset.turnKey ?? '',
+      offset: Math.round(first.rect.top - viewport.top)
+    }
+  })
+  await expect.poll(readingAnchor).not.toBeNull()
+  const before = await readingAnchor()
+
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await expect(appPage.getByText('Search marker: first result.')).toBeVisible()
+  await appPage.locator('.session-row').filter({ hasText: 'Long performance thread' }).click()
+  await expect.poll(readingAnchor).toEqual(before)
+
+  await appPage.keyboard.press('Control+f')
+  const search = appPage.getByRole('search', { name: 'Search this thread' })
+  await search.getByRole('searchbox', { name: 'Find in thread' }).fill('deep virtual search target')
+  await expect(search).toContainText('1 of 2')
+  await expect(appPage.locator('.msg.thread-search-current')).toContainText('near the start')
+  await appPage.keyboard.press('Enter')
+  await expect(search).toContainText('2 of 2')
+  await expect(appPage.locator('.msg.thread-search-current')).toContainText('near the end')
+  await expect.poll(() => appPage.locator('.messages .msg').count()).toBeLessThan(50)
+})
+
 test('shows an attached image and one copy of a response echoed under two message ids', async ({ appPage }) => {
   await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
 

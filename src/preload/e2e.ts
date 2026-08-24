@@ -282,6 +282,29 @@ function sourceMessages(): MessageWithParts[] {
   ]
 }
 
+function longTranscriptMessages(sessionID: string, turnCount: number): MessageWithParts[] {
+  const result: MessageWithParts[] = []
+  for (let index = 0; index < turnCount; index += 1) {
+    const userId = `${sessionID}-user-${index}`
+    const assistantId = `${sessionID}-assistant-${index}`
+    result.push({
+      info: { id: userId, sessionID, role: 'user', time: { created: index * 2 } },
+      parts: [{
+        id: `${userId}-text`, type: 'text', sessionID, messageID: userId,
+        text: index === 17 ? 'Deep virtual search target near the start.' : `Long transcript prompt ${index}.`
+      }]
+    })
+    result.push({
+      info: { id: assistantId, sessionID, role: 'assistant', time: { created: index * 2 + 1, completed: index * 2 + 2 } },
+      parts: [{
+        id: `${assistantId}-text`, type: 'text', sessionID, messageID: assistantId,
+        text: index === turnCount - 19 ? 'Deep virtual search target near the end.' : `Long transcript response ${index}.\n\nA stable second line gives this turn a measurable height.`
+      }]
+    })
+  }
+  return result
+}
+
 function claudeMessages(): MessageWithParts[] {
   const sessionID = 'thread-claude'
   return [
@@ -1096,6 +1119,27 @@ export function installE2EApi(boss: BossApi): void {
     spawnThread: (backendId: BackendId, title: string) => {
       const session = createThread(backendId, title)
       const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId })
+      for (const listener of eventListeners) listener(data)
+      return structuredClone(session)
+    },
+    installLongThread: (turnCount = 320) => {
+      const id = 'thread-long-performance'
+      const existing = sessions.find((item) => item.id === id)
+      if (existing) return structuredClone(existing)
+      const session: SessionInfo = {
+        id,
+        backendId: 'opencode',
+        nativeSessionId: 'native-long-performance',
+        projectId: 'boss-e2e',
+        projectPath: PROJECT,
+        executionPath: CHECKOUT,
+        title: 'Long performance thread',
+        time: { created: Date.now(), updated: Date.now() },
+        model: { id: 'gpt-5.6', provider: 'openai' }
+      }
+      sessions = [session, ...sessions]
+      messages[id] = longTranscriptMessages(id, turnCount)
+      const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId: 'opencode' })
       for (const listener of eventListeners) listener(data)
       return structuredClone(session)
     },

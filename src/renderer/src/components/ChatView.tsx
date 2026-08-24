@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId, QueuedFollowUp } from '@shared/backend'
@@ -23,6 +24,8 @@ import { AnnotationPopover, type AnnotationPopoverHandle } from './AnnotationPop
 import { AnnotationRow } from './AnnotationRow'
 import { createAnnotation, type Annotation, type AnnotationAnchor } from '@shared/annotations'
 import { anchorFromSelection } from '../lib/annotation-anchor'
+import { groupTranscriptTurns, searchTranscript, type TranscriptTurn } from '../lib/transcript'
+import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -51,8 +54,8 @@ function statusBadge(status?: string): React.JSX.Element | null {
   return <span className={`badge ${cls}`}>{status}</span>
 }
 
-function Thinking({ text }: { text: string }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
+function Thinking({ id, text }: { id: string; text: string }): React.JSX.Element {
+  const [open, setOpen] = usePersistentDisclosure(`thinking:${id}`)
   return (
     <div className="thinking">
       <button className="thinking-toggle" onClick={() => setOpen((o) => !o)}>
@@ -72,7 +75,7 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
     case 'text':
       return <MessageText text={partText(part)} />
     case 'reasoning':
-      return <Thinking text={partText(part)} />
+      return <Thinking id={part.id} text={partText(part)} />
     case 'tool': {
       const output = toolOutput(part)
       return (
@@ -131,6 +134,8 @@ function PartView({ part }: { part: Part }): React.JSX.Element | null {
   }
 }
 
+const PartViewMemo = React.memo(PartView)
+
 /** What the thread is doing right now, for the line pinned under the transcript.
  *
  *  The title carries the argument — the command, the path — where the tool name
@@ -153,8 +158,8 @@ function msgText(m: MessageWithParts): string {
     .join('\n')
 }
 
-function MessageError({ error }: { error?: unknown }): React.JSX.Element | null {
-  const [open, setOpen] = useState(false)
+function MessageError({ messageId, error }: { messageId: string; error?: unknown }): React.JSX.Element | null {
+  const [open, setOpen] = usePersistentDisclosure(`error:${messageId}`)
   if (!error) return null
   return (
     <div className="msg-error">
@@ -328,10 +333,14 @@ function QuestionCard({ question, backendId }: { question: QuestionRequest; back
 
 function MessageView({
   item,
-  onCtx
+  onCtx,
+  searchMatch = false,
+  searchCurrent = false
 }: {
   item: MessageWithParts
   onCtx?: (e: React.MouseEvent, item: MessageWithParts) => void
+  searchMatch?: boolean
+  searchCurrent?: boolean
 }): React.JSX.Element {
   const isUser = item.info.role === 'user'
   const hasCompactionPart = item.parts.some((p) => p.type === 'compaction')
@@ -347,7 +356,10 @@ function MessageView({
     )
   }
   return (
-    <div className={`msg ${isUser ? 'user' : 'assistant'}`} onContextMenu={onCtx ? (e) => onCtx(e, item) : undefined}>
+    <div
+      className={`msg ${isUser ? 'user' : 'assistant'}${searchMatch ? ' thread-search-match' : ''}${searchCurrent ? ' thread-search-current' : ''}`}
+      onContextMenu={onCtx ? (e) => onCtx(e, item) : undefined}
+    >
       {onCtx ? (
         <button className="msg-more" onClick={(e) => onCtx(e, item)} title="Message options">
           ⋯
@@ -357,15 +369,15 @@ function MessageView({
         <span>{isUser ? 'You' : 'Agent'}</span>
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
       </div>
-      <MessageError error={item.info.error} />
+      <MessageError messageId={item.info.id} error={item.info.error} />
       <div className="msg-body" data-message-id={isUser ? undefined : item.info.id}>
         {isUser ? (
-          item.parts.map((part) => <PartView key={part.id} part={part} />)
+          item.parts.map((part) => <PartViewMemo key={part.id} part={part} />)
         ) : (
           <>
             {segmentTurn(item.parts).map((segment, index) =>
               segment.type === 'narrative' ? (
-                <PartView key={segment.part.id} part={segment.part} />
+                <PartViewMemo key={segment.part.id} part={segment.part} />
               ) : (
                 <StepCard
                   key={`steps-${index}-${segment.parts[0].id}`}
@@ -1161,11 +1173,6 @@ function MicToggle({ targetId }: { targetId: string }): React.JSX.Element {
   )
 }
 
-interface TurnGroup {
-  user?: MessageWithParts
-  assistants: MessageWithParts[]
-}
-
 function uniqueNarrativeParts(parts: Part[]): Part[] {
   const seen = new Set<string>()
   return parts.filter((part) => {
@@ -1182,24 +1189,9 @@ function uniqueNarrativeParts(parts: Part[]): Part[] {
   })
 }
 
-function groupTurns(messages: MessageWithParts[]): TurnGroup[] {
-  const groups: TurnGroup[] = []
-  let current: TurnGroup = { assistants: [] }
-  for (const m of messages) {
-    if (m.info.role === 'user') {
-      if (current.assistants.length > 0) groups.push(current)
-      current = { user: m, assistants: [] }
-    } else {
-      current.assistants.push(m)
-    }
-  }
-  if (current.user || current.assistants.length > 0) groups.push(current)
-  return groups
-}
-
 /** One message standing for every assistant message in a turn.
  *
- *  A turn with no reply yet is normal, not a mistake: groupTurns opens a group
+ *  A turn with no reply yet is normal, not a mistake: grouping opens a group
  *  the moment the user sends, and it stays empty until the first message
  *  arrives. Returning an empty message rather than reading info off a message
  *  that is not there keeps that first frame renderable. */
@@ -1228,12 +1220,20 @@ function TurnView({
   turn,
   modelChanged,
   sessionId,
-  onCtx
+  onCtx,
+  working,
+  speakingKey,
+  searchMatchIds,
+  currentSearchMessageId
 }: {
-  turn: TurnGroup
+  turn: TranscriptTurn
   modelChanged?: boolean
   sessionId?: string
   onCtx?: (e: React.MouseEvent, item: MessageWithParts) => void
+  working: boolean
+  speakingKey?: string | null
+  searchMatchIds?: ReadonlySet<string>
+  currentSearchMessageId?: string
 }): React.JSX.Element {
   const model = turn.assistants[0]?.info.model?.id
   const combined = combineAssistants(turn.assistants)
@@ -1248,10 +1248,7 @@ function TurnView({
   // Playback state lives in the store, not local state: the auto-speak effect
   // starts audio outside this component, and its key is what names the turn
   // whose button becomes the stop control.
-  const speakingKey = useStore(appStore, (s) => s.speakingKey)
   const speakingThis = Boolean(lastAssistant && speakingKey === lastAssistant.info.id)
-  const working = useStore(appStore, (s) =>
-    sessionId ? Boolean(s.streaming[sessionId] || s.sessionBusy[sessionId]) : false)
   // A completed reply with a real prompt behind it can be asked for again.
   // Resending is an ordinary send — history is never truncated — so every
   // backend qualifies; a busy thread disqualifies itself by disabling.
@@ -1260,11 +1257,18 @@ function TurnView({
     [turn.user, lastAssistant]
   )
   return (
-    <>
-      {turn.user ? <MessageView item={turn.user} onCtx={onCtx} /> : null}
+    <div className="transcript-turn" data-turn-key={turn.key}>
+      {turn.user ? (
+        <MessageView
+          item={turn.user}
+          onCtx={onCtx}
+          searchMatch={searchMatchIds?.has(turn.user.info.id)}
+          searchCurrent={currentSearchMessageId === turn.user.info.id}
+        />
+      ) : null}
       {turn.assistants.length > 0 ? (
         <div
-          className="msg assistant"
+          className={`msg assistant${turn.assistants.some((message) => searchMatchIds?.has(message.info.id)) ? ' thread-search-match' : ''}${turn.assistants.some((message) => message.info.id === currentSearchMessageId) ? ' thread-search-current' : ''}`}
           onContextMenu={onCtx && lastAssistant ? (e) => onCtx(e, lastAssistant) : undefined}
         >
           {/* Inside msg-actions, not beside it: both anchor to the top-right
@@ -1305,7 +1309,7 @@ function TurnView({
               )
             ) : null}
           </div>
-          <MessageError error={lastAssistant.info.error} />
+          <MessageError messageId={lastAssistant.info.id} error={lastAssistant.info.error} />
           <div className="msg-body" data-message-id={lastAssistant.info.id}>
             {modelChanged && model ? <span className="model-chip">{model}</span> : null}
             {/* Stream order, so each card sits under the line that introduced
@@ -1313,7 +1317,7 @@ function TurnView({
                 the prose explaining them. */}
             {segments.map((segment, index) =>
               segment.type === 'narrative' ? (
-                <PartView key={segment.part.id} part={segment.part} />
+                <PartViewMemo key={segment.part.id} part={segment.part} />
               ) : (
                 <StepCard
                   key={`steps-${index}-${segment.parts[0].id}`}
@@ -1324,13 +1328,21 @@ function TurnView({
           </div>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }
 
 const TurnViewMemo = React.memo(TurnView)
 
-export function ChatView({ sessionId, active = true }: { sessionId?: string; active?: boolean }): React.JSX.Element {
+interface ViewportBookmark {
+  following: boolean
+  turnKey?: string
+  offsetWithinTurn: number
+}
+
+const viewportBookmarks = new Map<string, ViewportBookmark>()
+
+export function ChatView({ sessionId, tabId, active = true }: { sessionId?: string; tabId?: string; active?: boolean }): React.JSX.Element {
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
   const effectiveId = sessionId ?? activeSessionId
   const messages = useStore(appStore, (s) => (effectiveId ? s.messages[effectiveId] ?? [] : []))
@@ -1368,30 +1380,61 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
   const launcherProject = useStore(appStore, (s) => s.launcherProject)
 
   const streaming = useStore(appStore, (s) => (effectiveId ? Boolean(s.streaming[effectiveId]) : false))
+  const working = useStore(appStore, (s) => effectiveId ? Boolean(s.streaming[effectiveId] || s.sessionBusy[effectiveId]) : false)
+  const speakingKey = useStore(appStore, (s) => s.speakingKey)
   const compacting = useStore(appStore, (s) => (effectiveId ? Boolean(s.compacting[effectiveId]) : false))
   const permission = useStore(appStore, (s) => (effectiveId ? s.permissions[effectiveId] ?? null : null))
   const question = useStore(appStore, (s) => (effectiveId ? s.questions[effectiveId] ?? null : null))
-  const visible = messages
-  const WINDOW = 100
-  const PAGE = 200
-  const [visibleCount, setVisibleCount] = useState(WINDOW)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchMatchCount, setSearchMatchCount] = useState(0)
   const [activeSearchMatch, setActiveSearchMatch] = useState(0)
-
-  useEffect(() => {
-    setVisibleCount(WINDOW)
-  }, [effectiveId])
-
-  // Find is deliberately scoped to a thread, including history outside the
-  // ordinary rolling transcript window. Rendering that extra history only
-  // while there is a query keeps normal long-running threads lightweight.
-  const windowed = useMemo(
-    () => searchOpen && searchQuery.trim() ? visible : visible.slice(-visibleCount),
-    [visible, visibleCount, searchOpen, searchQuery]
+  const previousTurnsRef = useRef<TranscriptTurn[]>([])
+  const turns = useMemo(() => {
+    const next = groupTranscriptTurns(messages, previousTurnsRef.current)
+    previousTurnsRef.current = next
+    return next
+  }, [messages])
+  const virtualizer = useVirtualizer({
+    count: turns.length,
+    getScrollElement: () => scrollRef.current,
+    getItemKey: (index) => turns[index]?.key ?? index,
+    estimateSize: () => 280,
+    overscan: 4,
+    gap: 24,
+    paddingStart: 28,
+    paddingEnd: 12,
+    anchorTo: 'end',
+    followOnAppend: 'auto',
+    scrollEndThreshold: 120,
+    useAnimationFrameWithResizeObserver: true
+  })
+  const virtualTurns = virtualizer.getVirtualItems()
+  const annotationRevision = useMemo(() => [turns, virtualTurns], [turns, virtualTurns])
+  const searchHits = useMemo(
+    () => searchOpen ? searchTranscript(turns, searchQuery) : [],
+    [searchOpen, searchQuery, turns]
   )
-  const turns = useMemo(() => groupTurns(windowed), [windowed])
+  const searchMatchCount = searchHits.length
+  const searchMatchesByTurn = useMemo(() => {
+    const byTurn = new Map<string, Set<string>>()
+    for (const hit of searchHits) {
+      const ids = byTurn.get(hit.turnKey) ?? new Set<string>()
+      ids.add(hit.messageId)
+      byTurn.set(hit.turnKey, ids)
+    }
+    return byTurn
+  }, [searchHits])
+  const currentSearchHit = searchHits[Math.min(activeSearchMatch, Math.max(searchHits.length - 1, 0))]
+  const modelChangedByTurn = useMemo(() => {
+    const changed = new Set<string>()
+    let previousModel: string | undefined
+    for (const turn of turns) {
+      const model = turn.assistants[0]?.info.model?.id
+      if (model && model !== previousModel) changed.add(turn.key)
+      if (model) previousModel = model
+    }
+    return changed
+  }, [turns])
   const annotationsForThread = useStore(appStore, (s) => (effectiveId ? s.annotations[effectiveId] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
   // Lets a numbered marker in the transcript reopen the note editor on the
   // annotation it belongs to, which is what makes a placed highlight editable.
@@ -1400,7 +1443,7 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
   const allParts = lastTurnAssistants.flatMap((m) => m.parts)
   const liveText = allParts.some((p) => p.type === 'text' && (p.text ?? '').trim().length > 0)
   const runningPart = allParts.find((p) => p.state?.status === 'running' || p.state?.status === 'pending')
-  const waitingForReply = visible[visible.length - 1]?.info.role === 'user'
+  const waitingForReply = messages[messages.length - 1]?.info.role === 'user'
   // While the thread streams, always show a label: the running tool when one is
   // active, 'Thinking' before any reply text, 'Working' between text and tools.
   const activity = compacting
@@ -1408,12 +1451,9 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
     : streaming
       ? (runningPart ? runningLabel(runningPart) : waitingForReply || !liveText ? 'Thinking' : 'Working')
       : null
-  const expandingRef = useRef(false)
-
   const closeSearch = useCallback((): void => {
     setSearchOpen(false)
     setSearchQuery('')
-    setSearchMatchCount(0)
     setActiveSearchMatch(0)
     requestAnimationFrame(() => searchRestoreFocusRef.current?.focus({ preventScroll: true }))
   }, [])
@@ -1430,22 +1470,14 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
   }, [searchOpen])
 
   useLayoutEffect(() => {
-    const query = searchQuery.trim().toLocaleLowerCase()
-    const messageElements = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('.msg') ?? [])
-    const matches = query
-      ? messageElements.filter((element) => element.textContent?.toLocaleLowerCase().includes(query))
-      : []
-    const next = matches.length ? Math.min(activeSearchMatch, matches.length - 1) : 0
-
-    for (const element of messageElements) element.classList.remove('thread-search-match', 'thread-search-current')
-    for (const element of matches) element.classList.add('thread-search-match')
-    if (matches[next]) {
-      matches[next].classList.add('thread-search-current')
-      matches[next].scrollIntoView({ block: 'center', behavior: 'smooth' })
+    if (activeSearchMatch >= searchHits.length && searchHits.length > 0) {
+      setActiveSearchMatch(searchHits.length - 1)
+      return
     }
-    if (next !== activeSearchMatch) setActiveSearchMatch(next)
-    if (matches.length !== searchMatchCount) setSearchMatchCount(matches.length)
-  }, [searchQuery, activeSearchMatch, searchMatchCount, windowed])
+    if (!currentSearchHit) return
+    const index = turns.findIndex((turn) => turn.key === currentSearchHit.turnKey)
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center', behavior: 'auto' })
+  }, [activeSearchMatch, currentSearchHit, searchHits.length, turns, virtualizer])
 
   useEffect(() => {
     if (!active) return
@@ -1532,18 +1564,46 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
     // threshold is generous because a streamed line can land between the
     // scroll and this handler.
     followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
-    if (expandingRef.current) return
-    if (visible.length <= windowed.length) return
-    if (el.scrollTop < 120) {
-      expandingRef.current = true
-      const before = el.scrollHeight
-      setVisibleCount((c) => c + PAGE)
-      requestAnimationFrame(() => {
-        if (el) el.scrollTop += el.scrollHeight - before
-        expandingRef.current = false
-      })
-    }
   }
+
+  const viewportKey = tabId ?? effectiveId ?? 'launcher'
+  const restoreBookmark = useCallback((bookmark: ViewportBookmark): void => {
+    let attempts = 0
+    const restore = (): void => {
+      const el = scrollRef.current
+      if (!el || el.clientHeight === 0) {
+        if (attempts++ < 4) requestAnimationFrame(restore)
+        return
+      }
+      followRef.current = bookmark.following
+      if (bookmark.following || !bookmark.turnKey) {
+        el.scrollTop = el.scrollHeight
+        return
+      }
+      const index = turns.findIndex((turn) => turn.key === bookmark.turnKey)
+      if (index < 0) return
+      virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' })
+      requestAnimationFrame(() => virtualizer.scrollBy(bookmark.offsetWithinTurn, { behavior: 'auto' }))
+    }
+    requestAnimationFrame(restore)
+  }, [turns, virtualizer])
+
+  const wasActiveRef = useRef(active)
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (wasActiveRef.current && !active && el) {
+      const item = virtualizer.getVirtualItemForOffset(el.scrollTop)
+      viewportBookmarks.set(viewportKey, {
+        following: followRef.current,
+        turnKey: item ? String(item.key) : undefined,
+        offsetWithinTurn: item ? el.scrollTop - item.start : 0
+      })
+    } else if (!wasActiveRef.current && active) {
+      const bookmark = viewportBookmarks.get(viewportKey)
+      if (bookmark) restoreBookmark(bookmark)
+    }
+    wasActiveRef.current = active
+  }, [active, restoreBookmark, viewportKey, virtualizer])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -1576,9 +1636,7 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
     const el = scrollRef.current
     if (!el) return
     const stick = (): void => {
-      // Not while older messages are being prepended: that path is holding the
-      // scroll position deliberately, and jumping to the bottom would undo it.
-      if (followRef.current && !expandingRef.current) el.scrollTop = el.scrollHeight
+      if (followRef.current) el.scrollTop = el.scrollHeight
     }
     const observer = new ResizeObserver(stick)
     for (const child of el.children) observer.observe(child)
@@ -1721,14 +1779,14 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
           <AnnotationHighlights
             annotations={annotationsForThread}
             scrollRef={scrollRef}
-            revision={turns}
+            revision={annotationRevision}
           />
         ) : null}
         {effectiveId ? (
           <AnnotationMarkers
             annotations={annotationsForThread}
             scrollRef={scrollRef}
-            revision={turns}
+            revision={annotationRevision}
             onEdit={(annotation, at) => annotationPopoverRef.current?.edit(annotation, at)}
           />
         ) : null}
@@ -1750,7 +1808,7 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
             }}
           />
         ) : null}
-        <div className="messages" ref={scrollRef} onScroll={onScroll}>
+        <div className={`messages${turns.length === 0 && !activity ? ' empty-transcript' : ''}`} ref={scrollRef} onScroll={onScroll}>
           {/* A thread with nothing in it yet showed a blank half-window above
               the composer, which reads as something failing to load rather than
               as a thread waiting for its first instruction. Naming where the
@@ -1761,27 +1819,48 @@ export function ChatView({ sessionId, active = true }: { sessionId?: string; act
               <p>Describe the change you want, or ask about the code. {BACKEND_SHORT_LABELS[backendId]} works in this thread.</p>
             </div>
           ) : null}
-          {(() => {
-            let lastModel: string | undefined
-            return turns.map((turn, i) => {
-              const model = turn.assistants[0]?.info.model?.id
-              const changed = Boolean(model) && model !== lastModel
-              if (model) lastModel = model
-              return <TurnViewMemo key={i} turn={turn} modelChanged={changed} sessionId={effectiveId} onCtx={onMsgCtx} />
-            })
-          })()}
-          {activity ? (
-            <div className="thinking-indicator">
-              <span>{activity}</span>
-              <span className="thinking-dots">
-                <span>.</span>
-                <span>.</span>
-                <span>.</span>
-              </span>
+          {turns.length > 0 ? (
+            <div className="transcript-virtual-space" style={{ height: virtualizer.getTotalSize() }}>
+              {virtualTurns.map((virtualTurn) => {
+                const turn = turns[virtualTurn.index]
+                if (!turn) return null
+                return (
+                  <div
+                    key={String(virtualTurn.key)}
+                    ref={virtualizer.measureElement}
+                    data-index={virtualTurn.index}
+                    className="transcript-virtual-turn"
+                    style={{ transform: `translateY(${virtualTurn.start}px)` }}
+                  >
+                    <TurnViewMemo
+                      turn={turn}
+                      modelChanged={modelChangedByTurn.has(turn.key)}
+                      sessionId={effectiveId}
+                      onCtx={onMsgCtx}
+                      working={working}
+                      speakingKey={speakingKey}
+                      searchMatchIds={searchMatchesByTurn.get(turn.key)}
+                      currentSearchMessageId={currentSearchHit?.turnKey === turn.key ? currentSearchHit.messageId : undefined}
+                    />
+                  </div>
+                )
+              })}
             </div>
           ) : null}
-          {permission ? <PermissionCard permission={permission} /> : null}
-          {question ? <QuestionCard question={question} backendId={backendId} /> : null}
+          <div className="transcript-tail">
+            {activity ? (
+              <div className="thinking-indicator">
+                <span>{activity}</span>
+                <span className="thinking-dots">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
+                </span>
+              </div>
+            ) : null}
+            {permission ? <PermissionCard permission={permission} /> : null}
+            {question ? <QuestionCard question={question} backendId={backendId} /> : null}
+          </div>
         </div>
       </div>
       {msgCtx && (
