@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import type { MessageWithParts, Part } from '@shared/opencode'
 import { unifiedDiff, type DiffLine } from '../lib/diff'
 import { openReviewFile, selectSession } from '../lib/actions'
 import { MessageText } from '../lib/text'
 import { ChevronIcon, ReviewIcon } from './icons'
 import { fileChanges, groupPartRuns, toolKind, type PartRun } from '../lib/part-runs'
+import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
 
 function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return ''
@@ -42,7 +43,7 @@ const RUN_LABELS: Record<PartRun['kind'], [one: string, many: string]> = {
 }
 
 function RunGroup({ run }: { run: PartRun }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = usePersistentDisclosure(`run:${run.parts[0]?.part.id}`)
   const collapsed = run.parts.length >= RUN_COLLAPSE_AT && !open
   const [one, many] = RUN_LABELS[run.kind]
   const failed = run.parts.some(({ part }) => isError(part.state?.status))
@@ -60,7 +61,7 @@ function RunGroup({ run }: { run: PartRun }): React.JSX.Element {
       ) : null}
       {collapsed ? null : run.parts.map(({ part, index }) => (
         part.type === 'reasoning'
-          ? <ReasoningNote key={`${part.id}-${index}`} text={part.text ?? ''} />
+          ? <ReasoningNote key={`${part.id}-${index}`} id={part.id} text={part.text ?? ''} />
           : <ToolDetail key={`${part.id}-${index}`} part={part} />
       ))}
     </div>
@@ -168,8 +169,8 @@ function isError(status?: string): boolean {
   return status === 'error' || status === 'interrupted' || status === 'cancelled'
 }
 
-function ReasoningNote({ text }: { text: string }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false)
+function ReasoningNote({ id, text }: { id: string; text: string }): React.JSX.Element {
+  const [expanded, setExpanded] = usePersistentDisclosure(`reasoning:${id}`)
   const long = text.length > 320 || text.split('\n').length > 6
   return (
     <div
@@ -203,7 +204,7 @@ function MiniDiff({ lines }: { lines: DiffLine[] }): React.JSX.Element {
 }
 
 function ToolDetail({ part }: { part: Part }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = usePersistentDisclosure(`tool:${part.id}`)
   const diffs = partDiffs(part)
   const isEdit = diffs.length > 0
   const output = toolOutputText(part)
@@ -278,7 +279,7 @@ function ToolDetail({ part }: { part: Part }): React.JSX.Element {
  *  Named by how long it took rather than by how much of it there is: a duration
  *  tells you whether it is worth opening, where "3 notes" does not. */
 function ThoughtLine({ parts, duration }: { parts: Part[]; duration: number | null }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = usePersistentDisclosure(`thought:${parts[0]?.id}`)
   const notes = parts.filter((part) => part.type === 'reasoning' && (part.text ?? '').trim())
   return (
     <div className={`thought ${open ? 'open' : ''}`}>
@@ -298,7 +299,7 @@ function ThoughtLine({ parts, duration }: { parts: Part[]; duration: number | nu
 }
 
 export function StepCard({ message }: { message: MessageWithParts }): React.JSX.Element | null {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = usePersistentDisclosure(`steps:${message.parts[0]?.id ?? message.info.id}`)
   const tools = message.parts.filter((p) => p.type === 'tool')
   const hasReasoning = message.parts.some((p) => p.type === 'reasoning' && (p.text ?? '').trim())
   const files = editStats(message.parts)

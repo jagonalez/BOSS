@@ -25,6 +25,7 @@ interface E2EControl {
   failNextBackendRequest(type: string, message: string): Promise<void>
   emit(event: Record<string, unknown>): Promise<void>
   spawnThread(backendId: string, title: string): Promise<Record<string, unknown>>
+  installLongThread(turnCount?: number): Promise<Record<string, unknown>>
 }
 
 export async function control(page: Page): Promise<E2EControl> {
@@ -52,6 +53,10 @@ export async function control(page: Page): Promise<E2EControl> {
     spawnThread: (backendId, title) => page.evaluate(
       (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.spawnThread(value.backendId, value.title),
       { backendId, title }
+    ),
+    installLongThread: (turnCount) => page.evaluate(
+      (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.installLongThread(value),
+      turnCount
     )
   }
 }
