@@ -282,7 +282,9 @@ export class LabAssistantManager {
     for (const group of groups) {
       const ready = this.tasks
         .filter((task) => taskGroup(task) === group && task.status === 'ready' && !task.assignedThreadId)
-        .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+        // Array.sort is stable: equal timestamps keep the order the user added
+        // the tasks instead of being shuffled by their random UUIDs.
+        .sort((a, b) => a.createdAt - b.createdAt)
       if (ready.length < 2) continue
       const plan = this.taskPlans[group]
       if (plan && ready.every((task) => plan.taskIds.includes(task.id))) continue
