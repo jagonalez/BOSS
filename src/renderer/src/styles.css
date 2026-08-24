@@ -3055,6 +3055,96 @@ body.workspace-dragging .workspace-tab-slot {
   grid-column: 1 / -1;
 }
 
+.command-assistant {
+  max-width: 1040px;
+  margin: 0 auto 18px;
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line-subtle));
+}
+
+.command-assistant .command-section-head {
+  justify-content: space-between;
+}
+
+.command-assistant .command-section-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.command-assistant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.command-assistant-question {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 11px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.command-assistant-question > div:first-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.command-assistant-question strong,
+.command-assistant-quiet strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.command-assistant-question small,
+.command-assistant-quiet span {
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+.command-assistant-options {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.command-assistant-options button {
+  padding: 6px 9px;
+  border: 1px solid var(--line-default);
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  cursor: pointer;
+  font-size: 10.5px;
+}
+
+.command-assistant-options button:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-default));
+  color: var(--text);
+}
+
+.command-assistant-quiet {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 12px;
+}
+
+.command-assistant-error {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line-subtle));
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface-inset));
+  font-size: 11px;
+}
+
 .command-section-head {
   display: flex;
   align-items: center;
@@ -3735,6 +3825,15 @@ body.workspace-dragging .workspace-tab-slot {
 
   .command-grid {
     grid-template-columns: 1fr;
+  }
+
+  .command-assistant-question {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .command-assistant-options {
+    justify-content: flex-start;
   }
 
   .command-section.command-recent {

@@ -281,6 +281,7 @@ export class BackendManager {
   private notifications?: NotificationRouter
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
+  private assistant?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
   private mobile?: { handle(request: BackendRequest): Promise<unknown> }
   private remote?: { handle(request: BackendRequest): Promise<unknown> }
@@ -873,6 +874,10 @@ export class BackendManager {
 
   attachAutomations(automations: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.automations = automations
+  }
+
+  attachAssistant(assistant: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.assistant = assistant
   }
 
   attachMcpHub(mcpHub: { handle(request: BackendRequest): Promise<unknown> }): void {
@@ -2584,6 +2589,10 @@ export class BackendManager {
     if (request.type.startsWith('automation.')) {
       if (!this.automations) throw new Error('Automations are not available.')
       return this.automations.handle(request)
+    }
+    if (request.type.startsWith('assistant.')) {
+      if (!this.assistant) throw new Error('Lab Assistant is not available.')
+      return this.assistant.handle(request)
     }
     if (request.type.startsWith('mcp.')) {
       if (!this.mcpHub) throw new Error('MCP connections are not available.')

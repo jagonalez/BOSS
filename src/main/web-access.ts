@@ -38,7 +38,9 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'thread.diff',
   'automation.list',
   'automation.run',
-  'automation.stop'
+  'automation.stop',
+  'assistant.snapshot',
+  'assistant.answer'
 ])
 
 /** Event types the mobile page reacts to; the rest are desktop concerns. */
@@ -56,6 +58,7 @@ const FORWARDED_EVENTS = new Set([
   'permission.updated',
   'permission.replied',
   'automations.updated',
+  'assistant.updated',
   'thread.followups.updated'
 ])
 

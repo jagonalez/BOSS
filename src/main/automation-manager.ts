@@ -21,6 +21,7 @@ import {
   templatePrompt,
   webhookTriggerMatches
 } from '../shared/automation-trigger'
+import type { GitHubDelivery } from '../shared/automation-trigger'
 import type { NotificationRouter } from './notification-router'
 import type { WebhookSettings } from '../shared/notification'
 import type { WorktreeInfo } from '../shared/worktree'
@@ -99,6 +100,7 @@ export class AutomationManager {
   private readonly active = new Map<string, ActiveRun>()
   private tickTimer?: NodeJS.Timeout
   private offEvents?: () => void
+  private webhookObserver?: (delivery: GitHubDelivery) => unknown | Promise<unknown>
 
   constructor(
     private readonly options: AutomationManagerOptions,
@@ -191,6 +193,12 @@ export class AutomationManager {
    *  renderer can copy a ready-to-paste webhook address. */
   setHookUrl(build: (automationId: string, token: string) => string): void {
     this.hookUrl = build
+  }
+
+  /** Let another durable control plane observe authenticated GitHub events.
+   * Observer failures never prevent the configured automation from running. */
+  setWebhookObserver(observer: (delivery: GitHubDelivery) => unknown | Promise<unknown>): void {
+    this.webhookObserver = observer
   }
 
   snapshot(): AutomationsSnapshot {
@@ -443,6 +451,7 @@ export class AutomationManager {
     }
     const delivery = parseGitHubDelivery(eventHeader, body)
     if (!delivery) throw new WebhookDeliveryError('The payload must be a JSON object with a GitHub event header.', 400)
+    await Promise.resolve(this.webhookObserver?.(delivery)).catch(() => {})
     automation.lastWebhookAt = Date.now()
     automation.lastWebhookLabel = describeWebhookDelivery(delivery)
     await this.persistAndEmit()

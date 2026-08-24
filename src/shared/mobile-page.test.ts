@@ -64,7 +64,8 @@ test('read-only access cannot mutate task or automation state', () => {
     'thread.delegate',
     'thread.relay',
     'automation.run',
-    'automation.stop'
+    'automation.stop',
+    'assistant.answer'
   ] as const) {
     assert.equal(mobileRequestAllowed(type, 'read-only'), false, type)
     assert.equal(mobileRequestAllowed(type, 'control'), true, type)
@@ -78,7 +79,8 @@ test('read-only access can inspect supervision and transcripts', () => {
     'thread.list',
     'thread.messages',
     'thread.diff',
-    'automation.list'
+    'automation.list',
+    'assistant.snapshot'
   ] as const) {
     assert.equal(mobileRequestAllowed(type, 'read-only'), true, type)
   }
@@ -99,4 +101,13 @@ test('the page shows a worker the thread it came from', () => {
   // A narrow screen cannot indent a tree, so lineage is named instead.
   assert.match(script, /t\.lineage && t\.lineage\.sourceThreadId/)
   assert.match(script, /from ' \+ esc\(origin\)/)
+})
+
+test('the phone has a Lab Assistant inbox with durable decision actions', () => {
+  const script = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ''
+  assert.match(script, /function refreshAssistant/)
+  assert.match(script, /function renderAssistant/)
+  assert.match(script, /type: 'assistant\.snapshot'/)
+  assert.match(script, /type: 'assistant\.answer'/)
+  assert.match(script, />Assistant<\/button>/)
 })

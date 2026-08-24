@@ -154,6 +154,7 @@ var threads = [];
 var supervision = { threads: [], totals: {} };
 var threadTitles = {};
 var automations = { automations: [], runs: [] };
+var assistant = { pullRequests: [], questions: [], activities: [], mergeOrders: {} };
 var messages = {};
 var permissions = {};
 var busy = {};
@@ -329,6 +330,13 @@ function refreshAutomations() {
   });
 }
 
+function refreshAssistant() {
+  return api({ type: 'assistant.snapshot' }).then(function (snapshot) {
+    assistant = snapshot || { pullRequests: [], questions: [], activities: [], mergeOrders: {} };
+    if (view.name === 'assistant') render();
+  });
+}
+
 function refreshMessages(id) {
   return api({ type: 'thread.messages', threadId: id, limit: 60 }).then(function (list) {
     messages[id] = list || [];
@@ -447,6 +455,33 @@ function renderAutomations() {
   return html;
 }
 
+function renderAssistant() {
+  var open = (assistant.questions || []).filter(function (question) { return question.status === 'open'; });
+  var html = '<div class="card"><div class="title">Lab Assistant</div><div class="sub">' +
+    open.length + ' decision' + (open.length === 1 ? '' : 's') + ' waiting</div></div>';
+  open.forEach(function (question) {
+    html += '<div class="card"><div class="title">' + esc(question.prompt) + '</div>' +
+      '<div class="sub" style="margin-top:3px">' + esc(question.repository) + '</div>';
+    if (accessRole === 'control' && question.options && question.options.length) {
+      html += '<div class="row" style="margin-top:10px;flex-wrap:wrap">';
+      question.options.forEach(function (option) {
+        html += '<button class="btn" onclick="answerAssistant(\\\'' + question.id + '\\\',\\\'' + option.id + '\\\')">' + esc(option.label) + '</button>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+  });
+  if (!open.length) html += '<div class="empty">Nothing needs a decision.</div>';
+  if (assistant.activities && assistant.activities.length) {
+    html += '<div class="section">Recent activity</div>';
+    assistant.activities.slice(0, 8).forEach(function (activity) {
+      html += '<div class="card"><div class="title">' + esc(activity.title) + '</div>' +
+        '<div class="sub">' + esc(activity.detail) + '</div></div>';
+    });
+  }
+  return html;
+}
+
 function renderThread() {
   var t = null;
   threads.forEach(function (x) { if (x.id === view.id) t = x; });
@@ -516,7 +551,7 @@ function render() {
     return;
   }
   var body = '';
-  var title = 'BOSS';
+  var title = view.name === 'assistant' ? 'Lab Assistant' : 'BOSS';
   var headerExtra = '';
   if (view.name === 'thread') {
     var t = null;
@@ -537,10 +572,11 @@ function render() {
       (desktopOnline ? 'Reconnecting…' : 'Your desktop is offline') + '</div>' +
       '<div class="sub">' + (desktopOnline ? 'Waiting for the relay.' : 'Open BOSS on your desktop to continue.') + '</div></div>'
     : '';
-  body = '<main>' + offline + (view.name === 'automations' ? renderAutomations() : renderThreads()) + '</main>' +
+  body = '<main>' + offline + (view.name === 'automations' ? renderAutomations() : view.name === 'assistant' ? renderAssistant() : renderThreads()) + '</main>' +
     '<nav class="tabs">' +
     '<button class="' + (view.name === 'threads' ? 'active' : '') + '" onclick="showTab(\\'threads\\')">Threads</button>' +
     '<button class="' + (view.name === 'automations' ? 'active' : '') + '" onclick="showTab(\\'automations\\')">Automations</button>' +
+    '<button class="' + (view.name === 'assistant' ? 'active' : '') + '" onclick="showTab(\\'assistant\\')">Assistant</button>' +
     '</nav>';
   app.innerHTML = '<header><h1>' + esc(title) + '</h1></header>' + body;
 }
@@ -558,12 +594,17 @@ window.pair = function () {
   });
 };
 
-window.showTab = function (name) { view = { name: name }; render(); if (name === 'automations') refreshAutomations(); else refreshThreads(); };
+window.showTab = function (name) { view = { name: name }; render(); if (name === 'automations') refreshAutomations(); else if (name === 'assistant') refreshAssistant(); else refreshThreads(); };
 window.openThread = function (id) { view = { name: 'thread', id: id }; render(); refreshMessages(id); };
 window.goBack = function () { view = { name: 'threads' }; render(); refreshThreads(); };
 window.stopThread = function () { api({ type: 'thread.abort', threadId: view.id }).catch(function () {}); };
 window.runAutomation = function (id) { api({ type: 'automation.run', automationId: id }).then(refreshAutomations).catch(function (e) { alert(e.message); }); };
 window.stopAutomation = function (id) { api({ type: 'automation.stop', automationId: id }).then(refreshAutomations).catch(function (e) { alert(e.message); }); };
+window.answerAssistant = function (questionId, answerId) {
+  api({ type: 'assistant.answer', questionId: questionId, answerId: answerId })
+    .then(function (snapshot) { assistant = snapshot || assistant; render(); })
+    .catch(function (e) { alert(e.message); });
+};
 window.sendReply = function () {
   var input = document.getElementById('reply');
   var text = (input && input.value || '').trim();
@@ -735,6 +776,8 @@ function handleRelayMessage(message) {
     if (message.gap) {
       noteSeq(message.seq);
       refreshThreads();
+      refreshAutomations();
+      refreshAssistant();
       if (view.name === 'thread') refreshMessages(view.id);
     } else {
       message.events.forEach(function (entry) { noteSeq(entry.seq); applyEvent(entry.event); });
@@ -764,6 +807,7 @@ function applyEvent(event) {
   if (event.type === 'permission.asked' || event.type === 'permission.updated') { if (props.sessionID) permissions[props.sessionID] = props; }
   if (event.type === 'permission.replied') { if (props.sessionID) delete permissions[props.sessionID]; }
   if (event.type === 'automations.updated') { automations = props.snapshot || automations; if (view.name === 'automations') render(); return; }
+  if (event.type === 'assistant.updated') { assistant = props.snapshot || assistant; if (view.name === 'assistant') render(); return; }
   if (event.type.indexOf('session.') === 0) refreshThreads();
   if (view.name === 'thread' && sid === view.id) {
     if (event.type.indexOf('message.') === 0) scheduleRefresh(view.id);
@@ -845,7 +889,7 @@ window.unpairRelay = function () {
 
 function boot() {
   render();
-  refreshAccess().then(function () { refreshThreads(); refreshAutomations(); render(); });
+  refreshAccess().then(function () { refreshThreads(); refreshAutomations(); refreshAssistant(); render(); });
   listen();
 }
 

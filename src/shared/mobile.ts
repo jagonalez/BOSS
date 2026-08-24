@@ -12,7 +12,8 @@ const READ_ONLY_REQUESTS = new Set<BackendRequest['type']>([
   'thread.todos',
   'thread.followups.list',
   'thread.diff',
-  'automation.list'
+  'automation.list',
+  'assistant.snapshot'
 ])
 
 export function mobileRequestAllowed(type: BackendRequest['type'], role: MobileAccessRole): boolean {
