@@ -433,6 +433,31 @@ export function installE2EApi(boss: BossApi): void {
     createdAt: Date.now() - 86_400_000,
     updatedAt: Date.now() - 3_600_000
   }]
+  const automationRunsFixture: Array<Record<string, unknown>> = [{
+    id: 'run-report-seed',
+    automationId: 'automation-webhook-seed',
+    reportId: 'report-codex-seed',
+    threadId: 'thread-source',
+    trigger: 'schedule',
+    status: 'success',
+    summary: 'Codex added report history and improved mobile review.',
+    changedFiles: 0,
+    startedAt: Date.now() - 610_000,
+    finishedAt: Date.now() - 600_000
+  }]
+  let reportsFixture: Array<Record<string, unknown>> = [{
+    id: 'report-codex-seed',
+    automationId: 'automation-webhook-seed',
+    automationName: 'Review incoming PRs',
+    runId: 'run-report-seed',
+    threadId: 'thread-source',
+    projectPath: PROJECT,
+    title: 'Codex changelog',
+    summary: 'Codex added report history and improved mobile review.',
+    body: '## Highlights\n\n- Added durable automation reports.\n- Made every report available on mobile.\n\n| Area | Result |\n| --- | --- |\n| Reports | Ready |',
+    status: 'success',
+    createdAt: Date.now() - 600_000
+  }]
   let assistantFixture: LabAssistantSnapshot = {
     generatedAt: Date.now(),
     tasks: [
@@ -1038,7 +1063,25 @@ export function installE2EApi(boss: BossApi): void {
       case 'worktree.settings.set': return { autoCleanupEnabled: true, cleanupAfterDays: 30, location: 'app-data', ...request }
       case 'mcp.list': return []
       case 'mcp.import.scan': return []
-      case 'automation.list': return { automations: automationsFixture, runs: [], webhookUrl: '' }
+      case 'automation.list': return { automations: automationsFixture, runs: automationRunsFixture, webhookUrl: '' }
+      case 'report.list': return {
+        reports: reportsFixture.map((item) => {
+          const summary = { ...item }
+          delete summary.body
+          return structuredClone(summary)
+        })
+      }
+      case 'report.get': {
+        const report = reportsFixture.find((item) => item.id === request.reportId)
+        if (!report) throw new Error(`Unknown fixture report ${request.reportId}`)
+        return structuredClone(report)
+      }
+      case 'report.read': {
+        const report = reportsFixture.find((item) => item.id === request.reportId)
+        if (!report) throw new Error(`Unknown fixture report ${request.reportId}`)
+        if (!report.readAt) report.readAt = Date.now()
+        return structuredClone(report)
+      }
       case 'automation.create': {
         const now = Date.now()
         const created = {

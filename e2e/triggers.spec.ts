@@ -17,7 +17,7 @@ test('a GitHub webhook automation is created with its event config and shows a c
   await openAutomations(appPage)
   await appPage.getByRole('button', { name: 'New automation' }).click()
 
-  await appPage.getByPlaceholder('Morning Slack digest').fill('Triage hooks')
+  await appPage.getByPlaceholder('Morning changelog report').fill('Triage hooks')
   await appPage.getByPlaceholder('What should the agent do on every run?').fill('Summarize {{event}} on {{branch}}.')
   await appPage.getByLabel('Trigger').selectOption({ label: 'GitHub webhook' })
   await appPage.getByRole('checkbox', { name: 'Push' }).uncheck()

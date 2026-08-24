@@ -66,6 +66,8 @@ export interface Automation extends AutomationInput {
 export interface AutomationRun {
   id: string
   automationId: string
+  /** Durable presentation copy of this run's final answer, when one exists. */
+  reportId?: string
   threadId?: string
   worktreeId?: string
   trigger: AutomationRunTrigger

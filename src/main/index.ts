@@ -24,6 +24,7 @@ import { WorktreeManager } from './worktree-manager'
 import { NotificationRouter } from './notification-router'
 import { AutomationHooks } from './automation-hooks'
 import { AutomationManager } from './automation-manager'
+import { ReportManager } from './report-manager'
 import { LabAssistantManager } from './lab-assistant-manager'
 import { listGitHubPullRequests } from './lab-assistant-github'
 import { TelegramBot } from './telegram-bot'
@@ -131,10 +132,15 @@ backendMgr.attachThreadBus(threadBus)
 const notifications = new NotificationRouter()
 notifications.onForeground(() => BrowserWindow.getAllWindows().some((window) => window.isFocused()))
 backendMgr.attachNotifications(notifications)
+const reports = new ReportManager(
+  join(app.getPath('userData'), 'reports.json'),
+  (snapshot) => backendMgr.emit({ type: 'reports.updated', properties: { snapshot } })
+)
+backendMgr.attachReports(reports)
 const automations = new AutomationManager({
   stateFile: join(app.getPath('userData'), 'automations.json'),
   runsFile: join(app.getPath('userData'), 'automation-runs.json')
-}, backendMgr, worktrees)
+}, backendMgr, worktrees, reports)
 backendMgr.attachAutomations(automations)
 automations.attachNotifications(notifications)
 const labAssistant = new LabAssistantManager(

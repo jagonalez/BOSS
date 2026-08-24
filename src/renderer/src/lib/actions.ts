@@ -1093,6 +1093,23 @@ export async function refreshAutomations(): Promise<void> {
   }
 }
 
+export async function refreshReports(): Promise<void> {
+  try {
+    appStore.setState({ reports: await OpenCode.reportsList() })
+  } catch {
+    /* Reports may still be loading while the backend reconnects. */
+  }
+}
+
+export function openReport(reportId: string): void {
+  const detail = appStore.getState().reportDetail
+  appStore.setState({
+    activePage: 'reports',
+    selectedReportId: reportId,
+    ...(detail?.id === reportId ? {} : { reportDetail: null })
+  })
+}
+
 export async function setThreadBusPolicy(policy: CollaborationPolicy | null, projectId: string): Promise<void> {
   try {
     appStore.setState({ threadBus: await OpenCode.setThreadBusPolicy(policy, projectId) })

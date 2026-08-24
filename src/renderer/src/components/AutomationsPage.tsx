@@ -5,8 +5,8 @@ import { AUTOMATION_DEFAULTS } from '@shared/automation'
 import { AUTOMATION_WEBHOOK_EVENTS } from '@shared/automation-trigger'
 import type { BackendId, BackendModeId } from '@shared/backend'
 import { OpenCode } from '../lib/opencode'
-import { refreshAutomations, refreshBackendModels, selectSession } from '../lib/actions'
-import { ChatIcon, ChevronIcon, PlusIcon, ReloadIcon, RenameIcon, SendIcon, StopIcon, TrashIcon } from './icons'
+import { openReport, refreshAutomations, refreshBackendModels, selectSession } from '../lib/actions'
+import { ChatIcon, ChevronIcon, FileIcon, PlusIcon, ReloadIcon, RenameIcon, SendIcon, StopIcon, TrashIcon } from './icons'
 import { ModelSelect } from './ModelSelect'
 
 const WEBHOOK_EVENT_LABELS: Record<AutomationWebhookEvent, string> = {
@@ -167,9 +167,14 @@ function RunRow({ run }: { run: AutomationRun }): React.JSX.Element {
           {run.changedFiles > 0 ? ` · ${run.changedFiles} file${run.changedFiles === 1 ? '' : 's'} changed` : ''}
         </small>
       </div>
+      {run.reportId ? (
+        <button className="btn-ghost" onClick={() => openReport(run.reportId!)} title="Open the saved report">
+          <FileIcon size={13} /> Report
+        </button>
+      ) : null}
       {run.threadId ? (
         <button className="btn-ghost" onClick={() => selectSession(run.threadId!, false)} title="Open the run thread">
-          <ChatIcon size={13} /> Open
+          <ChatIcon size={13} /> Thread
         </button>
       ) : null}
     </div>
@@ -275,8 +280,11 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
     <div className="automation-editor">
       <label className="settings-row">
         <span className="settings-row-label">Name</span>
-        <input className="settings-input" value={draft.name} placeholder="Morning Slack digest" onChange={(e) => patch({ name: e.target.value })} />
+        <input className="settings-input" value={draft.name} placeholder="Morning changelog report" onChange={(e) => patch({ name: e.target.value })} />
       </label>
+      <div className="automation-report-hint">
+        <FileIcon size={13} /> The final response is saved in Reports. Ask the agent to message Slack or another service only when you want an external copy.
+      </div>
       <label className="settings-row automation-prompt-row">
         <span className="settings-row-label">Prompt</span>
         <textarea

@@ -12,7 +12,8 @@ import type {
 import { AUTOMATION_DEFAULTS } from '../shared/automation'
 import type { BackendRequest } from '../shared/backend'
 import type { FileDiff, MessageWithParts } from '../shared/opencode'
-import { extractSummary } from '../shared/thread-result'
+import { extractSummary, lastAssistantText } from '../shared/thread-result'
+import { reportBodyFromAssistantText } from '../shared/report'
 import {
   describeWebhookDelivery,
   githubPayloadVariables,
@@ -63,6 +64,12 @@ interface AutomationManagerOptions {
   runsFile: string
 }
 
+interface AutomationReports {
+  create(automation: Automation, run: AutomationRun, body: string): Promise<{ id: string } | undefined>
+  removeForAutomation(automationId: string): Promise<void>
+  removeForRuns(runIds: string[]): Promise<void>
+}
+
 const TICK_MS = 30_000
 const PERMISSION_GRACE_MS = 2_500
 
@@ -105,7 +112,8 @@ export class AutomationManager {
   constructor(
     private readonly options: AutomationManagerOptions,
     private readonly backends: BackendManager,
-    private readonly worktrees?: WorktreeManager
+    private readonly worktrees?: WorktreeManager,
+    private readonly reports?: AutomationReports
   ) {}
 
   private async load(): Promise<void> {
@@ -372,6 +380,7 @@ export class AutomationManager {
     this.automations = this.automations.filter((item) => item.id !== id)
     this.runs = this.runs.filter((run) => run.automationId !== id)
     delete this.webhookTokens[id]
+    if (this.reports) await this.reports.removeForAutomation(id).catch(() => {})
     await this.persistAndEmit()
   }
 
@@ -652,6 +661,7 @@ export class AutomationManager {
     active.pendingPermissions.clear()
     this.active.delete(automation.id)
 
+    let reportBody = ''
     if (run.threadId && status !== 'failure') {
       try {
         const messages = (await this.backends.handle({
@@ -660,6 +670,7 @@ export class AutomationManager {
           limit: 50
         })) as MessageWithParts[]
         run.summary = extractSummary(messages) ?? run.summary
+        reportBody = reportBodyFromAssistantText(lastAssistantText(messages))
       } catch {
         /* A missing summary never fails the run. */
       }
@@ -674,6 +685,11 @@ export class AutomationManager {
     if (run.worktreeId && run.changedFiles === 0 && this.worktrees) {
       // A clean worktree has no review value; remove() refuses dirty ones, which keeps real changes safe.
       await this.worktrees.remove(run.worktreeId).catch(() => {})
+    }
+
+    if (reportBody) {
+      const report = await this.reports?.create(automation, run, reportBody).catch(() => undefined)
+      if (report) run.reportId = report.id
     }
 
     if (status === 'failure' || status === 'timeout') {
@@ -701,6 +717,7 @@ export class AutomationManager {
     const excess = forAutomation.slice(automation.keepRuns)
     if (excess.length === 0) return
     const drop = new Set(excess.map((run) => run.id))
+    if (this.reports) await this.reports.removeForRuns([...drop]).catch(() => {})
     for (const run of excess) {
       if (run.threadId) {
         await this.backends.handle({ type: 'thread.delete', threadId: run.threadId }).catch(() => {})

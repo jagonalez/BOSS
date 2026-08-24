@@ -316,6 +316,9 @@ export type BackendRequest =
   /** The per-automation hook secret and full URL. Never included in snapshots,
    *  so phones and the relay cannot read it. */
   | { type: 'automation.webhook.token'; automationId: string }
+  | { type: 'report.list' }
+  | { type: 'report.get'; reportId: string }
+  | { type: 'report.read'; reportId: string }
   | { type: 'assistant.snapshot' }
   | { type: 'assistant.answer'; questionId: string; answerId: string }
   | { type: 'assistant.task.create'; input: import('./lab-assistant').LabAssistantTaskInput }

@@ -23,7 +23,8 @@ git, speech. Tokens and credentials stay on the machine.
 - **`boss` command** — run `boss .` in a terminal to open that folder in BOSS, creating the project if the folder is not one yet. Install it from Settings → Updates; it symlinks into `/usr/local/bin`, so app updates do not break it. With BOSS already running the folder opens in that window, and opening a git worktree opens its repository with that checkout selected.
 - **Worktrees** — give a thread its own git worktree so agents work in parallel without colliding. `.worktreeinclude` and `.worktreesetup` control what a fresh checkout gets (see below).
 - **Delegation & fan-out** — hand a subtask to another backend, or run the same task on several at once in separate worktrees and compare the diffs.
-- **Automations** — cron-scheduled agent runs with their own prompt, backend, workspace strategy, overlap policy, and run history.
+- **Automations** — cron-scheduled agent runs with their own prompt, backend, workspace strategy, overlap policy, run history, and a durable report for every completed answer.
+- **Reports** — a local inbox of full automation results rendered as Markdown, with unread state and a link back to the source thread for follow-up or debugging.
 - **Lab Assistant** — a durable orchestration inbox for global and per-project tasks, dependencies, ordered or parallel execution decisions, PR monitoring, and explicit handoff to an existing agent thread.
 - **MCP** — connect stdio or HTTP servers with per-connection env, headers, and encrypted tokens; BOSS also exposes its own tools (browser, computer-use, thread bus, `publish_site`) to agents that support MCP.
 - **Workspace** — a tiling layout of splits and tabs, with named views you can switch between, drag-and-drop between panes, and undo:
@@ -33,7 +34,7 @@ git, speech. Tokens and credentials stay on the machine.
   - **Terminal** — a real PTY running your `$SHELL`.
   - **Side chat** — a second, independent thread.
 - **Sites** — publish a folder of static files (or have the agent do it via the `publish_site` tool) and preview it instantly at a localhost URL in BOSS's built-in browser. Optionally deploy to Cloudflare Workers Static Assets for a public `*.workers.dev` URL.
-- **Mobile** — a small PWA served over loopback (pair it with `tailscale serve`) for reviewing and steering threads, running automations, and managing the Lab Assistant inbox from a phone.
+- **Mobile** — a small PWA served over loopback (pair it with `tailscale serve`) for reviewing reports, steering threads, running automations, and managing the Lab Assistant inbox from a phone.
 - **Security** — sandboxed renderer, context isolation, no node integration for remote content, a narrow typed IPC surface, and the browse view in its own hardened session. Project files reach the UI through a scheme scoped to the open project, never `file:`.
 
 ## Architecture
@@ -86,6 +87,12 @@ re-checked against the project root, so a path climbing out of it reads nothing.
 Two deliberate limits: files over 2 MB are not rendered as text (highlighting a
 huge log janks the UI), and `.svg` is shown as source rather than rendered,
 because an SVG is a document that can carry script.
+
+## Reports
+
+When an automation finishes with an assistant response, BOSS saves the complete final answer in `userData/reports.json`. The **Reports** page is the presentation layer for that result; the automation thread remains available as its provenance and working context. Reports follow the automation's run-retention setting and disappear when their run or automation is removed.
+
+The mobile PWA exposes the same report inbox and detail through authenticated read-only requests. Because reports are local-first, the BOSS desktop still needs to be reachable directly or through the encrypted relay for a phone to retrieve them.
 
 ## Sites
 

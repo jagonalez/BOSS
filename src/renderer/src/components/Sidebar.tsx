@@ -35,7 +35,7 @@ import {
   togglePin,
   exportSessionMarkdown
 } from '../lib/actions'
-import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
+import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FileIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -324,6 +324,7 @@ export function Sidebar(): React.JSX.Element {
   const sessions = useStore(appStore, (s) => s.sessions)
   const projects = useStore(appStore, (s) => s.projects)
   const activePage = useStore(appStore, (s) => s.activePage)
+  const unreadReports = useStore(appStore, (s) => s.reports?.reports.filter((report) => !report.readAt).length ?? 0)
   const archived = useStore(appStore, (s) => s.archived)
   const backends = useStore(appStore, (s) => s.backends)
   const workspace = useStore(appStore, (s) => s.projectWorkspace)
@@ -640,6 +641,9 @@ export function Sidebar(): React.JSX.Element {
         </button>
         <button className={`sidebar-primary-item ${activePage === 'automations' ? 'active' : ''}`} onClick={() => showPage('automations')}>
           <ReviewIcon size={15} /><span>Automations</span>
+        </button>
+        <button className={`sidebar-primary-item ${activePage === 'reports' ? 'active' : ''}`} onClick={() => showPage('reports')}>
+          <FileIcon size={15} /><span>Reports</span>{unreadReports ? <small>{unreadReports}</small> : null}
         </button>
         <button className={`sidebar-primary-item ${activePage === 'sites' ? 'active' : ''}`} onClick={() => showPage('sites')}>
           <GlobeIcon size={15} /><span>Sites</span>
