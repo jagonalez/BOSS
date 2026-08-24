@@ -25,6 +25,7 @@ import type { TelegramSettingsPatch, TelegramStatus } from '@shared/telegram'
 import type { RemoteAccessStatus } from '@shared/relay'
 import type { SupervisionSnapshot, ThreadUsageReport, TranscriptSearchResult } from '@shared/supervision'
 import type { TaskPolicy } from '@shared/task-policy'
+import type { LabAssistantSnapshot } from '@shared/lab-assistant'
 
 export class ApiError extends Error {
   constructor(
@@ -191,6 +192,9 @@ export const OpenCode = {
     backendRequest<TranscriptSearchResult[]>({ type: 'supervision.search', query, limit }),
   acknowledgeAttention: (threadId: string) =>
     backendRequest<SupervisionSnapshot>({ type: 'supervision.acknowledge', threadId }),
+  labAssistant: () => backendRequest<LabAssistantSnapshot>({ type: 'assistant.snapshot' }),
+  answerLabAssistant: (questionId: string, answerId: string) =>
+    backendRequest<LabAssistantSnapshot>({ type: 'assistant.answer', questionId, answerId }),
   archiveThread: (threadId: string, archived: boolean) =>
     backendRequest<SupervisionSnapshot>({ type: 'thread.archive', threadId, archived }),
   pinThread: (threadId: string, pinned: boolean) =>

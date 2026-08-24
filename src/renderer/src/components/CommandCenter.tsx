@@ -6,6 +6,7 @@ import { exportSessionMarkdown, openProject, selectSession } from '../lib/action
 import { OpenCode } from '../lib/opencode'
 import { ChatIcon, ChevronIcon, SearchIcon } from './icons'
 import { serviceDegradations } from '../lib/status'
+import type { LabAssistantSnapshot } from '@shared/lab-assistant'
 
 function timeAgo(timestamp?: number): string {
   if (!timestamp) return 'recently'
@@ -150,6 +151,8 @@ export function CommandCenter(): React.JSX.Element {
   const backends = useStore(appStore, (state) => state.backends)
   const threadBus = useStore(appStore, (state) => state.threadBus)
   const [snapshot, setSnapshot] = useState<SupervisionSnapshot | null>(null)
+  const [assistant, setAssistant] = useState<LabAssistantSnapshot | null>(null)
+  const [assistantError, setAssistantError] = useState('')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<TranscriptSearchResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -199,6 +202,9 @@ export function CommandCenter(): React.JSX.Element {
     const refresh = (): void => {
       void OpenCode.supervision().then((value) => {
         if (!disposed) setSnapshot(value)
+      }).catch(() => {})
+      void OpenCode.labAssistant().then((value) => {
+        if (!disposed) setAssistant(value)
       }).catch(() => {})
     }
     refresh()
@@ -271,6 +277,15 @@ export function CommandCenter(): React.JSX.Element {
   }, [snapshot, permissions, questions, errors, threadBus])
 
   const totals = snapshot?.totals
+  const openAssistantQuestions = assistant?.questions.filter((question) => question.status === 'open') ?? []
+  const answerAssistant = (questionId: string, answerId: string): void => {
+    setAssistantError('')
+    void OpenCode.answerLabAssistant(questionId, answerId)
+      .then(setAssistant)
+      .catch((error: unknown) => {
+        setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not record that decision.')
+      })
+  }
   return (
     <div className="command-center">
       <header className="command-header">
@@ -317,7 +332,39 @@ export function CommandCenter(): React.JSX.Element {
           </div>
         </section>
       ) : (
-        <div className="command-grid">
+        <>
+          <section className="command-section command-assistant" aria-label="Lab Assistant">
+            <div className="command-section-head">
+              <div>
+                <span className="command-eyebrow">Orchestration</span>
+                <h2>Lab Assistant</h2>
+              </div>
+              <span>{openAssistantQuestions.length}</span>
+            </div>
+            <div className="command-assistant-list">
+              {assistantError ? <div className="command-assistant-error" role="alert">{assistantError}</div> : null}
+              {openAssistantQuestions.map((question) => (
+                <article className="command-assistant-question" key={question.id}>
+                  <div>
+                    <strong>{question.prompt}</strong>
+                    <small>{question.repository}</small>
+                  </div>
+                  <div className="command-assistant-options">
+                    {question.options.map((option) => (
+                      <button key={option.id} onClick={() => answerAssistant(question.id, option.id)}>{option.label}</button>
+                    ))}
+                  </div>
+                </article>
+              ))}
+              {openAssistantQuestions.length === 0 ? (
+                <div className="command-assistant-quiet">
+                  <strong>Nothing needs a decision.</strong>
+                  <span>{assistant?.activities[0]?.detail ?? 'Authenticated GitHub automation events will appear here.'}</span>
+                </div>
+              ) : null}
+            </div>
+          </section>
+          <div className="command-grid">
           <section className="command-section command-attention">
             <div className="command-section-head"><h2>Needs your attention</h2><span>{classified.attention.length}</span></div>
             <div className="command-list">
@@ -346,7 +393,8 @@ export function CommandCenter(): React.JSX.Element {
                 : <div className="command-empty">Your recent work will appear here.</div>}
             </div>
           </section>
-        </div>
+          </div>
+        </>
       )}
 
       {cardMenu ? (

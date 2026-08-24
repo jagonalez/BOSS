@@ -309,6 +309,8 @@ export type BackendRequest =
   /** The per-automation hook secret and full URL. Never included in snapshots,
    *  so phones and the relay cannot read it. */
   | { type: 'automation.webhook.token'; automationId: string }
+  | { type: 'assistant.snapshot' }
+  | { type: 'assistant.answer'; questionId: string; answerId: string }
   | { type: 'mcp.list' }
   | { type: 'mcp.add'; input: import('./mcp').McpConnectionInput }
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }

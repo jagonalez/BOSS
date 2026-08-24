@@ -24,6 +24,8 @@ import { WorktreeManager } from './worktree-manager'
 import { NotificationRouter } from './notification-router'
 import { AutomationHooks } from './automation-hooks'
 import { AutomationManager } from './automation-manager'
+import { LabAssistantManager } from './lab-assistant-manager'
+import { listGitHubPullRequests } from './lab-assistant-github'
 import { TelegramBot } from './telegram-bot'
 import { McpHub } from './mcp-hub'
 import { WebAccess } from './web-access'
@@ -135,6 +137,20 @@ const automations = new AutomationManager({
 }, backendMgr, worktrees)
 backendMgr.attachAutomations(automations)
 automations.attachNotifications(notifications)
+const labAssistant = new LabAssistantManager(
+  join(app.getPath('userData'), 'lab-assistant.json'),
+  {
+    threads: () => backendMgr.supervisionSnapshot().threads,
+    messageAgent: async (threadId, message) => {
+      await backendMgr.addFollowUp(threadId, message)
+    },
+    refreshPullRequests: (repository) => listGitHubPullRequests(repository),
+    emit: (snapshot) => backendMgr.emit({ type: 'assistant.updated', properties: { snapshot } }),
+    notify: (event) => notifications.publish(event)
+  }
+)
+backendMgr.attachAssistant(labAssistant)
+automations.setWebhookObserver((delivery) => labAssistant.observeGitHub(delivery))
 // GitHub webhooks are delivered to a loopback endpoint; exposing it to the
 // internet is the user's tunnel, exactly like the mobile page.
 const automationHooks = new AutomationHooks({ deliver: (id, token, event, body) => automations.deliverWebhook(id, token, event, body) })
@@ -435,6 +451,7 @@ app.whenReady().then(() => {
     // Registering it is what turns a folder BOSS has never seen into a project.
     if (cliProject) await openFromCli(cliProject)
     await mcpHub.start()
+    await labAssistant.start()
     await automations.start()
     await automationHooks.start()
     await telegram.start()

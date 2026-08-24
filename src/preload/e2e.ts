@@ -15,6 +15,7 @@ import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
 import type { MessageWithParts, SessionInfo } from '../shared/opencode'
 import { contextHandoffPacket, delegatedContextInstruction } from '../shared/context-handoff'
 import { titleFromFirstPrompt } from '../shared/thread-title'
+import type { LabAssistantSnapshot } from '../shared/lab-assistant'
 
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
@@ -432,6 +433,35 @@ export function installE2EApi(boss: BossApi): void {
     createdAt: Date.now() - 86_400_000,
     updatedAt: Date.now() - 3_600_000
   }]
+  let assistantFixture: LabAssistantSnapshot = {
+    generatedAt: Date.now(),
+    pullRequests: [
+      {
+        id: 'octo/hello#21', repository: 'octo/hello', number: 21, title: 'Mobile polish',
+        url: 'https://github.com/octo/hello/pull/21', headBranch: 'mobile-polish', baseBranch: 'main',
+        state: 'open', mergeability: 'clean', updatedAt: Date.now() - 30_000
+      },
+      {
+        id: 'octo/hello#22', repository: 'octo/hello', number: 22, title: 'Eval foundation',
+        url: 'https://github.com/octo/hello/pull/22', headBranch: 'eval-foundation', baseBranch: 'main',
+        state: 'open', mergeability: 'clean', updatedAt: Date.now() - 20_000
+      }
+    ],
+    questions: [{
+      id: 'assistant-question-order',
+      key: 'merge-order:octo/hello:main:octo/hello#21,octo/hello#22',
+      repository: 'octo/hello',
+      prompt: 'Two pull requests are ready for main. Which should merge first?',
+      options: [
+        { id: 'octo/hello#21', label: '#21 · Mobile polish' },
+        { id: 'octo/hello#22', label: '#22 · Eval foundation' }
+      ],
+      status: 'open',
+      createdAt: Date.now() - 10_000
+    }],
+    activities: [],
+    mergeOrders: {}
+  }
   // Mirrors TelegramBot.status(): off and tokenless until settings turn it on.
   const telegramFixture = {
     enabled: false,
@@ -922,6 +952,23 @@ export function installE2EApi(boss: BossApi): void {
         }
       case 'supervision.search': return []
       case 'supervision.acknowledge': return backendRequest({ type: 'supervision.snapshot' })
+      case 'assistant.snapshot': return structuredClone(assistantFixture)
+      case 'assistant.answer': {
+        assistantFixture = {
+          ...assistantFixture,
+          generatedAt: Date.now(),
+          questions: assistantFixture.questions.map((question) => question.id === request.questionId
+            ? { ...question, status: 'answered', answerId: request.answerId, answeredAt: Date.now() }
+            : question),
+          mergeOrders: {
+            ...assistantFixture.mergeOrders,
+            'octo/hello:main': [request.answerId, ...assistantFixture.pullRequests.map((pullRequest) => pullRequest.id).filter((id) => id !== request.answerId)]
+          }
+        }
+        const data = JSON.stringify({ type: 'assistant.updated', properties: { snapshot: assistantFixture } })
+        for (const listener of eventListeners) listener(data)
+        return structuredClone(assistantFixture)
+      }
       case 'thread.policy.get': return undefined
       case 'thread.policy.set': return request.policy
       case 'worktree.list': return []
