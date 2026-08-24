@@ -31,6 +31,7 @@ const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
   'thread.list',
   'thread.get',
   'thread.messages',
+  'thread.part',
   'thread.send',
   'thread.abort',
   'thread.todos',

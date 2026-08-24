@@ -247,7 +247,14 @@ export type BackendRequest =
   | { type: 'thread.get'; threadId: string }
   | { type: 'thread.delete'; threadId: string }
   | { type: 'thread.rename'; threadId: string; title: string }
-  | { type: 'thread.messages'; threadId: string; limit?: number }
+  /** `trimOutput` caps how many characters of a tool part's output come back,
+   *  and sets `outputTruncated` to the full length on anything it shortened.
+   *  A phone asks for this: tool output is most of a transcript's bytes and
+   *  none of what a phone draws, which is a step summary. thread.part fetches
+   *  one in full when a step is opened. */
+  | { type: 'thread.messages'; threadId: string; limit?: number; trimOutput?: number }
+  /** One tool part's untrimmed output, for a step the user opened. */
+  | { type: 'thread.part'; threadId: string; messageId: string; partId: string }
   | { type: 'thread.send'; threadId: string; parts: unknown[]; options?: BackendMessageOptions }
   | { type: 'thread.followups.list'; threadId: string }
   | { type: 'thread.followups.add'; threadId: string; text: string; attachments?: QueuedFollowUpAttachment[]; options?: BackendMessageOptions }

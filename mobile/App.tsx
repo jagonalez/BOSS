@@ -109,7 +109,10 @@ export default function App(): React.JSX.Element {
     if (!connection) return
     try {
       const list = await connection.request<ThreadMessage[]>({
-        type: 'thread.messages', threadId, limit: 60
+        // Tool output is most of a transcript's bytes and none of what this
+        // screen draws — a step shows the command that ran. Asking for it
+        // whole is what pushed a Codex thread past the relay's frame cap.
+        type: 'thread.messages', threadId, limit: 60, trimOutput: 2000
       })
       setMessages((prev) => ({ ...prev, [threadId]: list ?? [] }))
     } catch (e) {
