@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -218,9 +218,6 @@ export function ThreadScreen({
 }): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const list = useRef<FlatList<Message>>(null)
-  /** Whether the view is parked at the newest message. Only then does new
-   *  content scroll; otherwise reading history fights the stream. */
-  const atTail = useRef(true)
   const [optionsOpen, setOptionsOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const modeLabel = modes.find((m) => m.id === mode)?.label
@@ -241,6 +238,8 @@ export function ThreadScreen({
   // While finding, the transcript becomes the result list: the matches, in
   // order, rather than a cursor stepping through a thread that keeps scrolling
   // under it. A phone has no room for a match counter and jump arrows.
+  // Inverted lists take the data backwards. useMemo keeps the identity stable
+  // between renders so FlatList is not handed a new array for the same content.
   const needle = find.trim().toLowerCase()
   const hitIds = new Set(findHits.map((h) => h.messageId))
   const visible = needle
@@ -249,6 +248,7 @@ export function ThreadScreen({
         return `${textOf(m)} ${reasoningOf(m) ?? ''}`.toLowerCase().includes(needle)
       })
     : rendered
+  const ordered = useMemo(() => [...visible].reverse(), [visible])
 
   return (
     <KeyboardAvoidingView
@@ -277,30 +277,31 @@ export function ThreadScreen({
         </View>
       ) : null}
 
+      {/* Inverted: the newest message sits at the visual bottom because the
+          list is upside down, not because anything scrolled there.
+
+          Chasing the tail by hand could not be made to sit still. The list
+          scrolled to the end on every content size change, and during a run
+          that fires constantly — messages refetch four times a second, each
+          refetch replaces every row, and virtualization re-measures as rows
+          come into view. Each scrollToEnd aimed at a content height that had
+          already changed, and the scroll it performed fed the next one. That
+          feedback loop is the jitter.
+
+          Inverting removes the loop rather than damping it: with offset 0 at
+          the bottom, new content extends away from the viewport and the
+          position you are looking at never moves. */}
       <FlatList
         ref={list}
-        data={visible}
+        inverted
+        data={ordered}
         keyExtractor={(m, i) => m.id ?? String(i)}
         contentContainerStyle={styles.list}
-        // Follow the tail only while the user is already at it.
-        //
-        // This used to scroll on EVERY content size change, and a streaming run
-        // changes it many times a second: the view was yanked to the bottom
-        // while you were reading further up, which reads as the text jittering.
-        onScroll={(e) => {
-          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent
-          const fromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height
-          atTail.current = fromBottom < 80
-        }}
-        scrollEventThrottle={100}
-        onContentSizeChange={() => {
-          // Filtering to matches changes the content size, and following the
-          // tail then would jump you past the results you asked to see.
-          if (atTail.current && !needle) list.current?.scrollToEnd({ animated: false })
-        }}
         ListEmptyComponent={
           needle ? (
-            <Text style={styles.findEmpty}>
+            // Counter-rotated: everything inside an inverted list is upside
+            // down, and this is text rather than a message.
+            <Text style={[styles.findEmpty, styles.uninvert]}>
               {finding ? 'Searching…' : `Nothing in this thread matches “${find.trim()}”.`}
             </Text>
           ) : null
@@ -512,7 +513,10 @@ const styles = StyleSheet.create({
   modeText: { color: theme.muted, fontSize: 12 },
   modeTextOn: { color: theme.bg, fontWeight: '700' },
   fill: { flex: 1, backgroundColor: theme.bg },
-  list: { padding: 12, paddingBottom: 20 },
+  // Inverted, so paddingTop is the gap above the newest message — the one
+  // nearest the composer — and paddingBottom is the breathing room at the top
+  // of the thread. They read backwards here on purpose.
+  list: { padding: 12, paddingTop: 20 },
   msg: { marginBottom: 16 },
   who: {
     color: theme.faint,
@@ -660,6 +664,7 @@ const styles = StyleSheet.create({
   },
   findCount: { color: theme.faint, fontSize: 13, fontWeight: '600', minWidth: 24, textAlign: 'right' },
   findEmpty: { color: theme.faint, textAlign: 'center', paddingVertical: 40, paddingHorizontal: 24 },
+  uninvert: { transform: [{ scaleY: -1 }] },
   btnPrimary: { backgroundColor: theme.accent, borderColor: theme.accent },
   btnText: { color: theme.text, fontWeight: '600', fontSize: 13.5 },
   btnPrimaryText: { color: theme.bg, fontWeight: '700', fontSize: 13.5 },
