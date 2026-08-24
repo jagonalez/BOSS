@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { blocks, groupByProject, sortThreads, spans, visibleThreads } from './parts.ts'
+import { blocks, groupByProject, segmentsOf, sortThreads, spans, visibleThreads } from './parts.ts'
 
 const row = (threadId, projectPath, extra = {}) => ({ threadId, projectPath, ...extra })
 
@@ -185,4 +185,50 @@ test('a plain-only run carries no redundant children', () => {
   const [span] = spans('**just bold**')
   assert.equal(span.kind, 'bold')
   assert.equal(span.children, undefined)
+})
+
+test('a message renders in the order it happened, not grouped by kind', () => {
+  // Codex reports a whole session as one assistant message. Rendering all the
+  // thinking, then all the tools, then all the text made those unreadable.
+  const segs = segmentsOf({ parts: [
+    { type: 'text', text: 'First I will look.' },
+    { type: 'tool', state: { status: 'completed', input: { command: 'ls' } } },
+    { type: 'text', text: 'Found it.' },
+    { type: 'reasoning', text: 'thinking' },
+    { type: 'text', text: 'Done.' }
+  ] })
+  assert.deepEqual(segs.map((s) => s.kind), ['text', 'tools', 'text', 'reasoning', 'text'])
+  assert.equal(segs[0].text, 'First I will look.')
+  assert.equal(segs[2].text, 'Found it.')
+})
+
+test('neighbouring parts of one kind join, distant ones do not', () => {
+  const segs = segmentsOf({ parts: [
+    { type: 'tool', state: { input: { command: 'a' } } },
+    { type: 'tool', state: { input: { command: 'b' } } },
+    { type: 'text', text: 'between' },
+    { type: 'tool', state: { input: { command: 'c' } } }
+  ] })
+  assert.deepEqual(segs.map((s) => s.kind), ['tools', 'text', 'tools'])
+  assert.equal(segs[0].parts.length, 2)
+  assert.equal(segs[2].parts.length, 1)
+})
+
+test('consecutive text parts become one paragraph, not one run-on line', () => {
+  const segs = segmentsOf({ parts: [
+    { type: 'text', text: 'One.' },
+    { type: 'text', text: 'Two.' }
+  ] })
+  assert.equal(segs.length, 1)
+  assert.equal(segs[0].text, 'One.\n\nTwo.')
+})
+
+test('empty parts are dropped rather than rendering blank bubbles', () => {
+  const segs = segmentsOf({ parts: [
+    { type: 'text', text: '   ' },
+    { type: 'reasoning', text: '' },
+    { type: 'text', text: 'real' }
+  ] })
+  assert.equal(segs.length, 1)
+  assert.equal(segs[0].text, 'real')
 })

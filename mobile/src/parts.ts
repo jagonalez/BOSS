@@ -14,6 +14,8 @@ export interface Part {
     input?: Record<string, unknown>
     output?: unknown
     title?: string
+    /** Where some backends put a reasoning part's text. */
+    text?: string
   }
   tool?: string
 }
@@ -65,6 +67,51 @@ export function isRunning(status?: string): boolean {
 
 export function isError(status?: string): boolean {
   return status === 'error'
+}
+
+/** One stretch of a message: something said, something thought, or work done.
+ *
+ *  A message is not a turn. Codex reports an entire session as one assistant
+ *  message — hundreds of parts, alternating between saying something, thinking,
+ *  and calling tools — where Claude sends one message per reply. Joining every
+ *  text part into a single block, which is what this used to do, turned those
+ *  into one unreadable wall with all the tool calls summarised at the end, and
+ *  the conversation inside them was impossible to follow.
+ *
+ *  So a message renders as the sequence it actually was. Neighbouring parts of
+ *  the same kind join up — consecutive tool calls are one collapsible group,
+ *  consecutive text is one paragraph — and the order is preserved. */
+export interface Segment {
+  kind: 'text' | 'reasoning' | 'tools'
+  /** For text and reasoning. */
+  text?: string
+  /** For tools. */
+  parts?: Part[]
+}
+
+export function segmentsOf(message: Message): Segment[] {
+  const out: Segment[] = []
+  for (const part of message.parts ?? []) {
+    const kind = part.type === 'text' ? 'text' as const
+      : part.type === 'reasoning' ? 'reasoning' as const
+      : part.type === 'tool' ? 'tools' as const
+      : undefined
+    if (!kind) continue
+
+    if (kind === 'tools') {
+      const last = out[out.length - 1]
+      if (last?.kind === 'tools') last.parts!.push(part)
+      else out.push({ kind, parts: [part] })
+      continue
+    }
+
+    const text = (part.text ?? part.state?.text ?? '').trim()
+    if (!text) continue
+    const last = out[out.length - 1]
+    if (last?.kind === kind) last.text = `${last.text}\n\n${text}`
+    else out.push({ kind, text })
+  }
+  return out
 }
 
 export function textOf(message: Message): string {

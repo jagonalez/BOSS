@@ -15,6 +15,7 @@ import {
 import {
   blocks,
   spans,
+  segmentsOf,
   isError,
   type Span,
   isRunning,
@@ -318,19 +319,29 @@ export function ThreadScreen({
         }
         renderItem={({ item }) => {
           const role = item.info?.role === 'user' ? 'user' : 'assistant'
-          const text = textOf(item)
-          const reasoning = reasoningOf(item)
-          const tools = (item.parts ?? []).filter((p) => p.type === 'tool')
+          // In order, rather than all the thinking, then all the tools, then
+          // all the text. That fixed order is fine for a backend that sends one
+          // message per reply, and unreadable for Codex, which reports a whole
+          // session as one message: the replies inside it ran together into a
+          // single block and every tool call collapsed into one summary at the
+          // end, so the conversation looked like it was missing.
+          const segments = segmentsOf(item)
           return (
             <View style={styles.msg}>
               <Text style={styles.who}>{role === 'user' ? 'You' : 'Agent'}</Text>
-              {reasoning ? <Thinking text={reasoning} /> : null}
-              {tools.length ? <Steps tools={tools} /> : null}
-              {text ? (
-                <View style={role === 'user' ? styles.userBody : undefined}>
-                  <Body text={text} />
-                </View>
-              ) : null}
+              {segments.map((segment, i) => {
+                if (segment.kind === 'reasoning') {
+                  return <Thinking key={i} text={segment.text ?? ''} />
+                }
+                if (segment.kind === 'tools') {
+                  return <Steps key={i} tools={segment.parts ?? []} />
+                }
+                return (
+                  <View key={i} style={role === 'user' ? styles.userBody : styles.said}>
+                    <Body text={segment.text ?? ''} />
+                  </View>
+                )
+              })}
             </View>
           )
         }}
@@ -577,6 +588,9 @@ const styles = StyleSheet.create({
   marker: { color: theme.muted, marginBottom: 0, minWidth: 16, textAlign: 'right' },
   itemText: { flex: 1, marginBottom: 0 },
   userBody: { backgroundColor: theme.inset, borderRadius: 12, padding: 11 },
+  // Separates one thing the agent said from the next stretch of work, now that
+  // a message can hold many of both.
+  said: { marginBottom: 2 },
   code: {
     backgroundColor: theme.inset,
     borderRadius: 8,
