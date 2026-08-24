@@ -165,7 +165,18 @@ export function CommandCenter(): React.JSX.Element {
    *  so secondary actions live here rather than in the card itself. */
   const [cardMenu, setCardMenu] = useState<{ x: number; y: number; thread: SupervisedThread } | null>(null)
   const cardMenuRef = useRef<HTMLDivElement>(null)
+  const [cardMenuTop, setCardMenuTop] = useState<number | null>(null)
   const degradations = serviceDegradations(serverUrl, serverHealthy, backends)
+
+  useEffect(() => {
+    if (!cardMenu) {
+      setCardMenuTop(null)
+      return
+    }
+    const height = cardMenuRef.current?.offsetHeight ?? 0
+    const overflow = cardMenu.y + height - (window.innerHeight - 8)
+    setCardMenuTop(overflow > 0 ? Math.max(8, cardMenu.y - overflow) : cardMenu.y)
+  }, [cardMenu])
 
   useEffect(() => {
     if (!cardMenu) return
@@ -501,7 +512,10 @@ export function CommandCenter(): React.JSX.Element {
         <div
           ref={cardMenuRef}
           className="ctx-menu"
-          style={{ left: Math.min(cardMenu.x, window.innerWidth - 220), top: cardMenu.y }}
+          style={{
+            left: Math.max(8, Math.min(cardMenu.x, window.innerWidth - 220)),
+            top: cardMenuTop ?? cardMenu.y
+          }}
         >
           {cardMenuItem('Open', () => void openThread(cardMenu.thread))}
           {cardMenuItem('Export as Markdown…', () => void exportSessionMarkdown(cardMenu.thread.threadId))}
