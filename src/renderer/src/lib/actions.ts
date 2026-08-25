@@ -2019,13 +2019,13 @@ export async function removeProject(path: string): Promise<void> {
     appStore.setState({ lastError: errorSummary(error) })
   }
   // A project that was open leaves the page pointing at a folder BOSS no
-  // longer lists, so fall back to the command center.
+  // longer lists, so fall back to Home.
   if (appStore.getState().projectPath === path) {
     appStore.setState({
       projectPath: undefined,
       selectedCheckoutPath: undefined,
       projectCheckouts: [],
-      activePage: 'command-center',
+      activePage: 'home',
       activeSessionId: null,
       diffs: null,
       fileContent: null,
