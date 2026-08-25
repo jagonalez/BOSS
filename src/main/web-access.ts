@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { BackendRequest } from '../shared/backend'
-import { mobileRequestAllowed, type MobileAccessConfig, type MobileAccessRole, type MobileAccessStatus } from '../shared/mobile'
+import { mobileRequestAllowed, mobileTransportRequestAllowed, type MobileAccessConfig, type MobileAccessRole, type MobileAccessStatus } from '../shared/mobile'
 import { MOBILE_PAGE } from '../shared/mobile-page'
 import { SERVICE_WORKER, WEB_MANIFEST } from '../shared/pwa-assets'
 
@@ -20,32 +20,6 @@ interface WebAccessHost {
   handle(request: BackendRequest): Promise<unknown>
   onEvent(callback: (event: Record<string, unknown>) => void): () => void
 }
-
-/** Only thread review/steering and automations. No settings, no MCP
- * connection management, no worktree removal, no thread deletion. */
-const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
-  'backend.list',
-  'supervision.snapshot',
-  'supervision.search',
-  'supervision.acknowledge',
-  'thread.list',
-  'thread.get',
-  'thread.messages',
-  'thread.part',
-  'thread.send',
-  'thread.abort',
-  'thread.todos',
-  'thread.permission',
-  'thread.diff',
-  'automation.list',
-  'automation.run',
-  'automation.stop',
-  'assistant.snapshot',
-  'assistant.answer',
-  'assistant.task.create',
-  'assistant.task.update',
-  'assistant.task.assign'
-])
 
 /** Event types the mobile page reacts to; the rest are desktop concerns. */
 const FORWARDED_EVENTS = new Set([
@@ -322,7 +296,7 @@ export class WebAccess {
         void (async () => {
           try {
             const payload = JSON.parse(body) as BackendRequest
-            if (!ALLOWED_REQUESTS.has(payload.type)) {
+            if (!mobileTransportRequestAllowed(payload.type, 'local')) {
               this.json(response, 403, { error: `"${payload.type}" is not available over mobile access.` })
               return
             }

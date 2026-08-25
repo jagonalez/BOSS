@@ -4,7 +4,7 @@ import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
 import { MOBILE_PAGE } from './mobile-page.ts'
 // @ts-expect-error Application code uses bundler resolution.
-import { mobileRequestAllowed } from '../shared/mobile.ts'
+import { mobileRequestAllowed, mobileTransportRequestAllowed } from '../shared/mobile.ts'
 
 test('mobile page contains valid JavaScript and uses the shared supervision API', () => {
   const match = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)
@@ -89,6 +89,20 @@ test('read-only access can inspect supervision and transcripts', () => {
     'assistant.snapshot'
   ] as const) {
     assert.equal(mobileRequestAllowed(type, 'read-only'), true, type)
+  }
+})
+
+test('both mobile transports expose the complete follow-up queue contract', () => {
+  for (const type of [
+    'thread.followups.list',
+    'thread.followups.add',
+    'thread.followups.update',
+    'thread.followups.remove',
+    'thread.followups.move',
+    'thread.followups.steer'
+  ] as const) {
+    assert.equal(mobileTransportRequestAllowed(type, 'local'), true, `local: ${type}`)
+    assert.equal(mobileTransportRequestAllowed(type, 'relay'), true, `relay: ${type}`)
   }
 })
 
