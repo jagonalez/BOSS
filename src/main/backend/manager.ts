@@ -774,7 +774,7 @@ export class BackendManager {
     }
   }
 
-  private labConnections(): LabConnectionsSettings {
+  private labConnections(): LabConnectionsSettings | Promise<LabConnectionsSettings> {
     const lab = this.backends.lab
     if (!lab.labConnections) throw new Error('Lab API connections are not available in this build.')
     return lab.labConnections()
