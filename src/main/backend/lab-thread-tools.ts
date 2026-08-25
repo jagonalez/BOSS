@@ -4,9 +4,9 @@
 import { THREAD_TOOL_DESCRIPTIONS } from '../../shared/thread-bus.ts'
 import type { LabToolFunction } from './lab-tools'
 
-/** Lab's view of the BOSS thread bus.
+/** Lab's view of BOSS host tools.
  *
- *  Lab has no MCP client, so the thread tools reach it as external tools the
+ *  Lab has no MCP client, so collaboration and publishing reach it as external tools the
  *  host injects. That is what lets an assistant work across threads rather than
  *  only inside one: it can see its siblings, read what they are doing, hand work
  *  to a new worktree thread, and pass a message back.
@@ -81,6 +81,22 @@ export const THREAD_TOOL_DEFINITIONS: LabToolFunction[] = [
           agent: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeAgent }
         },
         required: ['instruction']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'boss_git_create_change_request',
+      description: THREAD_TOOL_DESCRIPTIONS.createChangeRequest,
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestTitle },
+          body: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBody },
+          baseBranch: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase },
+          draft: { type: 'boolean', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft }
+        }
       }
     }
   }

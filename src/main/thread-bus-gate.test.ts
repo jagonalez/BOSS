@@ -74,19 +74,22 @@ test('a change request is opened for the caller’s own checkout', () => {
   assert.ok(!gate.includes('projectPath'), 'the project path is not where the thread is working')
 })
 
-test('every backend that registers thread tools also registers the change request tool', () => {
+test('every agent backend registers the change request tool', () => {
   // Each backend registers its own tool list, so a tool added only to the bus reaches no model.
+  // Keep this exhaustive: Lab has no MCP client and was previously omitted
+  // even though its built-in git_commit made it otherwise capable of the same
+  // commit -> host publish -> change request workflow.
   for (const file of [
     join(import.meta.dirname, 'backend', 'claude-backend.ts'),
     join(import.meta.dirname, 'backend', 'codex-backend.ts'),
     join(import.meta.dirname, 'backend', 'pi-backend.ts'),
-    join(import.meta.dirname, 'opencode-server.ts')
+    join(import.meta.dirname, 'opencode-server.ts'),
+    join(import.meta.dirname, 'backend', 'lab-thread-tools.ts')
   ]) {
     const backend = readFileSync(file, 'utf8')
-    if (!backend.includes('boss_threads_leave_worktree')) continue
     assert.ok(
       backend.includes('boss_git_create_change_request'),
-      `${file} registers thread tools, so it should register the change request tool too`
+      `${file} should register the shared change request tool`
     )
   }
 })
