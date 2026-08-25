@@ -651,6 +651,31 @@ export class CodexBackend implements Backend {
     return seen.length - 1
   }
 
+  /** Publish input as soon as Codex accepts the turn.
+   *
+   * Codex does not consistently report its userMessage item until the turn is
+   * complete. Waiting for that notification leaves the composer empty for the
+   * whole reasoning run, and a long turn makes a successful send look lost.
+   * turn/start already gives us the durable turn id, so this message uses the
+   * same id that the later live event and history reload derive. Those paths
+   * therefore update this row instead of drawing a duplicate. */
+  private emitUserMessage(
+    sessionId: string,
+    turnId: string,
+    index: number,
+    content: CodexItem['content'],
+    createdAt = Date.now()
+  ): void {
+    const messageId = codexUserMessageId(turnId, index)
+    this.emit({
+      type: 'message.updated',
+      message: { id: messageId, sessionID: sessionId, role: 'user', time: { created: createdAt } }
+    })
+    for (const part of userParts(sessionId, messageId, content)) {
+      this.emit({ type: 'message.part.updated', part })
+    }
+  }
+
   private mapNotification(method: string, params: Record<string, unknown>): void {
     const sessionId = String(params.threadId ?? '')
     const titleRun = this.titleRuns.get(sessionId)
@@ -692,15 +717,16 @@ export class CodexBackend implements Backend {
         const item = params.item as CodexItem | undefined
         if (!item) break
         const turnId = String(params.turnId ?? '')
-        const messageId = item.type === 'userMessage'
-          ? codexUserMessageId(turnId, this.userMessageOrdinal(sessionId, turnId, item.id))
-          : `assistant-${turnId}`
         if (item.type === 'userMessage') {
-          this.emit({ type: 'message.updated', message: { id: messageId, sessionID: sessionId, role: 'user', time: { created: Number(params.startedAtMs ?? Date.now()) } } })
-          for (const part of userParts(sessionId, messageId, item.content)) {
-            this.emit({ type: 'message.part.updated', part })
-          }
+          this.emitUserMessage(
+            sessionId,
+            turnId,
+            this.userMessageOrdinal(sessionId, turnId, item.id),
+            item.content,
+            Number(params.startedAtMs ?? Date.now())
+          )
         } else {
+          const messageId = `assistant-${turnId}`
           this.emit({ type: 'message.updated', message: { id: messageId, sessionID: sessionId, role: 'assistant', time: { created: Number(params.startedAtMs ?? Date.now()) } } })
           const part = itemPart(sessionId, messageId, item)
           if (part) {
@@ -864,9 +890,10 @@ export class CodexBackend implements Backend {
   async sendMessage(sessionId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
     await this.ensureLoaded(sessionId)
     const mode = options?.mode ?? 'ask'
+    const input = userInputs(parts)
     const params: Record<string, unknown> = {
       threadId: sessionId,
-      input: userInputs(parts),
+      input,
       cwd: this.directoryFor(sessionId),
       approvalPolicy: mode === 'auto' ? 'never' : 'on-request',
       sandboxPolicy: mode === 'plan'
@@ -892,7 +919,16 @@ export class CodexBackend implements Backend {
     // instructions set when it was created would still describe the old one.
     if (options?.context) params.developerInstructions = `${options.context}\n\n${QA_GUIDANCE}`
     const result = await this.request('turn/start', params) as { turn?: CodexTurn }
-    if (result.turn?.id) this.activeTurns.set(sessionId, result.turn.id)
+    if (result.turn?.id) {
+      this.activeTurns.set(sessionId, result.turn.id)
+      this.emitUserMessage(
+        sessionId,
+        result.turn.id,
+        0,
+        input as CodexItem['content'],
+        result.turn.startedAt ? result.turn.startedAt * 1000 : Date.now()
+      )
+    }
   }
 
   async steer(sessionId: string, parts: unknown[]): Promise<void> {

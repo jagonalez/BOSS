@@ -119,8 +119,8 @@ test('a user message keeps one id whether it streamed or was reloaded', () => {
 
   const live = source.slice(source.indexOf("case 'item/started':"), source.indexOf("case 'item/agentMessage/delta':"))
   assert.ok(
-    live.includes('codexUserMessageId('),
-    'the live path must derive the user message id from the turn, not item.id'
+    live.includes('this.emitUserMessage('),
+    'the live path must use the message emitter shared with turn/start'
   )
   assert.ok(
     !/item\.type === 'userMessage' \? item\.id/.test(live),
@@ -133,6 +133,33 @@ test('a user message keeps one id whether it streamed or was reloaded', () => {
     'the reload path must derive the user message id the same way'
   )
   assert.ok(!/const id = user\.id/.test(turn), 'the reload must not key a user message by item.id')
+
+  const emitter = source.slice(source.indexOf('private emitUserMessage('), source.indexOf('private mapNotification('))
+  assert.ok(
+    emitter.includes('codexUserMessageId(turnId, index)'),
+    'the shared live emitter must derive the id from the turn and ordinal'
+  )
+})
+
+test('a sent Codex message is visible as soon as turn/start accepts it', () => {
+  // Codex can hold item/started and item/completed for the userMessage until
+  // the assistant is done reasoning. The turn/start response arrives at the
+  // beginning and carries the stable turn id, so it must publish the input
+  // itself instead of making the renderer wait for a delayed item event.
+  const send = source.slice(source.indexOf('async sendMessage('), source.indexOf('async steer('))
+  assert.ok(send.includes("this.request('turn/start'"), 'the turn should still be started through Codex')
+  assert.ok(
+    send.indexOf('this.emitUserMessage(') > send.indexOf("this.request('turn/start'"),
+    'accepted input should be emitted immediately after turn/start resolves'
+  )
+
+  const optimistic = source.slice(source.indexOf('private emitUserMessage('), source.indexOf('private mapNotification('))
+  assert.ok(
+    optimistic.includes('codexUserMessageId(turnId, index)'),
+    'the optimistic row must use the same stable id as live events and history'
+  )
+  assert.ok(optimistic.includes("type: 'message.updated'"), 'the renderer needs a user message row')
+  assert.ok(optimistic.includes("type: 'message.part.updated'"), 'the row needs its text and attachments')
 })
 
 test('streamed user ordinals are per turn and do not outlive it', () => {
@@ -160,7 +187,9 @@ test('a Codex user image remains a renderable transcript part', () => {
   const history = source.slice(source.indexOf('function turnMessages('), source.indexOf('export class CodexBackend'))
   assert.ok(history.includes('parts: userParts(sessionId, id, user.content)'), 'history reloads must retain the image')
   const live = source.slice(source.indexOf("case 'item/started':"), source.indexOf("case 'thread/name/updated':"))
-  assert.ok(live.includes('userParts(sessionId, messageId, item.content)'), 'live user events must retain the image')
+  assert.ok(live.includes('this.emitUserMessage('), 'live user events should use the shared message emitter')
+  const emitter = source.slice(source.indexOf('private emitUserMessage('), source.indexOf('private mapNotification('))
+  assert.ok(emitter.includes('userParts(sessionId, messageId, content)'), 'live user events must retain the image')
 })
 
 test('a tool image becomes a content block rather than base64 in the text', () => {

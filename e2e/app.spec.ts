@@ -403,6 +403,42 @@ test('a Claude thread can submit a message without a transport error', async ({ 
   await expect(appPage.locator('.chat-error')).toHaveCount(0)
 })
 
+test('shows a Codex message while Codex is still working', async ({ appPage }) => {
+  const title = 'Codex pending message test'
+  await control(appPage).then((item) => item.spawnThread('codex', title))
+  await appPage.locator('.session-row').filter({ hasText: title }).click()
+
+  const composer = appPage.getByPlaceholder('Ask Codex…')
+  await composer.fill('Keep this visible while you reason.')
+  await composer.press('Enter')
+
+  await expect(appPage.locator('.msg.user')).toContainText('Keep this visible while you reason.')
+  await expect(composer).toHaveValue('')
+  await expect(appPage.locator('.thinking-indicator')).toBeVisible()
+  await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+})
+
+test('a failed Codex send keeps the message retryable and shows it after retry', async ({ appPage }) => {
+  const title = 'Codex failed message test'
+  await control(appPage).then((item) => item.spawnThread('codex', title))
+  await appPage.locator('.session-row').filter({ hasText: title }).click()
+  await control(appPage).then((item) => item.failNextBackendRequest('thread.send', 'Fixture Codex send failed.'))
+
+  const composer = appPage.getByPlaceholder('Ask Codex…')
+  await composer.fill('Do not lose this failed message.')
+  await composer.press('Enter')
+
+  await expect(appPage.locator('.chat-error')).toContainText('Fixture Codex send failed.')
+  await expect(composer).toHaveValue('Do not lose this failed message.')
+  await expect(appPage.locator('.msg.user')).toHaveCount(0)
+
+  await appPage.getByRole('button', { name: 'Retry' }).click()
+
+  await expect(appPage.locator('.msg.user')).toContainText('Do not lose this failed message.')
+  await expect(composer).toHaveValue('')
+  await expect(appPage.locator('.chat-error')).toHaveCount(0)
+})
+
 async function configureLabDefaults(page: Parameters<typeof control>[0]): Promise<void> {
   await openSettings(page)
   await page.getByRole('button', { name: 'Agent defaults' }).click()
