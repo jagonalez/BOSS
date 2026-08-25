@@ -415,7 +415,8 @@ export default function (pi: ExtensionAPI) {
         Type.Literal("click"), Type.Literal("type_text"), Type.Literal("press_key"),
         Type.Literal("hotkey"), Type.Literal("scroll"), Type.Literal("wait")
       ]),
-      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
+      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+      showInTranscript: Type.Optional(Type.Boolean({ default: false }))
     }),
     execute: (_id, args, signal) => call("boss_computer", args, signal)
   })

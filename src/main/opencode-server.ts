@@ -343,7 +343,8 @@ export const computer = tool({
   description: ${JSON.stringify(qaDescription("boss_computer"))},
   args: {
     operation: tool.schema.enum(["list_apps", "list_windows", "get_window_state", "get_desktop_state", "screenshot", "zoom", "click", "type_text", "press_key", "hotkey", "scroll", "wait"]),
-    arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional()
+    arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional(),
+    showInTranscript: tool.schema.boolean().optional()
   },
   execute(args, context) { return call("boss_computer", args, context) }
 })

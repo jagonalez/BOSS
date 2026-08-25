@@ -34,6 +34,32 @@ export function isAgentToolResult(value: unknown): value is AgentToolResult {
   return Boolean(value && typeof value === 'object' && (value as AgentToolResult).__bossToolResult === true)
 }
 
+/** Whether a tool-result image belongs in the user-facing transcript.
+ *
+ * Computer state calls return screenshots so the model can inspect them. They
+ * are working context, not attachments the model chose to show. The explicit
+ * flag is carried on the call itself, which every backend retains as the tool
+ * part's input, so the image can still reach the model without becoming a wall
+ * of near-identical transcript images. Other image-producing tools keep their
+ * existing visible behaviour. */
+export function isComputerTool(tool: string): boolean {
+  return tool === 'boss_computer' || tool.endsWith('__boss_computer')
+}
+
+export function shouldSurfaceToolImage(tool: string, input: unknown): boolean {
+  if (!isComputerTool(tool)) return true
+  let parsed = input
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      return false
+    }
+  }
+  return Boolean(parsed && typeof parsed === 'object'
+    && (parsed as { showInTranscript?: unknown }).showInTranscript === true)
+}
+
 /** Mime types the image store can put on disk, mirrored from its extension
  *  table. Kept here because both the MCP hub and the backend manager have to
  *  know what will be rejected before they hand bytes over, so that an image
@@ -116,6 +142,7 @@ export const QA_GUIDANCE = [
   'Reach for them whenever a claim about what something looks like or does would otherwise be a guess.',
   'That includes checking your own work after a change, answering a question about a page or an app, and reproducing a bug the user reports.',
   'Looking is cheap and does not need permission: listing tabs, reading a page, and taking a screenshot are always available.',
+  'Computer screenshots used for inspection stay out of the transcript by default; set showInTranscript only when the user asked to see that specific screenshot.',
   'Do not describe a page you have not read or a screen you have not seen.',
   'Acting on a page or an app — navigating, clicking, typing — needs Automatic QA turned on, and the tool says so if it is not.'
 ].join(' ')
@@ -206,12 +233,17 @@ export const QA_TOOL_DEFINITIONS: Array<{
   },
   {
     name: 'boss_computer',
-    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. Reach for it when a question is about what is on screen, when you want to check how a desktop app looks or behaves, or when a change you made shows up in an app rather than a browser. Looking is always available: list_apps and list_windows find what is running, get_window_state and get_desktop_state describe it, screenshot and zoom show it. Acting needs Automatic QA: click, type_text, press_key, hotkey, scroll, wait. Look before you act, and look again afterwards — an action you have not verified is not finished.',
+    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. Reach for it when a question is about what is on screen, when you want to check how a desktop app looks or behaves, or when a change you made shows up in an app rather than a browser. Looking is always available: list_apps and list_windows find what is running, get_window_state and get_desktop_state describe it, screenshot and zoom show it. Inspection screenshots are returned to you but hidden from the transcript by default; set showInTranscript only when the user asked to see that specific screenshot. Acting needs Automatic QA: click, type_text, press_key, hotkey, scroll, wait. Look before you act, and look again afterwards — an action you have not verified is not finished.',
     inputSchema: {
       type: 'object',
       properties: {
         operation: { type: 'string', enum: ['list_apps', 'list_windows', 'get_window_state', 'get_desktop_state', 'screenshot', 'zoom', 'click', 'type_text', 'press_key', 'hotkey', 'scroll', 'wait'] },
-        arguments: { type: 'object', additionalProperties: true }
+        arguments: { type: 'object', additionalProperties: true },
+        showInTranscript: {
+          type: 'boolean',
+          default: false,
+          description: 'Show this call\'s screenshot to the user. Leave false for internal inspection.'
+        }
       },
       required: ['operation'],
       additionalProperties: false
