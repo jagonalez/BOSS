@@ -8,7 +8,7 @@ import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
 import { ReviewManager, noChangeRequestYet } from './review-manager.ts'
 import type { ReviewProvider, ReviewProviderMatch, ReviewRepository } from './review-provider.ts'
-import type { AddReviewCommentInput, ChangeRequestFileDiff, ChangeRequestSummary } from '../shared/review.ts'
+import type { AddReviewCommentInput, ChangeRequestFileDiff, ChangeRequestSummary, CreatedChangeRequest } from '../shared/review.ts'
 
 class FakeForgeProvider implements ReviewProvider {
   readonly summary = {
@@ -216,6 +216,59 @@ test('a real sync failure is still reported', async () => {
 
     assert.equal(snapshot.syncError, 'HTTP 401: Bad credentials')
     assert.equal(snapshot.awaitingChangeRequest, undefined)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('creating a change request publishes one clean feature branch before opening it', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-review-create-'))
+  const repository = join(directory, 'repo')
+  try {
+    execFileSync('git', ['init', '-b', 'main', repository])
+    execFileSync('git', ['-C', repository, 'config', 'user.email', 'boss@example.test'])
+    execFileSync('git', ['-C', repository, 'config', 'user.name', 'BOSS Test'])
+    execFileSync('git', ['-C', repository, 'config', 'commit.gpgsign', 'false'])
+    writeFileSync(join(repository, 'file.ts'), 'initial\n')
+    execFileSync('git', ['-C', repository, 'add', 'file.ts'])
+    execFileSync('git', ['-C', repository, 'commit', '-m', 'initial'])
+    execFileSync('git', ['-C', repository, 'switch', '-c', 'fix/worktree-pr'])
+    execFileSync('git', ['-C', repository, 'remote', 'add', 'origin', 'https://fake.test/group/repo.git'])
+
+    const calls: string[] = []
+    class CreatingProvider extends FakeForgeProvider {
+      override readonly summary = {
+        id: 'fake-forge',
+        label: 'Fake Forge',
+        changeRequestLabel: 'Merge proposal',
+        capabilities: {
+          canonicalDiff: true,
+          publishOverallComment: true,
+          publishInlineComment: false,
+          replyToComment: false,
+          submitVerdict: false,
+          createChangeRequest: true
+        }
+      }
+      async getChangeRequest(): Promise<ChangeRequestSummary> {
+        throw new Error('no pull requests found for branch "fix/worktree-pr"')
+      }
+      async getDefaultBranch(): Promise<string> { return 'main' }
+      async publishBranch(): Promise<void> { calls.push('push') }
+      async createChangeRequest(): Promise<CreatedChangeRequest> {
+        calls.push('open')
+        return { url: 'https://fake.test/group/repo/reviews/7', number: 7 }
+      }
+    }
+
+    const manager = new ReviewManager(join(directory, 'comments.json'), [new CreatingProvider()])
+    const created = await manager.createChangeRequest(repository, {})
+    assert.deepEqual(calls, ['push', 'open'])
+    assert.equal(created.number, 7)
+
+    writeFileSync(join(repository, 'uncommitted.ts'), 'not published\n')
+    await assert.rejects(manager.createChangeRequest(repository, {}), /uncommitted files/)
+    assert.deepEqual(calls, ['push', 'open'], 'dirty work must not reach either remote operation')
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }

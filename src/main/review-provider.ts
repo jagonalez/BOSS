@@ -35,6 +35,9 @@ export interface ReviewProvider {
   submitVerdict?(repository: ReviewRepository, match: ReviewProviderMatch, changeRequest: ChangeRequestSummary, event: SubmitReviewEvent, body: string): Promise<void>
   /** Open a change request for the repository's current branch. */
   createChangeRequest?(repository: ReviewRepository, match: ReviewProviderMatch, input: CreateChangeRequestInput): Promise<CreatedChangeRequest>
+  /** Publish the already-committed current branch using the provider's host
+   *  authentication. This avoids depending on an agent shell's SSH keys. */
+  publishBranch?(repository: ReviewRepository, match: ReviewProviderMatch): Promise<void>
   /** The branch a change request targets when the caller does not name one. */
   getDefaultBranch?(repository: ReviewRepository, match: ReviewProviderMatch): Promise<string | undefined>
 }

@@ -734,7 +734,10 @@ export function installE2EApi(boss: BossApi): void {
     }
     if (modeRequest.type === 'thread.mode.set' && modeRequest.threadId && modeRequest.mode) {
       modesBySession = { ...modesBySession, [modeRequest.threadId]: modeRequest.mode }
-      return sessions.find((session) => session.id === modeRequest.threadId)
+      const session = sessions.find((item) => item.id === modeRequest.threadId)
+      return session?.backendId === 'codex' && busyThreads.has(modeRequest.threadId)
+        ? { ...session, pendingUntilNextMessage: true }
+        : session
     }
     switch (request.type) {
       case 'backend.list': return backends

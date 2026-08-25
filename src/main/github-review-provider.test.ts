@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { GitHubReviewProvider, createChangeRequestArgs, parseGitHubRemote, splitGitHubPullRequestDiff } from './github-review-provider.ts'
+import { GitHubReviewProvider, createChangeRequestArgs, parseGitHubRemote, publishGitHubBranchArgs, splitGitHubPullRequestDiff } from './github-review-provider.ts'
 // @ts-expect-error Application code uses bundler resolution.
 import { changeRequestNumberFromUrl, firstUrl } from './review-provider.ts'
 
@@ -77,6 +77,15 @@ test('passes base and draft through when asked', () => {
   const { args } = createChangeRequestArgs({ title: 't', body: 'b', baseBranch: 'develop', draft: true }, 'fix/thing')
   assert.equal(args[args.indexOf('--base') + 1], 'develop')
   assert.ok(args.includes('--draft'))
+})
+
+test('publishes a branch with gh credentials regardless of the origin transport', () => {
+  assert.deepEqual(publishGitHubBranchArgs('openai/codex', 'fix/worktree-pr'), [
+    '-c', 'credential.helper=',
+    '-c', 'credential.helper=!gh auth git-credential',
+    'push', 'https://github.com/openai/codex.git',
+    'HEAD:refs/heads/fix/worktree-pr'
+  ])
 })
 
 test('reads the change request number out of a forge URL', () => {
