@@ -890,6 +890,16 @@ export function installE2EApi(boss: BossApi): void {
           }
         }
         busyThreads.add(request.threadId)
+        // Main announces its optimistic busy state before waiting for the
+        // backend. Keep the fixture on that public seam too: updating only the
+        // private busy set makes a successfully accepted turn look idle in the
+        // renderer even though a real BOSS window shows its working indicator.
+        const busy = JSON.stringify({
+          type: 'session.status',
+          properties: { sessionID: request.threadId, status: { type: 'busy' } },
+          backendId: found?.backendId
+        })
+        for (const listener of eventListeners) listener(busy)
         // Codex's turn/start acknowledgement publishes the user's input before
         // the delayed native userMessage event. Mirror that main/backend seam
         // so E2E can hold the visible contract without real Codex credentials.
