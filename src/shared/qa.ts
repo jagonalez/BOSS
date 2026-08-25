@@ -1,5 +1,22 @@
 export type QaPolicy = 'off' | 'suggest' | 'automatic'
 
+/** Operations implemented by the CUA driver and exposed through BOSS.
+ * Screenshots are images on get_window_state/get_desktop_state results; CUA
+ * removed the former standalone `screenshot` operation from its tool surface. */
+export const COMPUTER_USE_OPERATIONS = [
+  'list_apps',
+  'list_windows',
+  'get_window_state',
+  'get_desktop_state',
+  'zoom',
+  'click',
+  'type_text',
+  'press_key',
+  'hotkey',
+  'scroll',
+  'wait'
+] as const
+
 export type QaAgentTool =
   | 'boss_browser_tabs'
   | 'boss_browser_navigate'
@@ -115,7 +132,7 @@ export const QA_GUIDANCE = [
   'You can see and operate what you build: boss_browser_* drives web pages open in BOSS, and boss_computer drives native applications.',
   'Reach for them whenever a claim about what something looks like or does would otherwise be a guess.',
   'That includes checking your own work after a change, answering a question about a page or an app, and reproducing a bug the user reports.',
-  'Looking is cheap and does not need permission: listing tabs, reading a page, and taking a screenshot are always available.',
+  'Looking is cheap and does not need permission: listing tabs, reading a page, and capturing window or desktop state are always available.',
   'Do not describe a page you have not read or a screen you have not seen.',
   'Acting on a page or an app — navigating, clicking, typing — needs Automatic QA turned on, and the tool says so if it is not.'
 ].join(' ')
@@ -206,11 +223,11 @@ export const QA_TOOL_DEFINITIONS: Array<{
   },
   {
     name: 'boss_computer',
-    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. Reach for it when a question is about what is on screen, when you want to check how a desktop app looks or behaves, or when a change you made shows up in an app rather than a browser. Looking is always available: list_apps and list_windows find what is running, get_window_state and get_desktop_state describe it, screenshot and zoom show it. Acting needs Automatic QA: click, type_text, press_key, hotkey, scroll, wait. Look before you act, and look again afterwards — an action you have not verified is not finished.',
+    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. Reach for it when a question is about what is on screen, when you want to check how a desktop app looks or behaves, or when a change you made shows up in an app rather than a browser. Looking is always available: list_apps and list_windows find what is running; get_window_state and get_desktop_state return both state and a screenshot; zoom shows a cropped region. Acting needs Automatic QA: click, type_text, press_key, hotkey, scroll, wait. Look before you act, and look again afterwards — an action you have not verified is not finished.',
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['list_apps', 'list_windows', 'get_window_state', 'get_desktop_state', 'screenshot', 'zoom', 'click', 'type_text', 'press_key', 'hotkey', 'scroll', 'wait'] },
+        operation: { type: 'string', enum: [...COMPUTER_USE_OPERATIONS] },
         arguments: { type: 'object', additionalProperties: true }
       },
       required: ['operation'],

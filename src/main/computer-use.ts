@@ -5,23 +5,10 @@ import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ComputerUsePermissions, ComputerUseStatus, PrivacyPane } from '@shared/ipc'
-import type { AgentToolResult } from '@shared/qa'
+import { COMPUTER_USE_OPERATIONS, type AgentToolResult } from '@shared/qa'
 
 const HOST_BUNDLE_ID = 'dev.boss.app'
-const ALLOWED_TOOLS = new Set([
-  'list_apps',
-  'list_windows',
-  'get_window_state',
-  'get_desktop_state',
-  'screenshot',
-  'zoom',
-  'click',
-  'type_text',
-  'press_key',
-  'hotkey',
-  'scroll',
-  'wait'
-])
+const ALLOWED_TOOLS = new Set<string>(COMPUTER_USE_OPERATIONS)
 
 function resolveCuaBin(): string {
   const exe = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver'
