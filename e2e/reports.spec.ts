@@ -20,6 +20,7 @@ test('automation reports have a durable inbox, rich detail, and source-thread pr
   await detail.getByRole('button', { name: 'Source thread' }).click()
   await expect(appPage.locator('.workspace-shell')).toBeVisible()
   await expect(appPage.locator('.reports-page')).not.toBeVisible()
+  await expect(appPage.locator('.workspace-tab.active')).toContainText('Automation report source')
 })
 
 test('an automation run opens its saved report without losing the source thread', async ({ appPage }) => {

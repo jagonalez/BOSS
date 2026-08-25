@@ -251,6 +251,20 @@ function initialOpenCodeStopSession(): SessionInfo {
   }
 }
 
+function initialAutomationReportSession(): SessionInfo {
+  return {
+    id: 'thread-report-source',
+    backendId: 'opencode',
+    nativeSessionId: 'native-report-source',
+    projectId: 'boss-e2e',
+    projectPath: PROJECT,
+    executionPath: CHECKOUT,
+    title: 'Automation report source',
+    time: { created: Date.now() - 610_000, updated: Date.now() - 600_000 },
+    model: { id: 'gpt-5.6', provider: 'openai' }
+  }
+}
+
 function sourceMessages(): MessageWithParts[] {
   const sessionID = 'thread-source'
   return [
@@ -376,7 +390,13 @@ export function installE2EApi(boss: BossApi): void {
   let threadPins = savedThreadPins()
   const applyPins = (list: SessionInfo[]): SessionInfo[] =>
     list.map((session) => (threadPins[session.id] === undefined ? session : { ...session, pinned: threadPins[session.id] }))
-  let sessions = applyPins([initialSession(), initialDuplicateSession(), initialClaudeSession(), initialOpenCodeStopSession()])
+  let sessions = applyPins([
+    initialSession(),
+    initialDuplicateSession(),
+    initialClaudeSession(),
+    initialOpenCodeStopSession(),
+    initialAutomationReportSession()
+  ])
   const messages: Record<string, MessageWithParts[]> = {
     'thread-source': sourceMessages(),
     'thread-duplicate': duplicateMessages(),
@@ -455,7 +475,7 @@ export function installE2EApi(boss: BossApi): void {
     id: 'run-report-seed',
     automationId: 'automation-webhook-seed',
     reportId: 'report-codex-seed',
-    threadId: 'thread-source',
+    threadId: 'thread-report-source',
     trigger: 'schedule',
     status: 'success',
     summary: 'Codex added report history and improved mobile review.',
@@ -468,7 +488,7 @@ export function installE2EApi(boss: BossApi): void {
     automationId: 'automation-webhook-seed',
     automationName: 'Review incoming PRs',
     runId: 'run-report-seed',
-    threadId: 'thread-source',
+    threadId: 'thread-report-source',
     projectPath: PROJECT,
     title: 'Codex changelog',
     summary: 'Codex added report history and improved mobile review.',
