@@ -32,6 +32,11 @@ const scripted: EvalRuntime<LabAssistantEvalInput, LabAssistantEvalObservation> 
         agent_id: 'agent-codex',
         message: 'PR #22 now has a merge conflict after PR #21 merged. Rebase it and resolve the conflict.'
       })
+    } else if (context.scenarioId === 'lab-assistant.route-ci-failure') {
+      input.world.execute('lab_assistant_message_agent', {
+        agent_id: 'agent-codex',
+        message: 'The CI workflow failed on PR #22. Investigate Electron end-to-end; the failing step is Run npm run test:e2e.'
+      })
     } else {
       input.world.execute('lab_assistant_prepare_release', {
         project_id: 'boss',
@@ -60,6 +65,6 @@ test('simulated releases cannot dispatch before user approval', () => {
 
 test('the initial Lab Assistant scenarios grade durable actions and final state', async () => {
   const report = await runEvalSuite(scripted, LAB_ASSISTANT_EVAL_SCENARIOS)
-  assert.equal(report.summary.total, 3)
-  assert.equal(report.summary.passed, 3)
+  assert.equal(report.summary.total, 4)
+  assert.equal(report.summary.passed, 4)
 })

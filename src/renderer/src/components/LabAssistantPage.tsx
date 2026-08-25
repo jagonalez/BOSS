@@ -47,6 +47,11 @@ export function LabAssistantPage(): React.JSX.Element {
     return rank[a.status] - rank[b.status] || b.updatedAt - a.updatedAt
   }), [assistant])
   const activeTasks = tasks.filter((task) => task.status !== 'done')
+  const incidents = useMemo(() => [...(assistant?.ciIncidents ?? [])].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'failing' ? -1 : 1
+    return b.updatedAt - a.updatedAt
+  }), [assistant])
+  const activeIncidents = incidents.filter((incident) => incident.status === 'failing')
   const projectPaths = [...new Set([
     currentProjectPath,
     ...projects.map((project) => project.path || project.directory || project.worktree || ''),
@@ -100,6 +105,7 @@ export function LabAssistantPage(): React.JSX.Element {
         </div>
         <div className="lab-assistant-counts">
           <strong>{activeTasks.length}</strong><span>active tasks</span>
+          <strong>{activeIncidents.length}</strong><span>CI failures</span>
           <strong>{openQuestions.length}</strong><span>open decisions</span>
         </div>
       </header>
@@ -133,6 +139,44 @@ export function LabAssistantPage(): React.JSX.Element {
                   <span>{assistant?.activities[0]?.detail ?? 'New orchestration decisions will appear here.'}</span>
                 </div>
               ) : null}
+            </div>
+          </section>
+
+          <section className="product-section" aria-label="Lab Assistant CI monitoring">
+            <div className="product-section-head">
+              <div><h2>CI monitoring</h2><p>GitHub Actions failures routed to their owning agents.</p></div>
+              <span>{activeIncidents.length}</span>
+            </div>
+            <div className="lab-ci-list">
+              {incidents.slice(0, 6).map((incident) => {
+                const pullRequest = assistant?.pullRequests.find((candidate) => candidate.id === incident.pullRequestId)
+                const routedThread = (snapshot?.threads ?? []).find((thread) => thread.threadId === incident.routedTo)
+                const failures = incident.jobs.flatMap((job) => job.failedSteps.length
+                  ? job.failedSteps.map((step) => `${job.name} · ${step}`)
+                  : [job.name])
+                return (
+                  <article className={`lab-ci-incident ${incident.status}`} key={incident.id}>
+                    <span className="lab-ci-state">{incident.status}</span>
+                    <div className="lab-ci-copy">
+                      <strong>{incident.workflow}</strong>
+                      <small>
+                        {incident.repository} · {pullRequest ? `PR #${pullRequest.number}` : incident.headBranch} · run #{incident.runNumber}, attempt {incident.runAttempt}
+                        {incident.occurrenceCount > 1 ? ` · ${incident.occurrenceCount} consecutive failures` : ''}
+                        {routedThread ? ` · ${routedThread.title}` : incident.routedTo === 'manual' ? ' · you are handling it' : ''}
+                      </small>
+                      <span>{failures.length ? failures.join(' · ') : 'Run failed before GitHub reported a failed job or step.'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={`Open ${incident.workflow} run ${incident.runNumber}`}
+                      onClick={() => void window.boss.openExternal(incident.url)}
+                    >
+                      Open run
+                    </button>
+                  </article>
+                )
+              })}
+              {incidents.length === 0 ? <div className="product-empty">No workflow failures observed.</div> : null}
             </div>
           </section>
 

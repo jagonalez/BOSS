@@ -23,9 +23,9 @@ git, speech. Tokens and credentials stay on the machine.
 - **`boss` command** — run `boss .` in a terminal to open that folder in BOSS, creating the project if the folder is not one yet. Install it from Settings → Updates; it symlinks into `/usr/local/bin`, so app updates do not break it. With BOSS already running the folder opens in that window, and opening a git worktree opens its repository with that checkout selected.
 - **Worktrees** — give a thread its own git worktree so agents work in parallel without colliding. `.worktreeinclude` and `.worktreesetup` control what a fresh checkout gets (see below).
 - **Delegation & fan-out** — hand a subtask to another backend, or run the same task on several at once in separate worktrees and compare the diffs.
-- **Automations** — cron-scheduled agent runs with their own prompt, backend, workspace strategy, overlap policy, run history, and a durable report for every completed answer.
-- **Reports** — a local inbox of full automation results rendered as Markdown, with unread state and a link back to the source thread for follow-up or debugging.
-- **Lab Assistant** — a durable orchestration inbox for global and per-project tasks, dependencies, ordered or parallel execution decisions, PR monitoring, and explicit handoff to an existing agent thread.
+- **Automations** — cron-scheduled agent runs with their own prompt, backend, workspace strategy, overlap policy, run history, and optional durable reports.
+- **Reports** — a local inbox of Markdown artifacts created by agents or automations, with unread state and a link back to the source thread for follow-up.
+- **Lab Assistant** — a durable orchestration inbox for global and per-project tasks, dependencies, ordered or parallel execution decisions, PR and GitHub Actions failure monitoring, and explicit handoff to an existing agent thread.
 - **MCP** — connect stdio or HTTP servers with per-connection env, headers, and encrypted tokens; BOSS also exposes its own tools (browser, computer-use, thread bus, `publish_site`) to agents that support MCP.
 - **Workspace** — a tiling layout of splits and tabs, with named views you can switch between, drag-and-drop between panes, and undo:
   - **Review** — diff of changed files across six scopes (working tree, staged, vs. a branch, per-commit, the open PR, and the review conversation), with inline comments that publish to GitHub.
@@ -169,6 +169,23 @@ The packaged app uses the bundled binary; in dev it uses your PATH `opencode`.
 
 See [Lab evaluations](docs/lab-evals.md) for scenario design, model
 configuration, trace reports, and adding another runtime.
+
+### Lab Assistant GitHub monitoring
+
+Lab Assistant observes authenticated deliveries sent to an automation's GitHub
+webhook URL. Create a GitHub-webhook automation, save it, copy its URL, expose
+the loopback endpoint through your tunnel, and add the URL under the repository's
+**Settings → Webhooks** with JSON payloads and these events:
+
+- **Pull request** events keep merge state and branch ownership current.
+- **Workflow run** events report completed GitHub Actions failures and recoveries.
+
+Workflow-run deliveries feed Lab Assistant even though they do not start the
+automation itself. A failed run is matched to the agent thread whose worktree
+branch owns it. The agent receives the failed job and step names; if ownership
+is missing or ambiguous, the decision stays in the Lab Assistant inbox for you
+to route from desktop or the mobile PWA. A later successful run resolves the
+incident automatically.
 
 ## Configuration
 

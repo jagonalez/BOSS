@@ -131,5 +131,8 @@ test('the phone has a Lab Assistant inbox with durable decision actions', () => 
   assert.match(script, /type: 'assistant\.task\.assign'/)
   assert.match(script, /function renderAssistant/)
   assert.match(script, /Task queue/)
+  assert.match(script, /CI monitoring/)
+  assert.match(script, /assistant\.ciIncidents/)
+  assert.match(script, /Run failed before GitHub reported a failed job or step/)
   assert.match(script, />Assistant<\/button>/)
 })

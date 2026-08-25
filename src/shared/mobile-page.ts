@@ -158,7 +158,7 @@ var threadTitles = {};
 var automations = { automations: [], runs: [] };
 var reports = { reports: [] };
 var reportDetails = {};
-var assistant = { tasks: [], taskPlans: {}, pullRequests: [], questions: [], activities: [], mergeOrders: {} };
+var assistant = { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {} };
 var messages = {};
 var permissions = {};
 var busy = {};
@@ -343,7 +343,7 @@ function refreshReports() {
 
 function refreshAssistant() {
   return api({ type: 'assistant.snapshot' }).then(function (snapshot) {
-    assistant = snapshot || { tasks: [], taskPlans: {}, pullRequests: [], questions: [], activities: [], mergeOrders: {} };
+    assistant = snapshot || { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {} };
     if (view.name === 'assistant') render();
   });
 }
@@ -496,12 +496,18 @@ function renderReport() {
 
 function renderAssistant() {
   var open = (assistant.questions || []).filter(function (question) { return question.status === 'open'; });
+  var incidents = (assistant.ciIncidents || []).slice().sort(function (a, b) {
+    if (a.status !== b.status) return a.status === 'failing' ? -1 : 1;
+    return (b.updatedAt || 0) - (a.updatedAt || 0);
+  });
+  var activeIncidents = incidents.filter(function (incident) { return incident.status === 'failing'; });
   var tasks = (assistant.tasks || []).slice().sort(function (a, b) {
     var rank = { running: 0, review: 1, ready: 2, blocked: 3, inbox: 4, done: 5 };
     return (rank[a.status] || 0) - (rank[b.status] || 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
   });
   var html = '<div class="card"><div class="title">Lab Assistant</div><div class="sub">' +
     tasks.filter(function (task) { return task.status !== 'done'; }).length + ' active tasks · ' +
+    activeIncidents.length + ' CI failure' + (activeIncidents.length === 1 ? '' : 's') + ' · ' +
     open.length + ' decision' + (open.length === 1 ? '' : 's') + ' waiting</div></div>';
   open.forEach(function (question) {
     html += '<div class="card"><div class="title">' + esc(question.prompt) + '</div>' +
@@ -516,6 +522,22 @@ function renderAssistant() {
     html += '</div>';
   });
   if (!open.length) html += '<div class="empty">Nothing needs a decision.</div>';
+  html += '<div class="section">CI monitoring</div>';
+  incidents.slice(0, 6).forEach(function (incident) {
+    var pr = (assistant.pullRequests || []).find(function (candidate) { return candidate.id === incident.pullRequestId; });
+    var failures = [];
+    (incident.jobs || []).forEach(function (job) {
+      if (job.failedSteps && job.failedSteps.length) job.failedSteps.forEach(function (step) { failures.push(job.name + ' · ' + step); });
+      else failures.push(job.name);
+    });
+    html += '<div class="card"><div class="row"><span class="badge ' + (incident.status === 'failing' ? 'failure' : 'success') + '">' + esc(incident.status) + '</span>' +
+      '<div><div class="title">' + esc(incident.workflow) + '</div><div class="sub">' + esc(incident.repository) + ' · ' +
+      esc(pr ? 'PR #' + pr.number : incident.headBranch) + ' · run #' + esc(incident.runNumber) + ', attempt ' + esc(incident.runAttempt) +
+      (incident.occurrenceCount > 1 ? ' · ' + esc(incident.occurrenceCount) + ' consecutive failures' : '') + '</div></div></div>' +
+      '<div class="sub" style="margin-top:8px">' + esc(failures.length ? failures.join(' · ') : 'Run failed before GitHub reported a failed job or step.') + '</div>' +
+      '<a class="btn" style="display:inline-block;margin-top:8px;text-decoration:none" target="_blank" rel="noreferrer" href="' + esc(incident.url) + '">Open run</a></div>';
+  });
+  if (!incidents.length) html += '<div class="empty">No workflow failures observed.</div>';
   html += '<div class="section">Task queue</div>';
   if (accessRole === 'control') {
     var projects = {};

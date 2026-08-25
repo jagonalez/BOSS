@@ -1621,10 +1621,10 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
     followRef.current = true
     if (el) el.scrollTop = el.scrollHeight
     const t1 = setTimeout(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      if (followRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }, 150)
     const t2 = setTimeout(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      if (followRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }, 600)
     return () => {
       clearTimeout(t1)
