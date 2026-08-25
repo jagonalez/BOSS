@@ -14,7 +14,7 @@ test('Lab Assistant surfaces and records a merge-order decision', async ({ appPa
 
   await control(appPage).then((item) => item.failNextBackendRequest('assistant.answer', 'Decision store unavailable'))
   await assistant.getByRole('button', { name: '#21 · Mobile polish' }).click()
-  await expect(assistant.getByRole('alert')).toContainText('Decision store unavailable')
+  await expect(appPage.getByRole('alert')).toContainText('Decision store unavailable')
   await expect(assistant).toContainText('Which should merge first?')
 
   await assistant.getByRole('button', { name: '#22 · Eval foundation' }).click()
@@ -44,12 +44,12 @@ test('Lab Assistant creates, unblocks, and assigns project tasks', async ({ appP
       dependsOn: ['assistant-task-plan']
     }
   })
-  const created = assistant.locator('article.command-assistant-task').filter({
+  const created = assistant.locator('article.lab-task').filter({
     has: appPage.getByText('Monitor test failures', { exact: true })
   })
   await expect(created).toContainText('blocked')
 
-  const prerequisite = assistant.locator('article.command-assistant-task').filter({
+  const prerequisite = assistant.locator('article.lab-task').filter({
     has: appPage.getByText('Plan task workflow', { exact: true })
   })
   await prerequisite

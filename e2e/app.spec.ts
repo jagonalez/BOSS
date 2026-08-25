@@ -367,7 +367,7 @@ test('quick-create uses the configured backend and exposes its defaults on the n
   await control(appPage).then((item) => item.resetCalls())
 
   await appPage.getByRole('tab', { name: /Chats/ }).click()
-  await appPage.getByRole('button', { name: 'New chat' }).click()
+  await appPage.getByRole('button', { name: 'New chat', exact: true }).click()
   const created = await lastBackendCall(appPage, 'thread.create')
   expect(created.request).toMatchObject({ backendId: 'claude', scope: 'global' })
 
@@ -458,7 +458,7 @@ test('quick-create with Lab uses the drop-in backend and its default model', asy
   await control(appPage).then((item) => item.resetCalls())
 
   await appPage.getByRole('tab', { name: /Chats/ }).click()
-  await appPage.getByRole('button', { name: 'New chat' }).click()
+  await appPage.getByRole('button', { name: 'New chat', exact: true }).click()
   const created = await lastBackendCall(appPage, 'thread.create')
   expect(created.request).toMatchObject({ backendId: 'lab', scope: 'global' })
 
