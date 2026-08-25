@@ -296,6 +296,10 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
           onChange={(e) => patch({ prompt: e.target.value })}
         />
       </label>
+      <label className="settings-check">
+        <input type="checkbox" checked={draft.saveReport} onChange={(e) => patch({ saveReport: e.target.checked })} />
+        <span>Save the final response to Reports</span>
+      </label>
       <label className="settings-row">
         <span className="settings-row-label">Project</span>
         <select
@@ -507,10 +511,6 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
         <label className="settings-check">
           <input type="checkbox" checked={draft.catchUp} onChange={(e) => patch({ catchUp: e.target.checked })} />
           <span>Run once at launch when a scheduled run was missed</span>
-        </label>
-        <label className="settings-check">
-          <input type="checkbox" checked={draft.saveReport} onChange={(e) => patch({ saveReport: e.target.checked })} />
-          <span>Save the final response to Reports</span>
         </label>
         <label className="settings-row">
           <span className="settings-row-label">Notifications</span>
