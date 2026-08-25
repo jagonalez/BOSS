@@ -26,7 +26,6 @@ import { createAnnotation, type Annotation, type AnnotationAnchor } from '@share
 import { anchorFromSelection } from '../lib/annotation-anchor'
 import { groupTranscriptTurns, searchTranscript, type TranscriptTurn } from '../lib/transcript'
 import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
-import { selectViewportAnchor, viewportAnchorScrollDelta } from '../lib/viewport-bookmark'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -1338,7 +1337,7 @@ const TurnViewMemo = React.memo(TurnView)
 interface ViewportBookmark {
   following: boolean
   turnKey?: string
-  offsetFromViewportTop: number
+  offsetWithinTurn: number
 }
 
 const viewportBookmarks = new Map<string, ViewportBookmark>()
@@ -1364,7 +1363,6 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
   const reverted = useStore(appStore, (s) => (effectiveId ? s.reverted[effectiveId] : undefined))
   const projects = useStore(appStore, (s) => s.projects)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const bookmarkCaptureFrameRef = useRef<number>()
   const searchInputRef = useRef<HTMLInputElement>(null)
   const searchRestoreFocusRef = useRef<HTMLElement | null>(null)
   /** Whether to keep the view pinned to the newest output. A ref, not state:
@@ -1570,49 +1568,19 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
     // scroll and this handler.
     const following = el.scrollHeight - el.scrollTop - el.clientHeight < 120
     followRef.current = following
-    const viewportTop = el.getBoundingClientRect().top
-    const renderedAnchors = Array.from(
-      el.querySelectorAll<HTMLElement>('.transcript-virtual-turn[data-virtual-turn-key]')
-    ).map((turn) => ({
-      turnKey: turn.dataset.virtualTurnKey ?? '',
-      offsetFromViewportTop: turn.getBoundingClientRect().top - viewportTop
-    })).filter((anchor) => anchor.turnKey.length > 0 && anchor.offsetFromViewportTop <= el.clientHeight)
-    const renderedAnchor = selectViewportAnchor(renderedAnchors)
-    // During the first render there may not be a row in the DOM yet. Preserve
-    // the old virtual-measurement fallback so a navigation in that frame still
-    // gets a useful bookmark; normal reading positions use rendered geometry.
-    const measuredItem = renderedAnchor ? undefined : virtualizer.getVirtualItemForOffset(el.scrollTop)
+    const item = virtualizer.getVirtualItemForOffset(el.scrollTop)
     viewportBookmarks.set(viewportKey, {
       following,
-      turnKey: renderedAnchor?.turnKey ?? (measuredItem ? String(measuredItem.key) : undefined),
-      offsetFromViewportTop: renderedAnchor?.offsetFromViewportTop ?? (measuredItem ? measuredItem.start - el.scrollTop : 0)
+      turnKey: item ? String(item.key) : undefined,
+      offsetWithinTurn: item ? el.scrollTop - item.start : 0
     })
   }, [viewportKey, virtualizer])
   const onScroll = useCallback((): void => {
     // Virtual measurement can emit one last correction after a tab loses
     // active status but before its host becomes display:none. That correction
     // must not replace the position captured at the moment the user left.
-    if (!active) return
-    captureBookmark()
-    if (bookmarkCaptureFrameRef.current !== undefined) {
-      cancelAnimationFrame(bookmarkCaptureFrameRef.current)
-    }
-    // The scroll event arrives before React commits TanStack Virtual's new
-    // slice. Re-capture after both that render and its animation-frame-wrapped
-    // ResizeObserver measurements, coalescing continuous wheel/drag events.
-    bookmarkCaptureFrameRef.current = requestAnimationFrame(() => {
-      bookmarkCaptureFrameRef.current = requestAnimationFrame(() => {
-        bookmarkCaptureFrameRef.current = undefined
-        captureBookmark()
-      })
-    })
+    if (active) captureBookmark()
   }, [active, captureBookmark])
-
-  useEffect(() => () => {
-    if (bookmarkCaptureFrameRef.current !== undefined) {
-      cancelAnimationFrame(bookmarkCaptureFrameRef.current)
-    }
-  }, [])
 
   const restoreBookmark = useCallback((bookmark: ViewportBookmark): void => {
     let attempts = 0
@@ -1629,33 +1597,8 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
       }
       const index = turns.findIndex((turn) => turn.key === bookmark.turnKey)
       if (index < 0) return
-      let correctionFrames = 0
-      let stableFrames = 0
-      const correctRenderedAnchor = (): void => {
-        const currentScroller = scrollRef.current
-        if (!currentScroller || currentScroller.clientHeight === 0) return
-        const target = Array.from(
-          currentScroller.querySelectorAll<HTMLElement>('.transcript-virtual-turn[data-virtual-turn-key]')
-        ).find((turn) => turn.dataset.virtualTurnKey === bookmark.turnKey)
-        if (!target) {
-          virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' })
-          if (correctionFrames++ < 12) requestAnimationFrame(correctRenderedAnchor)
-          return
-        }
-        const currentOffset = target.getBoundingClientRect().top - currentScroller.getBoundingClientRect().top
-        const delta = viewportAnchorScrollDelta(currentOffset, bookmark.offsetFromViewportTop)
-        if (Math.abs(delta) > 0.5) {
-          stableFrames = 0
-          virtualizer.scrollBy(delta, { behavior: 'auto' })
-        } else {
-          stableFrames += 1
-        }
-        // ResizeObserver and virtual scroll reconciliation both settle on
-        // animation frames. Require two matching frames, while bounding the
-        // work so a removed row can never leave a correction loop behind.
-        if (stableFrames < 2 && correctionFrames++ < 12) requestAnimationFrame(correctRenderedAnchor)
-      }
-      requestAnimationFrame(correctRenderedAnchor)
+      virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' })
+      requestAnimationFrame(() => virtualizer.scrollBy(bookmark.offsetWithinTurn, { behavior: 'auto' }))
     }
     requestAnimationFrame(restore)
   }, [turns, virtualizer])
@@ -1664,22 +1607,9 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
   useLayoutEffect(() => {
     if (wasActiveRef.current && !active) {
       captureBookmark()
-      const bookmark = viewportBookmarks.get(viewportKey)
-      const el = scrollRef.current
-      if (el && bookmark && 'bossE2E' in window) {
-        el.dataset.e2eDepartureBookmarkKey = bookmark.turnKey ?? ''
-        el.dataset.e2eDepartureBookmarkOffset = String(Math.round(bookmark.offsetFromViewportTop))
-      }
     } else if (!wasActiveRef.current && active) {
       const bookmark = viewportBookmarks.get(viewportKey)
-      if (bookmark) {
-        const el = scrollRef.current
-        if (el && 'bossE2E' in window) {
-          el.dataset.e2eRestorationBookmarkKey = bookmark.turnKey ?? ''
-          el.dataset.e2eRestorationBookmarkOffset = String(Math.round(bookmark.offsetFromViewportTop))
-        }
-        restoreBookmark(bookmark)
-      }
+      if (bookmark) restoreBookmark(bookmark)
     }
     wasActiveRef.current = active
   }, [active, captureBookmark, restoreBookmark, viewportKey])
@@ -1908,7 +1838,6 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
                     key={String(virtualTurn.key)}
                     ref={virtualizer.measureElement}
                     data-index={virtualTurn.index}
-                    data-virtual-turn-key={turn.key}
                     className="transcript-virtual-turn"
                     style={{ transform: `translateY(${virtualTurn.start}px)` }}
                   >
