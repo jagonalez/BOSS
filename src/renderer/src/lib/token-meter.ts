@@ -2,7 +2,7 @@ import type { ThreadUsageReport } from '@shared/supervision'
 
 const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
 
-/** Compact token count, the way Command Center prints totals. */
+/** Compact token count for small usage surfaces. */
 export function formatCompact(value: number): string {
   return compact.format(value)
 }

@@ -8,7 +8,7 @@ import { MONO_FONTS, READING_SIZE, TERMINAL_SIZE, UI_FONTS } from '@shared/typog
 import { KOKORO_VOICES } from '@shared/speech'
 import type { ViewMode } from '@shared/workspace'
 import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setUiDensity, setUiFontSize, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
-import { projectName } from './CommandCenter'
+import { projectName } from '../lib/project-name'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
 import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendSubscriptionUsage, LabConnection, LabConnectionsSettings, SandboxSettings, ThreadTitleSettings } from '@shared/backend'

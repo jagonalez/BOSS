@@ -1,4 +1,4 @@
-export type AppPage = 'command-center' | 'automations' | 'sites' | 'project' | 'chat'
+export type AppPage = 'home' | 'lab-assistant' | 'automations' | 'sites' | 'project' | 'chat'
 
 export type WorkspaceTabKind = 'thread' | 'browser' | 'terminal' | 'review' | 'files'
 export type SplitDirection = 'horizontal' | 'vertical'

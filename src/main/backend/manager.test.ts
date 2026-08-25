@@ -172,7 +172,7 @@ test('a native steer the backend refuses leaves the message queued', () => {
   )
 })
 
-test('an image part joins a real message instead of one invented for it', () => {
+test('an image part joins the tool message that produced it', () => {
   // groupTurns closes a turn only on a user message, so an assistant message
   // that nothing else shares never ends one: an image given a fresh messageID
   // stayed in the open turn and was drawn again under every later reply until
@@ -182,31 +182,18 @@ test('an image part joins a real message instead of one invented for it', () => 
   assert.ok(start > 0, 'expected an emitImagePart method')
   const body = source.slice(start, source.indexOf('\n  }', start))
   assert.ok(
-    !/messageID:\s*`assistant-tool-image-\$\{randomUUID\(\)\}`/.test(body),
+    !body.includes('assistant-tool-image-'),
     'emitImagePart must not mint a message id as its default'
   )
-  assert.ok(body.includes('messageID: owner'), 'the part should take the resolved owner')
-  assert.ok(
-    body.includes('messageId ?? binding.lastAssistantMessageId'),
-    'it should prefer the tool part\'s message, then the live assistant message'
-  )
+  assert.ok(body.includes('messageID: messageId'), 'the part should take the tool message owner')
+  assert.ok(body.includes('messageId: string'), 'an owner should be required before an image can be emitted')
 
   // Lifting an image out of a tool result already knows the message: use it
   // rather than falling back to whichever assistant message is current.
   const extract = source.slice(source.indexOf('private extractToolResultImages('))
   assert.ok(
-    /emitImagePart\(binding, tool, stored, typeof part\.messageID/.test(extract),
+    /emitImagePart\(binding, tool, stored, part\.messageID\)/.test(extract),
     'a lifted image should be anchored to its own tool part'
-  )
-})
-
-test('a new run does not hang an image off the turn before it', () => {
-  // The anchor is only meaningful while the run that set it is live. Carrying
-  // it into the next run would attach a fresh image to a turn already drawn.
-  const status = source.slice(source.indexOf("if (eventType === 'session.status')"))
-  assert.ok(
-    /status === 'busy'\) binding\.lastAssistantMessageId = undefined/.test(status),
-    'a run going busy should clear the remembered message'
   )
 })
 
