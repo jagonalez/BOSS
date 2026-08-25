@@ -260,6 +260,7 @@ function initialAutomationReportSession(): SessionInfo {
     projectPath: PROJECT,
     executionPath: CHECKOUT,
     title: 'Automation report source',
+    archived: true,
     time: { created: Date.now() - 610_000, updated: Date.now() - 600_000 },
     model: { id: 'gpt-5.6', provider: 'openai' }
   }

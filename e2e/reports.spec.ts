@@ -1,4 +1,4 @@
-import { expect, lastBackendCall, test } from './fixtures'
+import { backendCalls, expect, lastBackendCall, test } from './fixtures'
 
 test('automation reports have a durable inbox, rich detail, and source-thread provenance', async ({ appPage }) => {
   await appPage.getByRole('button', { name: 'Reports' }).click()
@@ -20,7 +20,8 @@ test('automation reports have a durable inbox, rich detail, and source-thread pr
   await detail.getByRole('button', { name: 'Source thread' }).click()
   await expect(appPage.locator('.workspace-shell')).toBeVisible()
   await expect(appPage.locator('.reports-page')).not.toBeVisible()
-  await expect(appPage.locator('.workspace-tab.active')).toContainText('Automation report source')
+  await expect.poll(async () => (await backendCalls(appPage, 'thread.messages'))
+    .some((call) => call.request.threadId === 'thread-report-source')).toBe(true)
 })
 
 test('an automation run opens its saved report without losing the source thread', async ({ appPage }) => {
