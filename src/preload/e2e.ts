@@ -631,7 +631,42 @@ export function installE2EApi(boss: BossApi): void {
       createdAt: Date.now() - 10_000
     }],
     activities: [],
-    mergeOrders: {}
+    mergeOrders: {},
+    workflowConfig: {
+      planner: { backendId: 'claude' },
+      implementer: { backendId: 'codex' },
+      reviewers: [{ backendId: 'lab' }],
+      maxReviewCycles: 2
+    },
+    workflowRuns: [{
+      id: 'assistant-workflow-history',
+      taskId: 'assistant-task-history',
+      title: 'Previous managed task',
+      projectPath: PROJECT,
+      status: 'completed',
+      stage: 'reviewing',
+      config: {
+        planner: { backendId: 'claude' },
+        implementer: { backendId: 'codex' },
+        reviewers: [{ backendId: 'lab' }],
+        maxReviewCycles: 2
+      },
+      plannerThreadId: 'thread-source',
+      implementerThreadId: 'thread-target',
+      reviewCycle: 1,
+      reviews: [{
+        cycle: 1,
+        index: 0,
+        threadId: 'thread-review',
+        backendId: 'lab',
+        status: 'passed',
+        startedAt: Date.now() - 80_000,
+        finishedAt: Date.now() - 70_000
+      }],
+      createdAt: Date.now() - 100_000,
+      updatedAt: Date.now() - 70_000,
+      completedAt: Date.now() - 70_000
+    }]
   }
   // Mirrors TelegramBot.status(): off and tokenless until settings turn it on.
   const telegramFixture = {
@@ -1233,6 +1268,37 @@ export function installE2EApi(boss: BossApi): void {
           tasks: assistantFixture.tasks.map((task) => task.id === request.taskId
             ? { ...task, status: 'running', assignedThreadId: request.threadId, updatedAt: now }
             : task)
+        }
+        return structuredClone(assistantFixture)
+      }
+      case 'assistant.workflow.configure': {
+        assistantFixture = { ...assistantFixture, generatedAt: Date.now(), workflowConfig: request.config }
+        return structuredClone(assistantFixture)
+      }
+      case 'assistant.workflow.start': {
+        const now = Date.now()
+        const task = assistantFixture.tasks.find((candidate) => candidate.id === request.taskId)
+        if (!task || !assistantFixture.workflowConfig) throw new Error('Workflow fixture is unavailable')
+        assistantFixture = {
+          ...assistantFixture,
+          generatedAt: now,
+          tasks: assistantFixture.tasks.map((candidate) => candidate.id === request.taskId
+            ? { ...candidate, status: 'running', assignedThreadId: 'thread-workflow-plan', updatedAt: now }
+            : candidate),
+          workflowRuns: [{
+            id: 'assistant-workflow-started',
+            taskId: task.id,
+            title: task.title,
+            projectPath: task.projectPath ?? PROJECT,
+            status: 'running',
+            stage: 'planning',
+            config: assistantFixture.workflowConfig,
+            plannerThreadId: 'thread-workflow-plan',
+            reviewCycle: 1,
+            reviews: [],
+            createdAt: now,
+            updatedAt: now
+          }, ...assistantFixture.workflowRuns]
         }
         return structuredClone(assistantFixture)
       }

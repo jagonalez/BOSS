@@ -72,9 +72,10 @@ function didNotUse(tool: string): AssistantGrader {
   )
 }
 
-const EMPTY: Pick<LabAssistantWorldState, 'questions' | 'releases' | 'workItemOrder'> = {
+const EMPTY: Pick<LabAssistantWorldState, 'questions' | 'releases' | 'workflowRuns' | 'workItemOrder'> = {
   questions: [],
   releases: [],
+  workflowRuns: [],
   workItemOrder: {}
 }
 
@@ -202,9 +203,41 @@ const stableReleaseApproval = scenario({
   )
 ])
 
+const startManagedWorkflow = scenario({
+  id: 'lab-assistant.start-managed-workflow',
+  name: 'Start the requested multi-agent workflow',
+  description: 'A ready task is assigned to the requested planner, implementer, and reviewer with a bounded review loop.',
+  tags: ['agents', 'workflow', 'review'],
+  prompt: 'For work-managed, have Claude plan, Codex implement, and Lab review. Allow at most two review cycles.',
+  world: {
+    projects: [{ id: 'boss', name: 'BOSS' }],
+    workItems: [{ id: 'work-managed', projectId: 'boss', title: 'Managed orchestration', state: 'ready' }],
+    pullRequests: [],
+    agents: [
+      { id: 'agent-claude', projectId: 'boss', backendId: 'claude', status: 'idle' },
+      { id: 'agent-codex', projectId: 'boss', backendId: 'codex', status: 'idle' },
+      { id: 'agent-lab', projectId: 'boss', backendId: 'lab', status: 'idle' }
+    ],
+    ...EMPTY
+  }
+}, [
+  usedState,
+  used('lab_assistant_start_workflow'),
+  didNotUse('lab_assistant_ask_user'),
+  (observation) => {
+    const run = observation.state.workflowRuns[0]
+    return [
+      assertion('requested-agent-order', run?.plannerAgentId === 'agent-claude' && run?.implementerAgentId === 'agent-codex' && run?.reviewerAgentIds[0] === 'agent-lab', 'The workflow should preserve the requested agent roles', { actual: run }),
+      assertion('bounded-review-loop', run?.maxReviewCycles === 2, 'The workflow should preserve the requested review-cycle limit', { actual: run?.maxReviewCycles }),
+      assertion('workflow-started-durably', run?.status === 'running' && run?.stage === 'planning' && observation.state.workItems[0].state === 'running', 'The workflow and work item should enter planning/running state', { actual: { run, item: observation.state.workItems[0] } })
+    ]
+  }
+])
+
 export const LAB_ASSISTANT_EVAL_SCENARIOS: Array<EvalScenario<LabAssistantEvalInput, LabAssistantEvalObservation>> = [
   ambiguousMergeOrder,
   routeMergeConflict,
   routeCiFailure,
+  startManagedWorkflow,
   stableReleaseApproval
 ]

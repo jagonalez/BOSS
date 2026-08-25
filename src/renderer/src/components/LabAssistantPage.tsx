@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { SupervisionSnapshot } from '@shared/supervision'
-import type { LabAssistantSnapshot, LabAssistantTaskStatus } from '@shared/lab-assistant'
+import type { BackendDescriptor, BackendId, BackendModelDescriptor } from '@shared/backend'
+import type { LabAssistantAgentConfig, LabAssistantSnapshot, LabAssistantTaskStatus, LabAssistantWorkflowConfig } from '@shared/lab-assistant'
 import { appStore, useStore } from '../state/AppState'
 import { OpenCode } from '../lib/opencode'
 import { projectName } from '../lib/project-name'
+import { refreshBackendModels, selectSession } from '../lib/actions'
+import { ModelSelect } from './ModelSelect'
 
 function timeAgo(timestamp: number): string {
   const diff = Date.now() - timestamp
@@ -13,15 +16,66 @@ function timeAgo(timestamp: number): string {
   return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
+function AgentPicker({
+  label,
+  agent,
+  backends,
+  models,
+  loading,
+  onChange
+}: {
+  label: string
+  agent: LabAssistantAgentConfig
+  backends: BackendDescriptor[]
+  models: Partial<Record<BackendId, BackendModelDescriptor[]>>
+  loading: boolean
+  onChange: (agent: LabAssistantAgentConfig) => void
+}): React.JSX.Element {
+  return (
+    <div className="lab-workflow-agent">
+      <label>{label}</label>
+      <select
+        aria-label={`${label} backend`}
+        value={agent.backendId}
+        onChange={(event) => onChange({ backendId: event.target.value as BackendId, instruction: agent.instruction })}
+      >
+        {backends.map((backend) => <option key={backend.id} value={backend.id}>{backend.label}</option>)}
+      </select>
+      <ModelSelect
+        backendId={agent.backendId}
+        models={models[agent.backendId] ?? []}
+        selected={agent.model}
+        loading={loading}
+        emptyLabel="Backend default"
+        onPick={(model) => onChange({
+          ...agent,
+          model: model ? { providerID: model.provider || agent.backendId, modelID: model.id } : undefined
+        })}
+      />
+      <input
+        aria-label={`${label} instructions`}
+        value={agent.instruction ?? ''}
+        onChange={(event) => onChange({ ...agent, instruction: event.target.value })}
+        placeholder="Optional role instructions"
+      />
+    </div>
+  )
+}
+
 export function LabAssistantPage(): React.JSX.Element {
   const projects = useStore(appStore, (state) => state.projects)
   const currentProjectPath = useStore(appStore, (state) => state.projectPath)
+  const backends = useStore(appStore, (state) => state.backends)
+  const backendModels = useStore(appStore, (state) => state.backendModels)
+  const backendModelsLoading = useStore(appStore, (state) => state.backendModelsLoading)
   const [snapshot, setSnapshot] = useState<SupervisionSnapshot | null>(null)
   const [assistant, setAssistant] = useState<LabAssistantSnapshot | null>(null)
   const [assistantError, setAssistantError] = useState('')
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskProject, setNewTaskProject] = useState('')
   const [newTaskDependency, setNewTaskDependency] = useState('')
+  const [workflowDraft, setWorkflowDraft] = useState<LabAssistantWorkflowConfig | null>(null)
+  const workflowInitialized = useRef(false)
 
   useEffect(() => {
     let disposed = false
@@ -40,6 +94,28 @@ export function LabAssistantPage(): React.JSX.Element {
       window.clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    if (backends.length > 0 && Object.keys(backendModels).length === 0) void refreshBackendModels()
+  }, [backends, backendModels])
+
+  useEffect(() => {
+    if (workflowInitialized.current || !assistant) return
+    const available = backends.filter((backend) => backend.available)
+    if (assistant.workflowConfig) {
+      workflowInitialized.current = true
+      setWorkflowDraft(assistant.workflowConfig)
+    } else if (available.length) {
+      const preferred = available.find((backend) => backend.id === 'lab') ?? available.find((backend) => backend.id === 'codex') ?? available[0]
+      workflowInitialized.current = true
+      setWorkflowDraft({
+        planner: { backendId: preferred.id },
+        implementer: { backendId: preferred.id },
+        reviewers: [{ backendId: preferred.id }],
+        maxReviewCycles: 2
+      })
+    }
+  }, [assistant, backends])
 
   const openQuestions = assistant?.questions.filter((question) => question.status === 'open') ?? []
   const tasks = useMemo(() => [...(assistant?.tasks ?? [])].sort((a, b) => {
@@ -94,6 +170,22 @@ export function LabAssistantPage(): React.JSX.Element {
       setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not record that decision.')
     })
   }
+  const saveWorkflow = (): void => {
+    if (!workflowDraft) return
+    setAssistantError('')
+    void OpenCode.configureLabAssistantWorkflow(workflowDraft).then(setAssistant).catch((error: unknown) => {
+      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not save that workflow.')
+    })
+  }
+  const startWorkflow = (taskId: string): void => {
+    setAssistantError('')
+    void OpenCode.startLabAssistantWorkflow(taskId).then(setAssistant).catch((error: unknown) => {
+      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not start that workflow.')
+    })
+  }
+
+  const availableBackends = backends.filter((backend) => backend.available)
+  const workflowRuns = assistant?.workflowRuns ?? []
 
   return (
     <div className="product-page lab-assistant-page">
@@ -180,6 +272,85 @@ export function LabAssistantPage(): React.JSX.Element {
             </div>
           </section>
 
+          <section className="product-section" aria-label="Lab Assistant managed workflow">
+            <div className="product-section-head">
+              <div><h2>Managed workflow</h2><p>Hand a task from planning to implementation and bounded review.</p></div>
+              <span>{workflowRuns.filter((run) => run.status === 'running').length} running</span>
+            </div>
+            {workflowDraft && availableBackends.length ? (
+              <div className="lab-workflow-editor">
+                <AgentPicker
+                  label="Planner"
+                  agent={workflowDraft.planner}
+                  backends={availableBackends}
+                  models={backendModels}
+                  loading={backendModelsLoading}
+                  onChange={(planner) => setWorkflowDraft({ ...workflowDraft, planner })}
+                />
+                <AgentPicker
+                  label="Implementer"
+                  agent={workflowDraft.implementer}
+                  backends={availableBackends}
+                  models={backendModels}
+                  loading={backendModelsLoading}
+                  onChange={(implementer) => setWorkflowDraft({ ...workflowDraft, implementer })}
+                />
+                {workflowDraft.reviewers.map((reviewer, index) => (
+                  <div className="lab-workflow-reviewer" key={index}>
+                    <AgentPicker
+                      label={`Reviewer ${index + 1}`}
+                      agent={reviewer}
+                      backends={availableBackends}
+                      models={backendModels}
+                      loading={backendModelsLoading}
+                      onChange={(next) => setWorkflowDraft({
+                        ...workflowDraft,
+                        reviewers: workflowDraft.reviewers.map((item, itemIndex) => itemIndex === index ? next : item)
+                      })}
+                    />
+                    {workflowDraft.reviewers.length > 1 ? (
+                      <button type="button" onClick={() => setWorkflowDraft({ ...workflowDraft, reviewers: workflowDraft.reviewers.filter((_, itemIndex) => itemIndex !== index) })}>Remove reviewer</button>
+                    ) : null}
+                  </div>
+                ))}
+                <div className="lab-workflow-controls">
+                  <label>
+                    Review cycles
+                    <input
+                      aria-label="Maximum review cycles"
+                      type="number"
+                      min={1}
+                      max={5}
+                      value={workflowDraft.maxReviewCycles}
+                      onChange={(event) => setWorkflowDraft({ ...workflowDraft, maxReviewCycles: Number(event.target.value) })}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={workflowDraft.reviewers.length >= 5}
+                    onClick={() => setWorkflowDraft({ ...workflowDraft, reviewers: [...workflowDraft.reviewers, { backendId: workflowDraft.reviewers.at(-1)?.backendId ?? workflowDraft.implementer.backendId }] })}
+                  >
+                    Add reviewer
+                  </button>
+                  <button type="button" onClick={saveWorkflow}>Save workflow</button>
+                </div>
+              </div>
+            ) : <div className="product-empty">Connect an agent backend to configure the managed workflow.</div>}
+            <div className="lab-workflow-runs">
+              {workflowRuns.slice(0, 6).map((run) => (
+                <article className={`lab-workflow-run ${run.status}`} key={run.id}>
+                  <span>{run.status}</span>
+                  <div><strong>{run.title}</strong><small>{run.stage} · review cycle {run.reviewCycle}/{run.config.maxReviewCycles}</small></div>
+                  <div className="lab-task-actions">
+                    {run.plannerThreadId ? <button type="button" onClick={() => selectSession(run.plannerThreadId!, false)}>Plan</button> : null}
+                    {run.implementerThreadId ? <button type="button" onClick={() => selectSession(run.implementerThreadId!, false)}>Implementation</button> : null}
+                    {run.reviews.at(-1)?.threadId ? <button type="button" onClick={() => selectSession(run.reviews.at(-1)!.threadId, false)}>Review</button> : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
           <section className="product-section" aria-label="Lab Assistant tasks">
             <div className="product-section-head">
               <div><h2>Task queue</h2><p>Global and project work, ordered by readiness.</p></div>
@@ -221,10 +392,13 @@ export function LabAssistantPage(): React.JSX.Element {
                     </div>
                     <div className="lab-task-actions">
                       {task.status === 'ready' ? (
-                        <select aria-label={`Assign ${task.title}`} value="" onChange={(event) => assignTask(task.id, event.target.value)}>
-                          <option value="">Assign agent…</option>
-                          {eligibleThreads.map((thread) => <option key={thread.threadId} value={thread.threadId}>{thread.title}</option>)}
-                        </select>
+                        <>
+                          {assistant?.workflowConfig && task.projectPath ? <button type="button" onClick={() => startWorkflow(task.id)}>Start workflow</button> : null}
+                          <select aria-label={`Assign ${task.title}`} value="" onChange={(event) => assignTask(task.id, event.target.value)}>
+                            <option value="">Assign agent…</option>
+                            {eligibleThreads.map((thread) => <option key={thread.threadId} value={thread.threadId}>{thread.title}</option>)}
+                          </select>
+                        </>
                       ) : null}
                       {task.status === 'running' ? <button type="button" onClick={() => updateTask(task.id, 'review')}>Ready for review</button> : null}
                       {task.status === 'review' ? <button type="button" onClick={() => updateTask(task.id, 'done')}>Complete</button> : null}

@@ -4,6 +4,7 @@ import { basename, dirname } from 'node:path'
 import type { GitHubDelivery } from '../shared/automation-trigger'
 import type {
   LabAssistantActivity,
+  LabAssistantAgentConfig,
   LabAssistantCiIncident,
   LabAssistantCiJob,
   LabAssistantMergeability,
@@ -14,11 +15,16 @@ import type {
   LabAssistantTaskInput,
   LabAssistantTaskPatch,
   LabAssistantTaskPlan,
-  LabAssistantTaskStatus
+  LabAssistantTaskStatus,
+  LabAssistantWorkflowConfig,
+  LabAssistantWorkflowRole,
+  LabAssistantWorkflowRun
 } from '../shared/lab-assistant'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
 import { workflowRunFromDelivery, type GitHubWorkflowRunObservation } from './lab-assistant-github.ts'
 import type { BackendRequest } from '../shared/backend'
+// @ts-expect-error Node's type-stripping test runner needs the extension.
+import { isBackendId } from '../shared/backend.ts'
 import type { BossEvent } from '../shared/notification'
 import type { SupervisedThread } from '../shared/supervision'
 
@@ -31,6 +37,8 @@ interface StoredLabAssistantState {
   questions: LabAssistantQuestion[]
   activities: LabAssistantActivity[]
   mergeOrders: Record<string, string[]>
+  workflowConfig?: LabAssistantWorkflowConfig
+  workflowRuns?: LabAssistantWorkflowRun[]
 }
 
 export interface LabAssistantHost {
@@ -38,6 +46,21 @@ export interface LabAssistantHost {
   messageAgent(threadId: string, message: string): Promise<void>
   refreshPullRequests?(repository: string): Promise<LabAssistantPullRequest[]>
   inspectWorkflowRun?(repository: string, runId: number, attempt: number): Promise<LabAssistantCiJob[]>
+  createWorkflowStage?(input: {
+    role: LabAssistantWorkflowRole
+    backendId: LabAssistantWorkflowConfig['planner']['backendId']
+    title: string
+    projectPath?: string
+    sourceThreadId?: string
+  }): Promise<string>
+  runWorkflowStage?(
+    threadId: string,
+    role: LabAssistantWorkflowRole,
+    agent: LabAssistantWorkflowConfig['planner'],
+    instruction: string,
+    sourceThreadId?: string
+  ): Promise<void>
+  workflowReviewVerdict?(threadId: string): Promise<{ verdict: 'pass' | 'changes-requested'; notes: string[] } | undefined>
   emit(snapshot: LabAssistantSnapshot): void
   notify(event: BossEvent): void
 }
@@ -97,6 +120,44 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function normalizeWorkflowAgent(agent: LabAssistantAgentConfig, label: string): LabAssistantAgentConfig {
+  if (!agent || !isBackendId(agent.backendId)) throw new Error(`Choose a valid ${label} backend.`)
+  const model = agent.model
+  if (model && (!text(model.modelID) || !text(model.providerID))) {
+    throw new Error(`Choose a valid ${label} model.`)
+  }
+  return {
+    backendId: agent.backendId,
+    ...(model ? {
+      model: {
+        modelID: text(model.modelID),
+        providerID: text(model.providerID),
+        ...(text(model.variant) ? { variant: text(model.variant) } : {})
+      }
+    } : {}),
+    ...(text(agent.instruction) ? { instruction: text(agent.instruction).slice(0, 2_000) } : {})
+  }
+}
+
+function normalizeWorkflowConfig(config: LabAssistantWorkflowConfig): LabAssistantWorkflowConfig {
+  if (!config || !Array.isArray(config.reviewers) || config.reviewers.length === 0) {
+    throw new Error('Add at least one reviewer to the managed workflow.')
+  }
+  const maxReviewCycles = Number.isFinite(config.maxReviewCycles)
+    ? Math.max(1, Math.min(5, Math.floor(config.maxReviewCycles)))
+    : 1
+  return {
+    planner: normalizeWorkflowAgent(config.planner, 'planner'),
+    implementer: normalizeWorkflowAgent(config.implementer, 'implementer'),
+    reviewers: config.reviewers.slice(0, 5).map((reviewer, index) => normalizeWorkflowAgent(reviewer, `reviewer ${index + 1}`)),
+    maxReviewCycles
+  }
+}
+
 export class LabAssistantManager {
   private readonly stateFile: string
   private readonly host: LabAssistantHost
@@ -109,6 +170,8 @@ export class LabAssistantManager {
   private questions: LabAssistantQuestion[] = []
   private activities: LabAssistantActivity[] = []
   private mergeOrders: Record<string, string[]> = {}
+  private workflowConfig?: LabAssistantWorkflowConfig
+  private workflowRuns: LabAssistantWorkflowRun[] = []
   private pendingMutation: Promise<void> = Promise.resolve()
 
   constructor(stateFile: string, host: LabAssistantHost, clock: () => number = Date.now) {
@@ -130,6 +193,8 @@ export class LabAssistantManager {
       if (Array.isArray(parsed.questions)) this.questions = parsed.questions
       if (Array.isArray(parsed.activities)) this.activities = parsed.activities.slice(0, ACTIVITY_CAP)
       if (parsed.mergeOrders && typeof parsed.mergeOrders === 'object') this.mergeOrders = parsed.mergeOrders
+      if (parsed.workflowConfig) this.workflowConfig = parsed.workflowConfig
+      if (Array.isArray(parsed.workflowRuns)) this.workflowRuns = parsed.workflowRuns
     } catch {
       /* First launch or a corrupt optional state file starts empty. */
     }
@@ -145,7 +210,9 @@ export class LabAssistantManager {
       ciIncidents: this.ciIncidents,
       questions: this.questions,
       activities: this.activities,
-      mergeOrders: this.mergeOrders
+      mergeOrders: this.mergeOrders,
+      workflowConfig: this.workflowConfig,
+      workflowRuns: this.workflowRuns
     }
     await writeFile(this.stateFile, JSON.stringify(state, null, 2))
   }
@@ -165,7 +232,9 @@ export class LabAssistantManager {
       ciIncidents: clone(this.ciIncidents),
       questions: clone(this.questions),
       activities: clone(this.activities),
-      mergeOrders: clone(this.mergeOrders)
+      mergeOrders: clone(this.mergeOrders),
+      ...(this.workflowConfig ? { workflowConfig: clone(this.workflowConfig) } : {}),
+      workflowRuns: clone(this.workflowRuns)
     }
   }
 
@@ -422,6 +491,319 @@ export class LabAssistantManager {
       threadId
     })
     return this.finishMutation()
+  }
+
+  configureWorkflow(config: LabAssistantWorkflowConfig): Promise<LabAssistantSnapshot> {
+    return this.mutate(async () => {
+      await this.load()
+      this.workflowConfig = normalizeWorkflowConfig(config)
+      this.addActivity({
+        kind: 'workflow',
+        title: 'Saved managed workflow',
+        detail: `Planner, implementer, ${this.workflowConfig.reviewers.length} reviewer${this.workflowConfig.reviewers.length === 1 ? '' : 's'} · ${this.workflowConfig.maxReviewCycles} review cycle${this.workflowConfig.maxReviewCycles === 1 ? '' : 's'}.`
+      })
+      return this.finishMutation()
+    })
+  }
+
+  startWorkflow(taskId: string): Promise<LabAssistantSnapshot> {
+    return this.mutate(() => this.startWorkflowNow(taskId))
+  }
+
+  private async startWorkflowNow(taskId: string): Promise<LabAssistantSnapshot> {
+    await this.load()
+    if (!this.host.createWorkflowStage || !this.host.runWorkflowStage || !this.host.workflowReviewVerdict) {
+      throw new Error('Managed workflows are unavailable in this build.')
+    }
+    if (!this.workflowConfig) throw new Error('Configure the managed workflow before starting it.')
+    const task = this.task(taskId)
+    if (!task.projectPath) throw new Error('Managed workflows need a project-specific task.')
+    if (task.status !== 'ready') throw new Error('Only a ready task can start a managed workflow.')
+    if (this.workflowRuns.some((run) => run.taskId === task.id && run.status === 'running')) {
+      throw new Error('That task already has a running managed workflow.')
+    }
+    const pendingOrder = this.questions.find((question) => question.status === 'open'
+      && question.key.startsWith('task-order:')
+      && question.options.some((option) => option.id === task.id))
+    if (pendingOrder) throw new Error('Choose the task order before starting this work.')
+    const incomplete = this.taskBlockers(task)
+    if (incomplete.length) throw new Error(`Complete ${incomplete.map((item) => item.title).join(', ')} before starting this task.`)
+
+    const now = this.clock()
+    const run: LabAssistantWorkflowRun = {
+      id: randomUUID(),
+      taskId: task.id,
+      title: task.title,
+      projectPath: task.projectPath,
+      status: 'running',
+      stage: 'planning',
+      config: clone(this.workflowConfig),
+      reviewCycle: 1,
+      reviews: [],
+      createdAt: now,
+      updatedAt: now
+    }
+    this.workflowRuns.unshift(run)
+    task.status = 'running'
+    task.updatedAt = now
+    this.addActivity({
+      kind: 'workflow',
+      title: `Planning ${task.title}`,
+      detail: 'Managed workflow started.',
+      taskId: task.id,
+      workflowRunId: run.id
+    })
+
+    try {
+      const threadId = await this.host.createWorkflowStage({
+        role: 'planner',
+        backendId: run.config.planner.backendId,
+        title: `Plan · ${task.title}`,
+        projectPath: task.projectPath
+      })
+      run.plannerThreadId = threadId
+      task.assignedThreadId = threadId
+      await this.workflowCheckpoint()
+      await this.host.runWorkflowStage(threadId, 'planner', run.config.planner, this.plannerPrompt(task))
+    } catch (error) {
+      this.workflowNeedsAttention(run, task, `Planner could not start: ${errorMessage(error)}`)
+    }
+    return this.finishMutation()
+  }
+
+  private plannerPrompt(task: LabAssistantTask): string {
+    return [
+      '[Lab Assistant managed workflow — planner]',
+      `Plan this task: ${task.title}.`,
+      task.details ? `User context: ${task.details}` : '',
+      'Inspect the project and produce a concrete implementation plan. Do not edit files.',
+      'Call out risks, required tests, and anything that needs a user decision.',
+      this.workflowConfig?.planner.instruction ?? ''
+    ].filter(Boolean).join('\n\n')
+  }
+
+  private implementationPrompt(run: LabAssistantWorkflowRun, task: LabAssistantTask): string {
+    return [
+      '[Lab Assistant managed workflow — implementer]',
+      `Implement the planned task: ${task.title}.`,
+      task.details ? `User context: ${task.details}` : '',
+      'Work in the isolated Git worktree created for this thread. Follow the planner handoff, update tests with behavior, and verify the change as far as the environment permits.',
+      run.config.implementer.instruction ?? ''
+    ].filter(Boolean).join('\n\n')
+  }
+
+  private reviewerPrompt(run: LabAssistantWorkflowRun, task: LabAssistantTask, reviewerIndex: number): string {
+    const reviewer = run.config.reviewers[reviewerIndex]
+    return [
+      '[Lab Assistant managed workflow — reviewer]',
+      `Review the implementation of: ${task.title}.`,
+      'Inspect the implementation checkout, tests, and the implementer handoff. Do not edit files.',
+      'End your final response with exactly PASS or CHANGES_REQUESTED. For changes, put actionable bullet points after CHANGES_REQUESTED.',
+      reviewer.instruction ?? ''
+    ].filter(Boolean).join('\n\n')
+  }
+
+  private async workflowCheckpoint(): Promise<void> {
+    await this.save()
+    this.host.emit(this.currentSnapshot())
+  }
+
+  private workflowNeedsAttention(run: LabAssistantWorkflowRun, task: LabAssistantTask, detail: string): void {
+    const now = this.clock()
+    run.status = 'needs-attention'
+    run.updatedAt = now
+    task.status = run.stage === 'reviewing' ? 'review' : 'running'
+    task.updatedAt = now
+    this.addQuestion({
+      key: `workflow:${run.id}:${run.reviewCycle}:${run.stage}`,
+      repository: task.projectPath ?? 'Global',
+      prompt: `${task.title}: ${detail}`,
+      options: [
+        { id: 'manual', label: "I'll take over" },
+        { id: 'stop', label: 'Stop and return to ready' }
+      ]
+    })
+    this.addActivity({
+      kind: 'workflow',
+      title: `${task.title} needs attention`,
+      detail,
+      taskId: task.id,
+      workflowRunId: run.id
+    })
+  }
+
+  private async startImplementer(run: LabAssistantWorkflowRun, task: LabAssistantTask): Promise<void> {
+    if (!run.plannerThreadId) throw new Error('The planner thread is missing.')
+    if (!this.host.createWorkflowStage || !this.host.runWorkflowStage) throw new Error('Managed workflows are unavailable in this build.')
+    const threadId = await this.host.createWorkflowStage({
+      role: 'implementer',
+      backendId: run.config.implementer.backendId,
+      title: `Implement · ${task.title}`,
+      sourceThreadId: run.plannerThreadId
+    })
+    run.implementerThreadId = threadId
+    run.stage = 'implementing'
+    run.updatedAt = this.clock()
+    task.status = 'running'
+    task.assignedThreadId = threadId
+    task.updatedAt = run.updatedAt
+    this.addActivity({
+      kind: 'workflow',
+      title: `Implementing ${task.title}`,
+      detail: 'Planner handoff delivered to an isolated worktree.',
+      taskId: task.id,
+      workflowRunId: run.id,
+      threadId
+    })
+    await this.workflowCheckpoint()
+    await this.host.runWorkflowStage(threadId, 'implementer', run.config.implementer, this.implementationPrompt(run, task), run.plannerThreadId)
+  }
+
+  private async startReviewer(run: LabAssistantWorkflowRun, task: LabAssistantTask, reviewerIndex: number): Promise<void> {
+    if (!run.implementerThreadId) throw new Error('The implementer thread is missing.')
+    if (!this.host.createWorkflowStage || !this.host.runWorkflowStage) throw new Error('Managed workflows are unavailable in this build.')
+    const reviewer = run.config.reviewers[reviewerIndex]
+    const threadId = await this.host.createWorkflowStage({
+      role: 'reviewer',
+      backendId: reviewer.backendId,
+      title: `Review ${reviewerIndex + 1} · ${task.title}`,
+      sourceThreadId: run.implementerThreadId
+    })
+    const now = this.clock()
+    run.stage = 'reviewing'
+    run.updatedAt = now
+    task.status = 'review'
+    task.updatedAt = now
+    run.reviews.push({
+      cycle: run.reviewCycle,
+      index: reviewerIndex,
+      threadId,
+      backendId: reviewer.backendId,
+      status: 'running',
+      startedAt: now
+    })
+    this.addActivity({
+      kind: 'workflow',
+      title: `Reviewing ${task.title}`,
+      detail: `Review ${reviewerIndex + 1} of ${run.config.reviewers.length}, cycle ${run.reviewCycle}.`,
+      taskId: task.id,
+      workflowRunId: run.id,
+      threadId
+    })
+    await this.workflowCheckpoint()
+    await this.host.runWorkflowStage(threadId, 'reviewer', reviewer, this.reviewerPrompt(run, task, reviewerIndex), run.implementerThreadId)
+  }
+
+  private async returnToImplementer(run: LabAssistantWorkflowRun, task: LabAssistantTask, reviewThreadId: string, notes: string[]): Promise<void> {
+    if (!run.implementerThreadId) throw new Error('The implementer thread is missing.')
+    if (!this.host.runWorkflowStage) throw new Error('Managed workflows are unavailable in this build.')
+    run.reviewCycle += 1
+    run.stage = 'implementing'
+    run.updatedAt = this.clock()
+    task.status = 'running'
+    task.updatedAt = run.updatedAt
+    const instruction = [
+      '[Lab Assistant managed workflow — review feedback]',
+      `Review requested changes for ${task.title}. Address every point, update tests, and rerun relevant checks.`,
+      notes.length ? notes.map((note) => `- ${note}`).join('\n') : '- Re-read the reviewer transcript and address the requested changes.',
+      run.config.implementer.instruction ?? ''
+    ].filter(Boolean).join('\n\n')
+    this.addActivity({
+      kind: 'workflow',
+      title: `Revising ${task.title}`,
+      detail: `Review feedback returned to the implementer for cycle ${run.reviewCycle}.`,
+      taskId: task.id,
+      workflowRunId: run.id,
+      threadId: run.implementerThreadId
+    })
+    await this.workflowCheckpoint()
+    await this.host.runWorkflowStage(run.implementerThreadId, 'implementer', run.config.implementer, instruction, reviewThreadId)
+  }
+
+  private completeWorkflow(run: LabAssistantWorkflowRun, task: LabAssistantTask): void {
+    const now = this.clock()
+    run.status = 'completed'
+    run.updatedAt = now
+    run.completedAt = now
+    task.status = 'done'
+    task.updatedAt = now
+    task.completedAt = now
+    this.reconcileBlockedTasks()
+    this.considerTaskOrders()
+    this.addActivity({
+      kind: 'workflow',
+      title: `Completed ${task.title}`,
+      detail: `${run.config.reviewers.length} reviewer${run.config.reviewers.length === 1 ? '' : 's'} passed in cycle ${run.reviewCycle}.`,
+      taskId: task.id,
+      workflowRunId: run.id
+    })
+    this.host.notify({
+      type: 'task.completed',
+      title: `Lab Assistant completed ${task.title}`,
+      body: 'Implementation and review are complete.',
+      threadId: run.implementerThreadId,
+      projectPath: task.projectPath,
+      createdAt: now
+    })
+  }
+
+  observeBackendEvent(event: Record<string, unknown>): Promise<void> {
+    if (event.type !== 'thread.result') return Promise.resolve()
+    return this.mutate(async () => {
+      await this.load()
+      const properties = record(event.properties)
+      const threadId = text(properties.threadId)
+      const result = record(properties.result)
+      const run = this.workflowRuns.find((candidate) => candidate.status === 'running'
+        && (candidate.plannerThreadId === threadId
+          || candidate.implementerThreadId === threadId
+          || candidate.reviews.some((review) => review.threadId === threadId && review.status === 'running')))
+      if (!run) return
+      const task = this.tasks.find((candidate) => candidate.id === run.taskId)
+      if (!task) return
+      const status = text(result.status)
+
+      try {
+        if (threadId === run.plannerThreadId) {
+          if (status !== 'completed') this.workflowNeedsAttention(run, task, `Planner ended with ${status || 'an unknown error'}.`)
+          else await this.startImplementer(run, task)
+        } else if (threadId === run.implementerThreadId) {
+          if (status !== 'completed') this.workflowNeedsAttention(run, task, `Implementer ended with ${status || 'an unknown error'}.`)
+          else await this.startReviewer(run, task, 0)
+        } else {
+          const review = run.reviews.find((candidate) => candidate.threadId === threadId && candidate.status === 'running')
+          if (!review) return
+          review.finishedAt = this.clock()
+          if (status !== 'completed') {
+            review.status = 'failed'
+            this.workflowNeedsAttention(run, task, `Reviewer ${review.index + 1} ended with ${status || 'an unknown error'}.`)
+          } else {
+            const verdict = await this.host.workflowReviewVerdict?.(threadId)
+            if (!verdict) {
+              review.status = 'no-verdict'
+              this.workflowNeedsAttention(run, task, `Reviewer ${review.index + 1} finished without PASS or CHANGES_REQUESTED.`)
+            } else if (verdict.verdict === 'changes-requested') {
+              review.status = 'changes-requested'
+              review.notes = verdict.notes.join('\n') || undefined
+              if (run.reviewCycle >= run.config.maxReviewCycles) {
+                this.workflowNeedsAttention(run, task, `Review still requests changes after ${run.reviewCycle} cycle${run.reviewCycle === 1 ? '' : 's'}.`)
+              } else {
+                await this.returnToImplementer(run, task, threadId, verdict.notes)
+              }
+            } else {
+              review.status = 'passed'
+              review.notes = verdict.notes.join('\n') || undefined
+              const nextReviewer = review.index + 1
+              if (nextReviewer < run.config.reviewers.length) await this.startReviewer(run, task, nextReviewer)
+              else this.completeWorkflow(run, task)
+            }
+          }
+        }
+      } catch (error) {
+        this.workflowNeedsAttention(run, task, `Could not advance the workflow: ${errorMessage(error)}`)
+      }
+      await this.finishMutation()
+    })
   }
 
   private ownerThreadsForBranch(repository: string, headBranch: string): SupervisedThread[] {
@@ -815,6 +1197,20 @@ export class LabAssistantManager {
       }
       this.reconcileBlockedTasks()
     }
+    if (question.key.startsWith('workflow:')) {
+      const runId = question.key.split(':')[1]
+      const run = this.workflowRuns.find((candidate) => candidate.id === runId)
+      if (!run) throw new Error('The managed workflow for that decision is no longer available.')
+      const task = this.tasks.find((candidate) => candidate.id === run.taskId)
+      run.status = 'stopped'
+      run.updatedAt = this.clock()
+      run.completedAt = run.updatedAt
+      if (task) {
+        task.status = answer.id === 'stop' ? 'ready' : (run.stage === 'reviewing' ? 'review' : 'running')
+        task.updatedAt = run.updatedAt
+        if (answer.id === 'stop') delete task.assignedThreadId
+      }
+    }
     question.status = 'answered'
     question.answerId = answer.id
     question.answeredAt = this.clock()
@@ -847,6 +1243,8 @@ export class LabAssistantManager {
     if (request.type === 'assistant.task.create') return this.createTask(request.input)
     if (request.type === 'assistant.task.update') return this.updateTask(request.taskId, request.patch)
     if (request.type === 'assistant.task.assign') return this.assignTask(request.taskId, request.threadId)
+    if (request.type === 'assistant.workflow.configure') return this.configureWorkflow(request.config)
+    if (request.type === 'assistant.workflow.start') return this.startWorkflow(request.taskId)
     throw new Error(`Unsupported Lab Assistant request: ${request.type}`)
   }
 }

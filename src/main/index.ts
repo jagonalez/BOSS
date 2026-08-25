@@ -153,11 +153,18 @@ const labAssistant = new LabAssistantManager(
     },
     refreshPullRequests: (repository) => listGitHubPullRequests(repository),
     inspectWorkflowRun: (repository, runId, attempt) => inspectGitHubWorkflowRun(repository, runId, attempt),
+    createWorkflowStage: async (input) => (await backendMgr.createLabAssistantStage(input)).id,
+    runWorkflowStage: (threadId, role, agent, instruction, sourceThreadId) =>
+      backendMgr.runLabAssistantStage(threadId, role, agent, instruction, sourceThreadId),
+    workflowReviewVerdict: (threadId) => backendMgr.labAssistantReviewVerdict(threadId),
     emit: (snapshot) => backendMgr.emit({ type: 'assistant.updated', properties: { snapshot } }),
     notify: (event) => notifications.publish(event)
   }
 )
 backendMgr.attachAssistant(labAssistant)
+backendMgr.onEvent((event) => {
+  void labAssistant.observeBackendEvent(event)
+})
 automations.setWebhookObserver((delivery) => labAssistant.observeGitHub(delivery))
 // GitHub webhooks are delivered to a loopback endpoint; exposing it to the
 // internet is the user's tunnel, exactly like the mobile page.

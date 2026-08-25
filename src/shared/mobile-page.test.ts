@@ -69,7 +69,8 @@ test('read-only access cannot mutate task or automation state', () => {
     'assistant.answer',
     'assistant.task.create',
     'assistant.task.update',
-    'assistant.task.assign'
+    'assistant.task.assign',
+    'assistant.workflow.start'
   ] as const) {
     assert.equal(mobileRequestAllowed(type, 'read-only'), false, type)
     assert.equal(mobileRequestAllowed(type, 'control'), true, type)
@@ -143,6 +144,10 @@ test('the phone has a Lab Assistant inbox with durable decision actions', () => 
   assert.match(script, /type: 'assistant\.task\.create'/)
   assert.match(script, /type: 'assistant\.task\.update'/)
   assert.match(script, /type: 'assistant\.task\.assign'/)
+  assert.match(script, /type: 'assistant\.workflow\.start'/)
+  assert.match(script, /Managed workflow/)
+  assert.match(script, /assistant\.workflowRuns/)
+  assert.match(script, /Start workflow/)
   assert.match(script, /function renderAssistant/)
   assert.match(script, /Task queue/)
   assert.match(script, /CI monitoring/)

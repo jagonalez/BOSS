@@ -4580,11 +4580,101 @@ body.workspace-dragging .workspace-tab-slot {
 .lab-decision-list,
 .lab-ci-list,
 .lab-task-list,
+.lab-workflow-runs,
 .lab-activity-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
+
+.lab-workflow-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.lab-workflow-agent {
+  display: grid;
+  grid-template-columns: 92px minmax(110px, 0.45fr) minmax(160px, 0.75fr) minmax(180px, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.lab-workflow-agent > label,
+.lab-workflow-controls label {
+  color: var(--text-muted);
+  font-size: var(--type-control);
+}
+
+.lab-workflow-agent > select,
+.lab-workflow-agent > input,
+.lab-workflow-controls input,
+.lab-workflow-controls button,
+.lab-workflow-reviewer > button {
+  min-height: var(--control-h);
+  padding: var(--control-pad-y) 10px;
+  border: 1px solid var(--line-default);
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font: inherit;
+  font-size: var(--type-control);
+}
+
+.lab-workflow-reviewer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lab-workflow-reviewer > button { align-self: flex-end; cursor: pointer; }
+
+.lab-workflow-controls {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.lab-workflow-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-right: auto;
+}
+
+.lab-workflow-controls input { width: 78px; }
+.lab-workflow-controls button { cursor: pointer; }
+
+.lab-workflow-run {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.lab-workflow-run > span {
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: var(--type-label);
+  text-transform: uppercase;
+}
+
+.lab-workflow-run.completed > span { color: var(--green); background: var(--green-soft); }
+.lab-workflow-run.needs-attention > span { color: var(--yellow); background: var(--yellow-soft); }
+.lab-workflow-run.stopped > span { color: var(--text-faint); background: var(--surface-inset); }
+.lab-workflow-run > div:not(.lab-task-actions) { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.lab-workflow-run strong { color: var(--text); font-size: var(--type-control); }
+.lab-workflow-run small { color: var(--text-faint); font-size: var(--type-meta); }
 
 .lab-decision {
   display: flex;
@@ -4807,9 +4897,12 @@ body.workspace-dragging .workspace-tab-slot {
   }
 
   .lab-decision,
-  .lab-task {
+  .lab-task,
+  .lab-workflow-run {
     align-items: flex-start;
   }
+
+  .lab-workflow-agent { grid-template-columns: 1fr; }
 
   .lab-decision {
     flex-direction: column;

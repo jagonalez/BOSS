@@ -52,6 +52,17 @@ export interface LabAssistantRelease {
   status: 'prepared' | 'approved' | 'dispatched'
 }
 
+export interface LabAssistantManagedWorkflowRun {
+  id: string
+  workItemId: string
+  plannerAgentId: string
+  implementerAgentId: string
+  reviewerAgentIds: string[]
+  maxReviewCycles: number
+  status: 'running' | 'needs-attention' | 'completed'
+  stage: 'planning' | 'implementing' | 'reviewing'
+}
+
 export interface LabAssistantWorldState {
   projects: LabAssistantProject[]
   workItems: LabAssistantWorkItem[]
@@ -59,6 +70,7 @@ export interface LabAssistantWorldState {
   agents: LabAssistantAgent[]
   questions: LabAssistantQuestion[]
   releases: LabAssistantRelease[]
+  workflowRuns: LabAssistantManagedWorkflowRun[]
   workItemOrder: Record<string, string[]>
 }
 
@@ -149,6 +161,24 @@ export const LAB_ASSISTANT_EVAL_TOOLS: LabToolFunction[] = [
   {
     type: 'function',
     function: {
+      name: 'lab_assistant_start_workflow',
+      description: 'Start a durable, bounded planner-to-implementer-to-reviewer workflow for one ready project work item. Use the exact agents requested by the user.',
+      parameters: {
+        type: 'object',
+        properties: {
+          work_item_id: workItemId,
+          planner_agent_id: { type: 'string' },
+          implementer_agent_id: { type: 'string' },
+          reviewer_agent_ids: { type: 'array', items: { type: 'string' } },
+          max_review_cycles: { type: 'number' }
+        },
+        required: ['work_item_id', 'planner_agent_id', 'implementer_agent_id', 'reviewer_agent_ids', 'max_review_cycles']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'lab_assistant_prepare_release',
       description: 'Create a release candidate and run its preflight. This does not publish anything; stable publication still requires user approval.',
       parameters: {
@@ -200,6 +230,7 @@ export class LabAssistantWorld {
       agents: clone(initial.agents ?? []),
       questions: clone(initial.questions ?? []),
       releases: clone(initial.releases ?? []),
+      workflowRuns: clone(initial.workflowRuns ?? []),
       workItemOrder: clone(initial.workItemOrder ?? {})
     }
   }
@@ -283,6 +314,36 @@ export class LabAssistantWorld {
         if (!['inbox', 'ready', 'blocked', 'running', 'review', 'done'].includes(state)) throw new Error(`Invalid work item state: ${state}.`)
         item.state = state
         return { ...clone(item), note: stringArg(args, 'note') || undefined }
+      }
+      case 'lab_assistant_start_workflow': {
+        const workItemId = stringArg(args, 'work_item_id')
+        const plannerAgentId = stringArg(args, 'planner_agent_id')
+        const implementerAgentId = stringArg(args, 'implementer_agent_id')
+        const reviewerAgentIds = stringArray(args, 'reviewer_agent_ids')
+        const maxReviewCycles = Math.floor(Number(args.max_review_cycles))
+        const item = this.state.workItems.find((candidate) => candidate.id === workItemId)
+        if (!item) throw new Error(`Work item ${workItemId || '(missing)'} does not exist.`)
+        if (item.state !== 'ready') throw new Error(`Work item ${workItemId} is not ready.`)
+        if (!reviewerAgentIds.length) throw new Error('A managed workflow needs at least one reviewer.')
+        if (!Number.isFinite(maxReviewCycles) || maxReviewCycles < 1 || maxReviewCycles > 5) throw new Error('Review cycles must be between 1 and 5.')
+        const agentIds = [plannerAgentId, implementerAgentId, ...reviewerAgentIds]
+        const invalid = agentIds.find((id) => !this.state.agents.some((agent) => agent.id === id && agent.projectId === item.projectId))
+        if (invalid) throw new Error(`Agent ${invalid || '(missing)'} is not available for this project.`)
+        const run: LabAssistantManagedWorkflowRun = {
+          id: `workflow-${this.state.workflowRuns.length + 1}`,
+          workItemId,
+          plannerAgentId,
+          implementerAgentId,
+          reviewerAgentIds,
+          maxReviewCycles,
+          status: 'running',
+          stage: 'planning'
+        }
+        this.state.workflowRuns.push(run)
+        item.state = 'running'
+        const planner = this.state.agents.find((agent) => agent.id === plannerAgentId)
+        if (planner) planner.status = 'running'
+        return clone(run)
       }
       case 'lab_assistant_prepare_release': {
         const targetProject = stringArg(args, 'project_id')

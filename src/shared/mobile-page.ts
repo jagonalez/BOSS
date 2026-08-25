@@ -158,7 +158,7 @@ var threadTitles = {};
 var automations = { automations: [], runs: [] };
 var reports = { reports: [] };
 var reportDetails = {};
-var assistant = { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {} };
+var assistant = { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {}, workflowRuns: [] };
 var messages = {};
 var permissions = {};
 var busy = {};
@@ -343,7 +343,7 @@ function refreshReports() {
 
 function refreshAssistant() {
   return api({ type: 'assistant.snapshot' }).then(function (snapshot) {
-    assistant = snapshot || { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {} };
+    assistant = snapshot || { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {}, workflowRuns: [] };
     if (view.name === 'assistant') render();
   });
 }
@@ -538,6 +538,18 @@ function renderAssistant() {
       '<a class="btn" style="display:inline-block;margin-top:8px;text-decoration:none" target="_blank" rel="noreferrer" href="' + esc(incident.url) + '">Open run</a></div>';
   });
   if (!incidents.length) html += '<div class="empty">No workflow failures observed.</div>';
+  html += '<div class="section">Managed workflow</div>';
+  (assistant.workflowRuns || []).slice(0, 6).forEach(function (run) {
+    html += '<div class="card"><div class="row"><span class="badge ' + esc(run.status) + '">' + esc(run.status) + '</span>' +
+      '<div style="flex:1;min-width:0"><div class="title">' + esc(run.title) + '</div><div class="sub">' +
+      esc(run.stage) + ' · review cycle ' + esc(run.reviewCycle) + '/' + esc(run.config.maxReviewCycles) + '</div></div></div>';
+    var latestReview = run.reviews && run.reviews.length ? run.reviews[run.reviews.length - 1] : null;
+    html += '<div class="row" style="margin-top:8px;flex-wrap:wrap">' +
+      (run.plannerThreadId ? '<button class="btn" onclick="openThread(\\\'' + run.plannerThreadId + '\\\')">Plan</button>' : '') +
+      (run.implementerThreadId ? '<button class="btn" onclick="openThread(\\\'' + run.implementerThreadId + '\\\')">Implementation</button>' : '') +
+      (latestReview ? '<button class="btn" onclick="openThread(\\\'' + latestReview.threadId + '\\\')">Review</button>' : '') + '</div></div>';
+  });
+  if (!(assistant.workflowRuns || []).length) html += '<div class="empty">No managed workflow runs yet.</div>';
   html += '<div class="section">Task queue</div>';
   if (accessRole === 'control') {
     var projects = {};
@@ -565,6 +577,9 @@ function renderAssistant() {
       (dependencies ? ' · after ' + esc(dependencies) : '') + (thread ? ' · ' + esc(thread.title) : '') + '</div></div></div>';
     if (accessRole === 'control') {
       if (task.status === 'ready') {
+        if (assistant.workflowConfig && task.projectPath) {
+          html += '<button class="btn primary" style="width:100%;margin-top:8px" onclick="startAssistantWorkflow(\\\'' + task.id + '\\\')">Start workflow</button>';
+        }
         html += '<select aria-label="Assign ' + esc(task.title) + '" style="width:100%;margin-top:8px" onchange="assignAssistantTask(\\\'' + task.id + '\\\',this.value)">' +
           '<option value="">Assign agent…</option>';
         (supervision.threads || []).filter(function (candidate) {
@@ -749,6 +764,11 @@ window.updateAssistantTask = function (taskId, status) {
 window.assignAssistantTask = function (taskId, threadId) {
   if (!threadId) return;
   api({ type: 'assistant.task.assign', taskId: taskId, threadId: threadId })
+    .then(function (snapshot) { assistant = snapshot || assistant; render(); })
+    .catch(function (e) { alert(e.message); });
+};
+window.startAssistantWorkflow = function (taskId) {
+  api({ type: 'assistant.workflow.start', taskId: taskId })
     .then(function (snapshot) { assistant = snapshot || assistant; render(); })
     .catch(function (e) { alert(e.message); });
 };

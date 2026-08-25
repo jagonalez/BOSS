@@ -324,6 +324,8 @@ export type BackendRequest =
   | { type: 'assistant.task.create'; input: import('./lab-assistant').LabAssistantTaskInput }
   | { type: 'assistant.task.update'; taskId: string; patch: import('./lab-assistant').LabAssistantTaskPatch }
   | { type: 'assistant.task.assign'; taskId: string; threadId: string }
+  | { type: 'assistant.workflow.configure'; config: import('./lab-assistant').LabAssistantWorkflowConfig }
+  | { type: 'assistant.workflow.start'; taskId: string }
   | { type: 'mcp.list' }
   | { type: 'mcp.add'; input: import('./mcp').McpConnectionInput }
   | { type: 'mcp.update'; connectionId: string; patch: Partial<import('./mcp').McpConnectionInput> & { enabled?: boolean } }
