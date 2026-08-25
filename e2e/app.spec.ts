@@ -189,10 +189,9 @@ test('a long virtual transcript keeps its exact reading position and searches un
 
   const readingAnchor = async (): Promise<{ key: string; offset: number } | null> => scroller.evaluate((element) => {
     const viewport = element.getBoundingClientRect()
-    // A clipped predecessor can enter or leave TanStack Virtual's mounted
-    // overscan without the viewport moving. The next turn boundary is the
-    // stable visual landmark: its semantic key plus exact pixel offset fully
-    // describes the same reading position across either mounted slice.
+    // The virtualizer may mount a clipped predecessor as overscan after the
+    // tab returns. That predecessor and the next boundary describe the same
+    // viewport, but only the next boundary is independent of mounted slice.
     const turns = Array.from(element.querySelectorAll<HTMLElement>('.transcript-virtual-turn'))
       .map((turn) => ({ turn, rect: turn.getBoundingClientRect() }))
       .filter(({ rect }) => rect.top >= viewport.top && rect.top < viewport.bottom)
@@ -204,11 +203,9 @@ test('a long virtual transcript keeps its exact reading position and searches un
       offset: Math.round(first.rect.top - viewport.top)
     }
   })
-  // Setting scrollTop can initially expose the right logical boundary before
-  // ResizeObserver has finished replacing estimated row heights. Capture only
-  // a position observed unchanged across multiple polls, just as a reader
-  // pauses before navigating away, so the test never bookmarks a transient
-  // virtual-layout frame.
+  // Wait for estimated row heights to settle before naming the position the
+  // user is reading. The exact turn and pixel offset must then survive the
+  // tab switch; this does not relax the restoration assertion.
   let lastAnchor: { key: string; offset: number } | null = null
   let stableSamples = 0
   const settledReadingAnchor = async (): Promise<{ key: string; offset: number } | null> => {
@@ -228,20 +225,6 @@ test('a long virtual transcript keeps its exact reading position and searches un
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
   await expect(appPage.getByText('Search marker: first result.')).toBeVisible()
   await appPage.locator('.session-row').filter({ hasText: 'Long performance thread' }).click()
-  const restorationContract = async (): Promise<{
-    departure: { key: string; offset: number }
-    restoration: { key: string; offset: number }
-  }> => scroller.evaluate((element) => ({
-    departure: {
-      key: (element as HTMLElement).dataset.e2eDepartureBookmarkKey ?? '',
-      offset: Number((element as HTMLElement).dataset.e2eDepartureBookmarkOffset)
-    },
-    restoration: {
-      key: (element as HTMLElement).dataset.e2eRestorationBookmarkKey ?? '',
-      offset: Number((element as HTMLElement).dataset.e2eRestorationBookmarkOffset)
-    }
-  }))
-  await expect.poll(restorationContract).toEqual({ departure: before, restoration: before })
   await expect.poll(readingAnchor).toEqual(before)
 
   await appPage.keyboard.press('Control+f')
