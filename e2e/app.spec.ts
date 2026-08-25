@@ -458,6 +458,23 @@ test('shows a Codex message while Codex is still working', async ({ appPage }) =
   await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
 })
 
+test('keeps Codex steering between tool rounds and hides inspection screenshots', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  await fixture.installCodexOrderingThread()
+  await appPage.locator('.session-row').filter({ hasText: 'Codex steering order' }).click()
+
+  const visibleMessages = appPage.locator('.messages:visible .msg')
+  await expect(visibleMessages).toHaveCount(4)
+  await expect(visibleMessages.nth(0)).toContainText('Inspect BOSS with computer use.')
+  await expect(visibleMessages.nth(1)).toContainText('First inspection started.')
+  await expect(visibleMessages.nth(2)).toContainText('ok so it seems to be ok now... this is a test')
+  await expect(visibleMessages.nth(3)).toContainText('Continued after steering.')
+
+  // The first computer result was model-only inspection context. The second
+  // opted into the transcript, so exactly that one is visible to the user.
+  await expect(appPage.getByRole('img', { name: 'boss_computer' })).toHaveCount(1)
+})
+
 test('a failed Codex send keeps the message retryable and shows it after retry', async ({ appPage }) => {
   const title = 'Codex failed message test'
   await control(appPage).then((item) => item.spawnThread('codex', title))

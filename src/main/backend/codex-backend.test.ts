@@ -104,22 +104,20 @@ test('the sandbox setting arrives before the turn that uses it', () => {
   )
 })
 
-test('a reloaded turn reports every message the user sent, not just the first', () => {
-  // Codex folds a steered message into the turn it is already running, so one
-  // turn carries one userMessage item per thing the user said. Reading only the
-  // first dropped the steered text from the reload, and because the reload
-  // prunes messages it does not report, the message the user watched appear
-  // mid-run was deleted the moment the run ended.
+test('a reloaded turn preserves steering between the work before and after it', () => {
+  // Codex folds a steered message into the turn it is already running. Taking
+  // every user item first and every assistant item second kept the text, but
+  // lifted steering above tools that had already happened.
   const start = source.indexOf('function turnMessages(')
   assert.ok(start > 0, 'expected a turnMessages function')
-  const turn = source.slice(start, source.indexOf('\n}', source.indexOf('const assistantItems', start)))
+  const turn = source.slice(start, source.indexOf('export class CodexBackend'))
   assert.ok(
-    !/\.find\(\(item\) => item\.type === 'userMessage'\)/.test(turn),
-    'turnMessages must not take only the first userMessage'
+    turn.includes('splitCodexTurnItems(turn.items ?? [])'),
+    'history must retain the item sequence instead of filtering by role'
   )
   assert.ok(
-    /filter\(\(item\) => item\.type === 'userMessage'\)/.test(turn),
-    'turnMessages should map every userMessage in the turn'
+    turn.includes('codexAssistantMessageId(turn.id, slice.index)'),
+    'work after steering needs a distinct assistant segment'
   )
 })
 
@@ -147,7 +145,7 @@ test('a user message keeps one id whether it streamed or was reloaded', () => {
     'the live path must not key a user message by the volatile item id'
   )
 
-  const turn = source.slice(source.indexOf('function turnMessages('), source.indexOf('\n}', source.indexOf('const assistantItems')))
+  const turn = source.slice(source.indexOf('function turnMessages('), source.indexOf('export class CodexBackend'))
   assert.ok(
     turn.includes('codexUserMessageId('),
     'the reload path must derive the user message id the same way'
@@ -197,6 +195,22 @@ test('streamed user ordinals are per turn and do not outlive it', () => {
   assert.ok(forget.includes('turnUserItems.clear()'), 'a lost server should forget streamed ordinals')
 })
 
+test('live assistant items stay on the side of steering where they started', () => {
+  const helper = source.slice(source.indexOf('private assistantMessageId('), source.indexOf('private emitUserMessage('))
+  assert.ok(helper.includes('items.get(itemId)'), 'a repeated completion should reuse its starting segment')
+  assert.ok(helper.includes('this.turnAssistantSegments.get(key)'), 'a new item should use the current steering segment')
+
+  const steer = source.slice(source.indexOf('async steer('), source.indexOf('async abort('))
+  assert.ok(
+    steer.indexOf('this.turnAssistantSegments.set(') > steer.indexOf("this.request('turn/steer'"),
+    'only an accepted steer should advance the assistant segment'
+  )
+
+  const completed = source.slice(source.indexOf("case 'turn/completed':"), source.indexOf("case 'item/started':"))
+  assert.ok(completed.includes('this.turnAssistantSegments.delete(key)'))
+  assert.ok(completed.includes('this.turnAssistantItems.delete(key)'))
+})
+
 test('a Codex user image remains a renderable transcript part', () => {
   const helperStart = source.indexOf('function userParts(')
   assert.ok(helperStart > 0, 'expected user content to have a transcript adapter')
@@ -205,7 +219,7 @@ test('a Codex user image remains a renderable transcript part', () => {
   assert.ok(helper.includes('mime,') && helper.includes('url'), 'the file part must retain its data URL and MIME type')
 
   const history = source.slice(source.indexOf('function turnMessages('), source.indexOf('export class CodexBackend'))
-  assert.ok(history.includes('parts: userParts(sessionId, id, user.content)'), 'history reloads must retain the image')
+  assert.ok(history.includes('parts: userParts(sessionId, id, slice.item.content)'), 'history reloads must retain the image')
   const live = source.slice(source.indexOf("case 'item/started':"), source.indexOf("case 'thread/name/updated':"))
   assert.ok(live.includes('this.emitUserMessage('), 'live user events should use the shared message emitter')
   const emitter = source.slice(source.indexOf('private emitUserMessage('), source.indexOf('private mapNotification('))

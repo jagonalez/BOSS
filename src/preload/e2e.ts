@@ -321,6 +321,56 @@ function longTranscriptMessages(sessionID: string, turnCount: number): MessageWi
   return result
 }
 
+function codexOrderingMessages(sessionID: string): MessageWithParts[] {
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  return [
+    {
+      info: { id: 'user-codex-order-0', sessionID, role: 'user', time: { created: 1 } },
+      parts: [{
+        id: 'user-codex-order-0-text', type: 'text', sessionID,
+        messageID: 'user-codex-order-0', text: 'Inspect BOSS with computer use.'
+      }]
+    },
+    {
+      info: { id: 'assistant-codex-order', sessionID, role: 'assistant', time: { created: 2, completed: 3 } },
+      parts: [
+        { id: 'assistant-before-text', type: 'text', sessionID, messageID: 'assistant-codex-order', text: 'First inspection started.' },
+        {
+          id: 'computer-before', type: 'tool', sessionID, messageID: 'assistant-codex-order',
+          state: {
+            status: 'completed', tool: 'boss_computer', title: 'Inspect window before steering',
+            input: { operation: 'get_window_state' }, output: '[Screenshot inspected internally.]'
+          }
+        }
+      ]
+    },
+    {
+      info: { id: 'user-codex-order-1', sessionID, role: 'user', time: { created: 4 } },
+      parts: [{
+        id: 'user-codex-order-1-text', type: 'text', sessionID,
+        messageID: 'user-codex-order-1', text: 'ok so it seems to be ok now... this is a test'
+      }]
+    },
+    {
+      info: { id: 'assistant-codex-order-1', sessionID, role: 'assistant', time: { created: 5, completed: 6 } },
+      parts: [
+        { id: 'assistant-after-text', type: 'text', sessionID, messageID: 'assistant-codex-order-1', text: 'Continued after steering.' },
+        {
+          id: 'computer-after', type: 'tool', sessionID, messageID: 'assistant-codex-order-1',
+          state: {
+            status: 'completed', tool: 'boss_computer', title: 'Capture requested screenshot',
+            input: { operation: 'get_window_state', showInTranscript: true }
+          }
+        },
+        {
+          id: 'computer-after-image', type: 'file', sessionID, messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', name: 'boss_computer', mime: 'image/png', url: image }
+        }
+      ]
+    }
+  ]
+}
+
 function claudeMessages(): MessageWithParts[] {
   const sessionID = 'thread-claude'
   return [
@@ -1422,6 +1472,27 @@ export function installE2EApi(boss: BossApi): void {
       sessions = [session, ...sessions]
       messages[id] = longTranscriptMessages(id, turnCount)
       const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId: 'opencode' })
+      for (const listener of eventListeners) listener(data)
+      return structuredClone(session)
+    },
+    installCodexOrderingThread: () => {
+      const id = 'thread-codex-ordering'
+      const existing = sessions.find((item) => item.id === id)
+      if (existing) return structuredClone(existing)
+      const session: SessionInfo = {
+        id,
+        backendId: 'codex',
+        nativeSessionId: 'native-codex-ordering',
+        projectId: 'boss-e2e',
+        projectPath: PROJECT,
+        executionPath: CHECKOUT,
+        title: 'Codex steering order',
+        time: { created: Date.now(), updated: Date.now() },
+        model: { id: 'gpt-5.6', provider: 'openai' }
+      }
+      sessions = [session, ...sessions]
+      messages[id] = codexOrderingMessages(id)
+      const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId: 'codex' })
       for (const listener of eventListeners) listener(data)
       return structuredClone(session)
     },
