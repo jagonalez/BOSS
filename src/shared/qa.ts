@@ -1,21 +1,51 @@
 export type QaPolicy = 'off' | 'suggest' | 'automatic'
 
-/** Operations implemented by the CUA driver and exposed through BOSS.
- * Screenshots are images on get_window_state/get_desktop_state results; CUA
- * removed the former standalone `screenshot` operation from its tool surface. */
-export const COMPUTER_USE_OPERATIONS = [
+/** Read-only desktop operations from the embedded CUA driver that BOSS exposes.
+ * Browser, clipboard, recording, configuration, maintenance, and session tools
+ * stay outside this scoped surface: BOSS already owns those capabilities or
+ * they carry authority beyond inspecting one user's desktop. */
+export const COMPUTER_USE_INSPECTION_OPERATIONS = [
   'list_apps',
   'list_windows',
   'get_window_state',
+  'get_accessibility_tree',
   'get_desktop_state',
+  'get_screen_size',
+  'get_cursor_position',
   'zoom',
+  'verify_state'
+] as const
+
+/** Reversible native-app actions from the embedded CUA driver. Every operation
+ * here is gated by Automatic QA in QaTools before it reaches the driver. */
+export const COMPUTER_USE_ACTION_OPERATIONS = [
+  'launch_app',
+  'bring_to_front',
+  'set_window_frame',
   'click',
+  'double_click',
+  'right_click',
+  'drag',
   'type_text',
   'press_key',
   'hotkey',
+  'set_value',
   'scroll',
-  'wait'
+  'move_cursor',
+  'invoke_menu'
 ] as const
+
+/** Operations implemented by the CUA driver and exposed through BOSS.
+ * Screenshots are returned by state capture; the former standalone screenshot
+ * and wait operations are not part of the current driver tool surface. */
+export const COMPUTER_USE_OPERATIONS = [
+  ...COMPUTER_USE_INSPECTION_OPERATIONS,
+  ...COMPUTER_USE_ACTION_OPERATIONS
+] as const
+
+export function isComputerUseActionOperation(operation: string): boolean {
+  return (COMPUTER_USE_ACTION_OPERATIONS as readonly string[]).includes(operation)
+}
 
 export type QaAgentTool =
   | 'boss_browser_tabs'
@@ -223,7 +253,7 @@ export const QA_TOOL_DEFINITIONS: Array<{
   },
   {
     name: 'boss_computer',
-    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. Reach for it when a question is about what is on screen, when you want to check how a desktop app looks or behaves, or when a change you made shows up in an app rather than a browser. Looking is always available: list_apps and list_windows find what is running; get_window_state and get_desktop_state return both state and a screenshot; zoom shows a cropped region. Acting needs Automatic QA: click, type_text, press_key, hotkey, scroll, wait. Look before you act, and look again afterwards — an action you have not verified is not finished.',
+    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. The arguments object is passed directly to the OSS CUA Driver. Looking is always available: list_apps and list_windows find what is running; get_window_state and get_desktop_state return state plus a screenshot; zoom crops a region; verify_state checks bounded postconditions. Acting needs Automatic QA. Prefer a current element_token from get_window_state over coordinates. Match the element actions in the returned tree: for example, call click with action \"show_menu\" when it advertises showmenu; click defaults to press. Coordinates are pixels in the returned screenshot. Follow the delivery ladder background action, fresh state, pixel action, fresh state, then delivery_mode \"foreground\". Use bring_to_front only when a transient or focus-proxy surface must remain foreground across multiple calls. Look again after every action — an action you have not verified is not finished.',
     inputSchema: {
       type: 'object',
       properties: {
