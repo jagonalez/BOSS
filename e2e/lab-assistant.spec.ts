@@ -58,3 +58,18 @@ test('Command Center creates, unblocks, and assigns project tasks', async ({ app
   })
   await expect(created).toContainText('running')
 })
+
+test('Command Center shows the failed CI evidence routed to an owning agent', async ({ appPage }) => {
+  const assistant = appPage.getByRole('region', { name: 'Lab Assistant' })
+  const incident = assistant.locator('article.command-assistant-incident').filter({
+    has: appPage.getByText('CI', { exact: true })
+  })
+
+  await expect(incident).toContainText('failing')
+  await expect(incident).toContainText('PR #22')
+  await expect(incident).toContainText('run #19, attempt 2')
+  await expect(incident).toContainText('2 consecutive failures')
+  await expect(incident).toContainText('Electron end-to-end · Run npm run test:e2e')
+  await expect(incident).toContainText('Source thread')
+  await expect(incident.getByRole('button', { name: 'Open CI run 19' })).toBeVisible()
+})

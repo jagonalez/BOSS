@@ -1,6 +1,7 @@
 export type LabAssistantPullRequestState = 'open' | 'merged' | 'closed'
 export type LabAssistantMergeability = 'clean' | 'conflicted' | 'unknown'
 export type LabAssistantTaskStatus = 'inbox' | 'ready' | 'blocked' | 'running' | 'review' | 'done'
+export type LabAssistantCiConclusion = 'failure' | 'timed_out' | 'action_required' | 'startup_failure' | 'success'
 
 export interface LabAssistantTask {
   id: string
@@ -51,6 +52,40 @@ export interface LabAssistantPullRequest {
   conflictRoutedTo?: string
 }
 
+export interface LabAssistantCiJob {
+  name: string
+  url: string
+  conclusion: string
+  failedSteps: string[]
+}
+
+/** One workflow/branch failure episode. A later successful run resolves it;
+ * another failure after that starts a fresh episode without losing history. */
+export interface LabAssistantCiIncident {
+  id: string
+  repository: string
+  workflowId: number
+  workflow: string
+  runId: number
+  runNumber: number
+  runAttempt: number
+  url: string
+  headBranch: string
+  headSha: string
+  pullRequestId?: string
+  conclusion: LabAssistantCiConclusion
+  status: 'failing' | 'resolved'
+  jobs: LabAssistantCiJob[]
+  occurrenceCount: number
+  firstFailedAt: number
+  updatedAt: number
+  resolvedAt?: number
+  taskId?: string
+  routedTo?: string
+  routedDeliveryKey?: string
+  lastDeliveryKey: string
+}
+
 export interface LabAssistantQuestionOption {
   id: string
   label: string
@@ -71,12 +106,13 @@ export interface LabAssistantQuestion {
 
 export interface LabAssistantActivity {
   id: string
-  kind: 'pull-request' | 'agent-message' | 'decision' | 'task'
+  kind: 'pull-request' | 'ci' | 'agent-message' | 'decision' | 'task'
   title: string
   detail: string
   repository?: string
   taskId?: string
   pullRequestId?: string
+  ciIncidentId?: string
   threadId?: string
   createdAt: number
 }
@@ -87,6 +123,7 @@ export interface LabAssistantSnapshot {
   /** Keyed by project path or "global". */
   taskPlans: Record<string, LabAssistantTaskPlan>
   pullRequests: LabAssistantPullRequest[]
+  ciIncidents: LabAssistantCiIncident[]
   questions: LabAssistantQuestion[]
   activities: LabAssistantActivity[]
   /** Keyed by "owner/repo:base-branch". */

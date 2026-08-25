@@ -299,6 +299,11 @@ export function CommandCenter(): React.JSX.Element {
     return rank[a.status] - rank[b.status] || b.updatedAt - a.updatedAt
   })
   const activeAssistantTasks = assistantTasks.filter((task) => task.status !== 'done')
+  const assistantCiIncidents = [...(assistant?.ciIncidents ?? [])].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'failing' ? -1 : 1
+    return b.updatedAt - a.updatedAt
+  })
+  const activeCiIncidents = assistantCiIncidents.filter((incident) => incident.status === 'failing')
   const projectPaths = [...new Set([
     currentProjectPath,
     ...projects.map((project) => project.path || project.directory || project.worktree || ''),
@@ -395,7 +400,7 @@ export function CommandCenter(): React.JSX.Element {
                 <span className="command-eyebrow">Orchestration</span>
                 <h2>Lab Assistant</h2>
               </div>
-              <span>{activeAssistantTasks.length} tasks · {openAssistantQuestions.length} decisions</span>
+              <span>{activeAssistantTasks.length} tasks · {activeCiIncidents.length} CI failures · {openAssistantQuestions.length} decisions</span>
             </div>
             <div className="command-assistant-list">
               {assistantError ? <div className="command-assistant-error" role="alert">{assistantError}</div> : null}
@@ -418,6 +423,40 @@ export function CommandCenter(): React.JSX.Element {
                   <span>{assistant?.activities[0]?.detail ?? 'Authenticated GitHub automation events will appear here.'}</span>
                 </div>
               ) : null}
+              <div className="command-assistant-task-head">
+                <div><strong>CI monitoring</strong><small>GitHub Actions failures routed to their owning agents.</small></div>
+              </div>
+              <div className="command-assistant-incidents">
+                {assistantCiIncidents.slice(0, 6).map((incident) => {
+                  const pullRequest = assistant?.pullRequests.find((candidate) => candidate.id === incident.pullRequestId)
+                  const routedThread = (snapshot?.threads ?? []).find((thread) => thread.threadId === incident.routedTo)
+                  const failures = incident.jobs.flatMap((job) => job.failedSteps.length
+                    ? job.failedSteps.map((step) => `${job.name} · ${step}`)
+                    : [job.name])
+                  return (
+                    <article className={`command-assistant-incident ${incident.status}`} key={incident.id}>
+                      <span className="command-assistant-task-state">{incident.status}</span>
+                      <div>
+                        <strong>{incident.workflow}</strong>
+                        <small>
+                          {incident.repository} · {pullRequest ? `PR #${pullRequest.number}` : incident.headBranch} · run #{incident.runNumber}, attempt {incident.runAttempt}
+                          {incident.occurrenceCount > 1 ? ` · ${incident.occurrenceCount} consecutive failures` : ''}
+                          {routedThread ? ` · ${routedThread.title}` : incident.routedTo === 'manual' ? ' · you are handling it' : ''}
+                        </small>
+                        <span>{failures.length ? failures.join(' · ') : 'Run failed before GitHub reported a failed job or step.'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Open ${incident.workflow} run ${incident.runNumber}`}
+                        onClick={() => void window.boss.openExternal(incident.url)}
+                      >
+                        Open run
+                      </button>
+                    </article>
+                  )
+                })}
+                {assistantCiIncidents.length === 0 ? <div className="command-empty">No workflow failures observed.</div> : null}
+              </div>
               <div className="command-assistant-task-head">
                 <div><strong>Task queue</strong><small>Global and project work, ordered by readiness.</small></div>
               </div>

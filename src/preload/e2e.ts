@@ -446,6 +446,34 @@ export function installE2EApi(boss: BossApi): void {
       }
     ],
     taskPlans: {},
+    ciIncidents: [{
+      id: 'octo/hello:workflow:7:eval-foundation',
+      repository: 'octo/hello',
+      workflowId: 7,
+      workflow: 'CI',
+      runId: 801,
+      runNumber: 19,
+      runAttempt: 2,
+      url: 'https://github.com/octo/hello/actions/runs/801',
+      headBranch: 'eval-foundation',
+      headSha: 'abc123',
+      pullRequestId: 'octo/hello#22',
+      conclusion: 'failure',
+      status: 'failing',
+      jobs: [{
+        name: 'Electron end-to-end',
+        url: 'https://github.com/octo/hello/actions/runs/801/job/9',
+        conclusion: 'failure',
+        failedSteps: ['Run npm run test:e2e']
+      }],
+      occurrenceCount: 2,
+      firstFailedAt: Date.now() - 50_000,
+      updatedAt: Date.now() - 10_000,
+      taskId: 'assistant-task-plan',
+      routedTo: 'thread-source',
+      routedDeliveryKey: '801:2:failure',
+      lastDeliveryKey: '801:2:failure'
+    }],
     pullRequests: [
       {
         id: 'octo/hello#21', repository: 'octo/hello', number: 21, title: 'Mobile polish',

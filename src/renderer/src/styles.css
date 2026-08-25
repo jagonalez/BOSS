@@ -3145,6 +3145,71 @@ body.workspace-dragging .workspace-tab-slot {
   font-size: 11px;
 }
 
+.command-assistant-incidents {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.command-assistant-incident {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface-inset));
+}
+
+.command-assistant-incident.resolved {
+  border-color: color-mix(in srgb, var(--green) 18%, transparent);
+  background: color-mix(in srgb, var(--green) 4%, var(--surface-inset));
+  opacity: 0.68;
+}
+
+.command-assistant-incident > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.command-assistant-incident strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.command-assistant-incident small,
+.command-assistant-incident > div > span {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-assistant-incident.failing .command-assistant-task-state {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.command-assistant-incident.resolved .command-assistant-task-state {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.command-assistant-incident > button {
+  padding: 6px 8px;
+  border: 1px solid var(--line-default);
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10.5px;
+}
+
 .command-assistant-task-head {
   display: flex;
   align-items: center;
@@ -3951,6 +4016,15 @@ body.workspace-dragging .workspace-tab-slot {
 
   .command-assistant-task {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .command-assistant-incident {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .command-assistant-incident > button {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .command-assistant-task-actions {
