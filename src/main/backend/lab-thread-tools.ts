@@ -1,7 +1,7 @@
 // Relative, with the extension, so this module also loads under Node's
 // type-stripping test runner, which cannot resolve the @shared bundler alias.
 // @ts-expect-error Application builds use bundler resolution.
-import { THREAD_TOOL_DESCRIPTIONS } from '../../shared/thread-bus.ts'
+import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '../../shared/thread-bus.ts'
 import type { LabToolFunction } from './lab-tools'
 
 /** Lab's view of BOSS host tools.
@@ -97,6 +97,39 @@ export const THREAD_TOOL_DEFINITIONS: LabToolFunction[] = [
           baseBranch: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase },
           draft: { type: 'boolean', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft }
         }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'boss_reports_create',
+      description: REPORT_TOOL_DESCRIPTIONS.create,
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.title },
+          summary: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.summary },
+          body: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.body }
+        },
+        required: ['title', 'body']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'boss_reports_update',
+      description: REPORT_TOOL_DESCRIPTIONS.update,
+      parameters: {
+        type: 'object',
+        properties: {
+          reportId: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.reportId },
+          title: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.title },
+          summary: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.summary },
+          body: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.body }
+        },
+        required: ['reportId']
       }
     }
   }

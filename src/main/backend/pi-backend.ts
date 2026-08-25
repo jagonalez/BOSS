@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
-import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { COMPUTER_USE_OPERATIONS, QA_GUIDANCE, qaDescription } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { compactionCompletedEvents, compactionStartedEvent } from './compaction-events'
@@ -495,6 +495,29 @@ export default function (pi: ExtensionAPI) {
       draft: Type.Optional(Type.Boolean({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft)} }))
     }),
     execute: (_id, args, signal) => call("boss_git_create_change_request", args, signal)
+  })
+  pi.registerTool({
+    name: "boss_reports_create",
+    label: "Create BOSS report",
+    description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.create)},
+    parameters: Type.Object({
+      title: Type.String({ description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.title)} }),
+      summary: Type.Optional(Type.String({ description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.summary)} })),
+      body: Type.String({ description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.body)} })
+    }),
+    execute: (_id, args, signal) => call("boss_reports_create", args, signal)
+  })
+  pi.registerTool({
+    name: "boss_reports_update",
+    label: "Update BOSS report",
+    description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.update)},
+    parameters: Type.Object({
+      reportId: Type.String({ description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.reportId)} }),
+      title: Type.Optional(Type.String({ description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.title)} })),
+      summary: Type.Optional(Type.String({ description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.summary)} })),
+      body: Type.Optional(Type.String({ description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.body)} }))
+    }),
+    execute: (_id, args, signal) => call("boss_reports_update", args, signal)
   })
   pi.registerTool({
     name: "boss_mcp_list",

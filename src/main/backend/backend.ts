@@ -102,8 +102,9 @@ export interface Backend {
 
   /** Lab is the only backend with an endpoint BOSS configures directly.
    *  Keeping this optional avoids making every CLI-backed backend pretend to
-   *  have a connection form. */
-  labConnections?(): LabConnectionsSettings
+   *  have a connection form. The first call may wait on an authenticated
+   *  health check, so it returns a promise. */
+  labConnections?(): LabConnectionsSettings | Promise<LabConnectionsSettings>
   saveLabConnection?(connection: LabConnectionUpdate): Promise<LabConnectionsSettings>
   deleteLabConnection?(connectionId: string): Promise<LabConnectionsSettings>
 

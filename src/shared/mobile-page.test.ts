@@ -65,6 +65,7 @@ test('read-only access cannot mutate task or automation state', () => {
     'thread.relay',
     'automation.run',
     'automation.stop',
+    'report.read',
     'assistant.answer',
     'assistant.task.create',
     'assistant.task.update',
@@ -83,10 +84,23 @@ test('read-only access can inspect supervision and transcripts', () => {
     'thread.messages',
     'thread.diff',
     'automation.list',
+    'report.list',
+    'report.get',
     'assistant.snapshot'
   ] as const) {
     assert.equal(mobileRequestAllowed(type, 'read-only'), true, type)
   }
+})
+
+test('the phone has a reports inbox and durable report detail', () => {
+  const script = MOBILE_PAGE.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? ''
+  assert.match(script, /function refreshReports/)
+  assert.match(script, /type: 'report\.list'/)
+  assert.match(script, /type: 'report\.get'/)
+  assert.match(script, /function renderReports/)
+  assert.match(script, /function renderReport/)
+  assert.match(script, />Reports<\/button>/)
+  assert.match(script, /Source thread/)
 })
 
 test('the page sorts what needs the user above everything else', () => {

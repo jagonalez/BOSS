@@ -122,6 +122,8 @@ input, textarea { font-size: 16px !important; }
 .empty { color: var(--faint); text-align: center; padding: 40px 0; }
 .err { color: var(--red); font-size: 13px; margin-top: 8px; }
 .back { color: var(--accent); background: none; border: none; font-size: 15px; padding: 4px 8px 4px 0; }
+.report-body { white-space: pre-wrap; color: var(--text); font-size: 14.5px; line-height: 1.65; }
+.report-summary { padding: 10px 12px; margin-bottom: 14px; border-left: 2px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--inset); color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -154,6 +156,8 @@ var threads = [];
 var supervision = { threads: [], totals: {} };
 var threadTitles = {};
 var automations = { automations: [], runs: [] };
+var reports = { reports: [] };
+var reportDetails = {};
 var assistant = { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {} };
 var messages = {};
 var permissions = {};
@@ -330,6 +334,13 @@ function refreshAutomations() {
   });
 }
 
+function refreshReports() {
+  return api({ type: 'report.list' }).then(function (snapshot) {
+    reports = snapshot || { reports: [] };
+    if (view.name === 'reports' || view.name === 'report') render();
+  });
+}
+
 function refreshAssistant() {
   return api({ type: 'assistant.snapshot' }).then(function (snapshot) {
     assistant = snapshot || { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {} };
@@ -453,6 +464,34 @@ function renderAutomations() {
     html += '</div>';
   });
   return html;
+}
+
+function renderReports() {
+  var all = (reports.reports || []).slice().sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+  if (!all.length) return '<div class="empty">No reports yet. Ask an agent to create one, or enable reports for an automation.</div>';
+  var html = '';
+  all.forEach(function (report) {
+    var source = report.source && report.source.kind === 'automation' ? 'Automation' : ((report.source && report.source.backendId) || 'Agent');
+    html += '<button class="card" onclick="openReport(\\\'' + report.id + '\\\')">' +
+      '<div class="row"><div style="flex:1;min-width:0"><div class="title">' + esc(report.title) + '</div>' +
+      '<div class="sub">' + esc(report.summary || 'Saved report') + '</div>' +
+      '<div class="sub">' + timeAgo(report.updatedAt) + '</div></div>' +
+      '<span class="badge">' + esc(source) + '</span></div></button>';
+  });
+  return html;
+}
+
+function renderReport() {
+  var report = reportDetails[view.id];
+  if (!report) return '<div class="empty">Loading report…</div>';
+  var source = report.source && report.source.kind === 'automation' ? 'Automation' : ((report.source && report.source.backendId) || 'Agent');
+  return '<div class="card"><div class="row" style="margin-bottom:12px">' +
+    '<span class="badge">' + esc(source) + '</span>' +
+    '<span class="sub">' + esc(new Date(report.updatedAt).toLocaleString()) + '</span></div>' +
+    (report.summary ? '<div class="report-summary">' + esc(report.summary) + '</div>' : '') +
+    '<div class="report-body">' + esc(report.body) + '</div>' +
+    (report.threadId ? '<button class="btn" style="margin-top:18px" onclick="openThread(\\\'' + report.threadId + '\\\')">Source thread</button>' : '') +
+    '</div>';
 }
 
 function renderAssistant() {
@@ -620,8 +659,15 @@ function render() {
     return;
   }
   var body = '';
-  var title = view.name === 'assistant' ? 'Lab Assistant' : 'BOSS';
+  var title = view.name === 'assistant' ? 'Lab Assistant' : view.name === 'reports' ? 'Reports' : 'BOSS';
   var headerExtra = '';
+  if (view.name === 'report') {
+    var selectedReport = null;
+    (reports.reports || []).forEach(function (item) { if (item.id === view.id) selectedReport = item; });
+    title = (selectedReport && selectedReport.title) || 'Report';
+    app.innerHTML = '<header><button class="back" onclick="goBack()">‹ Back</button><h1>' + esc(title) + '</h1></header><main>' + renderReport() + '</main>';
+    return;
+  }
   if (view.name === 'thread') {
     var t = null;
     threads.forEach(function (x) { if (x.id === view.id) t = x; });
@@ -641,10 +687,11 @@ function render() {
       (desktopOnline ? 'Reconnecting…' : 'Your desktop is offline') + '</div>' +
       '<div class="sub">' + (desktopOnline ? 'Waiting for the relay.' : 'Open BOSS on your desktop to continue.') + '</div></div>'
     : '';
-  body = '<main>' + offline + (view.name === 'automations' ? renderAutomations() : view.name === 'assistant' ? renderAssistant() : renderThreads()) + '</main>' +
+  body = '<main>' + offline + (view.name === 'automations' ? renderAutomations() : view.name === 'reports' ? renderReports() : view.name === 'assistant' ? renderAssistant() : renderThreads()) + '</main>' +
     '<nav class="tabs">' +
     '<button class="' + (view.name === 'threads' ? 'active' : '') + '" onclick="showTab(\\'threads\\')">Threads</button>' +
     '<button class="' + (view.name === 'automations' ? 'active' : '') + '" onclick="showTab(\\'automations\\')">Automations</button>' +
+    '<button class="' + (view.name === 'reports' ? 'active' : '') + '" onclick="showTab(\\'reports\\')">Reports</button>' +
     '<button class="' + (view.name === 'assistant' ? 'active' : '') + '" onclick="showTab(\\'assistant\\')">Assistant</button>' +
     '</nav>';
   app.innerHTML = '<header><h1>' + esc(title) + '</h1></header>' + body;
@@ -663,9 +710,17 @@ window.pair = function () {
   });
 };
 
-window.showTab = function (name) { view = { name: name }; render(); if (name === 'automations') refreshAutomations(); else if (name === 'assistant') refreshAssistant(); else refreshThreads(); };
+window.showTab = function (name) { view = { name: name }; render(); if (name === 'automations') refreshAutomations(); else if (name === 'reports') refreshReports(); else if (name === 'assistant') refreshAssistant(); else refreshThreads(); };
 window.openThread = function (id) { view = { name: 'thread', id: id }; render(); refreshMessages(id); };
-window.goBack = function () { view = { name: 'threads' }; render(); refreshThreads(); };
+window.openReport = function (id) {
+  view = { name: 'report', id: id };
+  render();
+  api({ type: 'report.get', reportId: id }).then(function (report) {
+    reportDetails[id] = report;
+    if (view.name === 'report' && view.id === id) render();
+  }).catch(function () { if (view.name === 'report' && view.id === id) render(); });
+};
+window.goBack = function () { var target = view.name === 'report' ? 'reports' : 'threads'; view = { name: target }; render(); if (target === 'reports') refreshReports(); else refreshThreads(); };
 window.stopThread = function () { api({ type: 'thread.abort', threadId: view.id }).catch(function () {}); };
 window.runAutomation = function (id) { api({ type: 'automation.run', automationId: id }).then(refreshAutomations).catch(function (e) { alert(e.message); }); };
 window.stopAutomation = function (id) { api({ type: 'automation.stop', automationId: id }).then(refreshAutomations).catch(function (e) { alert(e.message); }); };
@@ -869,6 +924,7 @@ function handleRelayMessage(message) {
       noteSeq(message.seq);
       refreshThreads();
       refreshAutomations();
+      refreshReports();
       refreshAssistant();
       if (view.name === 'thread') refreshMessages(view.id);
     } else {
@@ -899,6 +955,7 @@ function applyEvent(event) {
   if (event.type === 'permission.asked' || event.type === 'permission.updated') { if (props.sessionID) permissions[props.sessionID] = props; }
   if (event.type === 'permission.replied') { if (props.sessionID) delete permissions[props.sessionID]; }
   if (event.type === 'automations.updated') { automations = props.snapshot || automations; if (view.name === 'automations') render(); return; }
+  if (event.type === 'reports.updated') { reports = props.snapshot || reports; if (view.name === 'reports' || view.name === 'report') render(); return; }
   if (event.type === 'assistant.updated') { assistant = props.snapshot || assistant; if (view.name === 'assistant') render(); return; }
   if (event.type.indexOf('session.') === 0) refreshThreads();
   if (view.name === 'thread' && sid === view.id) {
@@ -981,7 +1038,7 @@ window.unpairRelay = function () {
 
 function boot() {
   render();
-  refreshAccess().then(function () { refreshThreads(); refreshAutomations(); refreshAssistant(); render(); });
+  refreshAccess().then(function () { refreshThreads(); refreshAutomations(); refreshReports(); refreshAssistant(); render(); });
   listen();
 }
 

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { ServerInfo } from '@shared/ipc'
 import type { ThreadBusConnection } from '@shared/thread-bus'
-import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { COMPUTER_USE_OPERATIONS, qaDescription } from '@shared/qa'
 
 interface Health {
@@ -119,6 +119,7 @@ export class OpenCodeServer {
     mkdirSync(toolsDir, { recursive: true })
     writeFileSync(join(toolsDir, 'boss_threads.ts'), this.threadToolSource())
     writeFileSync(join(toolsDir, 'boss.ts'), this.qaToolSource())
+    writeFileSync(join(toolsDir, 'boss_reports.ts'), this.reportToolSource())
   }
 
   private threadToolSource(): string {
@@ -236,6 +237,46 @@ export const mcp_call = tool({
     arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional()
   },
   execute(args, context) { return call("boss_mcp_call", args, context) }
+})
+`
+  }
+
+  private reportToolSource(): string {
+    return `import { tool } from "@opencode-ai/plugin"
+
+async function call(name, args, context) {
+  const url = process.env.BOSS_THREAD_BUS_URL
+  const token = process.env.BOSS_THREAD_BUS_TOKEN
+  if (!url || !token) throw new Error("BOSS report tools are unavailable.")
+  const response = await fetch(url + "/agent-call", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ backendId: "opencode", nativeThreadId: context.sessionID, tool: name, arguments: args })
+  })
+  const payload = await response.json()
+  if (!response.ok || !payload.ok) throw new Error(payload.error || "BOSS report tool failed.")
+  return JSON.stringify(payload.result, null, 2)
+}
+
+export const create = tool({
+  description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.create)},
+  args: {
+    title: tool.schema.string().describe(${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.title)}),
+    summary: tool.schema.string().optional().describe(${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.summary)}),
+    body: tool.schema.string().describe(${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.body)})
+  },
+  execute(args, context) { return call("boss_reports_create", args, context) }
+})
+
+export const update = tool({
+  description: ${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.update)},
+  args: {
+    reportId: tool.schema.string().describe(${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.reportId)}),
+    title: tool.schema.string().optional().describe(${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.title)}),
+    summary: tool.schema.string().optional().describe(${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.summary)}),
+    body: tool.schema.string().optional().describe(${JSON.stringify(REPORT_TOOL_DESCRIPTIONS.body)})
+  },
+  execute(args, context) { return call("boss_reports_update", args, context) }
 })
 `
   }
