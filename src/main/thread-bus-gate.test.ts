@@ -87,7 +87,7 @@ test('opening a change request is answered before the collaboration gate', () =>
 test('a change request is opened for the caller’s own checkout', () => {
   // A thread on a worktree must open the request for that worktree's branch, not for whatever the
   // project directory happens to have checked out.
-  const gate = source.slice(source.indexOf("tool === 'boss_git_create_change_request'"), source.indexOf("const policy = this.policy("))
+  const gate = source.slice(source.indexOf("tool === 'boss_git_create_change_request'"), source.indexOf("tool === 'boss_reports_create'"))
   assert.ok(gate.includes('caller.executionPath'), 'expected the caller’s execution path')
   assert.ok(!gate.includes('projectPath'), 'the project path is not where the thread is working')
 })
@@ -110,4 +110,23 @@ test('every agent backend registers the change request tool', () => {
       `${file} should register the shared change request tool`
     )
   }
+})
+
+test('every agent backend registers the report artifact toolchain', () => {
+  for (const file of [
+    join(import.meta.dirname, 'backend', 'claude-backend.ts'),
+    join(import.meta.dirname, 'backend', 'codex-backend.ts'),
+    join(import.meta.dirname, 'backend', 'pi-backend.ts'),
+    join(import.meta.dirname, 'opencode-server.ts'),
+    join(import.meta.dirname, 'backend', 'lab-thread-tools.ts')
+  ]) {
+    const backend = readFileSync(file, 'utf8')
+    assert.ok(backend.includes('boss_reports_create'), `${file} should let agents create reports`)
+    assert.ok(backend.includes('boss_reports_update'), `${file} should let agents update reports`)
+  }
+
+  const gate = source.slice(source.indexOf('private async runAgentCall('), source.indexOf('private async send('))
+  const policy = gate.indexOf("if (policy === 'off')")
+  assert.ok(gate.indexOf("tool === 'boss_reports_create'") < policy, 'creating a local report must not require collaboration')
+  assert.ok(gate.indexOf("tool === 'boss_reports_update'") < policy, 'updating a local report must not require collaboration')
 })

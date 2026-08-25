@@ -1,21 +1,23 @@
 import { backendCalls, expect, lastBackendCall, test } from './fixtures'
 
-test('automation reports have a durable inbox, rich detail, and source-thread provenance', async ({ appPage }) => {
+test('agent-created artifacts have a durable inbox, rich detail, and source-thread provenance', async ({ appPage }) => {
   await appPage.getByRole('button', { name: 'Reports' }).click()
 
   await expect(appPage.locator('.reports-page')).toBeVisible()
   await expect(appPage.getByRole('heading', { name: 'Reports' })).toBeVisible()
 
   const inbox = appPage.getByRole('region', { name: 'Report inbox' })
+  await expect(inbox.getByRole('button', { name: /Launch readiness brief/ })).toContainText('Claude-created artifact')
   await expect(inbox.getByRole('button', { name: /Codex changelog/ })).toContainText('Codex added report history')
 
   const detail = appPage.getByRole('article', { name: 'Report detail' })
-  await expect(detail.getByRole('heading', { name: 'Codex changelog' })).toBeVisible()
-  await expect(detail).toContainText('Added durable automation reports.')
-  await expect(detail.getByRole('table')).toContainText('Ready')
+  await expect(detail.getByRole('heading', { name: 'Launch readiness brief' })).toBeVisible()
+  await expect(detail).toContainText('Ship behind a feature flag.')
+  await expect(detail.getByRole('table')).toContainText('Guided rollout')
+  await expect(detail).toContainText('claude')
 
   const read = await lastBackendCall(appPage, 'report.read')
-  expect(read.request).toEqual({ type: 'report.read', reportId: 'report-codex-seed' })
+  expect(read.request).toEqual({ type: 'report.read', reportId: 'report-agent-seed' })
 
   await detail.getByRole('button', { name: 'Source thread' }).click()
   await expect(appPage.locator('.workspace-shell')).toBeVisible()

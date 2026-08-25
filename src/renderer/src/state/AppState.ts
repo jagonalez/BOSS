@@ -19,7 +19,7 @@ import type { Annotation } from '@shared/annotations'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
-import type { AutomationReport, ReportsSnapshot } from '@shared/report'
+import type { Report, ReportsSnapshot } from '@shared/report'
 import type { McpConnectionView } from '@shared/mcp'
 import type {
   BrowseNavigationState,
@@ -133,7 +133,7 @@ export interface AppState {
   automations: AutomationsSnapshot | null
   reports: ReportsSnapshot | null
   selectedReportId: string | null
-  reportDetail: AutomationReport | null
+  reportDetail: Report | null
   mcpConnections: McpConnectionView[]
   projectPath: string
   selectedCheckoutPath: string

@@ -462,6 +462,7 @@ export function installE2EApi(boss: BossApi): void {
     workspace: 'worktree',
     overlapPolicy: 'skip',
     catchUp: true,
+    saveReport: true,
     notify: 'events',
     maxRunMinutes: 30,
     keepRuns: 50,
@@ -484,19 +485,36 @@ export function installE2EApi(boss: BossApi): void {
     startedAt: Date.now() - 610_000,
     finishedAt: Date.now() - 600_000
   }]
-  let reportsFixture: Array<Record<string, unknown>> = [{
-    id: 'report-codex-seed',
-    automationId: 'automation-webhook-seed',
-    automationName: 'Review incoming PRs',
-    runId: 'run-report-seed',
-    threadId: 'thread-report-source',
-    projectPath: PROJECT,
-    title: 'Codex changelog',
-    summary: 'Codex added report history and improved mobile review.',
-    body: '## Highlights\n\n- Added durable automation reports.\n- Made every report available on mobile.\n\n| Area | Result |\n| --- | --- |\n| Reports | Ready |',
-    status: 'success',
-    createdAt: Date.now() - 600_000
-  }]
+  let reportsFixture: Array<Record<string, unknown>> = [
+    {
+      id: 'report-agent-seed',
+      source: { kind: 'agent', backendId: 'claude' },
+      threadId: 'thread-report-source',
+      projectPath: PROJECT,
+      title: 'Launch readiness brief',
+      summary: 'A Claude-created artifact with launch risks and recommendations.',
+      body: '## Recommendation\n\nShip behind a feature flag.\n\n| Risk | Mitigation |\n| --- | --- |\n| Adoption | Guided rollout |',
+      createdAt: Date.now() - 300_000,
+      updatedAt: Date.now() - 300_000
+    },
+    {
+      id: 'report-codex-seed',
+      source: {
+        kind: 'automation',
+        automationId: 'automation-webhook-seed',
+        automationName: 'Review incoming PRs',
+        runId: 'run-report-seed',
+        status: 'success'
+      },
+      threadId: 'thread-report-source',
+      projectPath: PROJECT,
+      title: 'Codex changelog',
+      summary: 'Codex added report history and improved mobile review.',
+      body: '## Highlights\n\n- Added durable automation reports.\n- Made every report available on mobile.\n\n| Area | Result |\n| --- | --- |\n| Reports | Ready |',
+      createdAt: Date.now() - 600_000,
+      updatedAt: Date.now() - 600_000
+    }
+  ]
   let assistantFixture: LabAssistantSnapshot = {
     generatedAt: Date.now(),
     tasks: [

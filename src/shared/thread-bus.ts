@@ -75,6 +75,8 @@ export type ThreadBusAgentTool =
   // Not a boss_threads_* tool: it acts on the caller's own checkout rather than reaching another
   // thread, so it is not gated by the collaboration policy either.
   | 'boss_git_create_change_request'
+  | 'boss_reports_create'
+  | 'boss_reports_update'
   | 'boss_mcp_list'
   | 'boss_mcp_call'
   | `mcp_${string}`
@@ -104,6 +106,15 @@ export const THREAD_TOOL_DESCRIPTIONS = {
   createChangeRequestBody: 'Description for the request, as Markdown. Omit together with title to fill both from the commits.',
   createChangeRequestBase: 'Branch to merge into. Omit to use the repository default.',
   createChangeRequestDraft: 'Open it as a draft.'
+} as const
+
+export const REPORT_TOOL_DESCRIPTIONS = {
+  create: 'Create a durable report artifact in BOSS when the user asks for a report, brief, dashboard narrative, analysis, or other result worth keeping outside the chat. The body supports Markdown. Return the report id so you can refine it later.',
+  update: 'Update a report artifact previously created by this thread. Pass only the fields that should change; pass an empty summary to remove it.',
+  title: 'Short human-facing title for the report.',
+  summary: 'Optional one- or two-sentence description shown in the report inbox.',
+  body: 'Complete report content in Markdown.',
+  reportId: 'Report id returned by boss_reports_create.'
 } as const
 
 export interface ThreadBusToolCall {

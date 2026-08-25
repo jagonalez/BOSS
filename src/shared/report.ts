@@ -1,29 +1,53 @@
 import type { AutomationRunStatus } from './automation'
+import type { BackendId } from './backend'
 
-/** A durable, human-facing result produced by an automation run.
+export type ReportSource =
+  | { kind: 'agent'; backendId: BackendId }
+  | {
+      kind: 'automation'
+      automationId: string
+      automationName: string
+      runId: string
+      status: AutomationRunStatus
+    }
+
+/** A durable, human-facing artifact produced by an agent.
  *
- * Threads remain the provenance and debugging surface. Reports copy the final
- * answer so pruning a thread never turns the result into an empty shell.
+ * A report owns a presentation copy of its content. The source thread remains
+ * provenance and working context, but deleting it never empties the artifact.
  */
-export interface AutomationReport {
+export interface Report {
   id: string
-  automationId: string
-  automationName: string
-  runId: string
+  source: ReportSource
   threadId?: string
   projectPath: string
   title: string
   summary?: string
   body: string
-  status: AutomationRunStatus
   createdAt: number
+  updatedAt: number
   readAt?: number
 }
 
-export type AutomationReportSummary = Omit<AutomationReport, 'body'>
+export type ReportSummary = Omit<Report, 'body'>
 
 export interface ReportsSnapshot {
-  reports: AutomationReportSummary[]
+  reports: ReportSummary[]
+}
+
+export interface AgentReportInput {
+  threadId: string
+  projectPath: string
+  backendId: BackendId
+  title: string
+  summary?: string
+  body: string
+}
+
+export interface AgentReportPatch {
+  title?: string
+  summary?: string
+  body?: string
 }
 
 /** Remove the machine-readable summary instruction from the presentation copy.

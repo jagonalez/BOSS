@@ -467,15 +467,16 @@ function renderAutomations() {
 }
 
 function renderReports() {
-  var all = (reports.reports || []).slice().sort(function (a, b) { return b.createdAt - a.createdAt; });
-  if (!all.length) return '<div class="empty">No reports yet. Completed automations will save their results here.</div>';
+  var all = (reports.reports || []).slice().sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+  if (!all.length) return '<div class="empty">No reports yet. Ask an agent to create one, or enable reports for an automation.</div>';
   var html = '';
   all.forEach(function (report) {
+    var source = report.source && report.source.kind === 'automation' ? 'Automation' : ((report.source && report.source.backendId) || 'Agent');
     html += '<button class="card" onclick="openReport(\\\'' + report.id + '\\\')">' +
       '<div class="row"><div style="flex:1;min-width:0"><div class="title">' + esc(report.title) + '</div>' +
-      '<div class="sub">' + esc(report.summary || 'Saved automation result') + '</div>' +
-      '<div class="sub">' + timeAgo(report.createdAt) + '</div></div>' +
-      '<span class="badge ' + esc(report.status) + '">' + esc(report.status) + '</span></div></button>';
+      '<div class="sub">' + esc(report.summary || 'Saved report') + '</div>' +
+      '<div class="sub">' + timeAgo(report.updatedAt) + '</div></div>' +
+      '<span class="badge">' + esc(source) + '</span></div></button>';
   });
   return html;
 }
@@ -483,9 +484,10 @@ function renderReports() {
 function renderReport() {
   var report = reportDetails[view.id];
   if (!report) return '<div class="empty">Loading report…</div>';
+  var source = report.source && report.source.kind === 'automation' ? 'Automation' : ((report.source && report.source.backendId) || 'Agent');
   return '<div class="card"><div class="row" style="margin-bottom:12px">' +
-    '<span class="badge ' + esc(report.status) + '">' + esc(report.status) + '</span>' +
-    '<span class="sub">' + esc(new Date(report.createdAt).toLocaleString()) + '</span></div>' +
+    '<span class="badge">' + esc(source) + '</span>' +
+    '<span class="sub">' + esc(new Date(report.updatedAt).toLocaleString()) + '</span></div>' +
     (report.summary ? '<div class="report-summary">' + esc(report.summary) + '</div>' : '') +
     '<div class="report-body">' + esc(report.body) + '</div>' +
     (report.threadId ? '<button class="btn" style="margin-top:18px" onclick="openThread(\\\'' + report.threadId + '\\\')">Source thread</button>' : '') +

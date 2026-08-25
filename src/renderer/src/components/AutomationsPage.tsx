@@ -104,6 +104,7 @@ interface EditorState {
   workspace: 'worktree' | 'project'
   overlapPolicy: 'skip' | 'queue'
   catchUp: boolean
+  saveReport: boolean
   notify: AutomationNotifyMode
   maxRunMinutes: number
   keepRuns: number
@@ -124,6 +125,7 @@ function emptyEditor(projectPath: string, backendId: BackendId): EditorState {
     workspace: 'worktree',
     overlapPolicy: AUTOMATION_DEFAULTS.overlapPolicy,
     catchUp: AUTOMATION_DEFAULTS.catchUp,
+    saveReport: AUTOMATION_DEFAULTS.saveReport,
     notify: AUTOMATION_DEFAULTS.notify,
     maxRunMinutes: AUTOMATION_DEFAULTS.maxRunMinutes,
     keepRuns: AUTOMATION_DEFAULTS.keepRuns
@@ -146,6 +148,7 @@ function editorFromAutomation(automation: Automation): EditorState {
     workspace: automation.workspace === 'none' ? 'worktree' : automation.workspace,
     overlapPolicy: automation.overlapPolicy,
     catchUp: automation.catchUp,
+    saveReport: automation.saveReport !== false,
     notify: automation.notify,
     maxRunMinutes: automation.maxRunMinutes,
     keepRuns: automation.keepRuns
@@ -252,6 +255,7 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
       workspace: draft.projectPath ? draft.workspace : 'none',
       overlapPolicy: draft.overlapPolicy,
       catchUp: draft.catchUp,
+      saveReport: draft.saveReport,
       notify: draft.notify,
       maxRunMinutes: draft.maxRunMinutes,
       keepRuns: draft.keepRuns
@@ -282,9 +286,6 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
         <span className="settings-row-label">Name</span>
         <input className="settings-input" value={draft.name} placeholder="Morning changelog report" onChange={(e) => patch({ name: e.target.value })} />
       </label>
-      <div className="automation-report-hint">
-        <FileIcon size={13} /> The final response is saved in Reports. Ask the agent to message Slack or another service only when you want an external copy.
-      </div>
       <label className="settings-row automation-prompt-row">
         <span className="settings-row-label">Prompt</span>
         <textarea
@@ -506,6 +507,10 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
         <label className="settings-check">
           <input type="checkbox" checked={draft.catchUp} onChange={(e) => patch({ catchUp: e.target.checked })} />
           <span>Run once at launch when a scheduled run was missed</span>
+        </label>
+        <label className="settings-check">
+          <input type="checkbox" checked={draft.saveReport} onChange={(e) => patch({ saveReport: e.target.checked })} />
+          <span>Save the final response to Reports</span>
         </label>
         <label className="settings-row">
           <span className="settings-row-label">Notifications</span>

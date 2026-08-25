@@ -137,6 +137,7 @@ const reports = new ReportManager(
   (snapshot) => backendMgr.emit({ type: 'reports.updated', properties: { snapshot } })
 )
 backendMgr.attachReports(reports)
+threadBus.attachReports(reports)
 const automations = new AutomationManager({
   stateFile: join(app.getPath('userData'), 'automations.json'),
   runsFile: join(app.getPath('userData'), 'automation-runs.json')

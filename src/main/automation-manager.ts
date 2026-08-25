@@ -65,9 +65,7 @@ interface AutomationManagerOptions {
 }
 
 interface AutomationReports {
-  create(automation: Automation, run: AutomationRun, body: string): Promise<{ id: string } | undefined>
-  removeForAutomation(automationId: string): Promise<void>
-  removeForRuns(runIds: string[]): Promise<void>
+  createForAutomation(automation: Automation, run: AutomationRun, body: string): Promise<{ id: string } | undefined>
 }
 
 const TICK_MS = 30_000
@@ -137,6 +135,8 @@ export class AutomationManager {
         // Migrate the pre-notify-mode boolean field.
         const legacy = automation.notify as unknown
         if (typeof legacy === 'boolean') automation.notify = legacy ? 'events' : 'off'
+        // Reports predate the per-automation choice, and were always enabled.
+        if (typeof automation.saveReport !== 'boolean') automation.saveReport = true
       }
     } catch {
       /* First launch starts with no automations. */
@@ -311,6 +311,7 @@ export class AutomationManager {
       projectPath,
       workspace,
       webhook,
+      saveReport: input.saveReport !== false,
       maxRunMinutes: Math.max(1, Math.min(24 * 60, Math.round(input.maxRunMinutes || AUTOMATION_DEFAULTS.maxRunMinutes))),
       keepRuns: Math.max(1, Math.min(500, Math.round(input.keepRuns || AUTOMATION_DEFAULTS.keepRuns)))
     }
@@ -380,7 +381,6 @@ export class AutomationManager {
     this.automations = this.automations.filter((item) => item.id !== id)
     this.runs = this.runs.filter((run) => run.automationId !== id)
     delete this.webhookTokens[id]
-    if (this.reports) await this.reports.removeForAutomation(id).catch(() => {})
     await this.persistAndEmit()
   }
 
@@ -687,8 +687,8 @@ export class AutomationManager {
       await this.worktrees.remove(run.worktreeId).catch(() => {})
     }
 
-    if (reportBody) {
-      const report = await this.reports?.create(automation, run, reportBody).catch(() => undefined)
+    if (automation.saveReport !== false && reportBody) {
+      const report = await this.reports?.createForAutomation(automation, run, reportBody).catch(() => undefined)
       if (report) run.reportId = report.id
     }
 
@@ -717,7 +717,6 @@ export class AutomationManager {
     const excess = forAutomation.slice(automation.keepRuns)
     if (excess.length === 0) return
     const drop = new Set(excess.map((run) => run.id))
-    if (this.reports) await this.reports.removeForRuns([...drop]).catch(() => {})
     for (const run of excess) {
       if (run.threadId) {
         await this.backends.handle({ type: 'thread.delete', threadId: run.threadId }).catch(() => {})

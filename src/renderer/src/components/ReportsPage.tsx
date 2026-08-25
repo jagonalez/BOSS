@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import type { AutomationReportSummary } from '@shared/report'
+import type { ReportSummary } from '@shared/report'
 import { useStore, appStore } from '../state/AppState'
 import { MarkdownDocument } from '../lib/text'
 import { OpenCode } from '../lib/opencode'
@@ -15,7 +15,7 @@ function timeAgo(ts: number): string {
 }
 
 function ReportCard({ report, selected, onSelect }: {
-  report: AutomationReportSummary
+  report: ReportSummary
   selected: boolean
   onSelect: () => void
 }): React.JSX.Element {
@@ -24,8 +24,8 @@ function ReportCard({ report, selected, onSelect }: {
       <span className="report-card-icon"><FileIcon size={14} /></span>
       <span className="report-card-main">
         <strong>{report.title}</strong>
-        <span>{report.summary ?? 'Saved automation result'}</span>
-        <small>{timeAgo(report.createdAt)}{report.projectPath ? ` · ${report.projectPath.split('/').pop()}` : ''}</small>
+        <span>{report.summary ?? 'Saved report'}</span>
+        <small>{timeAgo(report.updatedAt)}{report.projectPath ? ` · ${report.projectPath.split('/').pop()}` : ''}</small>
       </span>
       {!report.readAt ? <span className="report-unread" aria-label="Unread report" /> : null}
     </button>
@@ -74,7 +74,7 @@ export function ReportsPage(): React.JSX.Element {
         <div>
           <span className="command-eyebrow">BOSS</span>
           <h1>Reports</h1>
-          <p>Durable results from automation runs. Open the source thread when you need the full working context.</p>
+          <p>Durable artifacts created by your agents and automations. Open the source thread when you need the working context.</p>
         </div>
         <button className="btn-ghost" onClick={() => void refreshReports()} title="Refresh reports">
           <ReloadIcon size={13} /> Refresh
@@ -90,7 +90,7 @@ export function ReportsPage(): React.JSX.Element {
           <div className="report-list">
             {visible.length
               ? visible.map((report) => <ReportCard key={report.id} report={report} selected={selectedSummary?.id === report.id} onSelect={() => choose(report.id)} />)
-              : <div className="command-empty">{filter === 'unread' ? 'You’re caught up.' : 'No reports yet. Completed automations will save their final results here.'}</div>}
+              : <div className="command-empty">{filter === 'unread' ? 'You’re caught up.' : 'No reports yet. Ask an agent to create one, or enable reports for an automation.'}</div>}
           </div>
         </section>
 
@@ -99,9 +99,14 @@ export function ReportsPage(): React.JSX.Element {
             <>
               <header className="report-detail-head">
                 <div>
-                  <span className={`site-badge automation-badge status-${selectedSummary.status}`}>{selectedSummary.status}</span>
+                  <span className="site-badge automation-badge">
+                    {selectedSummary.source.kind === 'automation' ? 'Automation' : selectedSummary.source.backendId}
+                  </span>
                   <h2>{selectedSummary.title}</h2>
-                  <p>{new Date(selectedSummary.createdAt).toLocaleString()} · {selectedSummary.automationName}</p>
+                  <p>
+                    {new Date(selectedSummary.updatedAt).toLocaleString()}
+                    {selectedSummary.source.kind === 'automation' ? ` · ${selectedSummary.source.automationName}` : ' · Agent-created'}
+                  </p>
                 </div>
                 {selectedSummary.threadId ? (
                   <button className="btn-ghost" onClick={() => selectSession(selectedSummary.threadId!, false)}>

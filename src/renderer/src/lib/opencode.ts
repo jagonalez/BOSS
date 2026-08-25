@@ -26,7 +26,7 @@ import type { RemoteAccessStatus } from '@shared/relay'
 import type { SupervisionSnapshot, ThreadUsageReport, TranscriptSearchResult } from '@shared/supervision'
 import type { TaskPolicy } from '@shared/task-policy'
 import type { LabAssistantSnapshot, LabAssistantTaskInput, LabAssistantTaskPatch } from '@shared/lab-assistant'
-import type { AutomationReport, ReportsSnapshot } from '@shared/report'
+import type { Report, ReportsSnapshot } from '@shared/report'
 
 export class ApiError extends Error {
   constructor(
@@ -248,8 +248,8 @@ export const OpenCode = {
     backendRequest<MobileAccessStatus>({ type: 'mobile.set', patch }),
   automationsList: () => backendRequest<AutomationsSnapshot>({ type: 'automation.list' }),
   reportsList: () => backendRequest<ReportsSnapshot>({ type: 'report.list' }),
-  report: (reportId: string) => backendRequest<AutomationReport>({ type: 'report.get', reportId }),
-  markReportRead: (reportId: string) => backendRequest<AutomationReport>({ type: 'report.read', reportId }),
+  report: (reportId: string) => backendRequest<Report>({ type: 'report.get', reportId }),
+  markReportRead: (reportId: string) => backendRequest<Report>({ type: 'report.read', reportId }),
   createAutomation: (input: AutomationInput) => backendRequest<Automation>({ type: 'automation.create', input }),
   updateAutomation: (automationId: string, patch: Partial<AutomationInput> & { enabled?: boolean }) =>
     backendRequest<Automation>({ type: 'automation.update', automationId, patch }),
