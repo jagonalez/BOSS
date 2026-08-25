@@ -25,7 +25,7 @@ import { NotificationRouter } from './notification-router'
 import { AutomationHooks } from './automation-hooks'
 import { AutomationManager } from './automation-manager'
 import { LabAssistantManager } from './lab-assistant-manager'
-import { listGitHubPullRequests } from './lab-assistant-github'
+import { inspectGitHubWorkflowRun, listGitHubPullRequests } from './lab-assistant-github'
 import { TelegramBot } from './telegram-bot'
 import { McpHub } from './mcp-hub'
 import { WebAccess } from './web-access'
@@ -145,6 +145,7 @@ const labAssistant = new LabAssistantManager(
       await backendMgr.addFollowUp(threadId, message)
     },
     refreshPullRequests: (repository) => listGitHubPullRequests(repository),
+    inspectWorkflowRun: (repository, runId, attempt) => inspectGitHubWorkflowRun(repository, runId, attempt),
     emit: (snapshot) => backendMgr.emit({ type: 'assistant.updated', properties: { snapshot } }),
     notify: (event) => notifications.publish(event)
   }

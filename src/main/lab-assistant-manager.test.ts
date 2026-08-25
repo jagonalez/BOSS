@@ -30,6 +30,34 @@ function prDelivery(number: number, overrides: Record<string, unknown> = {}): Gi
   }
 }
 
+function workflowDelivery(
+  conclusion: 'failure' | 'success',
+  overrides: Record<string, unknown> = {}
+): GitHubDelivery {
+  return {
+    event: 'workflow_run',
+    action: 'completed',
+    body: {
+      action: 'completed',
+      repository: { full_name: 'jagonalez/BOSS' },
+      workflow_run: {
+        id: 801,
+        workflow_id: 42,
+        run_number: 19,
+        run_attempt: 1,
+        name: 'CI',
+        html_url: 'https://github.com/jagonalez/BOSS/actions/runs/801',
+        head_branch: 'feature-ci',
+        head_sha: 'abc123',
+        status: 'completed',
+        conclusion,
+        pull_requests: [{ number: 31 }],
+        ...overrides
+      }
+    }
+  }
+}
+
 function thread(branch: string, id = 'agent-codex'): SupervisedThread {
   return {
     threadId: id,
@@ -46,7 +74,8 @@ function thread(branch: string, id = 'agent-codex'): SupervisedThread {
 
 function fixture(
   threads: SupervisedThread[] = [],
-  refreshPullRequests?: LabAssistantHost['refreshPullRequests']
+  refreshPullRequests?: LabAssistantHost['refreshPullRequests'],
+  inspectWorkflowRun?: LabAssistantHost['inspectWorkflowRun']
 ): {
   root: string
   manager: LabAssistantManager
@@ -60,6 +89,7 @@ function fixture(
     threads: () => threads,
     messageAgent: async (threadId, message) => { messages.push({ threadId, message }) },
     ...(refreshPullRequests ? { refreshPullRequests } : {}),
+    ...(inspectWorkflowRun ? { inspectWorkflowRun } : {}),
     emit: () => {},
     notify: (event) => { notifications.push(event) }
   }
@@ -270,6 +300,137 @@ test('simultaneous webhook deliveries serialize their refresh and persistence wo
     ])
     assert.equal(maxActiveRefreshes, 1)
     assert.deepEqual((await manager.snapshot()).pullRequests.map((pullRequest) => pullRequest.number), [26, 27])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a failed workflow run is enriched and routed once to its branch owner', async () => {
+  let inspections = 0
+  const { root, manager, messages, notifications } = fixture(
+    [thread('feature-ci')],
+    undefined,
+    async (_repository, runId, attempt) => {
+      inspections += 1
+      assert.equal(runId, 801)
+      assert.equal(attempt, 1)
+      return [{
+        name: 'Electron end-to-end',
+        url: 'https://github.com/jagonalez/BOSS/actions/runs/801/job/9',
+        conclusion: 'failure',
+        failedSteps: ['Run npm run test:e2e']
+      }]
+    }
+  )
+  try {
+    await manager.observeGitHub(workflowDelivery('failure'))
+    await manager.observeGitHub(workflowDelivery('failure'))
+
+    assert.equal(inspections, 1)
+    assert.equal(messages.length, 1)
+    assert.equal(messages[0].threadId, 'agent-codex')
+    assert.match(messages[0].message, /Electron end-to-end/)
+    assert.match(messages[0].message, /Run npm run test:e2e/)
+    assert.match(messages[0].message, /investigate the root cause/i)
+    assert.deepEqual(notifications.map((event) => event.type), ['task.failed'])
+
+    const snapshot = await manager.snapshot()
+    assert.equal(snapshot.ciIncidents.length, 1)
+    assert.equal(snapshot.ciIncidents[0].status, 'failing')
+    assert.equal(snapshot.ciIncidents[0].occurrenceCount, 1)
+    assert.equal(snapshot.ciIncidents[0].routedTo, 'agent-codex')
+
+    const restored = new LabAssistantManager(join(root, 'assistant.json'), {
+      threads: () => [], messageAgent: async () => {}, emit: () => {}, notify: () => {}
+    })
+    assert.equal((await restored.snapshot()).ciIncidents[0].lastDeliveryKey, '801:1:failure')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a failed rerun is a new occurrence while a passing rerun resolves the episode', async () => {
+  const { root, manager, messages } = fixture(
+    [thread('feature-ci')],
+    undefined,
+    async () => [{ name: 'check', url: '', conclusion: 'failure', failedSteps: ['npm test'] }]
+  )
+  try {
+    await manager.observeGitHub(workflowDelivery('failure'))
+    const repeated = await manager.observeGitHub(workflowDelivery('failure', { run_attempt: 2 }))
+    assert.equal(repeated.ciIncidents[0].occurrenceCount, 2)
+    assert.equal(messages.length, 2)
+    assert.match(messages[1].message, /attempt 2/)
+
+    const resolved = await manager.observeGitHub(workflowDelivery('success', { run_attempt: 3 }))
+    assert.equal(resolved.ciIncidents[0].status, 'resolved')
+    assert.equal(resolved.ciIncidents[0].resolvedAt, 1_800_000_000_000)
+    assert.match(resolved.activities[0].title, /recovered/)
+    assert.equal(messages.length, 2)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('an unowned workflow failure asks the user and routes their answer with run-level fallback', async () => {
+  const { root, manager, messages } = fixture(
+    [thread('another-branch', 'agent-review')],
+    undefined,
+    async () => []
+  )
+  try {
+    const pending = await manager.observeGitHub(workflowDelivery('failure'))
+    assert.equal(messages.length, 0)
+    const question = pending.questions.find((item) => item.key.startsWith('ci-owner:'))
+    assert.ok(question)
+    assert.match(question.prompt, /CI failed/)
+    assert.deepEqual(question.options, [{ id: 'agent-review', label: 'Codex implementation' }])
+
+    const answered = await manager.answer(question.id, 'agent-review')
+    assert.equal(messages.length, 1)
+    assert.match(messages[0].message, /did not report a failed job or step/i)
+    assert.match(messages[0].message, /actions\/runs\/801/)
+    assert.equal(answered.ciIncidents[0].routedTo, 'agent-review')
+    assert.equal(answered.questions.find((item) => item.id === question.id)?.status, 'answered')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a recovered workflow dismisses an unanswered routing decision', async () => {
+  const { root, manager } = fixture([], undefined, async () => [])
+  try {
+    const failed = await manager.observeGitHub(workflowDelivery('failure'))
+    assert.equal(failed.questions.find((item) => item.key.startsWith('ci-owner:'))?.status, 'open')
+    const resolved = await manager.observeGitHub(workflowDelivery('success', { run_attempt: 2 }))
+    assert.equal(resolved.questions.find((item) => item.key.startsWith('ci-owner:'))?.status, 'dismissed')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a failed rerun replaces its prior unanswered routing decision', async () => {
+  const { root, manager } = fixture([], undefined, async () => [])
+  try {
+    const first = await manager.observeGitHub(workflowDelivery('failure'))
+    const firstQuestion = first.questions.find((item) => item.key.startsWith('ci-owner:'))!
+    const rerun = await manager.observeGitHub(workflowDelivery('failure', { run_attempt: 2 }))
+    assert.equal(rerun.questions.find((item) => item.id === firstQuestion.id)?.status, 'dismissed')
+    assert.equal(rerun.questions.filter((item) => item.status === 'open' && item.key.startsWith('ci-owner:')).length, 1)
+    assert.match(rerun.questions.find((item) => item.status === 'open')?.key ?? '', /801:2:failure$/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('an older successful delivery cannot resolve a newer workflow failure', async () => {
+  const { root, manager } = fixture([], undefined, async () => [])
+  try {
+    await manager.observeGitHub(workflowDelivery('failure', { id: 802, run_number: 20 }))
+    const stale = await manager.observeGitHub(workflowDelivery('success', { id: 801, run_number: 19 }))
+    assert.equal(stale.ciIncidents[0].status, 'failing')
+    assert.equal(stale.ciIncidents[0].runNumber, 20)
+    assert.equal(stale.questions.filter((item) => item.status === 'open' && item.key.startsWith('ci-owner:')).length, 1)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

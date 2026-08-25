@@ -4344,6 +4344,7 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .lab-decision-list,
+.lab-ci-list,
 .lab-task-list,
 .lab-activity-list {
   display: flex;
@@ -4375,6 +4376,63 @@ body.workspace-dragging .workspace-tab-slot {
 .lab-decision small,
 .lab-task-copy small,
 .lab-activity-list small { color: var(--text-faint); font-size: var(--type-meta); }
+
+.lab-ci-incident {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 25%, var(--line-subtle));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 5%, var(--surface-inset));
+}
+
+.lab-ci-incident.resolved {
+  border-color: color-mix(in srgb, var(--green) 22%, var(--line-subtle));
+  background: color-mix(in srgb, var(--green) 4%, var(--surface-inset));
+  opacity: 0.68;
+}
+
+.lab-ci-state {
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  color: var(--red);
+  background: var(--red-soft);
+  font-size: var(--type-label);
+  text-transform: uppercase;
+}
+
+.lab-ci-incident.resolved .lab-ci-state { color: var(--green); background: var(--green-soft); }
+
+.lab-ci-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.lab-ci-copy strong { color: var(--text); font-size: var(--type-control); }
+.lab-ci-copy small,
+.lab-ci-copy > span {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lab-ci-incident > button {
+  min-height: var(--control-h);
+  padding: var(--control-pad-y) 10px;
+  border: 1px solid var(--line-default);
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--type-control);
+}
 
 .lab-decision-options,
 .lab-task-actions {
@@ -4530,6 +4588,15 @@ body.workspace-dragging .workspace-tab-slot {
 
   .lab-task {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .lab-ci-incident {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .lab-ci-incident > button {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 
   .lab-task-actions {

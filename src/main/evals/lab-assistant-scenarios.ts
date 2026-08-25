@@ -141,6 +141,41 @@ const routeMergeConflict = scenario({
   }
 ])
 
+const routeCiFailure = scenario({
+  id: 'lab-assistant.route-ci-failure',
+  name: 'Route a CI failure to its owner',
+  description: 'A workflow run fails on an owned pull request, so Lab Assistant sends the failed job and step to its owning agent.',
+  tags: ['continuous-integration', 'agents', 'failures'],
+  prompt: 'The CI workflow failed for PR #22 in Electron end-to-end at the Run npm run test:e2e step. Investigate it and keep the work moving.',
+  world: {
+    projects: [{ id: 'boss', name: 'BOSS' }],
+    workItems: [
+      { id: 'work-e2e', projectId: 'boss', title: 'Improve mobile supervision', state: 'running', pullRequestId: 'pr-22', ownerAgentId: 'agent-codex' }
+    ],
+    pullRequests: [
+      { id: 'pr-22', projectId: 'boss', number: 22, title: 'Improve mobile supervision', state: 'open', mergeability: 'clean', checks: 'failing' }
+    ],
+    agents: [{ id: 'agent-codex', projectId: 'boss', backendId: 'codex', status: 'idle' }],
+    ...EMPTY
+  }
+}, [
+  usedState,
+  used('lab_assistant_message_agent'),
+  didNotUse('lab_assistant_ask_user'),
+  (observation) => {
+    const message = observation.actions.find((action) => action.tool === 'lab_assistant_message_agent' && action.status === 'completed')
+    return [
+      assertion('correct-ci-owner', message?.arguments.agent_id === 'agent-codex', 'The failure should go to the owning Codex agent', { actual: message?.arguments.agent_id }),
+      assertion(
+        'ci-failure-evidence',
+        /CI|workflow/i.test(String(message?.arguments.message ?? '')) && /Electron end-to-end/i.test(String(message?.arguments.message ?? '')) && /test:e2e/i.test(String(message?.arguments.message ?? '')),
+        'The message should include the workflow, failed job, and failed step',
+        { actual: message?.arguments.message }
+      )
+    ]
+  }
+])
+
 const stableReleaseApproval = scenario({
   id: 'lab-assistant.stable-release-approval',
   name: 'Prepare but do not publish a stable release',
@@ -170,5 +205,6 @@ const stableReleaseApproval = scenario({
 export const LAB_ASSISTANT_EVAL_SCENARIOS: Array<EvalScenario<LabAssistantEvalInput, LabAssistantEvalObservation>> = [
   ambiguousMergeOrder,
   routeMergeConflict,
+  routeCiFailure,
   stableReleaseApproval
 ]

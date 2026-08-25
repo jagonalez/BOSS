@@ -4,6 +4,8 @@ import { basename, dirname } from 'node:path'
 import type { GitHubDelivery } from '../shared/automation-trigger'
 import type {
   LabAssistantActivity,
+  LabAssistantCiIncident,
+  LabAssistantCiJob,
   LabAssistantMergeability,
   LabAssistantPullRequest,
   LabAssistantQuestion,
@@ -14,6 +16,8 @@ import type {
   LabAssistantTaskPlan,
   LabAssistantTaskStatus
 } from '../shared/lab-assistant'
+// @ts-expect-error Node's type-stripping test runner needs the extension.
+import { workflowRunFromDelivery, type GitHubWorkflowRunObservation } from './lab-assistant-github.ts'
 import type { BackendRequest } from '../shared/backend'
 import type { BossEvent } from '../shared/notification'
 import type { SupervisedThread } from '../shared/supervision'
@@ -23,6 +27,7 @@ interface StoredLabAssistantState {
   tasks: LabAssistantTask[]
   taskPlans: Record<string, LabAssistantTaskPlan>
   pullRequests: LabAssistantPullRequest[]
+  ciIncidents: LabAssistantCiIncident[]
   questions: LabAssistantQuestion[]
   activities: LabAssistantActivity[]
   mergeOrders: Record<string, string[]>
@@ -32,6 +37,7 @@ export interface LabAssistantHost {
   threads(): SupervisedThread[]
   messageAgent(threadId: string, message: string): Promise<void>
   refreshPullRequests?(repository: string): Promise<LabAssistantPullRequest[]>
+  inspectWorkflowRun?(repository: string, runId: number, attempt: number): Promise<LabAssistantCiJob[]>
   emit(snapshot: LabAssistantSnapshot): void
   notify(event: BossEvent): void
 }
@@ -99,6 +105,7 @@ export class LabAssistantManager {
   private tasks: LabAssistantTask[] = []
   private taskPlans: Record<string, LabAssistantTaskPlan> = {}
   private pullRequests: LabAssistantPullRequest[] = []
+  private ciIncidents: LabAssistantCiIncident[] = []
   private questions: LabAssistantQuestion[] = []
   private activities: LabAssistantActivity[] = []
   private mergeOrders: Record<string, string[]> = {}
@@ -119,6 +126,7 @@ export class LabAssistantManager {
       if (Array.isArray(parsed.tasks)) this.tasks = parsed.tasks
       if (parsed.taskPlans && typeof parsed.taskPlans === 'object') this.taskPlans = parsed.taskPlans
       if (Array.isArray(parsed.pullRequests)) this.pullRequests = parsed.pullRequests
+      if (Array.isArray(parsed.ciIncidents)) this.ciIncidents = parsed.ciIncidents
       if (Array.isArray(parsed.questions)) this.questions = parsed.questions
       if (Array.isArray(parsed.activities)) this.activities = parsed.activities.slice(0, ACTIVITY_CAP)
       if (parsed.mergeOrders && typeof parsed.mergeOrders === 'object') this.mergeOrders = parsed.mergeOrders
@@ -134,6 +142,7 @@ export class LabAssistantManager {
       tasks: this.tasks,
       taskPlans: this.taskPlans,
       pullRequests: this.pullRequests,
+      ciIncidents: this.ciIncidents,
       questions: this.questions,
       activities: this.activities,
       mergeOrders: this.mergeOrders
@@ -153,6 +162,7 @@ export class LabAssistantManager {
       tasks: clone(this.tasks),
       taskPlans: clone(this.taskPlans),
       pullRequests: clone(this.pullRequests),
+      ciIncidents: clone(this.ciIncidents),
       questions: clone(this.questions),
       activities: clone(this.activities),
       mergeOrders: clone(this.mergeOrders)
@@ -414,12 +424,23 @@ export class LabAssistantManager {
     return this.finishMutation()
   }
 
-  private ownerThreads(pullRequest: LabAssistantPullRequest): SupervisedThread[] {
-    const repositoryName = pullRequest.repository.split('/').pop()?.toLowerCase()
+  private ownerThreadsForBranch(repository: string, headBranch: string): SupervisedThread[] {
+    const repositoryName = repository.split('/').pop()?.toLowerCase()
     return this.host.threads().filter((thread) => {
-      if (thread.worktreeBranch !== pullRequest.headBranch) return false
+      if (thread.worktreeBranch !== headBranch) return false
       return !repositoryName || basename(thread.projectPath).toLowerCase() === repositoryName
     })
+  }
+
+  private ownerThreads(pullRequest: LabAssistantPullRequest): SupervisedThread[] {
+    return this.ownerThreadsForBranch(pullRequest.repository, pullRequest.headBranch)
+  }
+
+  private projectThreads(repository: string): SupervisedThread[] {
+    const repositoryName = repository.split('/').pop()?.toLowerCase()
+    return this.host.threads().filter((thread) =>
+      !repositoryName || basename(thread.projectPath).toLowerCase() === repositoryName
+    )
   }
 
   private conflictMessage(pullRequest: LabAssistantPullRequest): string {
@@ -432,10 +453,7 @@ export class LabAssistantManager {
 
   private conflictOwnerOptions(pullRequest: LabAssistantPullRequest, owners: SupervisedThread[]): Array<{ id: string; label: string }> {
     if (owners.length) return owners.map((owner) => ({ id: owner.threadId, label: owner.title }))
-    const repositoryName = pullRequest.repository.split('/').pop()?.toLowerCase()
-    const projectThreads = this.host.threads().filter((thread) =>
-      !repositoryName || basename(thread.projectPath).toLowerCase() === repositoryName
-    )
+    const projectThreads = this.projectThreads(pullRequest.repository)
     if (projectThreads.length) return projectThreads.map((thread) => ({ id: thread.threadId, label: thread.title }))
     return [{ id: 'manual', label: "I'll handle it" }]
   }
@@ -470,6 +488,187 @@ export class LabAssistantManager {
       prompt: `PR #${pullRequest.number} has merge conflicts, but ${reason}. Who should handle it?`,
       options: this.conflictOwnerOptions(pullRequest, owners)
     })
+  }
+
+  private ciOwnerOptions(incident: LabAssistantCiIncident, owners: SupervisedThread[]): Array<{ id: string; label: string }> {
+    if (owners.length) return owners.map((owner) => ({ id: owner.threadId, label: owner.title }))
+    const projectThreads = this.projectThreads(incident.repository)
+    if (projectThreads.length) return projectThreads.map((thread) => ({ id: thread.threadId, label: thread.title }))
+    return [{ id: 'manual', label: "I'll investigate it" }]
+  }
+
+  private ciMessage(incident: LabAssistantCiIncident): string {
+    const pullRequest = incident.pullRequestId
+      ? this.pullRequests.find((candidate) => candidate.id === incident.pullRequestId)
+      : undefined
+    const target = pullRequest ? `PR #${pullRequest.number} (${pullRequest.title})` : `branch ${incident.headBranch}`
+    const failures = incident.jobs.length
+      ? incident.jobs.map((job) => `${job.name}${job.failedSteps.length ? ` — ${job.failedSteps.join(', ')}` : ''}`).join('; ')
+      : 'GitHub did not report a failed job or step; inspect the run-level error'
+    return [
+      '[Lab Assistant]',
+      `${incident.workflow} failed for ${target} (run #${incident.runNumber}, attempt ${incident.runAttempt}).`,
+      `Failures: ${failures}.`,
+      `Investigate the root cause, fix it, run the relevant tests, and update the pull request. ${incident.url}`
+    ].join(' ')
+  }
+
+  private associateCiTask(incident: LabAssistantCiIncident, threadId: string): void {
+    const task = this.tasks
+      .filter((candidate) => candidate.assignedThreadId === threadId && candidate.status !== 'done')
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (task) incident.taskId = task.id
+  }
+
+  private async routeCiFailure(incident: LabAssistantCiIncident): Promise<void> {
+    if (incident.status !== 'failing' || incident.routedDeliveryKey === incident.lastDeliveryKey) return
+    const owners = this.ownerThreadsForBranch(incident.repository, incident.headBranch)
+    if (owners.length === 1) {
+      const owner = owners[0]
+      try {
+        await this.host.messageAgent(owner.threadId, this.ciMessage(incident))
+        incident.routedTo = owner.threadId
+        incident.routedDeliveryKey = incident.lastDeliveryKey
+        this.associateCiTask(incident, owner.threadId)
+        this.addActivity({
+          kind: 'agent-message',
+          title: `Routed ${incident.workflow} failure`,
+          detail: `Asked ${owner.title} to investigate run #${incident.runNumber}, attempt ${incident.runAttempt}.`,
+          repository: incident.repository,
+          taskId: incident.taskId,
+          pullRequestId: incident.pullRequestId,
+          ciIncidentId: incident.id,
+          threadId: owner.threadId
+        })
+        this.host.notify({
+          type: 'task.failed',
+          title: `${incident.workflow} failed`,
+          body: `Lab Assistant asked ${owner.title} to investigate ${incident.headBranch}.`,
+          threadId: owner.threadId,
+          projectPath: owner.projectPath,
+          createdAt: this.clock()
+        })
+        return
+      } catch {
+        /* Preserve the incident and ask the user who should receive it. */
+      }
+    }
+    const reason = owners.length === 0
+      ? 'no owning agent could be matched'
+      : owners.length === 1 ? 'the message to its owner could not be delivered' : 'more than one owning agent matched'
+    this.addQuestion({
+      key: `ci-owner:${incident.id}:${incident.lastDeliveryKey}`,
+      repository: incident.repository,
+      prompt: `${incident.workflow} failed on ${incident.headBranch}, but ${reason}. Who should investigate it?`,
+      options: this.ciOwnerOptions(incident, owners)
+    })
+  }
+
+  private dismissCiQuestions(incidentId: string): void {
+    for (const question of this.questions) {
+      if (question.status === 'open' && question.key.startsWith(`ci-owner:${incidentId}:`)) {
+        question.status = 'dismissed'
+        question.dismissedAt = this.clock()
+      }
+    }
+  }
+
+  private async observeWorkflowRun(observation: GitHubWorkflowRunObservation): Promise<LabAssistantSnapshot> {
+    const previousIndex = this.ciIncidents.findIndex((incident) => incident.id === observation.id)
+    const previous = previousIndex >= 0 ? this.ciIncidents[previousIndex] : undefined
+    if (previous?.lastDeliveryKey === observation.deliveryKey) return this.currentSnapshot()
+    // Completed webhook deliveries are not guaranteed to arrive in order. An
+    // older success must never resolve a newer failure episode.
+    if (previous && (
+      observation.runNumber < previous.runNumber
+      || (observation.runNumber === previous.runNumber && observation.runAttempt < previous.runAttempt)
+    )) return this.currentSnapshot()
+
+    // A new attempt supersedes any unanswered routing decision for the prior
+    // attempt. If the new attempt also needs a decision, routeCiFailure adds a
+    // single fresh question with current evidence.
+    this.dismissCiQuestions(observation.id)
+
+    if (observation.conclusion === 'success') {
+      if (!previous || previous.status !== 'failing') return this.currentSnapshot()
+      const resolved: LabAssistantCiIncident = {
+        ...previous,
+        runId: observation.runId,
+        runNumber: observation.runNumber,
+        runAttempt: observation.runAttempt,
+        url: observation.url,
+        headSha: observation.headSha,
+        conclusion: 'success',
+        status: 'resolved',
+        updatedAt: observation.observedAt,
+        resolvedAt: observation.observedAt,
+        lastDeliveryKey: observation.deliveryKey
+      }
+      this.ciIncidents[previousIndex] = resolved
+      this.addActivity({
+        kind: 'ci',
+        title: `${resolved.workflow} recovered`,
+        detail: `${resolved.headBranch} passed on run #${resolved.runNumber}, attempt ${resolved.runAttempt}.`,
+        repository: resolved.repository,
+        taskId: resolved.taskId,
+        pullRequestId: resolved.pullRequestId,
+        ciIncidentId: resolved.id,
+        threadId: resolved.routedTo && resolved.routedTo !== 'manual' ? resolved.routedTo : undefined
+      })
+      return this.finishMutation()
+    }
+
+    let jobs: LabAssistantCiJob[] = []
+    if (this.host.inspectWorkflowRun) {
+      try {
+        jobs = await this.host.inspectWorkflowRun(observation.repository, observation.runId, observation.runAttempt)
+      } catch (error) {
+        this.addActivity({
+          kind: 'ci',
+          title: `Could not inspect ${observation.workflow}`,
+          detail: error instanceof Error ? error.message : String(error),
+          repository: observation.repository,
+          pullRequestId: observation.pullRequestId,
+          ciIncidentId: observation.id
+        })
+      }
+    }
+    const sameEpisode = previous?.status === 'failing'
+    const incident: LabAssistantCiIncident = {
+      id: observation.id,
+      repository: observation.repository,
+      workflowId: observation.workflowId,
+      workflow: observation.workflow,
+      runId: observation.runId,
+      runNumber: observation.runNumber,
+      runAttempt: observation.runAttempt,
+      url: observation.url,
+      headBranch: observation.headBranch,
+      headSha: observation.headSha,
+      ...(observation.pullRequestId ? { pullRequestId: observation.pullRequestId } : {}),
+      conclusion: observation.conclusion,
+      status: 'failing',
+      jobs,
+      occurrenceCount: sameEpisode ? previous.occurrenceCount + 1 : 1,
+      firstFailedAt: sameEpisode ? previous.firstFailedAt : observation.observedAt,
+      updatedAt: observation.observedAt,
+      ...(sameEpisode && previous.taskId ? { taskId: previous.taskId } : {}),
+      ...(sameEpisode && previous.routedTo ? { routedTo: previous.routedTo } : {}),
+      ...(sameEpisode && previous.routedDeliveryKey ? { routedDeliveryKey: previous.routedDeliveryKey } : {}),
+      lastDeliveryKey: observation.deliveryKey
+    }
+    if (previousIndex >= 0) this.ciIncidents[previousIndex] = incident
+    else this.ciIncidents.unshift(incident)
+    this.addActivity({
+      kind: 'ci',
+      title: `${incident.workflow} failed`,
+      detail: `${incident.headBranch} · run #${incident.runNumber}, attempt ${incident.runAttempt} · ${incident.jobs.length || 'no'} failed jobs`,
+      repository: incident.repository,
+      pullRequestId: incident.pullRequestId,
+      ciIncidentId: incident.id
+    })
+    await this.routeCiFailure(incident)
+    return this.finishMutation()
   }
 
   private considerMergeOrder(pullRequest: LabAssistantPullRequest): void {
@@ -511,6 +710,8 @@ export class LabAssistantManager {
 
   private async observeGitHubNow(delivery: GitHubDelivery): Promise<LabAssistantSnapshot> {
     await this.load()
+    const workflowRun = workflowRunFromDelivery(delivery, this.clock())
+    if (workflowRun) return this.observeWorkflowRun(workflowRun)
     const incoming = pullRequestFromDelivery(delivery, this.clock())
     if (!incoming) return this.currentSnapshot()
     const updated = this.upsertPullRequest(incoming)
@@ -578,6 +779,29 @@ export class LabAssistantManager {
     } else if (question.key.startsWith('conflict-owner:') && answer.id === 'manual') {
       const pullRequest = this.pullRequests.find((item) => item.id === question.key.slice('conflict-owner:'.length))
       if (pullRequest) pullRequest.conflictRoutedTo = 'manual'
+    }
+    if (question.key.startsWith('ci-owner:')) {
+      const incident = this.ciIncidents.find((candidate) => question.key.startsWith(`ci-owner:${candidate.id}:`))
+      if (!incident) throw new Error('The CI failure for that decision is no longer available.')
+      if (answer.id === 'manual') {
+        incident.routedTo = 'manual'
+        incident.routedDeliveryKey = incident.lastDeliveryKey
+      } else {
+        await this.host.messageAgent(answer.id, this.ciMessage(incident))
+        incident.routedTo = answer.id
+        incident.routedDeliveryKey = incident.lastDeliveryKey
+        this.associateCiTask(incident, answer.id)
+        this.addActivity({
+          kind: 'agent-message',
+          title: `Routed ${incident.workflow} failure`,
+          detail: `Asked ${answer.label} to investigate run #${incident.runNumber}, attempt ${incident.runAttempt}.`,
+          repository: incident.repository,
+          taskId: incident.taskId,
+          pullRequestId: incident.pullRequestId,
+          ciIncidentId: incident.id,
+          threadId: answer.id
+        })
+      }
     }
     if (question.key.startsWith('task-order:')) {
       const taskIds = question.options.filter((option) => option.id !== 'parallel').map((option) => option.id)

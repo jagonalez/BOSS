@@ -65,3 +65,19 @@ test('Lab Assistant creates, unblocks, and assigns project tasks', async ({ appP
   })
   await expect(created).toContainText('running')
 })
+
+test('Lab Assistant shows the failed CI evidence routed to an owning agent', async ({ appPage }) => {
+  await openLabAssistant(appPage)
+  const assistant = appPage.getByRole('region', { name: 'Lab Assistant CI monitoring' })
+  const incident = assistant.locator('article.lab-ci-incident').filter({
+    has: appPage.getByText('CI', { exact: true })
+  })
+
+  await expect(incident).toContainText('failing')
+  await expect(incident).toContainText('PR #22')
+  await expect(incident).toContainText('run #19, attempt 2')
+  await expect(incident).toContainText('2 consecutive failures')
+  await expect(incident).toContainText('Electron end-to-end · Run npm run test:e2e')
+  await expect(incident).toContainText('Source thread')
+  await expect(incident.getByRole('button', { name: 'Open CI run 19' })).toBeVisible()
+})
