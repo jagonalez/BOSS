@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
 import { LabBackend, normaliseLabEndpoint } from './lab-backend.ts'
+import type { LabSecretStore } from './lab-backend.ts'
 // @ts-expect-error Application code uses bundler resolution.
 import { LabEngine } from './lab-engine.ts'
 
@@ -127,6 +128,106 @@ test('Lab routes a selected model through its connection endpoint', async () => 
   } finally {
     await backend.stop()
     globalThis.fetch = originalFetch
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+/** The backend is built before Electron's ready event, when safeStorage cannot
+ *  decrypt yet. These tests pin the contract that keeps saved keys alive. */
+
+function stubModelsFetch(): () => void {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(JSON.stringify({ data: [] }), { status: 200 })) as typeof fetch
+  return () => { globalThis.fetch = originalFetch }
+}
+
+test('Lab loads saved API keys on first use, never during construction', async () => {
+  let ready = false
+  const reads: boolean[] = []
+  const secrets: LabSecretStore = {
+    load: () => {
+      reads.push(ready)
+      if (!ready) throw new Error('safeStorage cannot decrypt before the app is ready')
+      return { 'cloud-one': 'key-one' }
+    },
+    save: () => {}
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'boss-lab-keys-lazy-'))
+  writeFileSync(join(directory, 'config.json'), JSON.stringify({
+    version: 2,
+    connections: [{ id: 'cloud-one', name: 'Cloud one', baseUrl: 'https://cloud.example.test/v1', manualModels: [], models: [] }]
+  }))
+  const restoreFetch = stubModelsFetch()
+  let backend: LabBackend | undefined
+  try {
+    // Before the fix this constructor eagerly decrypted (and lost) the keys.
+    backend = new LabBackend({
+      storeFile: join(directory, 'threads.json'),
+      configFile: join(directory, 'config.json'),
+      secretFile: join(directory, 'keys.bin'),
+      secretStore: secrets
+    })
+    assert.deepEqual(reads, [], 'construction must not read secure storage')
+    ready = true
+    const settings = await backend.labConnections()
+    assert.equal(settings.connections[0].apiKeyConfigured, true)
+  } finally {
+    if (backend) await backend.stop()
+    restoreFetch()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('saving a second Lab connection preserves other connections\u2019 keys', async () => {
+  let stored: Record<string, string> = { default: 'first-key' }
+  const secrets: LabSecretStore = {
+    load: () => ({ ...stored }),
+    save: (entries) => { stored = { ...entries } }
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'boss-lab-keys-preserve-'))
+  const restoreFetch = stubModelsFetch()
+  let backend: LabBackend | undefined
+  try {
+    backend = new LabBackend({
+      storeFile: join(directory, 'threads.json'),
+      configFile: join(directory, 'config.json'),
+      secretFile: join(directory, 'keys.bin'),
+      secretStore: secrets
+    })
+    await backend.saveLabConnection({ name: 'Second', baseUrl: 'https://cloud.example.test/v1', manualModels: [], apiKey: 'second-key' })
+    assert.equal(stored.default, 'first-key')
+    assert.ok(Object.values(stored).includes('second-key'))
+  } finally {
+    if (backend) await backend.stop()
+    restoreFetch()
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('clearing a Lab connection removes only its key', async () => {
+  let stored: Record<string, string> = { default: 'first-key' }
+  const secrets: LabSecretStore = {
+    load: () => ({ ...stored }),
+    save: (entries) => { stored = { ...entries } }
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'boss-lab-keys-clear-'))
+  const restoreFetch = stubModelsFetch()
+  let backend: LabBackend | undefined
+  try {
+    backend = new LabBackend({
+      storeFile: join(directory, 'threads.json'),
+      configFile: join(directory, 'config.json'),
+      secretFile: join(directory, 'keys.bin'),
+      secretStore: secrets
+    })
+    const settings = await backend.saveLabConnection({ name: 'Second', baseUrl: 'https://cloud.example.test/v1', manualModels: [], apiKey: 'second-key' })
+    const second = settings.connections.find((connection) => connection.name === 'Second')
+    assert.ok(second)
+    await backend.deleteLabConnection(second.id)
+    assert.deepEqual(stored, { default: 'first-key' })
+  } finally {
+    if (backend) await backend.stop()
+    restoreFetch()
     rmSync(directory, { recursive: true, force: true })
   }
 })

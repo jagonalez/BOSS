@@ -31,6 +31,8 @@ export interface LabBackendOptions {
   storeFile?: string
   configFile?: string
   secretFile?: string
+  /** Overrides encrypted storage for tests. */
+  secretStore?: LabSecretStore
 }
 
 interface StoredLabConnection {
@@ -105,6 +107,57 @@ interface PendingPermission {
   resolve: (decision: 'allow' | 'deny') => void
 }
 
+/** Shared empty view for reads before secure storage is ready. Frozen so a
+ *  stray write fails loudly instead of silently discarding a key. */
+const NO_KEYS: Record<string, string> = Object.freeze({}) as Record<string, string>
+
+/** Encrypted storage for connection API keys. Values never leave the main
+ *  process; the rest of the backend only ever sees ids and booleans. */
+export interface LabSecretStore {
+  /** Decrypted connection-id→key map. Throws while encrypted storage cannot
+   *  be read (Electron has not finished readying), so callers can tell that
+   *  apart from "no keys stored" and retry once it can. */
+  load(): Record<string, string>
+  save(entries: Record<string, string>): void
+}
+
+function electronSecretStore(secretFile: string): LabSecretStore {
+  const electron = () => nodeRequire('electron') as typeof import('electron')
+  return {
+    load() {
+      const { safeStorage } = electron()
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is not available yet.')
+      let decrypted: string
+      try {
+        decrypted = safeStorage.decryptString(readFileSync(secretFile)).trim()
+      } catch {
+        return {}
+      }
+      if (!decrypted) return {}
+      try {
+        const parsed = JSON.parse(decrypted) as Record<string, unknown>
+        return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim())))
+      } catch {
+        // PR #126 stored one raw key. Its singleton becomes the default profile.
+        return { default: decrypted }
+      }
+    },
+    save(entries) {
+      const usable = Object.entries(entries).filter(([, value]) => value.trim())
+      if (usable.length === 0) {
+        try { unlinkSync(secretFile) } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        return
+      }
+      const { safeStorage } = electron()
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this system.')
+      writeFileSync(secretFile, safeStorage.encryptString(JSON.stringify(Object.fromEntries(usable))), { mode: 0o600 })
+      chmodSync(secretFile, 0o600)
+    }
+  }
+}
+
 /** BOSS adapter over the Lab harness. All agent behavior lives in the engine;
  *  this class maps engine events to BOSS EventMessages and answers engine
  *  permission requests with the existing permission cards. */
@@ -116,10 +169,12 @@ export class LabBackend implements Backend {
   private readonly secretFile: string
   private readonly baseConfig: LabEnvConfig
   private connections: LabConnection[]
-  private apiKeys: Record<string, string>
+  private readonly secrets: LabSecretStore
+  private keysCache?: Record<string, string>
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
   private healthy = false
+  private healthRefreshed = false
   private readonly pendingPermissions = new Map<string, PendingPermission>()
   private readonly liveText = new Map<string, string>()
   private readonly liveReasoning = new Map<string, string>()
@@ -130,10 +185,28 @@ export class LabBackend implements Backend {
     this.configFile = options.configFile ?? userDataFile('lab-config.json')
     this.secretFile = options.secretFile ?? userDataFile('lab-api-key.bin')
     this.baseConfig = configFromEnv()
-    this.apiKeys = this.savedApiKeys()
+    this.secrets = options.secretStore ?? electronSecretStore(this.secretFile)
     this.connections = this.loadConnections()
     this.engine = this.createEngine()
-    void this.refreshHealth()
+  }
+
+  /** Keys load on first use, not at construction: the backend is built before
+   *  Electron's ready event, when safeStorage cannot decrypt yet. Caching that
+   *  empty first read made every restart look key-less and let the next save
+   *  wipe the stored keys for good. Reads before readiness see none; writes
+   *  go through requireApiKeys and wait for the real map. */
+  private get apiKeys(): Record<string, string> {
+    if (this.keysCache) return this.keysCache
+    try {
+      this.keysCache = this.secrets.load()
+      return this.keysCache
+    } catch {
+      return NO_KEYS
+    }
+  }
+
+  private requireApiKeys(): Record<string, string> {
+    return (this.keysCache ??= this.secrets.load())
   }
 
   private createEngine(): LabEngine {
@@ -162,36 +235,8 @@ export class LabBackend implements Backend {
     })
   }
 
-  private savedApiKeys(): Record<string, string> {
-    try {
-      const { safeStorage } = nodeRequire('electron') as typeof import('electron')
-      if (!safeStorage.isEncryptionAvailable()) return {}
-      const decrypted = safeStorage.decryptString(readFileSync(this.secretFile)).trim()
-      if (!decrypted) return {}
-      try {
-        const parsed = JSON.parse(decrypted) as Record<string, unknown>
-        return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim())))
-      } catch {
-        // PR #126 stored one raw key. Its singleton becomes the default profile.
-        return { default: decrypted }
-      }
-    } catch {
-      return {}
-    }
-  }
-
   private saveApiKeys(): void {
-    const entries = Object.entries(this.apiKeys).filter(([, value]) => value.trim())
-    if (entries.length === 0) {
-      try { unlinkSync(this.secretFile) } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-      return
-    }
-    const { safeStorage } = nodeRequire('electron') as typeof import('electron')
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this system.')
-    writeFileSync(this.secretFile, safeStorage.encryptString(JSON.stringify(Object.fromEntries(entries))), { mode: 0o600 })
-    chmodSync(this.secretFile, 0o600)
+    this.secrets.save(this.requireApiKeys())
   }
 
   private loadConnections(): LabConnection[] {
@@ -207,7 +252,9 @@ export class LabBackend implements Backend {
             id: connection.id,
             name: connection.name.trim() || 'Unnamed connection',
             baseUrl: normaliseLabEndpoint(connection.baseUrl),
-            apiKeyConfigured: Boolean(this.apiKeys[connection.id]),
+            // Placeholder only; labConnections() recomputes from secure storage
+            // on every fetch, which cannot happen this early in startup.
+            apiKeyConfigured: false,
             healthy: false,
             manualModels,
             models: uniqueModels([...models, ...manualModels.map((id) => ({ id, source: 'custom' as const }))])
@@ -223,7 +270,7 @@ export class LabBackend implements Backend {
       id: 'default',
       name: 'Default',
       baseUrl,
-      apiKeyConfigured: Boolean(this.apiKeys.default || this.baseConfig.apiKey),
+      apiKeyConfigured: false,
       healthy: false,
       manualModels: [model],
       models: [{ id: model, source: baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') ? 'local' : 'custom' }]
@@ -242,7 +289,12 @@ export class LabBackend implements Backend {
     chmodSync(this.configFile, 0o600)
   }
 
-  labConnections(): LabConnectionsSettings {
+  async labConnections(): Promise<LabConnectionsSettings> {
+    // Health needs the saved keys, which secure storage only exposes after
+    // Electron's ready event. The first settings fetch is the earliest moment
+    // a check can authenticate, so the initial one happens here rather than in
+    // the constructor.
+    if (!this.healthRefreshed) await this.refreshHealth()
     return { connections: this.connections.map((connection) => ({ ...connection, manualModels: [...connection.manualModels], models: connection.models.map((model) => ({ ...model })), apiKeyConfigured: Boolean(this.apiKeyFor(connection.id)) })) }
   }
 
@@ -258,19 +310,20 @@ export class LabBackend implements Backend {
     }
     if (update.apiKey !== undefined && update.clearApiKey) throw new Error('Set a new API key or clear the saved key, not both.')
     if (update.apiKey !== undefined || update.clearApiKey) {
-      const previous = this.apiKeys[id]
+      const keys = this.requireApiKeys()
+      const previous = keys[id]
       try {
         if (update.apiKey !== undefined) {
           const apiKey = update.apiKey.trim()
           if (!apiKey) throw new Error('Enter an API key or leave the field blank.')
-          this.apiKeys[id] = apiKey
+          keys[id] = apiKey
         } else {
-          delete this.apiKeys[id]
+          delete keys[id]
         }
         this.saveApiKeys()
       } catch (error) {
-        if (previous === undefined) delete this.apiKeys[id]
-        else this.apiKeys[id] = previous
+        if (previous === undefined) delete keys[id]
+        else keys[id] = previous
         throw error
       }
     }
@@ -298,9 +351,10 @@ export class LabBackend implements Backend {
 
   async deleteLabConnection(connectionId: string): Promise<LabConnectionsSettings> {
     if (!this.connections.some((connection) => connection.id === connectionId)) throw new Error('That Lab connection no longer exists.')
+    const keys = this.requireApiKeys()
     this.connections = this.connections.filter((connection) => connection.id !== connectionId)
     this.healthy = this.connections.some((connection) => connection.healthy)
-    delete this.apiKeys[connectionId]
+    delete keys[connectionId]
     this.saveApiKeys()
     this.persistConnections()
     return this.labConnections()
@@ -361,6 +415,7 @@ export class LabBackend implements Backend {
     })] as const)))
     this.connections = this.connections.map((connection) => ({ ...connection, healthy: statuses.get(connection.id) ?? connection.healthy }))
     this.healthy = this.connections.some((connection) => connection.healthy)
+    this.healthRefreshed = true
   }
 
   async start(): Promise<void> {
