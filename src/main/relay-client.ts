@@ -1,7 +1,7 @@
 import { webcrypto, randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import type { BackendRequest } from '../shared/backend'
-import { mobileRequestAllowed, type MobileAccessRole } from '../shared/mobile'
+import { mobileRequestAllowed, mobileTransportRequestAllowed, type MobileAccessRole } from '../shared/mobile'
 import { EventBuffer } from '../shared/event-buffer'
 import {
   deriveKey,
@@ -39,41 +39,6 @@ function sameSecret(a: string, b: string): boolean {
   const right = Buffer.from(b)
   return left.length === right.length && timingSafeEqual(left, right)
 }
-
-/** Same scope as the loopback server: review and steer, never configure. */
-const ALLOWED_REQUESTS = new Set<BackendRequest['type']>([
-  'backend.list',
-  'supervision.snapshot',
-  'supervision.search',
-  'supervision.acknowledge',
-  'thread.list',
-  'thread.get',
-  'thread.messages',
-  'thread.part',
-  'thread.send',
-  'thread.abort',
-  'thread.todos',
-  'thread.permission',
-  'thread.diff',
-  // Starting work, not just watching it. A paired phone can already send
-  // messages into a running agent, so it can already cause the machine to act;
-  // withholding these bought nothing and made the phone read-mostly.
-  'thread.create',
-  'thread.models',
-  'thread.mode.set',
-  'thread.archive',
-  'thread.delegate',
-  'thread.rename',
-  'thread.delete',
-  'automation.list',
-  'automation.run',
-  'automation.stop',
-  'assistant.snapshot',
-  'assistant.answer',
-  'assistant.task.create',
-  'assistant.task.update',
-  'assistant.task.assign'
-])
 
 /** Ceiling on how many frames one response may take.
  *
@@ -550,7 +515,7 @@ export class RelayClient {
     return this.config.devices.find((device) => sameSecret(device.tokenHash, hash)) ?? null
   }
 
-  /** Run one request locally, under the same allowlist the loopback server uses. */
+  /** Run one request locally, under the shared mobile transport and role policy. */
   private async serve(peerId: string, message: Extract<RelayMessage, { kind: 'request' }>): Promise<void> {
     const request = message.request as BackendRequest
     const role: MobileAccessRole = 'control'
@@ -562,7 +527,7 @@ export class RelayClient {
       device.lastSeenAt = Date.now()
       device.online = true
       if (!request || typeof request.type !== 'string') throw new Error('malformed request')
-      if (!ALLOWED_REQUESTS.has(request.type) || !mobileRequestAllowed(request.type, role)) {
+      if (!mobileTransportRequestAllowed(request.type, 'relay') || !mobileRequestAllowed(request.type, role)) {
         throw new Error(`"${request.type}" is not available over remote access.`)
       }
       const result = await this.host.handle(request)
