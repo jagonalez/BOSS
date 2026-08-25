@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel, ThreadTitleGenerationOptions } from './backend'
 import { BACKEND_IDS, type BackendMessageOptions, type BackendModeId } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
-import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
@@ -167,6 +167,37 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
         baseBranch: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase },
         draft: { type: 'boolean', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft }
       },
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'boss_reports_create',
+    description: REPORT_TOOL_DESCRIPTIONS.create,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.title },
+        summary: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.summary },
+        body: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.body }
+      },
+      required: ['title', 'body'],
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'boss_reports_update',
+    description: REPORT_TOOL_DESCRIPTIONS.update,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        reportId: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.reportId },
+        title: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.title },
+        summary: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.summary },
+        body: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.body }
+      },
+      required: ['reportId'],
       additionalProperties: false
     }
   },

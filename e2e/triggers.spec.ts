@@ -17,12 +17,13 @@ test('a GitHub webhook automation is created with its event config and shows a c
   await openAutomations(appPage)
   await appPage.getByRole('button', { name: 'New automation' }).click()
 
-  await appPage.getByPlaceholder('Morning Slack digest').fill('Triage hooks')
+  await appPage.getByPlaceholder('Morning changelog report').fill('Triage hooks')
   await appPage.getByPlaceholder('What should the agent do on every run?').fill('Summarize {{event}} on {{branch}}.')
   await appPage.getByLabel('Trigger').selectOption({ label: 'GitHub webhook' })
   await appPage.getByRole('checkbox', { name: 'Push' }).uncheck()
   await appPage.getByRole('checkbox', { name: 'Pull request opened' }).check()
   await appPage.getByLabel('Branch filter').fill('main')
+  await appPage.getByRole('checkbox', { name: 'Save the final response to Reports' }).uncheck()
 
   await appPage.getByRole('button', { name: 'Create automation' }).click()
 
@@ -31,6 +32,7 @@ test('a GitHub webhook automation is created with its event config and shows a c
     type: 'automation.create',
     input: {
       name: 'Triage hooks',
+      saveReport: false,
       schedule: { kind: 'manual' },
       webhook: { events: ['pull_request'], branch: 'main' }
     }

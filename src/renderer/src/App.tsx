@@ -7,6 +7,7 @@ import { HomePage } from './components/HomePage'
 import { LabAssistantPage } from './components/LabAssistantPage'
 import { SitesPage } from './components/SitesPage'
 import { AutomationsPage } from './components/AutomationsPage'
+import { ReportsPage } from './components/ReportsPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme, watchSystemTheme } from './lib/themes'
 import { applyTypography, loadTypography } from './lib/typography'
@@ -29,6 +30,7 @@ import {
   refreshSessions,
   refreshThreadBus,
   refreshAutomations,
+  refreshReports,
   syncAutomationThreadPreferences,
   finalizeStalledParts,
   noteThreadSettled,
@@ -65,6 +67,7 @@ async function refreshAll(): Promise<void> {
   void refreshConfig()
   void refreshThreadBus()
   void refreshAutomations()
+  void refreshReports()
   const id = appStore.getState().activeSessionId
   if (id) {
     void loadMessages(id)
@@ -125,7 +128,7 @@ export function App(): React.JSX.Element {
   // workspace would leave its browsers floating on top of whichever page is
   // showing. Detach them while it is covered.
   useEffect(() => {
-    const covered = activePage === 'home' || activePage === 'lab-assistant' || activePage === 'automations' || activePage === 'sites'
+    const covered = activePage === 'home' || activePage === 'lab-assistant' || activePage === 'automations' || activePage === 'reports' || activePage === 'sites'
     setNativeViewsSuspended('page-overlay', covered)
     return () => setNativeViewsSuspended('page-overlay', false)
   }, [activePage])
@@ -398,12 +401,13 @@ export function App(): React.JSX.Element {
   // No standalone chat page: a chat is a thread, so it opens in a view like
   // any other. And the workspace stays mounted behind the other pages rather
   // than being swapped out — rendering it conditionally tore down every
-  // terminal in it whenever you looked at Home, Lab Assistant, Automations or
-  // Sites, and started them again on the way back.
+  // terminal in it whenever you looked at Home, Lab Assistant, Automations,
+  // Reports or Sites, and started them again on the way back.
   const overlay = (() => {
     if (activePage === 'home') return <HomePage />
     if (activePage === 'lab-assistant') return <LabAssistantPage />
     if (activePage === 'automations') return <AutomationsPage />
+    if (activePage === 'reports') return <ReportsPage />
     if (activePage === 'sites') return <SitesPage />
     return null
   })()

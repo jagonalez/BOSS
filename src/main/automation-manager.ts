@@ -12,7 +12,8 @@ import type {
 import { AUTOMATION_DEFAULTS } from '../shared/automation'
 import type { BackendRequest } from '../shared/backend'
 import type { FileDiff, MessageWithParts } from '../shared/opencode'
-import { extractSummary } from '../shared/thread-result'
+import { extractSummary, lastAssistantText } from '../shared/thread-result'
+import { reportBodyFromAssistantText } from '../shared/report'
 import {
   describeWebhookDelivery,
   githubPayloadVariables,
@@ -63,6 +64,10 @@ interface AutomationManagerOptions {
   runsFile: string
 }
 
+interface AutomationReports {
+  createForAutomation(automation: Automation, run: AutomationRun, body: string): Promise<{ id: string } | undefined>
+}
+
 const TICK_MS = 30_000
 const PERMISSION_GRACE_MS = 2_500
 
@@ -105,7 +110,8 @@ export class AutomationManager {
   constructor(
     private readonly options: AutomationManagerOptions,
     private readonly backends: BackendManager,
-    private readonly worktrees?: WorktreeManager
+    private readonly worktrees?: WorktreeManager,
+    private readonly reports?: AutomationReports
   ) {}
 
   private async load(): Promise<void> {
@@ -129,6 +135,8 @@ export class AutomationManager {
         // Migrate the pre-notify-mode boolean field.
         const legacy = automation.notify as unknown
         if (typeof legacy === 'boolean') automation.notify = legacy ? 'events' : 'off'
+        // Reports predate the per-automation choice, and were always enabled.
+        if (typeof automation.saveReport !== 'boolean') automation.saveReport = true
       }
     } catch {
       /* First launch starts with no automations. */
@@ -303,6 +311,7 @@ export class AutomationManager {
       projectPath,
       workspace,
       webhook,
+      saveReport: input.saveReport !== false,
       maxRunMinutes: Math.max(1, Math.min(24 * 60, Math.round(input.maxRunMinutes || AUTOMATION_DEFAULTS.maxRunMinutes))),
       keepRuns: Math.max(1, Math.min(500, Math.round(input.keepRuns || AUTOMATION_DEFAULTS.keepRuns)))
     }
@@ -652,6 +661,7 @@ export class AutomationManager {
     active.pendingPermissions.clear()
     this.active.delete(automation.id)
 
+    let reportBody = ''
     if (run.threadId && status !== 'failure') {
       try {
         const messages = (await this.backends.handle({
@@ -660,6 +670,7 @@ export class AutomationManager {
           limit: 50
         })) as MessageWithParts[]
         run.summary = extractSummary(messages) ?? run.summary
+        reportBody = reportBodyFromAssistantText(lastAssistantText(messages))
       } catch {
         /* A missing summary never fails the run. */
       }
@@ -674,6 +685,11 @@ export class AutomationManager {
     if (run.worktreeId && run.changedFiles === 0 && this.worktrees) {
       // A clean worktree has no review value; remove() refuses dirty ones, which keeps real changes safe.
       await this.worktrees.remove(run.worktreeId).catch(() => {})
+    }
+
+    if (automation.saveReport !== false && reportBody) {
+      const report = await this.reports?.createForAutomation(automation, run, reportBody).catch(() => undefined)
+      if (report) run.reportId = report.id
     }
 
     if (status === 'failure' || status === 'timeout') {

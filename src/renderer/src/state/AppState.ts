@@ -19,6 +19,7 @@ import type { Annotation } from '@shared/annotations'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
+import type { Report, ReportsSnapshot } from '@shared/report'
 import type { McpConnectionView } from '@shared/mcp'
 import type {
   BrowseNavigationState,
@@ -130,6 +131,9 @@ export interface AppState {
   qaPolicies: Record<string, QaPolicyState>
   qaDefault: QaPolicy
   automations: AutomationsSnapshot | null
+  reports: ReportsSnapshot | null
+  selectedReportId: string | null
+  reportDetail: Report | null
   mcpConnections: McpConnectionView[]
   projectPath: string
   selectedCheckoutPath: string
@@ -248,6 +252,9 @@ export const initialState: AppState = {
   qaPolicies: {},
   qaDefault: 'suggest',
   automations: null,
+  reports: null,
+  selectedReportId: null,
+  reportDetail: null,
   mcpConnections: [],
   projectPath: '',
   selectedCheckoutPath: '',
@@ -427,6 +434,10 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
     case 'automations.updated': {
       const snapshot = props.snapshot as AutomationsSnapshot | undefined
       return snapshot ? { automations: snapshot } : {}
+    }
+    case 'reports.updated': {
+      const snapshot = props.snapshot as ReportsSnapshot | undefined
+      return snapshot ? { reports: snapshot } : {}
     }
     case 'mcp.updated': {
       const connections = props.connections as McpConnectionView[] | undefined

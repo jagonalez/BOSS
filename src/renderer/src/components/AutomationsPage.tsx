@@ -5,8 +5,8 @@ import { AUTOMATION_DEFAULTS } from '@shared/automation'
 import { AUTOMATION_WEBHOOK_EVENTS } from '@shared/automation-trigger'
 import type { BackendId, BackendModeId } from '@shared/backend'
 import { OpenCode } from '../lib/opencode'
-import { refreshAutomations, refreshBackendModels, selectSession } from '../lib/actions'
-import { ChatIcon, ChevronIcon, PlusIcon, ReloadIcon, RenameIcon, SendIcon, StopIcon, TrashIcon } from './icons'
+import { openReport, refreshAutomations, refreshBackendModels, selectSession } from '../lib/actions'
+import { ChatIcon, ChevronIcon, FileIcon, PlusIcon, ReloadIcon, RenameIcon, SendIcon, StopIcon, TrashIcon } from './icons'
 import { ModelSelect } from './ModelSelect'
 
 const WEBHOOK_EVENT_LABELS: Record<AutomationWebhookEvent, string> = {
@@ -104,6 +104,7 @@ interface EditorState {
   workspace: 'worktree' | 'project'
   overlapPolicy: 'skip' | 'queue'
   catchUp: boolean
+  saveReport: boolean
   notify: AutomationNotifyMode
   maxRunMinutes: number
   keepRuns: number
@@ -124,6 +125,7 @@ function emptyEditor(projectPath: string, backendId: BackendId): EditorState {
     workspace: 'worktree',
     overlapPolicy: AUTOMATION_DEFAULTS.overlapPolicy,
     catchUp: AUTOMATION_DEFAULTS.catchUp,
+    saveReport: AUTOMATION_DEFAULTS.saveReport,
     notify: AUTOMATION_DEFAULTS.notify,
     maxRunMinutes: AUTOMATION_DEFAULTS.maxRunMinutes,
     keepRuns: AUTOMATION_DEFAULTS.keepRuns
@@ -146,6 +148,7 @@ function editorFromAutomation(automation: Automation): EditorState {
     workspace: automation.workspace === 'none' ? 'worktree' : automation.workspace,
     overlapPolicy: automation.overlapPolicy,
     catchUp: automation.catchUp,
+    saveReport: automation.saveReport !== false,
     notify: automation.notify,
     maxRunMinutes: automation.maxRunMinutes,
     keepRuns: automation.keepRuns
@@ -167,9 +170,14 @@ function RunRow({ run }: { run: AutomationRun }): React.JSX.Element {
           {run.changedFiles > 0 ? ` · ${run.changedFiles} file${run.changedFiles === 1 ? '' : 's'} changed` : ''}
         </small>
       </div>
+      {run.reportId ? (
+        <button className="btn-ghost" onClick={() => openReport(run.reportId!)} title="Open the saved report">
+          <FileIcon size={13} /> Report
+        </button>
+      ) : null}
       {run.threadId ? (
         <button className="btn-ghost" onClick={() => selectSession(run.threadId!, false)} title="Open the run thread">
-          <ChatIcon size={13} /> Open
+          <ChatIcon size={13} /> Thread
         </button>
       ) : null}
     </div>
@@ -247,6 +255,7 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
       workspace: draft.projectPath ? draft.workspace : 'none',
       overlapPolicy: draft.overlapPolicy,
       catchUp: draft.catchUp,
+      saveReport: draft.saveReport,
       notify: draft.notify,
       maxRunMinutes: draft.maxRunMinutes,
       keepRuns: draft.keepRuns
@@ -275,7 +284,7 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
     <div className="automation-editor">
       <label className="settings-row">
         <span className="settings-row-label">Name</span>
-        <input className="settings-input" value={draft.name} placeholder="Morning Slack digest" onChange={(e) => patch({ name: e.target.value })} />
+        <input className="settings-input" value={draft.name} placeholder="Morning changelog report" onChange={(e) => patch({ name: e.target.value })} />
       </label>
       <label className="settings-row automation-prompt-row">
         <span className="settings-row-label">Prompt</span>
@@ -286,6 +295,10 @@ function AutomationEditor({ editor, onClose }: { editor: EditorState; onClose: (
           placeholder="What should the agent do on every run?"
           onChange={(e) => patch({ prompt: e.target.value })}
         />
+      </label>
+      <label className="settings-check">
+        <input type="checkbox" checked={draft.saveReport} onChange={(e) => patch({ saveReport: e.target.checked })} />
+        <span>Save the final response to Reports</span>
       </label>
       <label className="settings-row">
         <span className="settings-row-label">Project</span>

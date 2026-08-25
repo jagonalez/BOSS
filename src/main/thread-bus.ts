@@ -15,12 +15,14 @@ import type {
   ThreadBusThread
 } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { REPORT_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { policyOverrides, policySource, resolvePolicy } from '@shared/collaboration-policy'
 import { projectScope } from './project-identity'
 import type { QaTools } from './qa-tools'
 import { MCP_TOOL_PREFIX } from '@shared/mcp'
 import type { McpHub } from './mcp-hub'
 import type { ReviewManager } from './review-manager'
+import type { ReportManager } from './report-manager'
 
 interface LegacyThreadBusState {
   version: 1
@@ -106,6 +108,7 @@ export class ThreadBus {
   private qaTools?: QaTools
   private mcpHub?: McpHub
   private reviews?: ReviewManager
+  private reports?: ReportManager
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
@@ -121,6 +124,10 @@ export class ThreadBus {
 
   attachReviews(reviews: ReviewManager): void {
     this.reviews = reviews
+  }
+
+  attachReports(reports: ReportManager): void {
+    this.reports = reports
   }
 
   qaStatus(threadId: string) {
@@ -307,6 +314,32 @@ export class ThreadBus {
         ...(baseBranch ? { baseBranch } : {}),
         ...(booleanArg(args, 'draft', false) ? { draft: true } : {})
       })
+    }
+    // Report artifacts are local to BOSS and belong to the calling thread, so
+    // creating or refining one does not depend on cross-thread collaboration.
+    if (tool === 'boss_reports_create') {
+      if (!this.reports) throw new Error('Reports are not available.')
+      const report = await this.reports.createFromAgent({
+        threadId: caller.id,
+        projectPath: caller.projectPath,
+        backendId: caller.backendId,
+        title: stringArg(args, 'title'),
+        summary: stringArg(args, 'summary') || undefined,
+        body: stringArg(args, 'body')
+      })
+      return { id: report.id, title: report.title, summary: report.summary }
+    }
+    if (tool === 'boss_reports_update') {
+      if (!this.reports) throw new Error('Reports are not available.')
+      const values = args && typeof args === 'object' ? args as Record<string, unknown> : {}
+      const patch = {
+        ...('title' in values ? { title: typeof values.title === 'string' ? values.title : '' } : {}),
+        ...('summary' in values ? { summary: typeof values.summary === 'string' ? values.summary : '' } : {}),
+        ...('body' in values ? { body: typeof values.body === 'string' ? values.body : '' } : {})
+      }
+      if (!Object.keys(patch).length) throw new Error('Pass at least one report field to update.')
+      const report = await this.reports.updateFromAgent(caller.id, stringArg(args, 'reportId'), patch)
+      return { id: report.id, title: report.title, summary: report.summary, updatedAt: report.updatedAt }
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
@@ -616,6 +649,35 @@ export class ThreadBus {
             baseBranch: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase },
             draft: { type: 'boolean', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft }
           },
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_reports_create',
+        description: REPORT_TOOL_DESCRIPTIONS.create,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.title },
+            summary: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.summary },
+            body: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.body }
+          },
+          required: ['title', 'body'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_reports_update',
+        description: REPORT_TOOL_DESCRIPTIONS.update,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            reportId: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.reportId },
+            title: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.title },
+            summary: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.summary },
+            body: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.body }
+          },
+          required: ['reportId'],
           additionalProperties: false
         }
       },

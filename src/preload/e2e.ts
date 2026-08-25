@@ -251,6 +251,21 @@ function initialOpenCodeStopSession(): SessionInfo {
   }
 }
 
+function initialAutomationReportSession(): SessionInfo {
+  return {
+    id: 'thread-report-source',
+    backendId: 'opencode',
+    nativeSessionId: 'native-report-source',
+    projectId: 'boss-e2e',
+    projectPath: PROJECT,
+    executionPath: CHECKOUT,
+    title: 'Automation report source',
+    archived: true,
+    time: { created: Date.now() - 610_000, updated: Date.now() - 600_000 },
+    model: { id: 'gpt-5.6', provider: 'openai' }
+  }
+}
+
 function sourceMessages(): MessageWithParts[] {
   const sessionID = 'thread-source'
   return [
@@ -376,7 +391,13 @@ export function installE2EApi(boss: BossApi): void {
   let threadPins = savedThreadPins()
   const applyPins = (list: SessionInfo[]): SessionInfo[] =>
     list.map((session) => (threadPins[session.id] === undefined ? session : { ...session, pinned: threadPins[session.id] }))
-  let sessions = applyPins([initialSession(), initialDuplicateSession(), initialClaudeSession(), initialOpenCodeStopSession()])
+  let sessions = applyPins([
+    initialSession(),
+    initialDuplicateSession(),
+    initialClaudeSession(),
+    initialOpenCodeStopSession(),
+    initialAutomationReportSession()
+  ])
   const messages: Record<string, MessageWithParts[]> = {
     'thread-source': sourceMessages(),
     'thread-duplicate': duplicateMessages(),
@@ -441,6 +462,7 @@ export function installE2EApi(boss: BossApi): void {
     workspace: 'worktree',
     overlapPolicy: 'skip',
     catchUp: true,
+    saveReport: true,
     notify: 'events',
     maxRunMinutes: 30,
     keepRuns: 50,
@@ -451,6 +473,48 @@ export function installE2EApi(boss: BossApi): void {
     createdAt: Date.now() - 86_400_000,
     updatedAt: Date.now() - 3_600_000
   }]
+  const automationRunsFixture: Array<Record<string, unknown>> = [{
+    id: 'run-report-seed',
+    automationId: 'automation-webhook-seed',
+    reportId: 'report-codex-seed',
+    threadId: 'thread-report-source',
+    trigger: 'schedule',
+    status: 'success',
+    summary: 'Codex added report history and improved mobile review.',
+    changedFiles: 0,
+    startedAt: Date.now() - 610_000,
+    finishedAt: Date.now() - 600_000
+  }]
+  let reportsFixture: Array<Record<string, unknown>> = [
+    {
+      id: 'report-agent-seed',
+      source: { kind: 'agent', backendId: 'claude' },
+      threadId: 'thread-report-source',
+      projectPath: PROJECT,
+      title: 'Launch readiness brief',
+      summary: 'A Claude-created artifact with launch risks and recommendations.',
+      body: '## Recommendation\n\nShip behind a feature flag.\n\n| Risk | Mitigation |\n| --- | --- |\n| Adoption | Guided rollout |',
+      createdAt: Date.now() - 300_000,
+      updatedAt: Date.now() - 300_000
+    },
+    {
+      id: 'report-codex-seed',
+      source: {
+        kind: 'automation',
+        automationId: 'automation-webhook-seed',
+        automationName: 'Review incoming PRs',
+        runId: 'run-report-seed',
+        status: 'success'
+      },
+      threadId: 'thread-report-source',
+      projectPath: PROJECT,
+      title: 'Codex changelog',
+      summary: 'Codex added report history and improved mobile review.',
+      body: '## Highlights\n\n- Added durable automation reports.\n- Made every report available on mobile.\n\n| Area | Result |\n| --- | --- |\n| Reports | Ready |',
+      createdAt: Date.now() - 600_000,
+      updatedAt: Date.now() - 600_000
+    }
+  ]
   let assistantFixture: LabAssistantSnapshot = {
     generatedAt: Date.now(),
     tasks: [
@@ -1129,7 +1193,25 @@ export function installE2EApi(boss: BossApi): void {
       case 'worktree.settings.set': return { autoCleanupEnabled: true, cleanupAfterDays: 30, location: 'app-data', ...request }
       case 'mcp.list': return []
       case 'mcp.import.scan': return []
-      case 'automation.list': return { automations: automationsFixture, runs: [], webhookUrl: '' }
+      case 'automation.list': return { automations: automationsFixture, runs: automationRunsFixture, webhookUrl: '' }
+      case 'report.list': return {
+        reports: reportsFixture.map((item) => {
+          const summary = { ...item }
+          delete summary.body
+          return structuredClone(summary)
+        })
+      }
+      case 'report.get': {
+        const report = reportsFixture.find((item) => item.id === request.reportId)
+        if (!report) throw new Error(`Unknown fixture report ${request.reportId}`)
+        return structuredClone(report)
+      }
+      case 'report.read': {
+        const report = reportsFixture.find((item) => item.id === request.reportId)
+        if (!report) throw new Error(`Unknown fixture report ${request.reportId}`)
+        if (!report.readAt) report.readAt = Date.now()
+        return structuredClone(report)
+      }
       case 'automation.create': {
         const now = Date.now()
         const created = {
