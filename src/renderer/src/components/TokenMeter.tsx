@@ -5,7 +5,7 @@ import { compactMeter, usageDetailRows } from '../lib/token-meter'
 
 /** Reported token/run usage for the active thread, beside the composer.
  *
- *  Polls the same recorded metrics Command Center totals, so the meter needs
+ *  Polls the same recorded supervision metrics, so the meter needs
  *  no new bookkeeping and agrees with what supervision reports. Renders
  *  nothing until a backend has actually reported something — an empty meter
  *  would read as a broken one — and expands to a breakdown on click. */

@@ -680,10 +680,10 @@ export function AutomationsPage(): React.JSX.Element {
   }, [snapshot])
 
   return (
-    <div className="command-center automations-page">
-      <header className="command-header">
+    <div className="product-page automations-page">
+      <header className="product-header">
         <div>
-          <span className="command-eyebrow">BOSS</span>
+          <span className="product-eyebrow">BOSS</span>
           <h1>Automations</h1>
           <p>Prompts that run on a schedule — or on demand — against a backend you pick. Every run is a thread you can review and continue. Runs fire while BOSS is open.</p>
         </div>

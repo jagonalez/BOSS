@@ -35,7 +35,10 @@ async function configureClaudeDefaults(page: Parameters<typeof control>[0]): Pro
 }
 
 test('boots the real Electron renderer without covering it with a modal', async ({ appPage, electronApp }) => {
-  await expect(appPage.getByRole('heading', { name: 'Here’s what’s happening.' })).toBeVisible()
+  await expect(appPage.getByRole('heading', { name: 'Pick up where you left off.' })).toBeVisible()
+  await expect(appPage.getByRole('button', { name: 'Home', exact: true })).toHaveClass(/\bactive\b/)
+  await expect(appPage.getByRole('button', { name: 'Lab Assistant', exact: true })).toBeVisible()
+  await expect(appPage.getByText('Command Center', { exact: true })).toHaveCount(0)
   await expect(appPage.locator('.settings-page')).toHaveCount(0)
   await expect(appPage.locator('.modal-backdrop')).toHaveCount(0)
   expect(await electronApp.evaluate(({ BrowserWindow }) => {
@@ -204,6 +207,7 @@ test('shows an attached image and one copy of a response echoed under two messag
   await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
 
   await expect(appPage.getByRole('img', { name: 'duplicate-example.png' })).toBeVisible()
+  await expect(appPage.getByRole('img', { name: 'boss_browser_screenshot' })).toHaveCount(1)
   await expect(appPage.getByText('Critical find. Let me inspect it.')).toHaveCount(1)
   await expect(appPage.locator('.step-card')).toHaveCount(2)
 })
@@ -948,10 +952,14 @@ test('an attention event raises an unread badge that mark-all-read clears', asyn
 })
 
 test('a base font size choice survives a reload and can be undone', async ({ appPage }) => {
+  const homeThreadTitle = appPage.locator('.home-thread-copy strong').first()
+  const defaultSize = await homeThreadTitle.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
   await openSettings(appPage)
   await appPage.getByRole('button', { name: 'Appearance' }).click()
   await appPage.getByLabel('Base font size').selectOption('large')
   await expect(appPage.locator('html')).toHaveAttribute('data-ui-font-size', 'large')
+  const largeSize = await homeThreadTitle.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  expect(largeSize).toBeGreaterThan(defaultSize)
 
   await appPage.reload()
   await openSettings(appPage)
@@ -1032,7 +1040,7 @@ test('pinning a thread keeps it first across a reload', async ({ appPage }) => {
   await expect(reloadedRows.first().getByRole('button', { name: 'Unpin thread' })).toBeVisible()
 })
 
-test('thread rows and Command Center cards export the transcript as Markdown', async ({ appPage }) => {
+test('thread rows and Home cards export the transcript as Markdown', async ({ appPage }) => {
   const sourceRow = appPage.locator('.session-row').filter({ hasText: 'Source thread' })
   await expect(sourceRow).toBeVisible()
   await sourceRow.click({ button: 'right' })
@@ -1046,19 +1054,20 @@ test('thread rows and Command Center cards export the transcript as Markdown', a
   assert.ok(markdown.includes('### User'), 'user turns should be labelled')
   assert.ok(markdown.includes('Search marker: first result.'), 'the user message should be in the file')
 
-  // The same action hangs off Command Center's attention cards, which have no
+  // The same action hangs off Home's recent-thread cards, which have no
   // context menu of their own otherwise.
-  const card = appPage.locator('.command-session-card').filter({ hasText: 'Source thread' })
+  await appPage.getByRole('button', { name: 'Home', exact: true }).click()
+  const card = appPage.locator('.home-thread-row').filter({ hasText: 'Source thread' })
   await expect(card).toBeVisible()
   await card.click({ button: 'right' })
   await appPage.getByRole('button', { name: 'Export as Markdown…' }).click()
 
   await expect.poll(async () => (await exportCalls(appPage)).length).toBe(2)
 
-  // A save-dialog or disk failure must be visible even while Command Center,
+  // A save-dialog or disk failure must be visible even while Home,
   // rather than a hidden error that appears only after opening a chat.
   await (await control(appPage)).failNextExport('The export disk is full.')
-  await sourceRow.click({ button: 'right' })
+  await card.click({ button: 'right' })
   await appPage.getByRole('button', { name: 'Export as Markdown…' }).click()
   await expect(appPage.getByRole('heading', { name: 'Export failed' })).toBeVisible()
   await expect(appPage.locator('.modal .body')).toHaveText('Error: The export disk is full.')

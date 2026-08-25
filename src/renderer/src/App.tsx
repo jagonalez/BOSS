@@ -3,7 +3,8 @@ import { useStore, appStore, applyEvent } from './state/AppState'
 import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { Workspace } from './components/Workspace'
-import { CommandCenter } from './components/CommandCenter'
+import { HomePage } from './components/HomePage'
+import { LabAssistantPage } from './components/LabAssistantPage'
 import { SitesPage } from './components/SitesPage'
 import { AutomationsPage } from './components/AutomationsPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
@@ -124,7 +125,7 @@ export function App(): React.JSX.Element {
   // workspace would leave its browsers floating on top of whichever page is
   // showing. Detach them while it is covered.
   useEffect(() => {
-    const covered = activePage === 'command-center' || activePage === 'automations' || activePage === 'sites'
+    const covered = activePage === 'home' || activePage === 'lab-assistant' || activePage === 'automations' || activePage === 'sites'
     setNativeViewsSuspended('page-overlay', covered)
     return () => setNativeViewsSuspended('page-overlay', false)
   }, [activePage])
@@ -397,10 +398,11 @@ export function App(): React.JSX.Element {
   // No standalone chat page: a chat is a thread, so it opens in a view like
   // any other. And the workspace stays mounted behind the other pages rather
   // than being swapped out — rendering it conditionally tore down every
-  // terminal in it whenever you looked at Command Center, Automations or
+  // terminal in it whenever you looked at Home, Lab Assistant, Automations or
   // Sites, and started them again on the way back.
   const overlay = (() => {
-    if (activePage === 'command-center') return <CommandCenter />
+    if (activePage === 'home') return <HomePage />
+    if (activePage === 'lab-assistant') return <LabAssistantPage />
     if (activePage === 'automations') return <AutomationsPage />
     if (activePage === 'sites') return <SitesPage />
     return null

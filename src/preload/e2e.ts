@@ -335,8 +335,26 @@ function duplicateMessages(): MessageWithParts[] {
       ]
     },
     {
+      // BOSS versions before screenshot ownership was fixed wrote the image as
+      // an assistant message of its own. Keep one in the fixture so the real
+      // renderer proves it is re-homed once rather than appended after every
+      // later assistant update.
+      info: { id: 'assistant-tool-image-legacy', sessionID, role: 'assistant', time: { created: Date.now() - 39_500 } },
+      parts: [{
+        id: 'legacy-boss-screenshot',
+        type: 'file',
+        sessionID,
+        messageID: 'assistant-tool-image-legacy',
+        state: { status: 'completed', name: 'boss_browser_screenshot', mime: 'image/png', url: image }
+      }]
+    },
+    {
       info: { id: 'source-live-agent', sessionID, role: 'assistant', time: { created: Date.now() - 39_000, completed: Date.now() - 38_000 } },
       parts: [
+        {
+          id: 'owned-boss-screenshot', type: 'file', sessionID, messageID: 'source-live-agent',
+          state: { status: 'completed', name: 'boss_browser_screenshot', mime: 'image/png', url: image }
+        },
         { id: 'source-live-command', type: 'tool', sessionID, messageID: 'source-live-agent', state: { status: 'completed', tool: 'shell', input: { command: 'sed' } } },
         { id: 'source-live-text', type: 'text', sessionID, messageID: 'source-live-agent', text: 'Critical find. Let me inspect it.' }
       ]
@@ -952,8 +970,8 @@ export function installE2EApi(boss: BossApi): void {
             executionPath: session.executionPath || '',
             updatedAt: session.time?.updated || Date.now(),
             running: false,
-            // Source is intentionally an attention card so its export scenario
-            // covers every Command Center section, not only recent threads.
+            // Source is intentionally recent so Home's card export path is
+            // covered as well as the sidebar row.
             attention: session.id === 'thread-source'
               ? { kind: 'completed', createdAt: Date.now() - 1_000, detail: 'Fixture run completed' }
               : undefined,

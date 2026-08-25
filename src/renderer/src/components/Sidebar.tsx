@@ -35,7 +35,7 @@ import {
   togglePin,
   exportSessionMarkdown
 } from '../lib/actions'
-import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
+import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, LabMark, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -635,8 +635,11 @@ export function Sidebar(): React.JSX.Element {
         </IconButton>
       </div>
       <nav className="sidebar-primary" aria-label="Primary navigation">
-        <button className={`sidebar-primary-item ${activePage === 'command-center' ? 'active' : ''}`} onClick={() => showPage('command-center')}>
-          <PanelIcon size={15} /><span>Command Center</span>
+        <button className={`sidebar-primary-item ${activePage === 'home' ? 'active' : ''}`} onClick={() => showPage('home')}>
+          <PanelIcon size={15} /><span>Home</span>
+        </button>
+        <button className={`sidebar-primary-item ${activePage === 'lab-assistant' ? 'active' : ''}`} onClick={() => showPage('lab-assistant')}>
+          <LabMark size={15} /><span>Lab Assistant</span>
         </button>
         <button className={`sidebar-primary-item ${activePage === 'automations' ? 'active' : ''}`} onClick={() => showPage('automations')}>
           <ReviewIcon size={15} /><span>Automations</span>

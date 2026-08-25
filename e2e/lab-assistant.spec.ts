@@ -1,8 +1,14 @@
 import { control, expect, lastBackendCall, test } from './fixtures'
 
-test('Command Center surfaces and records a Lab Assistant merge-order decision', async ({ appPage }) => {
+async function openLabAssistant(appPage: Parameters<typeof control>[0]): Promise<void> {
+  await appPage.getByRole('button', { name: 'Lab Assistant', exact: true }).click()
+  await expect(appPage.getByRole('heading', { name: 'Lab Assistant', exact: true })).toBeVisible()
+}
+
+test('Lab Assistant surfaces and records a merge-order decision', async ({ appPage }) => {
   await control(appPage).then((item) => item.resetCalls())
-  const assistant = appPage.getByRole('region', { name: 'Lab Assistant' })
+  await openLabAssistant(appPage)
+  const assistant = appPage.getByRole('region', { name: 'Lab Assistant decisions' })
   await expect(assistant).toBeVisible()
   await expect(assistant).toContainText('Which should merge first?')
 
@@ -21,9 +27,10 @@ test('Command Center surfaces and records a Lab Assistant merge-order decision',
   await expect(assistant).toContainText('Nothing needs a decision.')
 })
 
-test('Command Center creates, unblocks, and assigns project tasks', async ({ appPage }) => {
+test('Lab Assistant creates, unblocks, and assigns project tasks', async ({ appPage }) => {
   await control(appPage).then((item) => item.resetCalls())
-  const assistant = appPage.getByRole('region', { name: 'Lab Assistant' })
+  await openLabAssistant(appPage)
+  const assistant = appPage.getByRole('region', { name: 'Lab Assistant tasks' })
   await assistant.getByRole('textbox', { name: 'New Lab Assistant task' }).fill('Monitor test failures')
   await assistant.getByRole('combobox', { name: 'Task project' }).selectOption({ label: 'project' })
   await assistant.getByRole('combobox', { name: 'Task dependency' }).selectOption({ label: 'After Plan task workflow' })

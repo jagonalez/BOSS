@@ -3,7 +3,7 @@ import { appStore, useStore } from '../state/AppState'
 import { bestFuzzyScore } from '../lib/fuzzy-match'
 import { activateWorkspaceView, markAllActivityRead, openProject, runMenuCommand, selectSession, showPage } from '../lib/actions'
 import type { Project } from '@shared/opencode'
-import { projectName } from './CommandCenter'
+import { projectName } from '../lib/project-name'
 
 interface PaletteItem {
   id: string
@@ -32,7 +32,8 @@ function commandItems(): PaletteItem[] {
 
 function pageItems(): PaletteItem[] {
   return [
-    { id: 'go.command-center', label: 'Go to Command Center', hint: 'Go', keywords: 'threads overview home', run: () => showPage('command-center') },
+    { id: 'go.home', label: 'Go to Home', hint: 'Go', keywords: 'threads overview continue recent', run: () => showPage('home') },
+    { id: 'go.lab-assistant', label: 'Go to Lab Assistant', hint: 'Go', keywords: 'orchestration tasks decisions', run: () => showPage('lab-assistant') },
     { id: 'go.automations', label: 'Go to Automations', hint: 'Go', keywords: 'scheduled cron runs', run: () => showPage('automations') },
     { id: 'go.sites', label: 'Go to Sites', hint: 'Go', keywords: 'publish web deploy', run: () => showPage('sites') }
   ]
