@@ -504,6 +504,7 @@ export function installE2EApi(boss: BossApi): void {
   const intentionallyStopped = new Set<string>()
   const busyThreads = new Set<string>()
   let nextBackendFailure: { type: BackendRequest['type']; message: string } | null = null
+  let nextCodexTurn = 1
 
   const recordBackend = (request: BackendRequest): void => {
     calls.push({ channel: 'backend', request: structuredClone(request) })
@@ -893,10 +894,10 @@ export function installE2EApi(boss: BossApi): void {
       // Main allows one run per thread and refuses the rest, because only it
       // knows without a race. The renderer is expected to queue what it refuses
       // rather than drop it.
-      case 'thread.send':
+      case 'thread.send': {
         if (busyThreads.has(request.threadId)) throw new Error(THREAD_BUSY_ERROR)
+        const found = sessions.find((session) => session.id === request.threadId)
         if (threadTitleSettings.autoNameFromFirstPrompt) {
-          const found = sessions.find((session) => session.id === request.threadId)
           // Codex stands in for a successful cheap model call; Claude has no
           // title generator in BOSS and exercises the local fallback.
           const title = found?.backendId === 'codex'
@@ -910,7 +911,48 @@ export function installE2EApi(boss: BossApi): void {
           }
         }
         busyThreads.add(request.threadId)
+        // Codex's turn/start acknowledgement publishes the user's input before
+        // the delayed native userMessage event. Mirror that main/backend seam
+        // so E2E can hold the visible contract without real Codex credentials.
+        if (found?.backendId === 'codex') {
+          // Main announces the run before waiting for the backend. The public
+          // event also changes the composer into its follow-up state, proving
+          // the message below is visible while Codex is genuinely busy.
+          const busy = JSON.stringify({
+            type: 'session.status',
+            properties: { sessionID: request.threadId, status: { type: 'busy' } },
+            backendId: found.backendId
+          })
+          for (const listener of eventListeners) listener(busy)
+          const messageId = `user-e2e-turn-${nextCodexTurn++}-0`
+          const info: MessageWithParts['info'] = {
+            id: messageId,
+            sessionID: request.threadId,
+            role: 'user',
+            time: { created: Date.now() }
+          }
+          const text = request.parts
+            .filter((part): part is { type: string; text: string } => Boolean(
+              part && typeof part === 'object' && (part as { type?: string }).type === 'text'
+            ))
+            .map((part) => part.text)
+            .join('\n')
+          const transcript: MessageWithParts = {
+            info,
+            parts: text
+              ? [{ id: `${messageId}-text`, type: 'text', sessionID: request.threadId, messageID: messageId, text }]
+              : []
+          }
+          messages[request.threadId] = [...(messages[request.threadId] ?? []), transcript]
+          for (const listener of eventListeners) {
+            listener(JSON.stringify({ type: 'message.updated', properties: { info }, backendId: 'codex' }))
+            for (const part of transcript.parts) {
+              listener(JSON.stringify({ type: 'message.part.updated', properties: { part }, backendId: 'codex' }))
+            }
+          }
+        }
         return undefined
+      }
       case 'thread.todos': return []
       case 'thread.diff': return []
       case 'thread.models': return models[request.backendId ?? sessions.find((session) => session.id === request.threadId)?.backendId ?? 'opencode']
