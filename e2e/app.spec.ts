@@ -413,7 +413,7 @@ test('shows a Codex message while Codex is still working', async ({ appPage }) =
   await composer.press('Enter')
 
   await expect(appPage.locator('.msg.user')).toContainText('Keep this visible while you reason.')
-  await expect(composer).toHaveValue('')
+  await expect(appPage.getByPlaceholder('Queue a follow-up for Codex…')).toHaveValue('')
   await expect(appPage.locator('.thinking-indicator')).toBeVisible()
   await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
 })
@@ -435,7 +435,7 @@ test('a failed Codex send keeps the message retryable and shows it after retry',
   await appPage.getByRole('button', { name: 'Retry' }).click()
 
   await expect(appPage.locator('.msg.user')).toContainText('Do not lose this failed message.')
-  await expect(composer).toHaveValue('')
+  await expect(appPage.getByPlaceholder('Queue a follow-up for Codex…')).toHaveValue('')
   await expect(appPage.locator('.chat-error')).toHaveCount(0)
 })
 
