@@ -38,7 +38,7 @@ import type { BackendAuth } from '../backend-auth'
 import type { TranscriptStore } from '../transcript-store'
 import type { ImageStore } from '../image-store'
 import type { NotificationRouter } from '../notification-router'
-import { toolResultImage } from '@shared/qa'
+import { isComputerTool, shouldSurfaceToolImage, toolResultImage } from '@shared/qa'
 import type { AttentionKind, SupervisionSnapshot, ThreadAttention, ThreadResult, ThreadUsageTotals, TranscriptSearchResult } from '@shared/supervision'
 import { extractSummary, lastAssistantText } from '@shared/thread-result'
 import { fanOutTitle, fanOutViolation, type FanOutWorker } from '@shared/fan-out'
@@ -265,6 +265,10 @@ export class BackendManager {
    *  truth. Cleared as soon as a run starts, because from then on the backend
    *  is authoritative again. */
   private readonly pruneSuspended = new Set<string>()
+  /** Tool outputs can arrive in a second event that carries the call id and
+   *  result but omits the original name/input. Remember those fields long
+   *  enough to apply transcript image visibility to the completion. */
+  private readonly toolResultContexts = new Map<string, { tool: string; input: unknown }>()
   private threadBus?: ThreadBus
   private images?: ImageStore
   private notifications?: NotificationRouter
@@ -309,13 +313,28 @@ export class BackendManager {
    *  the ordinary case costs one type check. */
   private extractToolResultImages(binding: ThreadBinding, part: MessageWithParts['parts'][number]): MessageWithParts['parts'][number] {
     if (part.type !== 'tool' || !this.images) return part
+    const contextKey = `${binding.id}:${part.messageID}:${part.id}`
+    const previousContext = this.toolResultContexts.get(contextKey)
+    const incomingTool = typeof part.state?.tool === 'string' ? part.state.tool : undefined
+    const context = {
+      tool: incomingTool ?? previousContext?.tool ?? 'tool',
+      input: part.state?.input ?? previousContext?.input
+    }
+    if (isComputerTool(context.tool) && (incomingTool || part.state?.input !== undefined)) {
+      this.toolResultContexts.set(contextKey, context)
+    }
     const output = part.state?.output
     if (!Array.isArray(output)) return part
-    const tool = typeof part.state?.tool === 'string' ? part.state.tool : 'tool'
+    this.toolResultContexts.delete(contextKey)
+    const surfaceImage = shouldSurfaceToolImage(context.tool, context.input)
     let changed = false
     const rewritten = output.map((block) => {
       const image = toolResultImage(block)
       if (!image) return block
+      if (!surfaceImage) {
+        changed = true
+        return { type: 'text', text: '[Screenshot inspected internally.]' }
+      }
       const stored = this.images?.write(binding.id, image.mimeType, image.data)
       if (!stored) {
         // A format the store will not take, or a disk that refused it. Say so
@@ -327,7 +346,7 @@ export class BackendManager {
       // The image came out of this tool part, so it belongs to the same
       // message — no need to fall back to whichever assistant message is
       // current.
-      this.emitImagePart(binding, tool, stored, part.messageID)
+      this.emitImagePart(binding, context.tool, stored, part.messageID)
       return { type: 'text', text: `[Image shown above: ${stored.mime}]` }
     })
     if (!changed) return part

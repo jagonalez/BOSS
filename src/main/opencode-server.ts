@@ -343,7 +343,8 @@ export const computer = tool({
   description: ${JSON.stringify(qaDescription("boss_computer"))},
   args: {
     operation: tool.schema.enum(${JSON.stringify(COMPUTER_USE_OPERATIONS)}),
-    arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional()
+    arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional(),
+    showInTranscript: tool.schema.boolean().optional()
   },
   execute(args, context) { return call("boss_computer", args, context) }
 })

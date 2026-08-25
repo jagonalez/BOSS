@@ -411,7 +411,8 @@ export default function (pi: ExtensionAPI) {
       operation: Type.Union([
         ${COMPUTER_USE_OPERATIONS.map((operation) => `Type.Literal(${JSON.stringify(operation)})`).join(', ')}
       ]),
-      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
+      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+      showInTranscript: Type.Optional(Type.Boolean({ default: false }))
     }),
     execute: (_id, args, signal) => call("boss_computer", args, signal)
   })
