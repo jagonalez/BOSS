@@ -12,7 +12,7 @@ function report(overrides: Partial<ThreadUsageReport> = {}): ThreadUsageReport {
   }
 }
 
-test('formatCompact abbreviates like Command Center totals', () => {
+test('formatCompact abbreviates usage totals', () => {
   assert.equal(formatCompact(12_400), '12.4K')
 })
 

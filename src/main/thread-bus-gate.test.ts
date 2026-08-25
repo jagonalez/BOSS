@@ -33,6 +33,24 @@ test('every backend reaches the gate through one call', () => {
   }
 })
 
+test('tool images wait for the backend message that owns them', () => {
+  // The result already returns to every backend with its image content. An
+  // eager host callback runs before the backend reports a message id, creating
+  // an orphan assistant-tool-image message that the streaming renderer keeps
+  // appending again. There must be only the backend-owned path.
+  assert.ok(!source.includes('publishToolImage'), 'the thread bus must not eagerly publish ownerless images')
+  assert.ok(!manager.includes('publishToolImage('), 'the manager must not expose the removed eager path')
+
+  for (const file of [
+    join(import.meta.dirname, 'backend', 'codex-backend.ts'),
+    join(import.meta.dirname, 'backend', 'pi-backend.ts'),
+    join(import.meta.dirname, 'opencode-server.ts')
+  ]) {
+    const backend = readFileSync(file, 'utf8')
+    assert.ok(backend.includes('result.image'), `${file} must carry the image in its completed tool result`)
+  }
+})
+
 test('the policy the gate reads is the one the tests cover', () => {
   // collaboration-policy.test.ts pins the default-and-override behaviour, but
   // only if this is the code that runs. A private fallback here would restore

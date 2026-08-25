@@ -9,7 +9,7 @@ export interface TaskNode {
 /** Nest threads under the thread each one came from.
  *
  *  The manager has always recorded delegation lineage; supervision just never
- *  carried it, so Command Center listed a worker and the thread that spawned it
+ *  carried it, so overview lists showed both a worker and the thread that spawned it
  *  as unrelated peers. Roots keep the order they arrived in, which is already
  *  most-recent-first, and children sort oldest-first so a task reads in the
  *  order the work actually happened.

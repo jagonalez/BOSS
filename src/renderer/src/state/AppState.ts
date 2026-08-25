@@ -190,7 +190,7 @@ export const initialBrowseState: BrowseNavigationState = {
 }
 
 export const initialState: AppState = {
-  activePage: 'command-center',
+  activePage: 'home',
   projectWorkspace: null,
   viewMode: 'multi',
   browseAgentActivity: {},

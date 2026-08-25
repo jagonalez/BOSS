@@ -1,14 +1,20 @@
 import { control, expect, lastBackendCall, test } from './fixtures'
 
-test('Command Center surfaces and records a Lab Assistant merge-order decision', async ({ appPage }) => {
+async function openLabAssistant(appPage: Parameters<typeof control>[0]): Promise<void> {
+  await appPage.getByRole('button', { name: 'Lab Assistant', exact: true }).click()
+  await expect(appPage.getByRole('heading', { name: 'Lab Assistant', exact: true })).toBeVisible()
+}
+
+test('Lab Assistant surfaces and records a merge-order decision', async ({ appPage }) => {
   await control(appPage).then((item) => item.resetCalls())
-  const assistant = appPage.getByRole('region', { name: 'Lab Assistant' })
+  await openLabAssistant(appPage)
+  const assistant = appPage.getByRole('region', { name: 'Lab Assistant decisions' })
   await expect(assistant).toBeVisible()
   await expect(assistant).toContainText('Which should merge first?')
 
   await control(appPage).then((item) => item.failNextBackendRequest('assistant.answer', 'Decision store unavailable'))
   await assistant.getByRole('button', { name: '#21 · Mobile polish' }).click()
-  await expect(assistant.getByRole('alert')).toContainText('Decision store unavailable')
+  await expect(appPage.getByRole('alert')).toContainText('Decision store unavailable')
   await expect(assistant).toContainText('Which should merge first?')
 
   await assistant.getByRole('button', { name: '#22 · Eval foundation' }).click()
@@ -21,9 +27,10 @@ test('Command Center surfaces and records a Lab Assistant merge-order decision',
   await expect(assistant).toContainText('Nothing needs a decision.')
 })
 
-test('Command Center creates, unblocks, and assigns project tasks', async ({ appPage }) => {
+test('Lab Assistant creates, unblocks, and assigns project tasks', async ({ appPage }) => {
   await control(appPage).then((item) => item.resetCalls())
-  const assistant = appPage.getByRole('region', { name: 'Lab Assistant' })
+  await openLabAssistant(appPage)
+  const assistant = appPage.getByRole('region', { name: 'Lab Assistant tasks' })
   await assistant.getByRole('textbox', { name: 'New Lab Assistant task' }).fill('Monitor test failures')
   await assistant.getByRole('combobox', { name: 'Task project' }).selectOption({ label: 'project' })
   await assistant.getByRole('combobox', { name: 'Task dependency' }).selectOption({ label: 'After Plan task workflow' })
@@ -37,12 +44,12 @@ test('Command Center creates, unblocks, and assigns project tasks', async ({ app
       dependsOn: ['assistant-task-plan']
     }
   })
-  const created = assistant.locator('article.command-assistant-task').filter({
+  const created = assistant.locator('article.lab-task').filter({
     has: appPage.getByText('Monitor test failures', { exact: true })
   })
   await expect(created).toContainText('blocked')
 
-  const prerequisite = assistant.locator('article.command-assistant-task').filter({
+  const prerequisite = assistant.locator('article.lab-task').filter({
     has: appPage.getByText('Plan task workflow', { exact: true })
   })
   await prerequisite

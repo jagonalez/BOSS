@@ -212,10 +212,10 @@ export function SitesPage(): React.JSX.Element {
   }, [])
 
   return (
-    <div className="command-center sites-page">
-      <header className="command-header">
+    <div className="product-page sites-page">
+      <header className="product-header">
         <div>
-          <span className="command-eyebrow">BOSS</span>
+          <span className="product-eyebrow">BOSS</span>
           <h1>Sites</h1>
           <p>Publish a folder of static files to preview it locally and optionally deploy it to Cloudflare Workers.</p>
         </div>
