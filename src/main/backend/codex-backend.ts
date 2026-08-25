@@ -202,6 +202,11 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   }
 ]
 
+// Dispatch exactly what this backend advertised. A separate hand-maintained
+// prefix allowlist rejected boss_git_create_change_request at runtime even
+// though it appeared in the model's tool schema.
+const THREAD_BUS_TOOL_NAMES = new Set(THREAD_BUS_TOOLS.map((tool) => String(tool.name ?? '')))
+
 function threadInfo(thread: CodexThread): SessionInfo {
   return {
     id: thread.id,
@@ -435,6 +440,7 @@ export class CodexBackend implements Backend {
   private eventCb?: (event: EventMessage) => void
   private projectPath = ''
   private readonly sessionDirectories = new SessionDirectories()
+  private readonly sessionWritableRoots = new Map<string, string[]>()
   private version = ''
   private healthy = false
   private buffer = ''
@@ -588,7 +594,7 @@ export class CodexBackend implements Backend {
   private handleServerRequest(id: RpcId, method: string, params: Record<string, unknown>): void {
     if (method === 'item/tool/call') {
       const tool = String(params.tool ?? '') as ThreadBusAgentTool
-      if (!this.threadBusHandler || (!tool.startsWith('boss_threads_') && !tool.startsWith('boss_browser_') && !tool.startsWith('boss_mcp_') && tool !== 'boss_computer')) {
+      if (!this.threadBusHandler || !THREAD_BUS_TOOL_NAMES.has(tool)) {
         this.respond(id, { contentItems: [{ type: 'inputText', text: 'Unknown BOSS tool.' }], success: false })
         return
       }
@@ -740,8 +746,9 @@ export class CodexBackend implements Backend {
 
   /** Put a thread in its own checkout. The manager calls this on every lookup
    *  with the path from the thread's own binding. */
-  setSessionDirectory(id: string, directory: string): void {
+  setSessionDirectory(id: string, directory: string, writableRoots: string[] = [directory]): void {
     this.sessionDirectories.set(id, directory)
+    this.sessionWritableRoots.set(id, [...new Set(writableRoots)])
   }
 
   /** The sandbox goes out with each turn, so this lands on the next message
@@ -780,6 +787,7 @@ export class CodexBackend implements Backend {
     await this.request('thread/delete', { threadId: id })
     this.loadedThreads.delete(id)
     this.sessionDirectories.forget(id)
+    this.sessionWritableRoots.delete(id)
   }
 
   async sessionRename(id: string, title: string): Promise<SessionInfo> {
@@ -877,7 +885,8 @@ export class CodexBackend implements Backend {
             type: 'workspaceWrite',
             // Scoped to this thread's checkout. The global path would hand a
             // thread write access to a project it has nothing to do with.
-            writableRoots: (() => { const dir = this.directoryFor(sessionId); return dir ? [dir] : [] })(),
+            writableRoots: this.sessionWritableRoots.get(sessionId)
+              ?? (() => { const dir = this.directoryFor(sessionId); return dir ? [dir] : [] })(),
             // Off blocks `gh pr create`, `npm install`, and every other
             // outbound call, while leaving `git push` — which needs no
             // sandbox network — untouched. Default on for that reason.

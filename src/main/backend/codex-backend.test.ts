@@ -23,6 +23,26 @@ test('every per-thread request uses the thread checkout, not the global path', (
     !/writableRoots:\s*this\.projectPath/.test(send),
     'writableRoots must not come from the global project path'
   )
+  assert.ok(
+    send.includes('this.sessionWritableRoots.get(sessionId)'),
+    'sendMessage should use the trusted checkout and Git roots supplied for this session'
+  )
+})
+
+test('every advertised Codex dynamic tool is accepted by the runtime dispatcher', () => {
+  const handler = source.slice(source.indexOf('private handleServerRequest('), source.indexOf('/** The position of this user item'))
+  assert.ok(source.includes('const THREAD_BUS_TOOL_NAMES = new Set(THREAD_BUS_TOOLS.map('))
+  assert.ok(handler.includes('THREAD_BUS_TOOL_NAMES.has(tool)'), 'dispatch should be derived from the advertised definitions')
+  assert.ok(!handler.includes("tool.startsWith('boss_threads_')"), 'a second prefix allowlist can drift from the schema')
+  assert.ok(source.includes("name: 'boss_git_create_change_request'"), 'the PR tool should remain advertised')
+})
+
+test('the manager supplies only the bound project checkout and its trusted Git metadata', () => {
+  const manager = readFileSync(join(import.meta.dirname, 'manager.ts'), 'utf8')
+  const binding = manager.slice(manager.indexOf('private setBackendSessionDirectory('), manager.indexOf('private bindingForNative('))
+  assert.ok(binding.includes('binding.executionPath'), 'the writable checkout must come from the thread binding')
+  assert.ok(binding.includes('projectSandboxWritableRoots(binding.projectPath, binding.executionPath)'))
+  assert.ok(!binding.includes('this.projectPath'), 'the app\'s current project must not leak into another thread')
 })
 
 test('a server that goes away takes what BOSS believed about it', () => {

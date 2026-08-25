@@ -249,6 +249,15 @@ export class ReviewManager {
       throw new Error(`${provider.summary.changeRequestLabel} #${existing.id} is already open for ${repository.branch}: ${existing.url}`)
     }
     const baseBranch = input.baseBranch ?? (await provider.getDefaultBranch?.(repository, match))
+    if (!repository.branch) throw new Error('Check out a branch before opening a change request.')
+    if (baseBranch && repository.branch === baseBranch) {
+      throw new Error(`Create a feature branch before opening a change request against ${baseBranch}.`)
+    }
+    const status = await requiredCommand('git', ['status', '--porcelain', '--untracked-files=all'], repository.root)
+    if (status.trim()) {
+      throw new Error('Commit the intended changes before opening a change request; the checkout still has uncommitted files.')
+    }
+    await provider.publishBranch?.(repository, match)
     const created = await provider.createChangeRequest(repository, match, {
       ...input,
       ...(baseBranch === undefined ? {} : { baseBranch })

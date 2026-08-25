@@ -71,7 +71,10 @@ export interface Backend {
   /** Sessions */
   sessionsList(): Promise<SessionInfo[]>
   sessionCreate(title?: string, directory?: string): Promise<SessionInfo>
-  setSessionDirectory?(id: string, directory: string): void
+  /** Bind a native session to its checkout and the trusted writable roots for
+   *  that checkout. Sandboxing backends use the roots; other backends may
+   *  ignore the third argument. */
+  setSessionDirectory?(id: string, directory: string, writableRoots?: string[]): void
   /** Tell a sandboxing backend what the sandbox may do. Optional: only
    *  backends that run the agent in a sandbox implement it. */
   setSandbox?(settings: SandboxSettings): void

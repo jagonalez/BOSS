@@ -539,6 +539,27 @@ test('auto mode answers permission requests without leaving a blocking panel', a
   await expect(appPage.locator('.modal-backdrop')).toHaveCount(0)
 })
 
+test('a running Codex thread says a permission-mode switch starts next turn', async ({ appPage }) => {
+  await control(appPage).then((item) => item.spawnThread('codex', 'Codex PR worker'))
+  await appPage.locator('.session-row').filter({ hasText: 'Codex PR worker' }).click()
+
+  // Start in Auto while idle, then begin the turn that fixes its approval
+  // policy. Switching to Ask during that turn must not imply that a blocked
+  // git command already in flight can suddenly request approval.
+  await appPage.locator('.model-picker-btn').filter({ hasText: 'Ask' }).click()
+  await appPage.locator('.model-row').filter({ hasText: /^Auto/ }).click()
+  await appPage.getByRole('button', { name: 'Enable Auto' }).click()
+  const composer = appPage.getByPlaceholder('Ask Codex…')
+  await composer.fill('Prepare and publish the pull request.')
+  await composer.press('Enter')
+
+  await appPage.locator('.model-picker-btn').filter({ hasText: 'Auto' }).click()
+  await appPage.locator('.model-row').filter({ hasText: /^Ask/ }).click()
+  const pending = appPage.locator('.model-picker-btn').filter({ hasText: 'Ask (next turn)' })
+  await expect(pending).toBeVisible()
+  await expect(pending).toHaveAttribute('title', /applies from your next message/)
+})
+
 test('a second message sent before the first is acknowledged is queued, not lost', async ({ appPage }) => {
   // The renderer decided between sending and queueing from its own copy of the
   // busy state. Two quick sends both read "idle", both started a run, and the
