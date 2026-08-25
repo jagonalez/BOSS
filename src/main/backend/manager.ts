@@ -30,7 +30,7 @@ import type { EventMessage, FileDiff, MessageWithParts, Part, SessionInfo } from
 import { isCompletedTodoToolCall } from '@shared/opencode'
 import type { ThreadBus } from '../thread-bus'
 import type { ThreadBusConnection, ThreadBusSnapshot, ThreadBusThread } from '@shared/thread-bus'
-import { projectScope, type ProjectScope } from '../project-identity'
+import { projectSandboxWritableRoots, projectScope, type ProjectScope } from '../project-identity'
 import { envHint, resolveBackendBin, type BinaryOverrides } from '../backend-bin'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { WorktreeManager } from '../worktree-manager'
@@ -1098,9 +1098,19 @@ export class BackendManager {
   private binding(threadId: string): ThreadBinding {
     const binding = this.bindings.get(threadId)
     if (!binding) throw new Error(`BOSS thread not found: ${threadId}`)
-    this.backends[binding.backendId].setSessionDirectory?.(binding.nativeSessionId, binding.executionPath)
+    this.setBackendSessionDirectory(binding)
     if (binding.worktree?.status === 'active') void this.worktrees?.touch(binding.worktree.id)
     return binding
+  }
+
+  /** Keep a backend on the thread's own checkout and, for sandboxing
+   * backends, grant only the Git metadata that belongs to that project. */
+  private setBackendSessionDirectory(binding: ThreadBinding): void {
+    this.backends[binding.backendId].setSessionDirectory?.(
+      binding.nativeSessionId,
+      binding.executionPath,
+      projectSandboxWritableRoots(binding.projectPath, binding.executionPath)
+    )
   }
 
   private bindingForNative(backendId: BackendId, nativeSessionId?: string): ThreadBinding | undefined {
@@ -2298,7 +2308,7 @@ export class BackendManager {
     binding.executionPath = worktree.path
     binding.worktree = { ...worktree, ownerThreadId: threadId }
     this.save()
-    this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, worktree.path)
+    this.setBackendSessionDirectory(binding)
     this.reportSetupFailure(threadId, worktree.setupError, binding.backendId)
     const session = this.session(binding)
     this.emit({ type: 'session.updated', properties: { info: session }, backendId: binding.backendId })
@@ -2417,7 +2427,7 @@ export class BackendManager {
         // uncommitted work, so there is nothing here to lose.
         if (stranded) {
           binding.executionPath = binding.projectPath
-          this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, binding.projectPath)
+          this.setBackendSessionDirectory(binding)
           this.emit({
             type: 'session.updated',
             properties: { info: this.session(binding) },
@@ -2453,7 +2463,7 @@ export class BackendManager {
       // thread pointing into it left the thread in a directory that no longer
       // exists — every command after that failed with no explanation.
       binding.executionPath = binding.projectPath
-      this.backends[binding.backendId]?.setSessionDirectory?.(binding.nativeSessionId, binding.projectPath)
+      this.setBackendSessionDirectory(binding)
       this.emit({
         type: 'session.updated',
         properties: { info: this.session(binding) },

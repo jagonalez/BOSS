@@ -99,6 +99,17 @@ export function createChangeRequestArgs(
   return { args, stdin: body ?? '' }
 }
 
+/** Push through the authenticated GitHub CLI without changing global Git
+ * configuration or depending on the origin transport. */
+export function publishGitHubBranchArgs(repository: string, branch: string): string[] {
+  return [
+    '-c', 'credential.helper=',
+    '-c', 'credential.helper=!gh auth git-credential',
+    'push', `https://github.com/${repository}.git`,
+    `HEAD:refs/heads/${branch}`
+  ]
+}
+
 export function splitGitHubPullRequestDiff(value: string): ChangeRequestFileDiff[] {
   return value.split(/(?=^diff --git )/m).flatMap((block) => {
     if (!block.startsWith('diff --git ')) return []
@@ -252,6 +263,15 @@ export class GitHubReviewProvider implements ReviewProvider {
     const result = await runCommand('gh', ['repo', 'view', '--json', 'defaultBranchRef', '--jq', '.defaultBranchRef.name'], repository.root)
     const name = result.stdout.trim()
     return result.code === 0 && name ? name : undefined
+  }
+
+  async publishBranch(repository: ReviewRepository, match: ReviewProviderMatch): Promise<void> {
+    if (!repository.branch) throw new Error('Check out a branch before opening a pull request.')
+    // The app's `gh` login is the supported GitHub credential source. Passing
+    // its helper for this one command works even when origin uses SSH and the
+    // agent shell has no SSH key, without modifying the user's global Git
+    // configuration or exposing a token to the agent.
+    await requiredCommand('git', publishGitHubBranchArgs(match.repository, repository.branch), repository.root)
   }
 
   async createChangeRequest(repository: ReviewRepository, _match: ReviewProviderMatch, input: CreateChangeRequestInput): Promise<CreatedChangeRequest> {

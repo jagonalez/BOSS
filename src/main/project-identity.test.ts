@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { projectCheckouts, projectScope } from './project-identity.ts'
+import { gitCommonDirectory, projectCheckouts, projectSandboxWritableRoots, projectScope } from './project-identity.ts'
 
 test('linked worktrees share one project while retaining their checkout paths', () => {
   const root = mkdtempSync(join(tmpdir(), 'boss-project-identity-'))
@@ -25,6 +25,19 @@ test('linked worktrees share one project while retaining their checkout paths', 
     assert.equal(linkedScope.projectId, mainScope.projectId)
     assert.equal(linkedScope.projectPath, realpathSync.native(repository))
     assert.equal(linkedScope.executionPath, realpathSync.native(linked))
+
+    const commonGit = realpathSync.native(join(repository, '.git'))
+    assert.equal(gitCommonDirectory(repository), commonGit)
+    assert.deepEqual(
+      projectSandboxWritableRoots(repository, repository),
+      [realpathSync.native(repository)],
+      'a main checkout already contains its Git metadata'
+    )
+    assert.deepEqual(
+      projectSandboxWritableRoots(repository, linked),
+      [realpathSync.native(linked), commonGit],
+      'a linked checkout needs its trusted common Git directory for index, object, and ref locks'
+    )
 
     assert.deepEqual(projectCheckouts(linked), [
       { path: realpathSync.native(repository), branch: 'main', main: true },
