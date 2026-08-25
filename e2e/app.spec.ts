@@ -47,6 +47,22 @@ test('boots the real Electron renderer without covering it with a modal', async 
   })).toEqual({ count: 1, visible: false })
 })
 
+test('sets Automatic QA for one thread without sending the command to the agent', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await fixture.resetCalls()
+
+  const composer = appPage.locator('.composer-input textarea:visible')
+  await composer.fill('/qa auto')
+  await composer.press('Enter')
+
+  await expect.poll(async () => (await backendCalls(appPage))
+    .filter((call) => call.request.type === 'thread.qa.policy')).toEqual([
+    { channel: 'backend', request: { type: 'thread.qa.policy', threadId: 'thread-source', policy: 'automatic' } }
+  ])
+  expect((await backendCalls(appPage)).some((call) => call.request.type === 'session.prompt')).toBe(false)
+})
+
 test('switching workspace layouts restores the views previously shown in each mode', async ({ appPage }) => {
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
   await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()

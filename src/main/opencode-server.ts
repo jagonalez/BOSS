@@ -7,7 +7,7 @@ import { app } from 'electron'
 import type { ServerInfo } from '@shared/ipc'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
-import { qaDescription } from '@shared/qa'
+import { COMPUTER_USE_OPERATIONS, qaDescription } from '@shared/qa'
 
 interface Health {
   healthy: boolean
@@ -342,7 +342,7 @@ export const browser_type = tool({
 export const computer = tool({
   description: ${JSON.stringify(qaDescription("boss_computer"))},
   args: {
-    operation: tool.schema.enum(["list_apps", "list_windows", "get_window_state", "get_desktop_state", "screenshot", "zoom", "click", "type_text", "press_key", "hotkey", "scroll", "wait"]),
+    operation: tool.schema.enum(${JSON.stringify(COMPUTER_USE_OPERATIONS)}),
     arguments: tool.schema.record(tool.schema.string(), tool.schema.unknown()).optional(),
     showInTranscript: tool.schema.boolean().optional()
   },

@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { QaAgentTool, QaPolicy, QaPolicyState, AgentToolResult } from '@shared/qa'
+import { isComputerUseActionOperation, type QaAgentTool, type QaPolicy, type QaPolicyState, type AgentToolResult } from '@shared/qa'
 import type { BrowseManager } from './browse'
 import type { ComputerUse } from './computer-use'
 
@@ -15,8 +15,6 @@ interface LegacyQaState {
   version: 1
   policies: Record<string, QaPolicy>
 }
-
-const COMPUTER_INPUT_TOOLS = new Set(['click', 'type_text', 'press_key', 'hotkey', 'scroll'])
 
 function stateFile(): string {
   return join(app.getPath('userData'), 'qa-policies.json')
@@ -110,7 +108,7 @@ export class QaTools {
         return this.requireBrowser(browser).agentType(stringArg(args, 'tabId'), stringArg(args, 'ref'), stringArg(args, 'text'), booleanArg(args, 'submit'))
       case 'boss_computer': {
         const operation = stringArg(args, 'operation')
-        if (COMPUTER_INPUT_TOOLS.has(operation)) this.requireAutomatic(policy, `run computer action ${operation}`)
+        if (isComputerUseActionOperation(operation)) this.requireAutomatic(policy, `run computer action ${operation}`)
         const input = objectArg(objectArg(args).arguments)
         return this.computer.call(operation, input)
       }
