@@ -24,7 +24,10 @@ test('Lab Assistant surfaces and records a merge-order decision', async ({ appPa
     questionId: 'assistant-question-order',
     answerId: 'octo/hello#22'
   })
-  await expect(assistant).toContainText('Nothing needs a decision.')
+  // The merged Attention list still carries the workflow engine's seeded
+  // items, so the answered question disappearing is the contract — not an
+  // empty state.
+  await expect(assistant).not.toContainText('Which should merge first?')
 })
 
 test('Lab Assistant creates, unblocks, and assigns project tasks', async ({ appPage }) => {
