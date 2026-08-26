@@ -505,7 +505,7 @@ function renderAssistant() {
     var rank = { running: 0, review: 1, ready: 2, blocked: 3, inbox: 4, done: 5 };
     return (rank[a.status] || 0) - (rank[b.status] || 0) || (b.updatedAt || 0) - (a.updatedAt || 0);
   });
-  var html = '<div class="card"><div class="title">Lab Assistant</div><div class="sub">' +
+  var html = '<div class="card"><div class="title">Assistant</div><div class="sub">' +
     tasks.filter(function (task) { return task.status !== 'done'; }).length + ' active tasks · ' +
     activeIncidents.length + ' CI failure' + (activeIncidents.length === 1 ? '' : 's') + ' · ' +
     open.length + ' decision' + (open.length === 1 ? '' : 's') + ' waiting</div></div>';
@@ -542,7 +542,7 @@ function renderAssistant() {
   if (accessRole === 'control') {
     var projects = {};
     (supervision.threads || []).forEach(function (thread) { if (thread.projectPath) projects[thread.projectPath] = true; });
-    html += '<div class="card"><input id="assistant-task-title" aria-label="New Lab Assistant task" placeholder="Add a task…" style="width:100%;box-sizing:border-box">' +
+    html += '<div class="card"><input id="assistant-task-title" aria-label="New assistant task" placeholder="Add a task…" style="width:100%;box-sizing:border-box">' +
       '<select id="assistant-task-project" aria-label="Task project" style="width:100%;margin-top:8px"><option value="">Global</option>';
     Object.keys(projects).sort().forEach(function (path) {
       html += '<option value="' + esc(path) + '">' + esc(path.split(/[\\/]/).pop() || path) + '</option>';
@@ -662,7 +662,7 @@ function render() {
     return;
   }
   var body = '';
-  var title = view.name === 'assistant' ? 'Lab Assistant' : view.name === 'reports' ? 'Reports' : 'BOSS';
+  var title = view.name === 'assistant' ? 'Assistant' : view.name === 'reports' ? 'Reports' : 'BOSS';
   var headerExtra = '';
   if (view.name === 'report') {
     var selectedReport = null;

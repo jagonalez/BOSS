@@ -640,7 +640,7 @@ export function Sidebar(): React.JSX.Element {
           <PanelIcon size={15} /><span>Home</span>
         </button>
         <button className={`sidebar-primary-item ${activePage === 'lab-assistant' ? 'active' : ''}`} onClick={() => showPage('lab-assistant')}>
-          <LabMark size={15} /><span>Lab Assistant</span>
+          <LabMark size={15} /><span>Assistant</span>
         </button>
         <button className={`sidebar-primary-item ${activePage === 'automations' ? 'active' : ''}`} onClick={() => showPage('automations')}>
           <ReviewIcon size={15} /><span>Automations</span>

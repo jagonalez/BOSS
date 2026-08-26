@@ -37,7 +37,7 @@ async function configureClaudeDefaults(page: Parameters<typeof control>[0]): Pro
 test('boots the real Electron renderer without covering it with a modal', async ({ appPage, electronApp }) => {
   await expect(appPage.getByRole('heading', { name: 'Pick up where you left off.' })).toBeVisible()
   await expect(appPage.getByRole('button', { name: 'Home', exact: true })).toHaveClass(/\bactive\b/)
-  await expect(appPage.getByRole('button', { name: 'Lab Assistant', exact: true })).toBeVisible()
+  await expect(appPage.getByRole('button', { name: 'Assistant', exact: true })).toBeVisible()
   await expect(appPage.getByText('Command Center', { exact: true })).toHaveCount(0)
   await expect(appPage.locator('.settings-page')).toHaveCount(0)
   await expect(appPage.locator('.modal-backdrop')).toHaveCount(0)

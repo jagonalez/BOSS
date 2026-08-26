@@ -11463,3 +11463,8 @@ select:hover {
 .workflow-awaiting {
   border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
 }
+
+.assistant-ask {
+  margin-top: 10px;
+  max-width: 560px;
+}
