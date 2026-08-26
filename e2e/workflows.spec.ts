@@ -4,7 +4,8 @@ test('the workflows page shows durable runs, pending questions, and the agent-ap
   await appPage.getByRole('button', { name: 'Workflows' }).click()
 
   await expect(appPage.locator('.workflows-page')).toBeVisible()
-  await expect(appPage.getByRole('heading', { name: 'Workflows' })).toBeVisible()
+  // Level 1 disambiguates the page title from the list section's h2.
+  await expect(appPage.getByRole('heading', { name: 'Workflows', level: 1 })).toBeVisible()
 
   // The seeded agent-authored workflow is disabled and says so: enabling it is
   // the user's approval step.
