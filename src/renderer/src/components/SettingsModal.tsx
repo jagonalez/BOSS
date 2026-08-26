@@ -894,6 +894,7 @@ export function SettingsModal(): React.JSX.Element | null {
                     <label className="settings-computer-toggle">
                       <input
                         type="checkbox"
+                        aria-label="Computer use"
                         disabled={!computerUse.supported}
                         checked={computerUse.enabled}
                         onChange={(event) => void toggleComputerUse(event.target.checked)}

@@ -11,8 +11,10 @@ Do not leave test coverage for a later agent or PR.
 - Changes to pure logic still need a nearby `*.test.ts` unit test. Use both a
   unit test and an E2E scenario when a regression crosses process or UI
   boundaries.
-- Run `npm run typecheck`, `npm test`, and `npm run test:e2e` before handing
-  off a change that affects an E2E-covered flow.
+- Run `npm run typecheck` and `npm test` before handing off a change.
+- Do not run `npm run test:e2e` locally unless the user explicitly requests a
+  local E2E run in the current thread. CI owns Electron E2E execution; still
+  add or update the required E2E scenarios in the same change.
 - Keep E2E tests deterministic. Extend `src/preload/e2e.ts` instead of using
   real agent credentials, network services, or the user's BOSS data.
 - Never launch a development or test instance against the default BOSS

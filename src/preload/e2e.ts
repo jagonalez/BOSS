@@ -1445,7 +1445,9 @@ export function installE2EApi(boss: BossApi): void {
       { id: 'computer-use', installed: false, optional: true }
     ],
     onOptionalProgress: () => () => {},
-    computerUseStatus: async () => ({ supported: false, enabled: false, running: false }),
+    // Keep the lifecycle real so restart coverage exercises main's persisted
+    // preference. The fixture launches main with a deterministic fake driver.
+    computerUseStatus: () => ipcRenderer.invoke(IpcChannels.ComputerUseStatus),
     computerUsePermissions: async () => ({ available: false, accessibility: false, screenRecording: false }),
     projectList: async () => [PROJECT],
     projectForget: async () => [],

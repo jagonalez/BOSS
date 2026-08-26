@@ -195,7 +195,7 @@ backendMgr.attachRemote(relayClient)
 relayClient.setOnChange(() => backendMgr.emit({ type: 'remote.updated', properties: { status: relayClient.status() } }))
 
 const optional = new OptionalDeps(process.env.BOSS_OPTIONAL_CDN)
-const computerUse = new ComputerUse()
+const computerUse = new ComputerUse(join(app.getPath('userData'), 'computer-use.json'))
 let browse: BrowseManager | null = null
 const qaTools = new QaTools(() => browse, computerUse)
 threadBus.attachQaTools(qaTools)
@@ -440,6 +440,9 @@ app.whenReady().then(() => {
   buildAppMenu()
   createWindow()
   registerIpcOnce()
+  // The daemon is process-bound, but the user's enable choice is not. Start a
+  // fresh child for a choice remembered from the previous BOSS process.
+  void computerUse.restore()
   loadRenderer()
   const saved = loadState()
   // `boss <folder>` that started the app, rather than handing off to a running

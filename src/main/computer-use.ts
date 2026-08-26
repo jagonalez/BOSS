@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ComputerUsePermissions, ComputerUseStatus, PrivacyPane } from '@shared/ipc'
 import { COMPUTER_USE_OPERATIONS, type AgentToolResult } from '@shared/qa'
+import { loadComputerUseEnabled, saveComputerUseEnabled } from './computer-use-state'
 
 const HOST_BUNDLE_ID = 'dev.boss.app'
 const ALLOWED_TOOLS = new Set<string>(COMPUTER_USE_OPERATIONS)
@@ -54,12 +55,16 @@ function socketPath(): string {
 }
 
 export class ComputerUse {
-  private enabled = false
+  private enabled: boolean
   private error: string | undefined
   private daemon: ChildProcess | null = null
   private socket = ''
 
   onStatusChange?: (status: ComputerUseStatus) => void
+
+  constructor(private readonly stateFile: string) {
+    this.enabled = loadComputerUseEnabled(stateFile)
+  }
 
   get status(): ComputerUseStatus {
     return {
@@ -106,9 +111,16 @@ export class ComputerUse {
 
   async setEnabled(on: boolean): Promise<ComputerUseStatus> {
     this.enabled = on
+    saveComputerUseEnabled(this.stateFile, on)
     if (on) await this.start()
     else this.stopDaemon()
     this.emit()
+    return this.status
+  }
+
+  /** Start a fresh process for an enable choice remembered from the prior run. */
+  async restore(): Promise<ComputerUseStatus> {
+    if (this.enabled) await this.start()
     return this.status
   }
 
@@ -228,6 +240,7 @@ export class ComputerUse {
   /** Emergency stop — kill the daemon and drop the MCP registration. */
   async emergencyStop(): Promise<void> {
     this.enabled = false
+    saveComputerUseEnabled(this.stateFile, false)
     this.stopDaemon()
     this.emit()
   }
