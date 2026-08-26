@@ -1579,6 +1579,16 @@ export class BackendManager {
 
   async messagesList(threadId: string, limit?: number): Promise<MessageWithParts[]> {
     const binding = this.binding(threadId)
+    const hasStoredMessages = this.transcripts?.hasMessages(threadId) ?? false
+    if (this.transcripts
+      && binding.backendId === 'codex'
+      && binding.nativeSessionOwnership === 'boss'
+      && hasStoredMessages) {
+      // Codex thread/read returns the complete native session. Image-generation
+      // outputs can make that response hundreds of megabytes even though the
+      // sanitized transcript BOSS already recorded is only a few megabytes.
+      return this.transcripts.messages(threadId, limit)
+    }
     let messages: MessageWithParts[]
     try {
       const backend = await this.ensureStarted(binding.backendId)

@@ -11,6 +11,7 @@ import { WorkflowsPage } from './components/WorkflowsPage'
 import { ReportsPage } from './components/ReportsPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme, watchSystemTheme } from './lib/themes'
+import { shouldScheduleMessageHistoryRefresh } from './lib/live-message-refresh'
 import { applyTypography, loadTypography } from './lib/typography'
 import { CommitDialog } from './components/CommitDialog'
 import { RenameModal } from './components/RenameModal'
@@ -145,6 +146,11 @@ export function App(): React.JSX.Element {
     // trailing refresh could be starved indefinitely and, when it did fire,
     // only refreshed whichever thread emitted last.
     const refreshTimers = new Map<string, number>()
+    const cancelMessageRefresh = (sessionId: string): void => {
+      const timer = refreshTimers.get(sessionId)
+      if (timer !== undefined) window.clearTimeout(timer)
+      refreshTimers.delete(sessionId)
+    }
 
     document.documentElement.dataset.platform = window.boss.platform()
     void window.boss.subscribeEvents()
@@ -176,10 +182,19 @@ export function App(): React.JSX.Element {
           break
         case 'session.status':
         case 'session.idle': {
-          const props = (ev.properties ?? {}) as { sessionID?: string }
+          const props = (ev.properties ?? {}) as { sessionID?: string; status?: { type?: string } }
           const sid = props.sessionID ?? appStore.getState().activeSessionId ?? ''
           const wasStreaming = Boolean(appStore.getState().streaming[sid])
+          if (sid && (props.status?.type === 'busy' || props.status?.type === 'retry')) {
+            // A message event can beat the busy event by a few milliseconds.
+            // Cancel the reload it tentatively scheduled before it can request
+            // a full image-heavy native history.
+            cancelMessageRefresh(sid)
+          }
           if (ev.type === 'session.idle' && sid) {
+            // Idle performs the one authoritative reconciliation itself. A
+            // trailing message timer would otherwise repeat it 300 ms later.
+            cancelMessageRefresh(sid)
             // The turn is over, so a mode that was waiting for it now applies.
             if (appStore.getState().modePending[sid]) {
               appStore.setState((state) => {
@@ -208,6 +223,7 @@ export function App(): React.JSX.Element {
         case 'session.compacted': {
           const props = (ev.properties ?? {}) as { sessionID?: string }
           if (props.sessionID) {
+            cancelMessageRefresh(props.sessionID)
             void loadMessages(props.sessionID)
             void loadTodos(props.sessionID)
           }
@@ -260,6 +276,7 @@ export function App(): React.JSX.Element {
         case 'session.error': {
           const props = (ev.properties ?? {}) as { sessionID?: string }
           if (props.sessionID) {
+            cancelMessageRefresh(props.sessionID)
             finalizeStalledParts(props.sessionID)
             refreshStreaming(props.sessionID)
             void loadMessages(props.sessionID)
@@ -270,13 +287,14 @@ export function App(): React.JSX.Element {
         }
         case 'message.updated':
         case 'message.part.updated':
-        case 'message.part.created':
+        case 'message.part.created': {
           const props = (ev.properties ?? {}) as { sessionID?: string; part?: { sessionID?: string } }
           const eventSessionId = props.sessionID ?? props.part?.sessionID ?? appStore.getState().activeSessionId ?? undefined
           refreshStreaming(eventSessionId)
           if (eventSessionId) {
             const id = eventSessionId
-            window.clearTimeout(refreshTimers.get(id))
+            cancelMessageRefresh(id)
+            if (!shouldScheduleMessageHistoryRefresh(appStore.getState(), id)) break
             refreshTimers.set(id, window.setTimeout(() => {
               refreshTimers.delete(id)
               void loadMessages(id)
@@ -284,6 +302,7 @@ export function App(): React.JSX.Element {
             }, 300))
           }
           break
+        }
         case 'config.updated':
           void refreshConfig()
           break
