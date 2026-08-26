@@ -48,6 +48,7 @@ interface E2EControl {
   emit(event: Record<string, unknown>): Promise<void>
   spawnThread(backendId: string, title: string): Promise<Record<string, unknown>>
   installLongThread(turnCount?: number): Promise<Record<string, unknown>>
+  installCodexOrderingThread(): Promise<Record<string, unknown>>
 }
 
 export async function control(page: Page): Promise<E2EControl> {
@@ -79,6 +80,9 @@ export async function control(page: Page): Promise<E2EControl> {
     installLongThread: (turnCount) => page.evaluate(
       (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.installLongThread(value),
       turnCount
+    ),
+    installCodexOrderingThread: () => page.evaluate(
+      () => (window as unknown as { bossE2E: E2EControl }).bossE2E.installCodexOrderingThread()
     )
   }
 }

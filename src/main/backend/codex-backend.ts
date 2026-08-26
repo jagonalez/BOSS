@@ -11,6 +11,7 @@ import { SessionDirectories } from './session-directory'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from '@shared/sandbox'
 import { toolLabel } from '@shared/tool-label'
 import { compactionCompletedEvents } from './compaction-events'
+import { splitCodexTurnItems } from './codex-turn-order'
 
 type RpcId = string | number
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
@@ -418,25 +419,22 @@ function codexUserMessageId(turnId: string, index: number): string {
   return `user-${turnId}-${index}`
 }
 
+function codexAssistantMessageId(turnId: string, index: number): string {
+  if (index < 0) return `assistant-${turnId}-prelude`
+  return index === 0 ? `assistant-${turnId}` : `assistant-${turnId}-${index}`
+}
+
 function turnMessages(sessionId: string, turn: CodexTurn): MessageWithParts[] {
-  const messages: MessageWithParts[] = []
-  // Every userMessage, not just the first. Codex folds a steered message into
-  // the turn it is already running, so a turn holds one item per thing the user
-  // said. Reading only the first dropped every steered message from the reload,
-  // and the reload prunes what it does not report — so the message the user
-  // watched appear during the run was deleted the moment the run ended.
-  const userItems = (turn.items ?? []).filter((item) => item.type === 'userMessage')
-  userItems.forEach((user, index) => {
-    const id = codexUserMessageId(turn.id, index)
-    messages.push({
-      info: { id, sessionID: sessionId, role: 'user', time: { created: turn.startedAt ? turn.startedAt * 1000 : undefined } },
-      parts: userParts(sessionId, id, user.content)
-    })
-  })
-  const assistantItems = (turn.items ?? []).filter((item) => item.type !== 'userMessage' && item.type !== 'hookPrompt')
-  if (assistantItems.length) {
-    const id = `assistant-${turn.id}`
-    messages.push({
+  return splitCodexTurnItems(turn.items ?? []).map((slice): MessageWithParts => {
+    if (slice.role === 'user') {
+      const id = codexUserMessageId(turn.id, slice.index)
+      return {
+        info: { id, sessionID: sessionId, role: 'user', time: { created: turn.startedAt ? turn.startedAt * 1000 : undefined } },
+        parts: userParts(sessionId, id, slice.item.content)
+      }
+    }
+    const id = codexAssistantMessageId(turn.id, slice.index)
+    return {
       info: {
         id,
         sessionID: sessionId,
@@ -446,10 +444,9 @@ function turnMessages(sessionId: string, turn: CodexTurn): MessageWithParts[] {
           completed: turn.completedAt ? turn.completedAt * 1000 : undefined
         }
       },
-      parts: assistantItems.map((item) => itemPart(sessionId, id, item)).filter(Boolean) as Part[]
-    })
-  }
-  return messages
+      parts: slice.items.map((item) => itemPart(sessionId, id, item)).filter(Boolean) as Part[]
+    }
+  })
 }
 
 export class CodexBackend implements Backend {
@@ -466,6 +463,11 @@ export class CodexBackend implements Backend {
    *  keys off the item id so item/started and item/completed — which both fire
    *  for one item — agree rather than counting it twice. */
   private turnUserItems = new Map<string, string[]>()
+  /** The user segment new assistant items belong to while a turn streams. */
+  private turnAssistantSegments = new Map<string, number>()
+  /** An item keeps the segment where it started even if steering happens
+   *  before its completion notification arrives. */
+  private turnAssistantItems = new Map<string, Map<string, number>>()
   private titleRuns = new Map<string, TitleRun>()
   private manualCompactions = new Set<string>()
   private eventCb?: (event: EventMessage) => void
@@ -545,6 +547,8 @@ export class CodexBackend implements Backend {
     this.activeTurns.clear()
     this.liveText.clear()
     this.turnUserItems.clear()
+    this.turnAssistantSegments.clear()
+    this.turnAssistantItems.clear()
     this.approvals.clear()
     for (const [threadId] of this.titleRuns) this.finishTitleRun(threadId)
   }
@@ -688,6 +692,18 @@ export class CodexBackend implements Backend {
     return seen.length - 1
   }
 
+  private assistantMessageId(sessionId: string, turnId: string, itemId: string): string {
+    const key = `${sessionId}:${turnId}`
+    const items = this.turnAssistantItems.get(key) ?? new Map<string, number>()
+    let segment = items.get(itemId)
+    if (segment === undefined) {
+      segment = this.turnAssistantSegments.get(key) ?? 0
+      items.set(itemId, segment)
+      this.turnAssistantItems.set(key, items)
+    }
+    return codexAssistantMessageId(turnId, segment)
+  }
+
   /** Publish input as soon as Codex accepts the turn.
    *
    * Codex does not consistently report its userMessage item until the turn is
@@ -733,7 +749,10 @@ export class CodexBackend implements Backend {
     switch (method) {
       case 'turn/started': {
         const turn = params.turn as CodexTurn | undefined
-        if (turn?.id) this.activeTurns.set(sessionId, turn.id)
+        if (turn?.id) {
+          this.activeTurns.set(sessionId, turn.id)
+          this.turnAssistantSegments.set(`${sessionId}:${turn.id}`, 0)
+        }
         this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'busy' } })
         break
       }
@@ -743,7 +762,12 @@ export class CodexBackend implements Backend {
         // The ordinals only matter while the turn is streaming; the reload
         // derives them from turn.items. Dropping them here keeps a long-lived
         // server from retaining one entry per turn for the whole session.
-        if (turn?.id) this.turnUserItems.delete(`${sessionId}:${turn.id}`)
+        if (turn?.id) {
+          const key = `${sessionId}:${turn.id}`
+          this.turnUserItems.delete(key)
+          this.turnAssistantSegments.delete(key)
+          this.turnAssistantItems.delete(key)
+        }
         this.activeTurns.delete(sessionId)
         this.emit({ type: 'session.status', sessionID: sessionId, status: { type: 'idle' } })
         this.emit({ type: 'session.idle', sessionID: sessionId })
@@ -763,7 +787,7 @@ export class CodexBackend implements Backend {
             Number(params.startedAtMs ?? Date.now())
           )
         } else {
-          const messageId = `assistant-${turnId}`
+          const messageId = this.assistantMessageId(sessionId, turnId, item.id)
           this.emit({ type: 'message.updated', message: { id: messageId, sessionID: sessionId, role: 'assistant', time: { created: Number(params.startedAtMs ?? Date.now()) } } })
           const part = itemPart(sessionId, messageId, item)
           if (part) {
@@ -774,7 +798,8 @@ export class CodexBackend implements Backend {
       }
       case 'item/agentMessage/delta': {
         const itemId = String(params.itemId ?? randomUUID())
-        const messageId = `assistant-${String(params.turnId ?? '')}`
+        const turnId = String(params.turnId ?? '')
+        const messageId = this.assistantMessageId(sessionId, turnId, itemId)
         const key = `${sessionId}:${itemId}`
         const text = `${this.liveText.get(key) ?? ''}${String(params.delta ?? '')}`
         this.liveText.set(key, text)
@@ -961,6 +986,7 @@ export class CodexBackend implements Backend {
     const result = await this.request('turn/start', params) as { turn?: CodexTurn }
     if (result.turn?.id) {
       this.activeTurns.set(sessionId, result.turn.id)
+      this.turnAssistantSegments.set(`${sessionId}:${result.turn.id}`, 0)
       this.emitUserMessage(
         sessionId,
         result.turn.id,
@@ -979,6 +1005,8 @@ export class CodexBackend implements Backend {
       expectedTurnId: turnId,
       input: userInputs(parts)
     })
+    const key = `${sessionId}:${turnId}`
+    this.turnAssistantSegments.set(key, (this.turnAssistantSegments.get(key) ?? 0) + 1)
   }
 
   async abort(sessionId: string): Promise<void> {

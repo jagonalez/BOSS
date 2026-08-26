@@ -192,7 +192,7 @@ test('an image part joins the tool message that produced it', () => {
   // rather than falling back to whichever assistant message is current.
   const extract = source.slice(source.indexOf('private extractToolResultImages('))
   assert.ok(
-    /emitImagePart\(binding, tool, stored, part\.messageID\)/.test(extract),
+    /emitImagePart\(binding, context\.tool, stored, part\.messageID\)/.test(extract),
     'a lifted image should be anchored to its own tool part'
   )
 })
@@ -211,6 +211,20 @@ test('the same image reported twice is shown once, and two images stay two', () 
     body.includes('id: `tool-image-${stored.url}`'),
     'the part id should follow the stored image, which is unique per written image'
   )
+})
+
+test('computer inspection images are stripped before the transcript stores them', () => {
+  const body = source.slice(
+    source.indexOf('private extractToolResultImages('),
+    source.indexOf('private emitImagePart(')
+  )
+  const visibility = body.indexOf('shouldSurfaceToolImage(context.tool, context.input)')
+  const write = body.indexOf('this.images?.write(')
+  assert.ok(visibility > 0, 'the original tool input should decide whether its image is user-facing')
+  assert.ok(visibility < write, 'an internal screenshot must be rejected before it is written to the transcript image store')
+  assert.ok(body.includes('this.toolResultContexts.get(contextKey)'), 'a split completion must recover its start-event context')
+  assert.ok(body.includes('this.toolResultContexts.delete(contextKey)'), 'completed calls must release remembered context')
+  assert.ok(body.includes('[Screenshot inspected internally.]'))
 })
 
 test('pinning is recorded on the binding and persisted, like archiving', () => {

@@ -9,8 +9,7 @@ import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backe
 import type { BackendMessageOptions } from '@shared/backend'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
-import { qaDescription } from '@shared/qa'
-import { QA_GUIDANCE } from '@shared/qa'
+import { COMPUTER_USE_OPERATIONS, QA_GUIDANCE, qaDescription } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { compactionCompletedEvents, compactionStartedEvent } from './compaction-events'
 
@@ -410,12 +409,10 @@ export default function (pi: ExtensionAPI) {
     description: ${JSON.stringify(qaDescription("boss_computer"))},
     parameters: Type.Object({
       operation: Type.Union([
-        Type.Literal("list_apps"), Type.Literal("list_windows"), Type.Literal("get_window_state"),
-        Type.Literal("get_desktop_state"), Type.Literal("screenshot"), Type.Literal("zoom"),
-        Type.Literal("click"), Type.Literal("type_text"), Type.Literal("press_key"),
-        Type.Literal("hotkey"), Type.Literal("scroll"), Type.Literal("wait")
+        ${COMPUTER_USE_OPERATIONS.map((operation) => `Type.Literal(${JSON.stringify(operation)})`).join(', ')}
       ]),
-      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown()))
+      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+      showInTranscript: Type.Optional(Type.Boolean({ default: false }))
     }),
     execute: (_id, args, signal) => call("boss_computer", args, signal)
   })

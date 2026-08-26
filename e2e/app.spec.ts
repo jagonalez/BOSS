@@ -47,6 +47,22 @@ test('boots the real Electron renderer without covering it with a modal', async 
   })).toEqual({ count: 1, visible: false })
 })
 
+test('sets Automatic QA for one thread without sending the command to the agent', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await fixture.resetCalls()
+
+  const composer = appPage.locator('.composer-input textarea:visible')
+  await composer.fill('/qa auto')
+  await composer.press('Enter')
+
+  await expect.poll(async () => (await backendCalls(appPage))
+    .filter((call) => call.request.type === 'thread.qa.policy')).toEqual([
+    { channel: 'backend', request: { type: 'thread.qa.policy', threadId: 'thread-source', policy: 'automatic' } }
+  ])
+  expect((await backendCalls(appPage)).some((call) => call.request.type === 'session.prompt')).toBe(false)
+})
+
 test('switching workspace layouts restores the views previously shown in each mode', async ({ appPage }) => {
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
   await appPage.locator('.session-row').filter({ hasText: 'Duplicate transcript' }).click()
@@ -173,9 +189,12 @@ test('a long virtual transcript keeps its exact reading position and searches un
 
   const readingAnchor = async (): Promise<{ key: string; offset: number } | null> => scroller.evaluate((element) => {
     const viewport = element.getBoundingClientRect()
+    // The virtualizer may mount a clipped predecessor as overscan after the
+    // tab returns. That predecessor and the next boundary describe the same
+    // viewport, but only the next boundary is independent of mounted slice.
     const turns = Array.from(element.querySelectorAll<HTMLElement>('.transcript-virtual-turn'))
       .map((turn) => ({ turn, rect: turn.getBoundingClientRect() }))
-      .filter(({ rect }) => rect.bottom > viewport.top)
+      .filter(({ rect }) => rect.top >= viewport.top && rect.top < viewport.bottom)
       .sort((left, right) => left.rect.top - right.rect.top)
     const first = turns[0]
     if (!first) return null
@@ -184,8 +203,24 @@ test('a long virtual transcript keeps its exact reading position and searches un
       offset: Math.round(first.rect.top - viewport.top)
     }
   })
-  await expect.poll(readingAnchor).not.toBeNull()
-  const before = await readingAnchor()
+  // Wait for estimated row heights to settle before naming the position the
+  // user is reading. The exact turn and pixel offset must then survive the
+  // tab switch; this does not relax the restoration assertion.
+  let lastAnchor: { key: string; offset: number } | null = null
+  let stableSamples = 0
+  const settledReadingAnchor = async (): Promise<{ key: string; offset: number } | null> => {
+    const current = await readingAnchor()
+    if (current && lastAnchor?.key === current.key && lastAnchor.offset === current.offset) {
+      stableSamples += 1
+    } else {
+      stableSamples = current ? 1 : 0
+    }
+    lastAnchor = current
+    return stableSamples >= 3 ? current : null
+  }
+  await expect.poll(settledReadingAnchor).not.toBeNull()
+  const before = lastAnchor
+  assert.ok(before)
 
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
   await expect(appPage.getByText('Search marker: first result.')).toBeVisible()
@@ -420,6 +455,23 @@ test('shows a Codex message while Codex is still working', async ({ appPage }) =
   await expect(appPage.getByPlaceholder('Queue a follow-up for Codex…')).toHaveValue('')
   await expect(appPage.locator('.thinking-indicator')).toBeVisible()
   await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
+})
+
+test('keeps Codex steering between tool rounds and hides inspection screenshots', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  await fixture.installCodexOrderingThread()
+  await appPage.locator('.session-row').filter({ hasText: 'Codex steering order' }).click()
+
+  const visibleMessages = appPage.locator('.messages:visible .msg')
+  await expect(visibleMessages).toHaveCount(4)
+  await expect(visibleMessages.nth(0)).toContainText('Inspect BOSS with computer use.')
+  await expect(visibleMessages.nth(1)).toContainText('First inspection started.')
+  await expect(visibleMessages.nth(2)).toContainText('ok so it seems to be ok now... this is a test')
+  await expect(visibleMessages.nth(3)).toContainText('Continued after steering.')
+
+  // The first computer result was model-only inspection context. The second
+  // opted into the transcript, so exactly that one is visible to the user.
+  await expect(appPage.getByRole('img', { name: 'boss_computer' })).toHaveCount(1)
 })
 
 test('a failed Codex send keeps the message retryable and shows it after retry', async ({ appPage }) => {
