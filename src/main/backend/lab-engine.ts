@@ -510,7 +510,7 @@ export class LabEngine {
       '- Search to locate the responsible code, then stop investigating once you know the fix. Do not over-explore.',
       '- Make the smallest edit that solves it. Prefer edit_file for targeted changes and write_file for new/whole files.',
       '- Verify your change: run the relevant test or a minimal repro. If it fails, iterate.',
-      '- Do not modify or add test files unless the task is specifically about them.',
+      '- Update the tests that protect a behavior in the same change as the behavior. Follow the project\'s own testing rules when it states them.',
       '- Your tool budget is finite — a run that ends without a code change is a failure. Always finish with a real edit.',
       '- When done, stop and give a concise summary of what you changed.',
       '',
