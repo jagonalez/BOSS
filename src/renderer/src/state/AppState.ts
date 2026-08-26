@@ -19,6 +19,7 @@ import type { Annotation } from '@shared/annotations'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
+import type { WorkflowsSnapshot } from '@shared/workflow'
 import type { Report, ReportsSnapshot } from '@shared/report'
 import type { McpConnectionView } from '@shared/mcp'
 import type {
@@ -131,6 +132,7 @@ export interface AppState {
   qaPolicies: Record<string, QaPolicyState>
   qaDefault: QaPolicy
   automations: AutomationsSnapshot | null
+  workflows: WorkflowsSnapshot | null
   reports: ReportsSnapshot | null
   selectedReportId: string | null
   reportDetail: Report | null
@@ -252,6 +254,7 @@ export const initialState: AppState = {
   qaPolicies: {},
   qaDefault: 'suggest',
   automations: null,
+  workflows: null,
   reports: null,
   selectedReportId: null,
   reportDetail: null,
@@ -434,6 +437,10 @@ export function applyEvent(state: AppState, ev: Record<string, unknown>): Partia
     case 'automations.updated': {
       const snapshot = props.snapshot as AutomationsSnapshot | undefined
       return snapshot ? { automations: snapshot } : {}
+    }
+    case 'workflows.updated': {
+      const snapshot = props.snapshot as WorkflowsSnapshot | undefined
+      return snapshot ? { workflows: snapshot } : {}
     }
     case 'reports.updated': {
       const snapshot = props.snapshot as ReportsSnapshot | undefined

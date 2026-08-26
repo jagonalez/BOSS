@@ -7,6 +7,7 @@ import { HomePage } from './components/HomePage'
 import { LabAssistantPage } from './components/LabAssistantPage'
 import { SitesPage } from './components/SitesPage'
 import { AutomationsPage } from './components/AutomationsPage'
+import { WorkflowsPage } from './components/WorkflowsPage'
 import { ReportsPage } from './components/ReportsPage'
 import { ModelSwitchModal } from './components/ModelSwitchModal'
 import { applyTheme, loadTheme, watchSystemTheme } from './lib/themes'
@@ -128,7 +129,7 @@ export function App(): React.JSX.Element {
   // workspace would leave its browsers floating on top of whichever page is
   // showing. Detach them while it is covered.
   useEffect(() => {
-    const covered = activePage === 'home' || activePage === 'lab-assistant' || activePage === 'automations' || activePage === 'reports' || activePage === 'sites'
+    const covered = activePage === 'home' || activePage === 'lab-assistant' || activePage === 'automations' || activePage === 'workflows' || activePage === 'reports' || activePage === 'sites'
     setNativeViewsSuspended('page-overlay', covered)
     return () => setNativeViewsSuspended('page-overlay', false)
   }, [activePage])
@@ -407,6 +408,7 @@ export function App(): React.JSX.Element {
     if (activePage === 'home') return <HomePage />
     if (activePage === 'lab-assistant') return <LabAssistantPage />
     if (activePage === 'automations') return <AutomationsPage />
+    if (activePage === 'workflows') return <WorkflowsPage />
     if (activePage === 'reports') return <ReportsPage />
     if (activePage === 'sites') return <SitesPage />
     return null

@@ -18,6 +18,7 @@ import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
+import type { Workflow, WorkflowInput, WorkflowRun, WorkflowsSnapshot } from '@shared/workflow'
 import type { WebhookSettings } from '@shared/notification'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
@@ -251,6 +252,15 @@ export const OpenCode = {
   mobileSet: (patch: { enabled?: boolean; port?: number; tailscale?: boolean; regenerateToken?: boolean; regenerateViewerToken?: boolean }) =>
     backendRequest<MobileAccessStatus>({ type: 'mobile.set', patch }),
   automationsList: () => backendRequest<AutomationsSnapshot>({ type: 'automation.list' }),
+  workflowsList: () => backendRequest<WorkflowsSnapshot>({ type: 'workflow.list' }),
+  createWorkflow: (input: WorkflowInput) => backendRequest<Workflow>({ type: 'workflow.create', input }),
+  updateWorkflow: (workflowId: string, patch: Partial<WorkflowInput> & { enabled?: boolean }) =>
+    backendRequest<Workflow>({ type: 'workflow.update', workflowId, patch }),
+  deleteWorkflow: (workflowId: string) => backendRequest<void>({ type: 'workflow.delete', workflowId }),
+  runWorkflow: (workflowId: string) => backendRequest<WorkflowRun>({ type: 'workflow.run', workflowId }),
+  stopWorkflowRun: (runId: string) => backendRequest<void>({ type: 'workflow.run.stop', runId }),
+  answerWorkflowRun: (runId: string, seq: number, response: string) =>
+    backendRequest<void>({ type: 'workflow.run.answer', runId, seq, response }),
   reportsList: () => backendRequest<ReportsSnapshot>({ type: 'report.list' }),
   report: (reportId: string) => backendRequest<Report>({ type: 'report.get', reportId }),
   markReportRead: (reportId: string) => backendRequest<Report>({ type: 'report.read', reportId }),

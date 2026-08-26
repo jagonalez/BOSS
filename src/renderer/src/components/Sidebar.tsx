@@ -35,7 +35,7 @@ import {
   togglePin,
   exportSessionMarkdown
 } from '../lib/actions'
-import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FileIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, LabMark, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
+import { BACKEND_MARKS, BranchIcon, ChatIcon, ChevronIcon, ExternalIcon, FileIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, LabMark, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -644,6 +644,9 @@ export function Sidebar(): React.JSX.Element {
         </button>
         <button className={`sidebar-primary-item ${activePage === 'automations' ? 'active' : ''}`} onClick={() => showPage('automations')}>
           <ReviewIcon size={15} /><span>Automations</span>
+        </button>
+        <button className={`sidebar-primary-item ${activePage === 'workflows' ? 'active' : ''}`} onClick={() => showPage('workflows')}>
+          <BranchIcon size={15} /><span>Workflows</span>
         </button>
         <button className={`sidebar-primary-item ${activePage === 'reports' ? 'active' : ''}`} onClick={() => showPage('reports')}>
           <FileIcon size={15} /><span>Reports</span>{unreadReports ? <small>{unreadReports}</small> : null}

@@ -535,6 +535,35 @@ export function installE2EApi(boss: BossApi): void {
     startedAt: Date.now() - 610_000,
     finishedAt: Date.now() - 600_000
   }]
+  let nextWorkflow = 1
+  // One agent-authored workflow ships pre-seeded, disabled, with a run parked
+  // on a pending ask() — the states the Workflows page must make legible.
+  let workflowsFixture: Array<Record<string, unknown>> = [{
+    id: 'workflow-watcher-seed',
+    name: 'Datadog alert watcher',
+    description: 'Pings only on real alerts; flaky monitors go to a weekly digest.',
+    script: "const v = await judge('monitor flapped', ['real', 'flaky']); return v.verdict",
+    projectPath: PROJECT,
+    triggers: [{ kind: 'cron', expression: '*/20 * * * *' }],
+    overlapPolicy: 'skip',
+    enabled: false,
+    source: 'agent',
+    createdAt: Date.now() - 86_400_000,
+    updatedAt: Date.now() - 3_600_000,
+    lastRunAt: Date.now() - 1_200_000
+  }]
+  let workflowRunsFixture: Array<Record<string, unknown>> = [{
+    id: 'workflow-run-seed',
+    workflowId: 'workflow-watcher-seed',
+    trigger: 'manual',
+    status: 'waiting',
+    journal: [
+      { seq: 0, op: 'log', argsHash: '0', label: 'checking monitors', status: 'done', startedAt: Date.now() - 1_200_000, finishedAt: Date.now() - 1_200_000 },
+      { seq: 1, op: 'ask', argsHash: '1', args: { question: 'Mute the flaky monitor?' }, label: 'Mute the flaky monitor?', status: 'started', startedAt: Date.now() - 1_100_000 }
+    ],
+    usage: { agentRuns: 0, judgeCalls: 1, notifies: 0 },
+    startedAt: Date.now() - 1_200_000
+  }]
   let reportsFixture: Array<Record<string, unknown>> = [
     {
       id: 'report-agent-seed',
@@ -1310,6 +1339,58 @@ export function installE2EApi(boss: BossApi): void {
       case 'mcp.list': return []
       case 'mcp.import.scan': return []
       case 'automation.list': return { automations: automationsFixture, runs: automationRunsFixture, webhookUrl: '' }
+      case 'workflow.list': return { workflows: structuredClone(workflowsFixture), runs: structuredClone(workflowRunsFixture) }
+      case 'workflow.create': {
+        const now = Date.now()
+        const created = {
+          ...structuredClone(request.input),
+          id: `workflow-created-${nextWorkflow++}`,
+          enabled: true,
+          source: 'user',
+          createdAt: now,
+          updatedAt: now
+        }
+        workflowsFixture = [...workflowsFixture, created]
+        return created
+      }
+      case 'workflow.update': {
+        const found = workflowsFixture.find((item) => item.id === request.workflowId)
+        if (!found) throw new Error(`Unknown fixture workflow ${request.workflowId}`)
+        Object.assign(found, structuredClone(request.patch), { updatedAt: Date.now() })
+        return structuredClone(found)
+      }
+      case 'workflow.delete': {
+        workflowsFixture = workflowsFixture.filter((item) => item.id !== request.workflowId)
+        workflowRunsFixture = workflowRunsFixture.filter((item) => item.workflowId !== request.workflowId)
+        return undefined
+      }
+      case 'workflow.run': {
+        const run = {
+          id: `workflow-run-${nextWorkflow++}`,
+          workflowId: request.workflowId,
+          trigger: 'manual',
+          status: 'running',
+          journal: [],
+          usage: { agentRuns: 0, judgeCalls: 0, notifies: 0 },
+          startedAt: Date.now()
+        }
+        workflowRunsFixture = [run, ...workflowRunsFixture]
+        return structuredClone(run)
+      }
+      case 'workflow.run.stop': {
+        const run = workflowRunsFixture.find((item) => item.id === request.runId)
+        if (run) Object.assign(run, { status: 'stopped', finishedAt: Date.now() })
+        return undefined
+      }
+      case 'workflow.run.answer': {
+        const run = workflowRunsFixture.find((item) => item.id === request.runId)
+        if (!run) throw new Error(`Unknown fixture run ${request.runId}`)
+        const journal = run.journal as Array<Record<string, unknown>>
+        const entry = journal.find((item) => item.seq === request.seq)
+        if (entry) Object.assign(entry, { status: 'done', result: { answer: request.response }, finishedAt: Date.now() })
+        Object.assign(run, { status: 'completed', result: request.response, finishedAt: Date.now() })
+        return undefined
+      }
       case 'report.list': return {
         reports: reportsFixture.map((item) => {
           const summary = { ...item }
