@@ -1093,6 +1093,45 @@ export async function refreshAutomations(): Promise<void> {
   }
 }
 
+/** Workflows are agent-authored: this opens a fresh conversation seeded with
+ *  the request and the method (create → test → iterate → summarize), which is
+ *  the page's only creation path. The human's job is approving the result. */
+export async function authorWorkflowWithAgent(input: {
+  description: string
+  refine?: { id: string; name: string }
+}): Promise<void> {
+  const backendId = appStore.getState().engine
+  const session = await OpenCode.createSession(
+    input.refine ? `Refine workflow · ${input.refine.name}` : 'New workflow',
+    backendId
+  )
+  applyBackendDefaults(session.id, backendId)
+  upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? appStore.getState().projectPath })
+  await refreshSessions()
+  await refreshProviders(session.id)
+  selectSession(session.id, false)
+  const seeded = input.refine
+    ? [
+        '[Workflow refinement request]',
+        `Refine the existing BOSS workflow "${input.refine.name}" (id ${input.refine.id}) with boss_workflow_update.`,
+        '',
+        'What should change:',
+        input.description,
+        '',
+        'Method: read the workflow and its recent runs first (boss_workflow_list, boss_workflow_runs), apply the change with boss_workflow_update, test once with boss_workflow_run — the run result arrives back in this conversation — and finish with a short summary of what changed.'
+      ].join('\n')
+    : [
+        '[Workflow authoring request]',
+        'Create a durable BOSS workflow for this project with the boss_workflow_create tool.',
+        '',
+        'What it should do:',
+        input.description,
+        '',
+        'Method: draft the script, create the workflow, test it once with boss_workflow_run — the run result arrives back in this conversation as a message — inspect boss_workflow_runs if a step surprises you, and iterate with boss_workflow_update until a test run behaves. Finish with a short summary of what it does, when it triggers, and when it will notify the user.'
+      ].join('\n')
+  await sendPrompt(seeded, session.id)
+}
+
 export async function refreshWorkflows(): Promise<void> {
   try {
     appStore.setState({ workflows: await OpenCode.workflowsList() })

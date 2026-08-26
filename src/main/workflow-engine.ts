@@ -15,7 +15,7 @@ import type {
   WorkflowRunTrigger,
   WorkflowsSnapshot
 } from '../shared/workflow'
-import type { EventPattern } from '../shared/workflow'
+import type { EventPattern, WorkflowApprovalMode } from '../shared/workflow'
 import type { BackendRequest } from '../shared/backend'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
 import { WORKFLOW_BUDGET_DEFAULTS, clampResult, hashArgs, judgePrompt, matchesPattern, parseJudgeOutcome } from '../shared/workflow.ts'
@@ -56,6 +56,9 @@ export interface WorkflowHost {
   notify(notice: { title: string; body: string; attention: boolean }): void
   /** Optional capabilities; the matching primitive throws when absent. */
   createChangeRequest?(threadId: string, input: { title?: string; body?: string; baseBranch?: string; draft?: boolean }): Promise<unknown>
+  /** Deliver a finished run's result back to the conversation that started
+   *  it, closing the loop for agents that call boss_workflow_run. */
+  deliverToThread?(threadId: string, body: string): Promise<void>
   /** Delete the durable leftovers of a pruned run. */
   disposeThread?(threadId: string, worktreeId?: string): Promise<void>
 }
@@ -166,6 +169,8 @@ export class WorkflowEngine {
         return this.stopRun(request.runId)
       case 'workflow.run.answer':
         return this.answer(request.runId, request.seq, request.response)
+      case 'workflow.approval.set':
+        return this.setApprovalMode(request.mode)
       default:
         throw new Error(`Unsupported workflow request: ${request.type}`)
     }
@@ -176,8 +181,20 @@ export class WorkflowEngine {
   snapshot(): WorkflowsSnapshot {
     return {
       workflows: this.store.workflows.map((item) => ({ ...item })),
-      runs: this.store.runs.map((item) => ({ ...item, journal: item.journal.map((entry) => ({ ...entry })) }))
+      runs: this.store.runs.map((item) => ({ ...item, journal: item.journal.map((entry) => ({ ...entry })) })),
+      approvalMode: this.store.approvalMode
     }
+  }
+
+  approvalMode(): WorkflowApprovalMode {
+    return this.store.approvalMode
+  }
+
+  async setApprovalMode(mode: WorkflowApprovalMode): Promise<WorkflowsSnapshot> {
+    await this.store.load()
+    this.store.approvalMode = mode === 'auto' ? 'auto' : 'ask'
+    await this.persistAndEmit()
+    return this.snapshot()
   }
 
   private emit(): void {
@@ -282,10 +299,10 @@ export class WorkflowEngine {
 
   // ---------------------------------------------------------------- runs
 
-  async runNow(workflowId: string, event?: BossEvent): Promise<WorkflowRun> {
+  async runNow(workflowId: string, event?: BossEvent, options?: { startedByThreadId?: string }): Promise<WorkflowRun> {
     await this.store.load()
     const workflow = this.store.workflow(workflowId)
-    return this.startRun(workflow, 'manual', event, { throwOnOverlap: true })
+    return this.startRun(workflow, 'manual', event, { throwOnOverlap: true, startedByThreadId: options?.startedByThreadId })
   }
 
   /** Answer a pending ask() step. */
@@ -311,7 +328,7 @@ export class WorkflowEngine {
     workflow: Workflow,
     trigger: WorkflowRunTrigger,
     event: BossEvent | undefined,
-    options?: { throwOnOverlap?: boolean }
+    options?: { throwOnOverlap?: boolean; startedByThreadId?: string }
   ): Promise<WorkflowRun> {
     const active = this.store.runs.find((item) => item.workflowId === workflow.id && isActive(item.status))
     if (active && workflow.overlapPolicy !== 'parallel') {
@@ -335,6 +352,7 @@ export class WorkflowEngine {
     const run: WorkflowRun = {
       id: randomUUID(),
       workflowId: workflow.id,
+      ...(options?.startedByThreadId ? { startedByThreadId: options.startedByThreadId } : {}),
       trigger,
       status: 'running',
       ...(event ? { event: clampResult(event) as BossEvent } : {}),
@@ -886,6 +904,16 @@ export class WorkflowEngine {
       }
     }
     await this.bus.unsubscribeTarget({ runId: run.id })
+    if (run.startedByThreadId && this.host.deliverToThread) {
+      const body = [
+        '[BOSS WORKFLOW RESULT]',
+        `Workflow: ${workflow?.name ?? run.workflowId}`,
+        `Run ${run.id} finished: ${status}.`,
+        run.error ? `Error: ${run.error}` : undefined,
+        run.result !== undefined && run.result !== null ? `Result: ${typeof run.result === 'string' ? run.result : JSON.stringify(run.result)}` : undefined
+      ].filter((line): line is string => line !== undefined).join('\n')
+      await this.host.deliverToThread(run.startedByThreadId, body).catch(() => {})
+    }
     if (workflow) {
       const prune = this.store.pruneCandidates(workflow.id)
       for (const old of prune) {

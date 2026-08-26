@@ -31,7 +31,7 @@ interface WorkflowEngineHandle {
   snapshot(): WorkflowsSnapshot
   create(input: WorkflowInput, source: Workflow['source'], options?: { enabled?: boolean }): Promise<Workflow>
   update(id: string, patch: Partial<WorkflowInput> & { enabled?: boolean }): Promise<Workflow>
-  runNow(workflowId: string): Promise<WorkflowRun>
+  runNow(workflowId: string, event?: undefined, options?: { startedByThreadId?: string }): Promise<WorkflowRun>
 }
 
 
@@ -453,16 +453,20 @@ export class ThreadBus {
           }
         })
       case 'boss_workflow_create': {
-        const workflow = await engine.create(this.workflowInputFrom(caller, values), 'agent', { enabled: false })
+        const autoApprove = snapshot.approvalMode === 'auto'
+        const workflow = await engine.create(this.workflowInputFrom(caller, values), 'agent', { enabled: autoApprove })
         return {
           id: workflow.id,
-          enabled: false,
-          note: 'Created disabled: triggers stay dormant until the user enables it in the Workflows page. Use boss_workflow_run to execute it once now.'
+          enabled: autoApprove,
+          note: autoApprove
+            ? 'Workflow approval is set to auto, so its triggers are live immediately. Use boss_workflow_run to also execute it once now.'
+            : 'Created disabled: triggers stay dormant until the user enables it in the Workflows page. Use boss_workflow_run to execute it once now.'
         }
       }
       case 'boss_workflow_update': {
         const target = this.requireWorkflow(snapshot, stringArg(args, 'workflowId'), visible)
-        const patch: Partial<WorkflowInput> & { enabled?: boolean } = { enabled: false }
+        const autoApprove = snapshot.approvalMode === 'auto'
+        const patch: Partial<WorkflowInput> & { enabled?: boolean } = autoApprove ? {} : { enabled: false }
         if (typeof values.name === 'string' && values.name.trim()) patch.name = values.name.trim()
         if (typeof values.description === 'string') patch.description = values.description
         if (typeof values.script === 'string' && values.script.trim()) patch.script = values.script
@@ -470,12 +474,16 @@ export class ThreadBus {
           patch.triggers = this.workflowTriggersFrom(values)
         }
         const updated = await engine.update(target.id, patch)
-        return { id: updated.id, enabled: false, note: 'Saved, and disabled until the user re-enables it.' }
+        return {
+          id: updated.id,
+          enabled: updated.enabled,
+          note: autoApprove ? 'Saved.' : 'Saved, and disabled until the user re-enables it.'
+        }
       }
       case 'boss_workflow_run': {
         const target = this.requireWorkflow(snapshot, stringArg(args, 'workflowId'), visible)
-        const run = await engine.runNow(target.id)
-        return { runId: run.id, status: run.status }
+        const run = await engine.runNow(target.id, undefined, { startedByThreadId: caller.id })
+        return { runId: run.id, status: run.status, note: 'The result will arrive in this conversation as a message when the run finishes.' }
       }
       case 'boss_workflow_runs': {
         const workflowId = stringArg(args, 'workflowId')

@@ -205,6 +205,10 @@ export class BossWorkflowHost implements WorkflowHost {
     return this.reviews.createChangeRequest(info.executionPath, input)
   }
 
+  async deliverToThread(threadId: string, body: string): Promise<void> {
+    await this.backends.addFollowUp(threadId, body)
+  }
+
   async disposeThread(threadId: string, worktreeId?: string): Promise<void> {
     await this.backends.handle({ type: 'thread.delete', threadId }).catch(() => {})
     if (worktreeId && this.worktrees) await this.worktrees.remove(worktreeId).catch(() => {})

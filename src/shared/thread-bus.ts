@@ -138,10 +138,10 @@ export const WORKFLOW_TOOL_DESCRIPTIONS = {
     'state.get(key) / state.set(key, value) persist across runs of this workflow (alert history, seen ids); log(message) journals a progress note; ' +
     'pr(agentOutcome, {title?, body?, baseBranch?, draft?}) opens a change request from that agent step\'s checkout. ' +
     'The triggering event is in scope as `event`. Determinism rules: Date.now(), argless new Date(), and Math.random() throw — take time from event.at and randomness from journaled inputs. return a JSON-safe value as the run result. ' +
-    'New workflows start disabled: cron/event triggers stay dormant until the user enables them in the Workflows page. boss_workflow_run executes one immediately regardless, under this conversation\'s supervision.',
+    'Unless the user has set workflow approval to auto, new workflows start disabled: cron/event triggers stay dormant until the user enables them in the Workflows page. boss_workflow_run executes one immediately regardless, under this conversation\'s supervision.',
   update:
-    'Edit a workflow this project owns (script, name, description, triggers, overlap). An edited workflow is disabled again until the user re-enables it — editing is how you iterate, enabling is how the user approves. Runs already in flight replay against the new script: steps before the first changed call keep their results.',
-  run: 'Run a workflow once, now, regardless of whether it is enabled. Returns the run id; poll boss_workflow_runs for progress. Use this to test a workflow you just created.',
+    'Edit a workflow this project owns (script, name, description, triggers, overlap). Under ask-mode approval an edited workflow is disabled again until the user re-enables it — editing is how you iterate, enabling is how the user approves. Runs already in flight replay against the new script: steps before the first changed call keep their results.',
+  run: 'Run a workflow once, now, regardless of whether it is enabled. Returns the run id, and the finished run\'s result is delivered back to this conversation as a message — no need to poll. Use this to test a workflow you just created.',
   runs: 'Recent runs of a workflow (or all workflows in this project): status, error, result, and each journaled step with its label and state. A run with status "waiting" is parked on waitFor/ask — that is normal, not stuck.',
   name: 'Short human-facing name, e.g. "Datadog alert watcher".',
   description: 'One or two sentences on what it watches and when it pings the user.',

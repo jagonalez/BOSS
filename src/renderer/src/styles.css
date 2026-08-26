@@ -11445,3 +11445,21 @@ select:hover {
   background: var(--bg-elevated);
   color: inherit;
 }
+
+.workflow-script-view {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre;
+}
+
+.workflow-awaiting {
+  border-color: color-mix(in srgb, var(--yellow) 45%, transparent);
+}
