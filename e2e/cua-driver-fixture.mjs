@@ -17,7 +17,11 @@ if (command === 'serve') {
   process.on('SIGTERM', stop)
   setInterval(() => {}, 60_000)
 } else if (command === 'call') {
-  process.stdout.write('E2E computer-use fixture completed.')
+  const [tool, rawArguments] = args
+  process.stdout.write(JSON.stringify({
+    tool,
+    arguments: JSON.parse(rawArguments ?? '{}')
+  }))
 } else {
   process.exit(2)
 }

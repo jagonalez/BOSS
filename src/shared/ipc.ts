@@ -204,6 +204,8 @@ export const IpcChannels = {
   ComputerUseSetEnabled: 'computer-use:set-enabled',
   ComputerUsePermissions: 'computer-use:permissions',
   ComputerUseRequestPermission: 'computer-use:request-permission',
+  /** Test-only bridge registered only under BOSS_E2E. */
+  E2EComputerUseCall: 'e2e:computer-use:call',
   OpenPrivacyPane: 'open-privacy-pane',
   ProjectCurrent: 'project:current',
   ProjectSet: 'project:set',

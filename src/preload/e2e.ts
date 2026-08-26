@@ -1534,6 +1534,8 @@ export function installE2EApi(boss: BossApi): void {
      *  recorded, which is exactly what those tests are about, so this reaches
      *  the real channel. Reading only — it creates nothing. */
     realProjectList: (): Promise<string[]> => ipcRenderer.invoke(IpcChannels.ProjectList),
+    computerUseCall: (operation: string, args: Record<string, unknown>) =>
+      ipcRenderer.invoke(IpcChannels.E2EComputerUseCall, operation, args),
     calls: () => structuredClone(calls),
     sessions: () => structuredClone(sessions),
     defaults: () => structuredClone(defaults),

@@ -17,6 +17,7 @@ import type { EventStream } from './event-stream'
 import type { BrowseManager } from './browse'
 import type { OptionalDeps } from './optional-deps'
 import type { ComputerUse } from './computer-use'
+import type { QaTools } from './qa-tools'
 import type { PTYManager } from './pty-manager'
 import type { SpeechManager } from './speech'
 import type { SitesManager } from './sites'
@@ -38,6 +39,7 @@ export interface IpcDeps {
   browse: BrowseManager
   optional: OptionalDeps
   computerUse: ComputerUse
+  qaTools: QaTools
   pty: PTYManager
   speech: SpeechManager
   sites: SitesManager
@@ -225,6 +227,19 @@ export function registerIpc(deps: IpcDeps): void {
   ipcMain.handle(IpcChannels.ComputerUseRequestPermission, (_e, pane: PrivacyPane) =>
     deps.computerUse.requestPermission(pane)
   )
+
+  // Exercise the real renderer → main → QA policy → driver subprocess
+  // boundary without exposing a production backdoor or touching a real app.
+  if (process.env.BOSS_E2E === '1') {
+    ipcMain.handle(
+      IpcChannels.E2EComputerUseCall,
+      async (_e, operation: string, args: Record<string, unknown>) => {
+        const threadId = 'e2e-computer-use'
+        await deps.qaTools.setPolicy(threadId, 'automatic')
+        return deps.qaTools.call(threadId, 'boss_computer', { operation, arguments: args })
+      }
+    )
+  }
 
   ipcMain.handle(IpcChannels.OpenPrivacyPane, (_e, pane: PrivacyPane) => {
     const url =

@@ -38,6 +38,7 @@ interface E2EControl {
   defaults(): Promise<Record<string, Record<string, unknown>>>
   contextHandoff(): Promise<string>
   clipboardWrites(): Promise<string[]>
+  computerUseCall(operation: string, args: Record<string, unknown>): Promise<{ text: string }>
   resetCalls(): Promise<void>
   failNextExport(message: string): Promise<void>
   holdNextPin(): Promise<void>
@@ -59,6 +60,10 @@ export async function control(page: Page): Promise<E2EControl> {
     defaults: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.defaults()),
     contextHandoff: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.contextHandoff()),
     clipboardWrites: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.clipboardWrites()),
+    computerUseCall: (operation, args) => page.evaluate(
+      (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.computerUseCall(value.operation, value.args),
+      { operation, args }
+    ),
     resetCalls: () => page.evaluate(() => (window as unknown as { bossE2E: E2EControl }).bossE2E.resetCalls()),
     failNextExport: (message) => page.evaluate(
       (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.failNextExport(value),

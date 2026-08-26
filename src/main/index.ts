@@ -255,7 +255,7 @@ automations.setWebhookObserver(async (delivery) => {
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates, reviews, projectFiles, takePendingCliOpen }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, qaTools, pty, speech, sites, updates, reviews, projectFiles, takePendingCliOpen }
 }
 
 function registerIpcOnce(): void {

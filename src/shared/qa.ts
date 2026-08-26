@@ -47,6 +47,42 @@ export function isComputerUseActionOperation(operation: string): boolean {
   return (COMPUTER_USE_ACTION_OPERATIONS as readonly string[]).includes(operation)
 }
 
+const COMPUTER_USE_CLICK_ACTIONS = {
+  press: 'press',
+  click: 'press',
+  showmenu: 'show_menu',
+  rightclick: 'show_menu',
+  pick: 'pick',
+  confirm: 'confirm',
+  cancel: 'cancel',
+  open: 'open'
+} as const
+
+/** Convert compact action names printed by CUA's accessibility tree back to
+ * the canonical click action names accepted by the driver.
+ *
+ * The tree renders AXShowMenu as `showmenu`, while click expects `show_menu`.
+ * Passing the rendered spelling through unchanged is unsafe: the macOS driver
+ * treats an unknown action as AXPress. Normalize every documented spelling and
+ * fail closed on typos instead of pressing the wrong control. Coordinates and
+ * every non-action argument remain untouched; screenshot-pixel to screen-point
+ * and Retina conversion belong to the driver. */
+export function normalizeComputerUseArguments(
+  operation: string,
+  args: Record<string, unknown>
+): Record<string, unknown> {
+  if (operation !== 'click' || typeof args.action !== 'string') return args
+  const key = args.action.trim().replace(/^ax/i, '').replace(/[\s_-]/g, '').toLowerCase()
+  const action = COMPUTER_USE_CLICK_ACTIONS[key as keyof typeof COMPUTER_USE_CLICK_ACTIONS]
+  if (!action) {
+    throw new Error(
+      `Computer click action “${args.action}” is not supported. ` +
+      'Use press, show_menu, pick, confirm, cancel, or open.'
+    )
+  }
+  return action === args.action ? args : { ...args, action }
+}
+
 export type QaAgentTool =
   | 'boss_browser_tabs'
   | 'boss_browser_navigate'
@@ -280,12 +316,37 @@ export const QA_TOOL_DEFINITIONS: Array<{
   },
   {
     name: 'boss_computer',
-    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. The arguments object is passed directly to the OSS CUA Driver. Looking is always available: list_apps and list_windows find what is running; get_window_state and get_desktop_state return state plus a screenshot; zoom crops a region; verify_state checks bounded postconditions. Inspection screenshots are returned to you but hidden from the transcript by default; set showInTranscript only when the user asked to see that specific screenshot. Acting needs Automatic QA. Prefer a current element_token from get_window_state over coordinates. Match the element actions in the returned tree: for example, call click with action \"show_menu\" when it advertises showmenu; click defaults to press. Coordinates are pixels in the returned screenshot. Follow the delivery ladder background action, fresh state, pixel action, fresh state, then delivery_mode \"foreground\". Use bring_to_front only when a transient or focus-proxy surface must remain foreground across multiple calls. Look again after every action — an action you have not verified is not finished.',
+    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. The arguments object is passed to the OSS CUA Driver after BOSS safely canonicalizes click action names. Looking is always available: list_apps and list_windows find what is running; get_window_state and get_desktop_state return state plus a screenshot; zoom crops a region; verify_state checks bounded postconditions. Inspection screenshots are returned to you but hidden from the transcript by default; set showInTranscript only when the user asked to see that specific screenshot. Acting needs Automatic QA. Prefer a current element_token from get_window_state over coordinates. Match the element actions in the returned tree: click action \"showmenu\" is accepted and translated to the driver action \"show_menu\"; click defaults to press. For a window action, x/y are local pixels from its get_window_state screenshot. For a desktop action, x/y are absolute pixels from get_desktop_state; never apply display scale or window offsets yourself. Follow the delivery ladder background action, fresh state, pixel action, fresh state, then delivery_mode \"foreground\". Use bring_to_front when a transient menu or focus-proxy surface must remain foreground across multiple calls. Look again after every action — an action you have not verified is not finished.',
     inputSchema: {
       type: 'object',
       properties: {
         operation: { type: 'string', enum: [...COMPUTER_USE_OPERATIONS] },
-        arguments: { type: 'object', additionalProperties: true },
+        arguments: {
+          type: 'object',
+          description: 'Arguments for the selected CUA Driver operation.',
+          properties: {
+            pid: { type: 'integer', description: 'Target process ID for a window-scoped operation.' },
+            window_id: { type: 'integer', description: 'Target window ID from list_windows/get_window_state.' },
+            element_token: { type: 'string', description: 'Preferred opaque element handle from the latest get_window_state.' },
+            x: { type: 'number', description: 'Screenshot-pixel X: window-local for get_window_state, desktop-absolute for get_desktop_state.' },
+            y: { type: 'number', description: 'Screenshot-pixel Y in the same coordinate space as x.' },
+            action: {
+              type: 'string',
+              description: 'For click: press, show_menu (or tree spelling showmenu), pick, confirm, cancel, or open.'
+            },
+            delivery_mode: {
+              type: 'string',
+              enum: ['background', 'foreground'],
+              description: 'Best-effort background by default; foreground briefly focuses the exact target window.'
+            },
+            scope: {
+              type: 'string',
+              enum: ['window', 'desktop'],
+              description: 'Pixel coordinate scope. Desktop pixels require get_desktop_state.'
+            }
+          },
+          additionalProperties: true
+        },
         showInTranscript: {
           type: 'boolean',
           default: false,
