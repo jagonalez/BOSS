@@ -481,9 +481,9 @@ test('shows Codex custom output images live and once after history reload', asyn
 
   const images = appPage.getByRole('img', { name: /Codex image [12]/ })
   await expect(images).toHaveCount(2)
+  await expect(images.nth(0)).toHaveAttribute('alt', 'Codex image 1')
+  await expect(images.nth(1)).toHaveAttribute('alt', 'Codex image 2')
   const transcript = appPage.locator('.messages:visible')
-  await expect(transcript).toContainText('First study.')
-  await expect(transcript).toContainText('Second study.')
   await expect(transcript).not.toContainText('data:image/png;base64')
 
   // item/completed can repeat what item/started already surfaced. Stable part
