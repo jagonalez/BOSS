@@ -47,6 +47,20 @@ test('boots the real Electron renderer without covering it with a modal', async 
   })).toEqual({ count: 1, visible: false })
 })
 
+test('ships a loadable square favicon with the renderer', async ({ appPage }) => {
+  const favicon = appPage.locator('link[rel="icon"]')
+  await expect(favicon).toHaveAttribute('href', './favicon.ico')
+
+  const dimensions = await favicon.evaluate(async (element) => {
+    const image = new Image()
+    image.src = (element as HTMLLinkElement).href
+    await image.decode()
+    return { width: image.naturalWidth, height: image.naturalHeight }
+  })
+
+  expect(dimensions).toEqual({ width: 256, height: 256 })
+})
+
 test('sets Automatic QA for one thread without sending the command to the agent', async ({ appPage }) => {
   const fixture = await control(appPage)
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
