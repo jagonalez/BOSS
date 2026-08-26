@@ -1,12 +1,13 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { Workflow, WorkflowRun } from '../shared/workflow'
+import type { Workflow, WorkflowApprovalMode, WorkflowRun } from '../shared/workflow'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
 import { WORKFLOW_DEFAULTS } from '../shared/workflow.ts'
 
 interface WorkflowState {
   version: 1
   workflows: Workflow[]
+  approvalMode?: WorkflowApprovalMode
   /** Per-workflow durable key/value memory, shared across runs. This is what
    *  lets a watcher remember e.g. a monitor's alert history between fires. */
   memory: Record<string, Record<string, unknown>>
@@ -22,6 +23,7 @@ interface RunState {
 export class WorkflowStore {
   private loading?: Promise<void>
   workflows: Workflow[] = []
+  approvalMode: WorkflowApprovalMode = 'ask'
   runs: WorkflowRun[] = []
   private memory: Record<string, Record<string, unknown>> = {}
   private readonly stateFile: string
@@ -47,6 +49,7 @@ export class WorkflowStore {
       if (parsed.version === 1) {
         if (Array.isArray(parsed.workflows)) this.workflows = parsed.workflows
         if (parsed.memory && typeof parsed.memory === 'object') this.memory = parsed.memory
+        if (parsed.approvalMode === 'auto') this.approvalMode = 'auto'
       }
     } catch {
       /* First launch starts with no workflows. */
@@ -61,7 +64,7 @@ export class WorkflowStore {
 
   async save(): Promise<void> {
     await mkdir(dirname(this.stateFile), { recursive: true })
-    const state: WorkflowState = { version: 1, workflows: this.workflows, memory: this.memory }
+    const state: WorkflowState = { version: 1, workflows: this.workflows, memory: this.memory, approvalMode: this.approvalMode }
     await writeFile(this.stateFile, JSON.stringify(state, null, 2))
     await writeFile(this.runsFile, JSON.stringify({ version: 1, runs: this.runs } satisfies RunState, null, 2))
   }

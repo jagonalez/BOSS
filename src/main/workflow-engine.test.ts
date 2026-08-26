@@ -56,6 +56,12 @@ class MockHost implements WorkflowHost {
     this.notices.push(notice)
   }
 
+  delivered: { threadId: string; body: string }[] = []
+
+  async deliverToThread(threadId: string, body: string): Promise<void> {
+    this.delivered.push({ threadId, body })
+  }
+
   finish(threadId: string, outcome: Partial<AgentOutcome>): void {
     this.active.delete(threadId)
     this.finished?.(threadId, { status: 'success', changedFiles: 0, threadId, ...outcome })
@@ -545,5 +551,42 @@ test('agent failures surface to the script, which can escalate', async () => {
     assert.equal(runOf(rigged, run.id).result, 'escalated:fixed properly')
   } finally {
     await drop(rigged)
+  }
+})
+
+test('a run started by a thread delivers its result back to that thread', async () => {
+  const rigged = await rig()
+  try {
+    const workflow = await rigged.engine.create(definition(`log('checking'); return 'all clear'`))
+    const run = await rigged.engine.runNow(workflow.id, undefined, { startedByThreadId: 'caller-thread' })
+    await until(() => runOf(rigged, run.id).status === 'completed', 'completion')
+    await until(() => rigged.host.delivered.length === 1, 'delivery')
+    assert.equal(rigged.host.delivered[0].threadId, 'caller-thread')
+    assert.match(rigged.host.delivered[0].body, /BOSS WORKFLOW RESULT/)
+    assert.match(rigged.host.delivered[0].body, /completed/)
+    assert.match(rigged.host.delivered[0].body, /all clear/)
+  } finally {
+    await drop(rigged)
+  }
+})
+
+test('the approval mode persists and rides the snapshot', async () => {
+  const first = await rig()
+  const dir = first.dir
+  try {
+    assert.equal(first.engine.snapshot().approvalMode, 'ask')
+    await first.engine.setApprovalMode('auto')
+    assert.equal(first.engine.snapshot().approvalMode, 'auto')
+    first.engine.stop()
+  } catch (error) {
+    await drop(first)
+    throw error
+  }
+
+  const second = await rig(dir, 'reborn')
+  try {
+    assert.equal(second.engine.snapshot().approvalMode, 'auto')
+  } finally {
+    await drop(second)
   }
 })

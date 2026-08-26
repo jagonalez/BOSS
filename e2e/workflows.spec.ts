@@ -1,21 +1,20 @@
-import { expect, lastBackendCall, test } from './fixtures'
+import { backendCalls, expect, lastBackendCall, test } from './fixtures'
 
-test('the workflows page shows durable runs, pending questions, and the agent-approval state', async ({ appPage }) => {
+test('an agent-authored workflow is reviewed and approved from the workflows page', async ({ appPage }) => {
   await appPage.getByRole('button', { name: 'Workflows' }).click()
 
   await expect(appPage.locator('.workflows-page')).toBeVisible()
   // Level 1 disambiguates the page title from the list section's h2.
   await expect(appPage.getByRole('heading', { name: 'Workflows', level: 1 })).toBeVisible()
 
-  // The seeded agent-authored workflow is disabled and says so: enabling it is
-  // the user's approval step.
+  // The seeded agent-authored workflow is disabled and flagged; because a
+  // signature is being requested, its script is open for review by default.
   const card = appPage.locator('.automation-card').filter({ hasText: 'Datadog alert watcher' })
   await expect(card).toContainText('Awaiting approval')
   await expect(card).toContainText('Agent-authored')
-  await expect(card).toContainText('Cron: */20 * * * *')
+  await expect(card.locator('.workflow-script-view')).toContainText("judge('monitor flapped'")
 
   // Its latest run is parked on an ask(): the question is answerable in place.
-  await expect(card).toContainText('Waiting on an event, timer, or answer.')
   await expect(card).toContainText('Mute the flaky monitor?')
   const answer = card.locator('.workflow-answer input')
   await answer.fill('yes, mute it')
@@ -28,45 +27,80 @@ test('the workflows page shows durable runs, pending questions, and the agent-ap
     response: 'yes, mute it'
   })
 
-  // Enabling is a plain update the engine treats as approval.
-  await card.getByRole('button', { name: 'Enable' }).click()
+  // Approving is enabling: the signature moment.
+  await card.getByRole('button', { name: 'Approve & enable' }).click()
   const enabled = await lastBackendCall(appPage, 'workflow.update')
   expect(enabled.request).toEqual({ type: 'workflow.update', workflowId: 'workflow-watcher-seed', patch: { enabled: true } })
 })
 
-test('creating a workflow sends the script, triggers, and budget to the engine', async ({ appPage }) => {
+test('the approval mode is a trust dial like permission modes', async ({ appPage }) => {
+  await appPage.getByRole('button', { name: 'Workflows' }).click()
+  const select = appPage.getByRole('combobox', { name: 'Workflow approval mode' })
+  await expect(select).toHaveValue('ask')
+  await select.selectOption('auto')
+  const set = await lastBackendCall(appPage, 'workflow.approval.set')
+  expect(set.request).toEqual({ type: 'workflow.approval.set', mode: 'auto' })
+  await expect(select).toHaveValue('auto')
+})
+
+test('new workflows are described to an agent, never written in a form', async ({ appPage }) => {
   await appPage.getByRole('button', { name: 'Workflows' }).click()
   await appPage.getByRole('button', { name: 'New workflow' }).click()
 
-  const editor = appPage.locator('.automation-editor')
-  await editor.getByPlaceholder('Datadog alert watcher').fill('CI babysitter')
-  await editor.getByPlaceholder(/github.pull_request/).fill('github.workflow_run')
-  await editor.getByPlaceholder(/"branch": "main"/).fill('{"conclusion": "failure"}')
-  await editor.getByPlaceholder('Agent runs (10)').fill('3')
-  await editor.getByRole('button', { name: 'Create workflow' }).click()
+  // There is no script editor: the composer is a request, handed to a seeded
+  // agent conversation that authors and tests the workflow with the
+  // boss_workflow_* tools.
+  await expect(appPage.locator('.workflows-page textarea.workflow-script')).toHaveCount(0)
+  await appPage
+    .getByRole('textbox', { name: 'Workflow request' })
+    .fill('Watch CI on main and escalate failures to a stronger agent.')
+  await appPage.getByRole('button', { name: 'Hand to an agent' }).click()
 
-  const created = await lastBackendCall(appPage, 'workflow.create')
-  const input = created.request.input as {
-    name: string
-    script: string
-    triggers: unknown[]
-    budget?: { maxAgentRuns?: number }
-  }
-  expect(input.name).toBe('CI babysitter')
-  expect(input.script).toContain('await agent(')
-  expect(input.triggers).toEqual([
-    { kind: 'event', pattern: { type: 'github.workflow_run', filters: { conclusion: 'failure' } } }
-  ])
-  expect(input.budget?.maxAgentRuns).toBe(3)
-
-  // The new card renders from the refreshed snapshot.
-  await expect(appPage.locator('.automation-card').filter({ hasText: 'CI babysitter' })).toBeVisible()
+  const created = await lastBackendCall(appPage, 'thread.create')
+  expect(created.request).toMatchObject({ type: 'thread.create', title: 'New workflow' })
+  await expect
+    .poll(async () =>
+      // An idle thread gets a direct thread.send; a busy one gets a queued
+      // follow-up. The seeded prompt is valid arriving either way.
+      (await backendCalls(appPage)).some((call) => {
+        if (call.request.type !== 'thread.send' && call.request.type !== 'thread.followups.add') return false
+        const text = JSON.stringify(call.request)
+        return text.includes('[Workflow authoring request]') && text.includes('Watch CI on main')
+      })
+    )
+    .toBe(true)
+  // The page handed off to the conversation.
+  await expect(appPage.locator('.workspace-shell')).toBeVisible()
 })
 
-test('run now and stop reach the engine from the workflow card', async ({ appPage }) => {
+test('refining goes through an agent conversation seeded with the workflow id', async ({ appPage }) => {
   await appPage.getByRole('button', { name: 'Workflows' }).click()
   const card = appPage.locator('.automation-card').filter({ hasText: 'Datadog alert watcher' })
+  await card.getByRole('button', { name: 'Refine with agent' }).click()
 
+  await appPage
+    .getByRole('textbox', { name: 'Workflow refinement request' })
+    .fill('Batch flaky monitors into a weekly digest instead of asking me.')
+  await appPage.getByRole('button', { name: 'Hand to an agent' }).click()
+
+  const created = await lastBackendCall(appPage, 'thread.create')
+  expect(created.request).toMatchObject({ type: 'thread.create', title: 'Refine workflow · Datadog alert watcher' })
+  await expect
+    .poll(async () =>
+      // An idle thread gets a direct thread.send; a busy one gets a queued
+      // follow-up. The seeded prompt is valid arriving either way.
+      (await backendCalls(appPage)).some((call) => {
+        if (call.request.type !== 'thread.send' && call.request.type !== 'thread.followups.add') return false
+        const text = JSON.stringify(call.request)
+        return text.includes('[Workflow refinement request]') && text.includes('workflow-watcher-seed')
+      })
+    )
+    .toBe(true)
+})
+
+test('run now reaches the engine from the workflow card', async ({ appPage }) => {
+  await appPage.getByRole('button', { name: 'Workflows' }).click()
+  const card = appPage.locator('.automation-card').filter({ hasText: 'Datadog alert watcher' })
   await card.getByRole('button', { name: 'Run now' }).click()
   const ran = await lastBackendCall(appPage, 'workflow.run')
   expect(ran.request).toEqual({ type: 'workflow.run', workflowId: 'workflow-watcher-seed' })

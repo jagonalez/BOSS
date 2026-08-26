@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore, appStore } from '../state/AppState'
-import type { JournalEntry, Workflow, WorkflowInput, WorkflowRun, WorkflowTrigger } from '@shared/workflow'
+import type { JournalEntry, Workflow, WorkflowApprovalMode, WorkflowRun } from '@shared/workflow'
 import { OpenCode } from '../lib/opencode'
-import { refreshWorkflows, selectSession } from '../lib/actions'
-import { BranchIcon, ChatIcon, ChevronIcon, PlusIcon, RenameIcon, SendIcon, StopIcon, TrashIcon } from './icons'
+import { authorWorkflowWithAgent, refreshWorkflows, selectSession } from '../lib/actions'
+import { BranchIcon, ChatIcon, ChevronIcon, PlusIcon, SendIcon, StopIcon, TrashIcon } from './icons'
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts
@@ -22,92 +22,6 @@ function triggersLabel(workflow: Workflow): string {
 
 function isActiveRun(run: WorkflowRun): boolean {
   return run.status === 'running' || run.status === 'waiting'
-}
-
-const EXAMPLE_SCRIPT = `// Steps are journaled: this run survives BOSS restarts mid-sequence.
-const outcome = await agent('Describe the task for the agent conversation here.')
-if (outcome.status !== 'success') {
-  await notify('The step failed: ' + (outcome.error ?? outcome.status), { attention: true })
-  return outcome.status
-}
-return outcome.summary`
-
-interface EditorState {
-  id?: string
-  name: string
-  description: string
-  projectPath: string
-  script: string
-  cron: string
-  eventType: string
-  eventFilters: string
-  maxAgentRuns: string
-  maxNotifies: string
-  maxRunHours: string
-}
-
-function emptyEditor(projectPath: string): EditorState {
-  return {
-    name: '',
-    description: '',
-    projectPath,
-    script: EXAMPLE_SCRIPT,
-    cron: '',
-    eventType: '',
-    eventFilters: '',
-    maxAgentRuns: '',
-    maxNotifies: '',
-    maxRunHours: ''
-  }
-}
-
-function editorFromWorkflow(workflow: Workflow): EditorState {
-  const cron = workflow.triggers.find((trigger): trigger is Extract<WorkflowTrigger, { kind: 'cron' }> => trigger.kind === 'cron')
-  const event = workflow.triggers.find((trigger): trigger is Extract<WorkflowTrigger, { kind: 'event' }> => trigger.kind === 'event')
-  return {
-    id: workflow.id,
-    name: workflow.name,
-    description: workflow.description ?? '',
-    projectPath: workflow.projectPath,
-    script: workflow.script,
-    cron: cron?.expression ?? '',
-    eventType: event?.pattern.type ?? '',
-    eventFilters: event?.pattern.filters ? JSON.stringify(event.pattern.filters) : '',
-    maxAgentRuns: workflow.budget?.maxAgentRuns !== undefined ? String(workflow.budget.maxAgentRuns) : '',
-    maxNotifies: workflow.budget?.maxNotifies !== undefined ? String(workflow.budget.maxNotifies) : '',
-    maxRunHours: workflow.budget?.maxRunHours !== undefined ? String(workflow.budget.maxRunHours) : ''
-  }
-}
-
-function inputFromEditor(draft: EditorState): WorkflowInput {
-  const triggers: WorkflowTrigger[] = []
-  if (draft.cron.trim()) triggers.push({ kind: 'cron', expression: draft.cron.trim() })
-  if (draft.eventType.trim()) {
-    let filters: Record<string, string | number | boolean> | undefined
-    if (draft.eventFilters.trim()) {
-      const parsed: unknown = JSON.parse(draft.eventFilters)
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Event filters must be a JSON object.')
-      filters = Object.fromEntries(
-        Object.entries(parsed as Record<string, unknown>).filter(
-          (entry): entry is [string, string | number | boolean] => ['string', 'number', 'boolean'].includes(typeof entry[1])
-        )
-      )
-    }
-    triggers.push({ kind: 'event', pattern: { type: draft.eventType.trim(), ...(filters && Object.keys(filters).length ? { filters } : {}) } })
-  }
-  const budget: WorkflowInput['budget'] = {}
-  if (draft.maxAgentRuns.trim()) budget.maxAgentRuns = Math.max(1, Math.round(Number(draft.maxAgentRuns)))
-  if (draft.maxNotifies.trim()) budget.maxNotifies = Math.max(1, Math.round(Number(draft.maxNotifies)))
-  if (draft.maxRunHours.trim()) budget.maxRunHours = Math.max(1, Math.round(Number(draft.maxRunHours)))
-  return {
-    name: draft.name,
-    ...(draft.description.trim() ? { description: draft.description.trim() } : {}),
-    projectPath: draft.projectPath,
-    script: draft.script,
-    triggers,
-    overlapPolicy: 'skip',
-    ...(Object.keys(budget).length ? { budget } : {})
-  }
 }
 
 function StepRow({ run, entry }: { run: WorkflowRun; entry: JournalEntry }): React.JSX.Element {
@@ -200,137 +114,47 @@ function RunCard({ run }: { run: WorkflowRun }): React.JSX.Element {
   )
 }
 
-function WorkflowEditor({ editor, onClose }: { editor: EditorState; onClose: () => void }): React.JSX.Element {
-  const projects = useStore(appStore, (s) => s.projects)
-  const projectPath = useStore(appStore, (s) => s.projectPath)
-  const [draft, setDraft] = useState(editor)
-  const [saving, setSaving] = useState(false)
+/** The composer is a request to an agent, not a form: describing the job in a
+ *  sentence opens a seeded conversation that authors, tests, and iterates on
+ *  the workflow with the boss_workflow_* tools. Humans never write scripts. */
+function DescribeComposer({ refine, onClose }: { refine?: { id: string; name: string }; onClose: () => void }): React.JSX.Element {
+  const [description, setDescription] = useState('')
+  const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const patch = (partial: Partial<EditorState>): void => setDraft((current) => ({ ...current, ...partial }))
-
-  const projectPaths = useMemo(() => {
-    const paths = new Set<string>()
-    if (projectPath) paths.add(projectPath)
-    for (const project of projects) {
-      const path = project.worktree ?? project.directory ?? project.path
-      if (path && path !== '/') paths.add(path)
-    }
-    if (draft.projectPath) paths.add(draft.projectPath)
-    return [...paths]
-  }, [projects, projectPath, draft.projectPath])
-
-  const save = async (): Promise<void> => {
-    setSaving(true)
+  const send = async (): Promise<void> => {
+    if (!description.trim()) return
+    setSending(true)
     setError(null)
     try {
-      const input = inputFromEditor(draft)
-      if (draft.id) await OpenCode.updateWorkflow(draft.id, input)
-      else await OpenCode.createWorkflow(input)
-      await refreshWorkflows()
+      await authorWorkflowWithAgent({ description: description.trim(), ...(refine ? { refine } : {}) })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSaving(false)
+      setSending(false)
     }
   }
-
   return (
-    <div className="automation-editor">
-      <label className="settings-row">
-        <span className="settings-row-label">Name</span>
-        <input
-          className="settings-input"
-          value={draft.name}
-          placeholder="Datadog alert watcher"
-          onChange={(event) => patch({ name: event.target.value })}
-        />
-      </label>
-      <label className="settings-row">
-        <span className="settings-row-label">Description</span>
-        <input
-          className="settings-input"
-          value={draft.description}
-          placeholder="What it watches, and when it pings you"
-          onChange={(event) => patch({ description: event.target.value })}
-        />
-      </label>
-      <label className="settings-row">
-        <span className="settings-row-label">Project</span>
-        <select className="settings-select" value={draft.projectPath} onChange={(event) => patch({ projectPath: event.target.value })}>
-          <option value="">No project (global)</option>
-          {projectPaths.map((path) => (
-            <option key={path} value={path}>{path}</option>
-          ))}
-        </select>
-      </label>
+    <div className="automation-editor workflow-describe">
       <label className="settings-row automation-prompt-row">
-        <span className="settings-row-label">Script</span>
+        <span className="settings-row-label">{refine ? `Refine "${refine.name}"` : 'Describe it'}</span>
         <textarea
-          className="settings-input automation-prompt workflow-script"
-          rows={14}
-          spellCheck={false}
-          value={draft.script}
-          onChange={(event) => patch({ script: event.target.value })}
+          className="settings-input automation-prompt"
+          rows={4}
+          aria-label={refine ? 'Workflow refinement request' : 'Workflow request'}
+          value={description}
+          placeholder={
+            refine
+              ? 'What should change? e.g. "Only page me for monitors tagged team:sre, batch the rest into a weekly digest."'
+              : 'What should this workflow watch or do? e.g. "Every 20 minutes, check our Datadog monitors; judge real alerts vs flaky ones and only ping me for real ones."'
+          }
+          onChange={(event) => setDescription(event.target.value)}
         />
-      </label>
-      <label className="settings-row">
-        <span className="settings-row-label">Cron trigger</span>
-        <input
-          className="settings-input"
-          value={draft.cron}
-          placeholder="*/20 * * * * — optional; leave empty for manual or event-only"
-          onChange={(event) => patch({ cron: event.target.value })}
-        />
-      </label>
-      <label className="settings-row">
-        <span className="settings-row-label">Event trigger</span>
-        <input
-          className="settings-input"
-          value={draft.eventType}
-          placeholder="github.pull_request — optional"
-          onChange={(event) => patch({ eventType: event.target.value })}
-        />
-      </label>
-      {draft.eventType.trim() ? (
-        <label className="settings-row">
-          <span className="settings-row-label">Event filters</span>
-          <input
-            className="settings-input"
-            value={draft.eventFilters}
-            placeholder='{"branch": "main"} — JSON, matched against event data'
-            onChange={(event) => patch({ eventFilters: event.target.value })}
-          />
-        </label>
-      ) : null}
-      <label className="settings-row">
-        <span className="settings-row-label">Budget</span>
-        <span className="workflow-budget-row">
-          <input
-            className="settings-input"
-            value={draft.maxAgentRuns}
-            placeholder="Agent runs (10)"
-            onChange={(event) => patch({ maxAgentRuns: event.target.value })}
-          />
-          <input
-            className="settings-input"
-            value={draft.maxNotifies}
-            placeholder="Notifications (5)"
-            onChange={(event) => patch({ maxNotifies: event.target.value })}
-          />
-          <input
-            className="settings-input"
-            value={draft.maxRunHours}
-            placeholder="Run hours (72)"
-            onChange={(event) => patch({ maxRunHours: event.target.value })}
-          />
-        </span>
       </label>
       {error ? <div className="automation-error">{error}</div> : null}
       <div className="automation-editor-actions">
         <button className="btn-ghost" onClick={onClose}>Cancel</button>
-        <button className="site-publish-btn" disabled={saving || !draft.name.trim() || !draft.script.trim()} onClick={() => void save()}>
-          {draft.id ? 'Save workflow' : 'Create workflow'}
+        <button className="site-publish-btn" disabled={sending || !description.trim()} onClick={() => void send()}>
+          <SendIcon size={13} /> Hand to an agent
         </button>
       </div>
     </div>
@@ -340,15 +164,21 @@ function WorkflowEditor({ editor, onClose }: { editor: EditorState; onClose: () 
 function WorkflowCard({
   workflow,
   runs,
-  onEdit
+  onRefine
 }: {
   workflow: Workflow
   runs: WorkflowRun[]
-  onEdit: () => void
+  onRefine: () => void
 }): React.JSX.Element {
+  const projectPath = useStore(appStore, (s) => s.projectPath)
   const [expanded, setExpanded] = useState(false)
+  const awaitingApproval = !workflow.enabled && workflow.source === 'agent'
+  // Reviewing before enabling is the point of ask-mode, so the script opens
+  // by itself exactly when a signature is being requested.
+  const [scriptOpen, setScriptOpen] = useState(awaitingApproval)
   const active = runs.find(isActiveRun)
   const lastRun = runs[0]
+  const sameProject = !workflow.projectPath || workflow.projectPath === projectPath
 
   const act = async (action: () => Promise<unknown>): Promise<void> => {
     try {
@@ -360,7 +190,7 @@ function WorkflowCard({
   }
 
   return (
-    <div className={`site-card automation-card${active ? ' running' : ''}`}>
+    <div className={`site-card automation-card${active ? ' running' : ''}${awaitingApproval ? ' workflow-awaiting' : ''}`}>
       <div className="site-card-head">
         <span className="command-state-icon"><BranchIcon size={14} /></span>
         <div className="command-session-main">
@@ -369,14 +199,21 @@ function WorkflowCard({
           {workflow.description ? <small>{workflow.description}</small> : null}
         </div>
         {active ? <span className="site-badge automation-badge status-running">{active.status}</span> : null}
-        {!workflow.enabled ? (
-          <span className="site-badge" title="Triggers are dormant until you enable this workflow.">
-            {workflow.source === 'agent' ? 'Awaiting approval' : 'Paused'}
+        {awaitingApproval ? (
+          <span className="site-badge automation-badge status-failure" title="Triggers stay dormant until you approve this script.">
+            Awaiting approval
           </span>
+        ) : !workflow.enabled ? (
+          <span className="site-badge">Disabled</span>
         ) : null}
         {workflow.source === 'agent' ? <span className="site-badge">Agent-authored</span> : null}
         <span className="site-time">{workflow.lastRunAt ? `Ran ${timeAgo(workflow.lastRunAt)}` : 'Never ran'}</span>
       </div>
+      {scriptOpen ? (
+        <div className="workflow-script-review">
+          <pre className="workflow-script-view" aria-label={`Script for ${workflow.name}`}>{workflow.script}</pre>
+        </div>
+      ) : null}
       {lastRun && !expanded ? (
         <div className="automation-last-run"><RunCard run={lastRun} /></div>
       ) : null}
@@ -386,13 +223,33 @@ function WorkflowCard({
         </div>
       ) : null}
       <div className="site-card-actions">
+        {awaitingApproval ? (
+          <button
+            className="site-publish-btn"
+            title="Read the script above, then enable its triggers."
+            onClick={() => void act(() => OpenCode.updateWorkflow(workflow.id, { enabled: true }))}
+          >
+            Approve &amp; enable
+          </button>
+        ) : (
+          <button className="btn-ghost" onClick={() => void act(() => OpenCode.updateWorkflow(workflow.id, { enabled: !workflow.enabled }))}>
+            {workflow.enabled ? 'Disable' : 'Enable'}
+          </button>
+        )}
         <button className="btn-ghost" onClick={() => void act(() => OpenCode.runWorkflow(workflow.id))}>
           <SendIcon size={13} /> Run now
         </button>
-        <button className="btn-ghost" onClick={() => void act(() => OpenCode.updateWorkflow(workflow.id, { enabled: !workflow.enabled }))}>
-          {workflow.enabled ? 'Disable' : 'Enable'}
+        <button className="btn-ghost" onClick={() => setScriptOpen((value) => !value)}>
+          {scriptOpen ? 'Hide script' : 'Review script'}
         </button>
-        <button className="btn-ghost" onClick={onEdit}><RenameIcon size={13} /> Edit</button>
+        <button
+          className="btn-ghost"
+          disabled={!sameProject}
+          title={sameProject ? 'Open a conversation that edits this workflow with the boss_workflow tools.' : 'Open this workflow’s project to refine it.'}
+          onClick={onRefine}
+        >
+          <ChatIcon size={13} /> Refine with agent
+        </button>
         <button className="btn-ghost" onClick={() => setExpanded((value) => !value)}>
           <ChevronIcon size={13} /> {expanded ? 'Hide runs' : `Runs (${runs.length})`}
         </button>
@@ -419,14 +276,14 @@ function WorkflowCard({
 
 export function WorkflowsPage(): React.JSX.Element {
   const snapshot = useStore(appStore, (s) => s.workflows)
-  const projectPath = useStore(appStore, (s) => s.projectPath)
-  const [editor, setEditor] = useState<EditorState | null>(null)
+  const [composer, setComposer] = useState<{ refine?: { id: string; name: string } } | null>(null)
 
   useEffect(() => {
     void refreshWorkflows()
   }, [])
 
   const workflows = snapshot?.workflows ?? []
+  const approvalMode: WorkflowApprovalMode = snapshot?.approvalMode ?? 'ask'
   const runsByWorkflow = useMemo(() => {
     const map = new Map<string, WorkflowRun[]>()
     for (const run of snapshot?.runs ?? []) {
@@ -435,6 +292,13 @@ export function WorkflowsPage(): React.JSX.Element {
     for (const list of map.values()) list.sort((a, b) => b.startedAt - a.startedAt)
     return map
   }, [snapshot])
+  const awaiting = workflows.filter((workflow) => !workflow.enabled && workflow.source === 'agent')
+
+  const setApproval = (mode: WorkflowApprovalMode): void => {
+    void OpenCode.setWorkflowApprovalMode(mode)
+      .catch((error) => appStore.setState({ lastError: error instanceof Error ? error.message : String(error) }))
+      .then(() => refreshWorkflows())
+  }
 
   return (
     <div className="product-page automations-page workflows-page">
@@ -443,26 +307,51 @@ export function WorkflowsPage(): React.JSX.Element {
           <span className="product-eyebrow">BOSS</span>
           <h1>Workflows</h1>
           <p>
-            Durable scripts over agents, judges, events, and timers. Every step is journaled, so a run survives BOSS
-            restarts and resumes exactly where it left off. Agents can author workflows too — those wait here, disabled,
-            until you enable them.
+            Durable scripts agents write and the engine runs — journaled steps, restarts survived, budgets enforced.
+            Your job here is reviewing, approving, and watching: describe what you want and an agent authors it.
           </p>
         </div>
-        <button className="site-publish-btn" onClick={() => setEditor(emptyEditor(projectPath))}>
+        <button className="site-publish-btn" onClick={() => setComposer({})}>
           <PlusIcon size={14} /> New workflow
         </button>
       </header>
 
       <div className="automations-main">
-        {editor ? (
+        {composer ? (
           <div className="command-section">
-            <div className="command-section-head"><h2>{editor.id ? 'Edit workflow' : 'New workflow'}</h2></div>
-            <WorkflowEditor editor={editor} onClose={() => setEditor(null)} />
+            <div className="command-section-head"><h2>{composer.refine ? 'Refine with an agent' : 'Ask an agent for a workflow'}</h2></div>
+            <DescribeComposer refine={composer.refine} onClose={() => setComposer(null)} />
           </div>
         ) : null}
+
         <div className="command-section">
           <div className="command-section-head">
-            <h2>Workflows</h2>
+            <h2>Approval</h2>
+          </div>
+          <label className="settings-row">
+            <span className="settings-row-label">Agent-authored workflows</span>
+            <select
+              className="settings-select"
+              aria-label="Workflow approval mode"
+              value={approvalMode}
+              onChange={(event) => setApproval(event.target.value === 'auto' ? 'auto' : 'ask')}
+            >
+              <option value="ask">Ask — stay disabled until I review and enable them</option>
+              <option value="auto">Auto — go live as soon as an agent saves them</option>
+            </select>
+          </label>
+          {awaiting.length > 0 ? (
+            <div className="automation-hint">
+              {awaiting.length === 1
+                ? `"${awaiting[0].name}" is waiting for your review below.`
+                : `${awaiting.length} workflows are waiting for your review below.`}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="command-section">
+          <div className="command-section-head">
+            <h2>All workflows</h2>
             <span>{workflows.length}</span>
           </div>
           <div className="command-list">
@@ -472,13 +361,13 @@ export function WorkflowsPage(): React.JSX.Element {
                   key={workflow.id}
                   workflow={workflow}
                   runs={runsByWorkflow.get(workflow.id) ?? []}
-                  onEdit={() => setEditor(editorFromWorkflow(workflow))}
+                  onRefine={() => setComposer({ refine: { id: workflow.id, name: workflow.name } })}
                 />
               ))
             ) : (
               <div className="command-empty">
-                No workflows yet. Create one for anything that must outlive a conversation — a CI babysitter, a PR review
-                loop, a Datadog watcher — or ask an agent to write one for you.
+                No workflows yet. Describe one — a CI babysitter, a PR review loop, a Datadog watcher — and an agent will
+                write, test, and hand it back for your approval.
               </div>
             )}
           </div>

@@ -18,7 +18,7 @@ import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { Automation, AutomationInput, AutomationsSnapshot } from '@shared/automation'
-import type { Workflow, WorkflowInput, WorkflowRun, WorkflowsSnapshot } from '@shared/workflow'
+import type { Workflow, WorkflowApprovalMode, WorkflowInput, WorkflowRun, WorkflowsSnapshot } from '@shared/workflow'
 import type { WebhookSettings } from '@shared/notification'
 import type { McpConnectionInput, McpConnectionView, McpImportCandidate } from '@shared/mcp'
 import type { MobileAccessStatus } from '@shared/mobile'
@@ -261,6 +261,8 @@ export const OpenCode = {
   stopWorkflowRun: (runId: string) => backendRequest<void>({ type: 'workflow.run.stop', runId }),
   answerWorkflowRun: (runId: string, seq: number, response: string) =>
     backendRequest<void>({ type: 'workflow.run.answer', runId, seq, response }),
+  setWorkflowApprovalMode: (mode: WorkflowApprovalMode) =>
+    backendRequest<WorkflowsSnapshot>({ type: 'workflow.approval.set', mode }),
   reportsList: () => backendRequest<ReportsSnapshot>({ type: 'report.list' }),
   report: (reportId: string) => backendRequest<Report>({ type: 'report.get', reportId }),
   markReportRead: (reportId: string) => backendRequest<Report>({ type: 'report.read', reportId }),

@@ -324,6 +324,8 @@ export type BackendRequest =
   | { type: 'workflow.run.stop'; runId: string }
   /** Answer a run's pending ask() step; seq names the journal entry. */
   | { type: 'workflow.run.answer'; runId: string; seq: number; response: string }
+  /** The ask/auto trust dial for agent-authored workflows. */
+  | { type: 'workflow.approval.set'; mode: import('./workflow').WorkflowApprovalMode }
   | { type: 'report.list' }
   | { type: 'report.get'; reportId: string }
   | { type: 'report.read'; reportId: string }

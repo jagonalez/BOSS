@@ -536,6 +536,7 @@ export function installE2EApi(boss: BossApi): void {
     finishedAt: Date.now() - 600_000
   }]
   let nextWorkflow = 1
+  let workflowApprovalMode = 'ask'
   // One agent-authored workflow ships pre-seeded, disabled, with a run parked
   // on a pending ask() — the states the Workflows page must make legible.
   let workflowsFixture: Array<Record<string, unknown>> = [{
@@ -1296,7 +1297,11 @@ export function installE2EApi(boss: BossApi): void {
       case 'mcp.list': return []
       case 'mcp.import.scan': return []
       case 'automation.list': return { automations: automationsFixture, runs: automationRunsFixture, webhookUrl: '' }
-      case 'workflow.list': return { workflows: structuredClone(workflowsFixture), runs: structuredClone(workflowRunsFixture) }
+      case 'workflow.list': return { workflows: structuredClone(workflowsFixture), runs: structuredClone(workflowRunsFixture), approvalMode: workflowApprovalMode }
+      case 'workflow.approval.set': {
+        workflowApprovalMode = request.mode === 'auto' ? 'auto' : 'ask'
+        return { workflows: structuredClone(workflowsFixture), runs: structuredClone(workflowRunsFixture), approvalMode: workflowApprovalMode }
+      }
       case 'workflow.create': {
         const now = Date.now()
         const created = {

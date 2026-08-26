@@ -91,6 +91,12 @@ export const WORKFLOW_BUDGET_DEFAULTS: WorkflowBudget = {
 
 export type WorkflowOverlapPolicy = 'skip' | 'parallel'
 
+/** What happens when an agent creates or edits a workflow: 'ask' (default)
+ *  leaves it disabled until the user enables it — enabling is the approval —
+ *  while 'auto' lets agent-authored workflows go live immediately, the same
+ *  trust dial as auto vs ask permission modes. */
+export type WorkflowApprovalMode = 'ask' | 'auto'
+
 export interface WorkflowInput {
   name: string
   description?: string
@@ -184,6 +190,8 @@ export interface WorkflowRunUsage {
 export interface WorkflowRun {
   id: string
   workflowId: string
+  /** Conversation that asked for this run; it gets the result as a message. */
+  startedByThreadId?: string
   trigger: WorkflowRunTrigger
   status: WorkflowRunStatus
   /** The triggering event, exposed to the script as `event`. */
@@ -202,6 +210,7 @@ export interface WorkflowRun {
 export interface WorkflowsSnapshot {
   workflows: Workflow[]
   runs: WorkflowRun[]
+  approvalMode: WorkflowApprovalMode
 }
 
 /** Options a script may pass to agent(). */
