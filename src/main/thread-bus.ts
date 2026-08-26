@@ -15,14 +15,25 @@ import type {
   ThreadBusThread
 } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
-import { REPORT_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { REPORT_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import type { Workflow, WorkflowInput, WorkflowRun, WorkflowTrigger, WorkflowsSnapshot } from '@shared/workflow'
 import { policyOverrides, policySource, resolvePolicy } from '@shared/collaboration-policy'
 import { projectScope } from './project-identity'
+
 import type { QaTools } from './qa-tools'
 import { MCP_TOOL_PREFIX } from '@shared/mcp'
 import type { McpHub } from './mcp-hub'
 import type { ReviewManager } from './review-manager'
 import type { ReportManager } from './report-manager'
+/** What the bus needs from the workflow engine, kept structural so the bus
+ *  has no import-time dependency on the engine class. */
+interface WorkflowEngineHandle {
+  snapshot(): WorkflowsSnapshot
+  create(input: WorkflowInput, source: Workflow['source'], options?: { enabled?: boolean }): Promise<Workflow>
+  update(id: string, patch: Partial<WorkflowInput> & { enabled?: boolean }): Promise<Workflow>
+  runNow(workflowId: string): Promise<WorkflowRun>
+}
+
 
 interface LegacyThreadBusState {
   version: 1
@@ -109,6 +120,7 @@ export class ThreadBus {
   private mcpHub?: McpHub
   private reviews?: ReviewManager
   private reports?: ReportManager
+  private workflowEngine?: WorkflowEngineHandle
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
@@ -128,6 +140,10 @@ export class ThreadBus {
 
   attachReports(reports: ReportManager): void {
     this.reports = reports
+  }
+
+  attachWorkflowEngine(engine: WorkflowEngineHandle): void {
+    this.workflowEngine = engine
   }
 
   qaStatus(threadId: string) {
@@ -341,6 +357,12 @@ export class ThreadBus {
       const report = await this.reports.updateFromAgent(caller.id, stringArg(args, 'reportId'), patch)
       return { id: report.id, title: report.title, summary: report.summary, updatedAt: report.updatedAt }
     }
+    // Workflows are local to BOSS and scoped to the caller's project, so like
+    // reports they are answered before the collaboration policy.
+    if (tool.startsWith('boss_workflow_')) {
+      if (!this.workflowEngine) throw new Error('Workflows are not available.')
+      return this.runWorkflowTool(caller, tool, args)
+    }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
     if (!['boss_threads_list', 'boss_threads_read', 'boss_threads_send', 'boss_threads_reply', 'boss_threads_spawn_worktree', 'boss_threads_use_worktree', 'boss_threads_leave_worktree'].includes(tool)) {
@@ -406,6 +428,126 @@ export class ThreadBus {
         return this.host.useWorktree(caller.id)
       }
     }
+  }
+
+  private async runWorkflowTool(caller: ThreadBusThread, tool: ThreadBusAgentTool, args: unknown): Promise<unknown> {
+    const engine = this.workflowEngine!
+    const values = args && typeof args === 'object' ? (args as Record<string, unknown>) : {}
+    // A thread sees its own project's workflows plus global ones.
+    const visible = (workflow: Workflow): boolean => workflow.projectPath === caller.projectPath || workflow.projectPath === ''
+    const snapshot = engine.snapshot()
+    switch (tool) {
+      case 'boss_workflow_list':
+        return snapshot.workflows.filter(visible).map((workflow) => {
+          const latest = snapshot.runs
+            .filter((run) => run.workflowId === workflow.id)
+            .sort((a, b) => b.startedAt - a.startedAt)[0]
+          return {
+            id: workflow.id,
+            name: workflow.name,
+            description: workflow.description ?? '',
+            enabled: workflow.enabled,
+            source: workflow.source,
+            triggers: workflow.triggers,
+            ...(latest ? { lastRun: { id: latest.id, status: latest.status, startedAt: latest.startedAt, error: latest.error } } : {})
+          }
+        })
+      case 'boss_workflow_create': {
+        const workflow = await engine.create(this.workflowInputFrom(caller, values), 'agent', { enabled: false })
+        return {
+          id: workflow.id,
+          enabled: false,
+          note: 'Created disabled: triggers stay dormant until the user enables it in the Workflows page. Use boss_workflow_run to execute it once now.'
+        }
+      }
+      case 'boss_workflow_update': {
+        const target = this.requireWorkflow(snapshot, stringArg(args, 'workflowId'), visible)
+        const patch: Partial<WorkflowInput> & { enabled?: boolean } = { enabled: false }
+        if (typeof values.name === 'string' && values.name.trim()) patch.name = values.name.trim()
+        if (typeof values.description === 'string') patch.description = values.description
+        if (typeof values.script === 'string' && values.script.trim()) patch.script = values.script
+        if ('cron' in values || 'eventType' in values || 'eventFilters' in values) {
+          patch.triggers = this.workflowTriggersFrom(values)
+        }
+        const updated = await engine.update(target.id, patch)
+        return { id: updated.id, enabled: false, note: 'Saved, and disabled until the user re-enables it.' }
+      }
+      case 'boss_workflow_run': {
+        const target = this.requireWorkflow(snapshot, stringArg(args, 'workflowId'), visible)
+        const run = await engine.runNow(target.id)
+        return { runId: run.id, status: run.status }
+      }
+      case 'boss_workflow_runs': {
+        const workflowId = stringArg(args, 'workflowId')
+        const ids = workflowId
+          ? [this.requireWorkflow(snapshot, workflowId, visible).id]
+          : snapshot.workflows.filter(visible).map((workflow) => workflow.id)
+        const limit = Math.max(1, Math.min(20, numberArg(args, 'limit', 5)))
+        return snapshot.runs
+          .filter((run) => ids.includes(run.workflowId))
+          .sort((a, b) => b.startedAt - a.startedAt)
+          .slice(0, limit)
+          .map((run) => ({
+            id: run.id,
+            workflowId: run.workflowId,
+            status: run.status,
+            trigger: run.trigger,
+            startedAt: run.startedAt,
+            finishedAt: run.finishedAt,
+            error: run.error,
+            result: run.result,
+            note: run.note,
+            steps: run.journal.map((entry) => ({
+              seq: entry.seq,
+              op: entry.op,
+              label: entry.label,
+              status: entry.status,
+              ...(entry.error ? { error: entry.error } : {})
+            }))
+          }))
+      }
+      default:
+        throw new Error('Unknown BOSS workflow tool.')
+    }
+  }
+
+  private requireWorkflow(snapshot: WorkflowsSnapshot, id: string, visible: (workflow: Workflow) => boolean): Workflow {
+    if (!id) throw new Error('A workflow id is required.')
+    const workflow = snapshot.workflows.find((item) => item.id === id)
+    if (!workflow || !visible(workflow)) throw new Error('Workflow not found in this project.')
+    return workflow
+  }
+
+  private workflowInputFrom(caller: ThreadBusThread, values: Record<string, unknown>): WorkflowInput {
+    const name = typeof values.name === 'string' ? values.name : ''
+    const script = typeof values.script === 'string' ? values.script : ''
+    return {
+      name,
+      script,
+      ...(typeof values.description === 'string' && values.description ? { description: values.description } : {}),
+      projectPath: caller.projectPath,
+      triggers: this.workflowTriggersFrom(values),
+      overlapPolicy: 'skip'
+    }
+  }
+
+  private workflowTriggersFrom(values: Record<string, unknown>): WorkflowTrigger[] {
+    const triggers: WorkflowTrigger[] = []
+    const cron = typeof values.cron === 'string' ? values.cron.trim() : ''
+    if (cron) triggers.push({ kind: 'cron', expression: cron })
+    const eventType = typeof values.eventType === 'string' ? values.eventType.trim() : ''
+    if (eventType) {
+      const raw = values.eventFilters && typeof values.eventFilters === 'object' && !Array.isArray(values.eventFilters)
+        ? (values.eventFilters as Record<string, unknown>)
+        : {}
+      const filters = Object.fromEntries(
+        Object.entries(raw).filter((entry): entry is [string, string | number | boolean] =>
+          ['string', 'number', 'boolean'].includes(typeof entry[1])
+        )
+      )
+      triggers.push({ kind: 'event', pattern: { type: eventType, ...(Object.keys(filters).length ? { filters } : {}) } })
+    }
+    return triggers
   }
 
   private requirePeer(caller: ThreadBusThread, targetId: string): ThreadBusThread {
@@ -680,6 +822,70 @@ export class ThreadBus {
           required: ['reportId'],
           additionalProperties: false
         }
+      },
+      {
+        name: 'boss_workflow_list',
+        description: WORKFLOW_TOOL_DESCRIPTIONS.list,
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: true }
+      },
+      {
+        name: 'boss_workflow_create',
+        description: WORKFLOW_TOOL_DESCRIPTIONS.create,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.name },
+            description: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.description },
+            script: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.script },
+            cron: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.cron },
+            eventType: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.eventType },
+            eventFilters: { type: 'object', description: WORKFLOW_TOOL_DESCRIPTIONS.eventFilters }
+          },
+          required: ['name', 'script'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_workflow_update',
+        description: WORKFLOW_TOOL_DESCRIPTIONS.update,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId },
+            name: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.name },
+            description: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.description },
+            script: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.script },
+            cron: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.cron },
+            eventType: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.eventType },
+            eventFilters: { type: 'object', description: WORKFLOW_TOOL_DESCRIPTIONS.eventFilters }
+          },
+          required: ['workflowId'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_workflow_run',
+        description: WORKFLOW_TOOL_DESCRIPTIONS.run,
+        inputSchema: {
+          type: 'object',
+          properties: { workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId } },
+          required: ['workflowId'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_workflow_runs',
+        description: WORKFLOW_TOOL_DESCRIPTIONS.runs,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId },
+            limit: { type: 'integer', minimum: 1, maximum: 20, default: 5, description: WORKFLOW_TOOL_DESCRIPTIONS.limit }
+          },
+          additionalProperties: false
+        },
+        annotations: { readOnlyHint: true }
       },
       ...QA_TOOL_DEFINITIONS.map((tool) => ({
         name: tool.name,

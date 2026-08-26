@@ -228,6 +228,7 @@ const workflowEngine = new WorkflowEngine(workflowStore, workflowBus, workflowHo
   onSnapshot: (snapshot) => backendMgr.emit({ type: 'workflows.updated', properties: { snapshot } })
 })
 backendMgr.attachWorkflows(workflowEngine)
+threadBus.attachWorkflowEngine(workflowEngine)
 // Every authenticated GitHub delivery reaches both durable control planes:
 // Lab Assistant's PR/CI observers and the workflow event bus.
 automations.setWebhookObserver(async (delivery) => {

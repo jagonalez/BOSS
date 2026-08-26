@@ -15,7 +15,12 @@ test('the host tools cover collaboration and publishing completed work', () => {
     'boss_threads_spawn_worktree',
     'boss_git_create_change_request',
     'boss_reports_create',
-    'boss_reports_update'
+    'boss_reports_update',
+    'boss_workflow_list',
+    'boss_workflow_create',
+    'boss_workflow_update',
+    'boss_workflow_run',
+    'boss_workflow_runs'
   ])
   // Every definition carries a description: an undescribed tool goes unused.
   assert.ok(THREAD_TOOL_DEFINITIONS.every((tool) => tool.function.description.length > 40))
@@ -27,6 +32,8 @@ test('only declared Lab host tools route to the bus', () => {
   assert.ok(isThreadTool('boss_git_create_change_request'))
   assert.ok(isThreadTool('boss_reports_create'))
   assert.ok(isThreadTool('boss_reports_update'))
+  assert.ok(isThreadTool('boss_workflow_create'))
+  assert.ok(isThreadTool('boss_workflow_run'))
   assert.ok(!isThreadTool('not_a_thread_tool'))
   assert.ok(!isThreadTool('edit_file'))
 })

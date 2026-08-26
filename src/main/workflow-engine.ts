@@ -210,14 +210,16 @@ export class WorkflowEngine {
     return { ...input, name, projectPath: input.projectPath.trim() }
   }
 
-  async create(input: WorkflowInput, source: Workflow['source'] = 'user'): Promise<Workflow> {
+  async create(input: WorkflowInput, source: Workflow['source'] = 'user', options?: { enabled?: boolean }): Promise<Workflow> {
     await this.store.load()
     const clean = this.validate(input)
     const timestamp = this.now()
     const workflow: Workflow = {
       ...clean,
       id: randomUUID(),
-      enabled: true,
+      // Agent-authored workflows start disabled: their triggers stay dormant
+      // until the user enables them, which is the approval step.
+      enabled: options?.enabled ?? true,
       source,
       createdAt: timestamp,
       updatedAt: timestamp
