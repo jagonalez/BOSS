@@ -5,7 +5,8 @@ import type { LabAssistantAgentConfig, LabAssistantSnapshot, LabAssistantTaskSta
 import { appStore, useStore } from '../state/AppState'
 import { OpenCode } from '../lib/opencode'
 import { projectName } from '../lib/project-name'
-import { refreshBackendModels } from '../lib/actions'
+import { openAssistantConversation, refreshBackendModels, refreshWorkflows, selectSession, showPage } from '../lib/actions'
+import type { WorkflowRun } from '@shared/workflow'
 import { ModelSelect } from './ModelSelect'
 
 function timeAgo(timestamp: number): string {
@@ -59,6 +60,40 @@ function AgentPicker({
         placeholder="Optional role instructions"
       />
     </div>
+  )
+}
+
+function WorkflowAskRow({ item, name }: { item: { run: WorkflowRun; seq: number; question: string }; name: string }): React.JSX.Element {
+  const [answer, setAnswer] = useState('')
+  const submit = async (): Promise<void> => {
+    if (!answer.trim()) return
+    try {
+      await OpenCode.answerWorkflowRun(item.run.id, item.seq, answer.trim())
+      setAnswer('')
+    } catch (error) {
+      appStore.setState({ lastError: error instanceof Error ? error.message : String(error) })
+    }
+    await refreshWorkflows()
+  }
+  return (
+    <article className="lab-decision">
+      <div>
+        <strong>{item.question}</strong>
+        <small>{name} · a workflow run is suspended until you answer.</small>
+      </div>
+      <div className="lab-decision-options workflow-answer">
+        <input
+          aria-label={`Answer for ${name}`}
+          value={answer}
+          placeholder="Your answer…"
+          onChange={(event) => setAnswer(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void submit()
+          }}
+        />
+        <button onClick={() => void submit()}>Answer</button>
+      </div>
+    </article>
   )
 }
 
@@ -134,6 +169,41 @@ export function LabAssistantPage(): React.JSX.Element {
     ...(snapshot?.threads ?? []).map((thread) => thread.projectPath)
   ].filter(Boolean))].sort()
 
+  const workflowsSnapshot = useStore(appStore, (s) => s.workflows)
+  useEffect(() => {
+    void refreshWorkflows()
+  }, [])
+  const [askText, setAskText] = useState('')
+
+  const workflowNames = useMemo(
+    () => new Map((workflowsSnapshot?.workflows ?? []).map((workflow) => [workflow.id, workflow.name])),
+    [workflowsSnapshot]
+  )
+  const pendingAsks = useMemo(() => {
+    const items: { run: WorkflowRun; seq: number; question: string }[] = []
+    for (const run of workflowsSnapshot?.runs ?? []) {
+      if (run.status !== 'running' && run.status !== 'waiting') continue
+      for (const entry of run.journal) {
+        if (entry.op === 'ask' && entry.status === 'started') items.push({ run, seq: entry.seq, question: entry.label ?? 'A workflow is waiting on you.' })
+      }
+    }
+    return items
+  }, [workflowsSnapshot])
+  const attentionRuns = useMemo(
+    () => (workflowsSnapshot?.runs ?? []).filter((run) => run.status === 'needs-attention'),
+    [workflowsSnapshot]
+  )
+  const awaitingApproval = useMemo(
+    () => (workflowsSnapshot?.workflows ?? []).filter((workflow) => !workflow.enabled && workflow.source === 'agent'),
+    [workflowsSnapshot]
+  )
+  const activeRuns = useMemo(
+    () => (workflowsSnapshot?.runs ?? []).filter((run) => run.status === 'running' || run.status === 'waiting'),
+    [workflowsSnapshot]
+  )
+  const busyThreads = (snapshot?.threads ?? []).filter((thread) => thread.running)
+  const attentionCount = openQuestions.length + pendingAsks.length + attentionRuns.length + awaitingApproval.length
+
   const createTask = (event: React.FormEvent): void => {
     event.preventDefault()
     const title = newTaskTitle.trim()
@@ -148,39 +218,39 @@ export function LabAssistantPage(): React.JSX.Element {
       setNewTaskTitle('')
       setNewTaskDependency('')
     }).catch((error: unknown) => {
-      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not create that task.')
+      setAssistantError(error instanceof Error ? error.message : 'The assistant could not create that task.')
     })
   }
   const updateTask = (taskId: string, status: 'ready' | 'review' | 'done'): void => {
     setAssistantError('')
     void OpenCode.updateLabAssistantTask(taskId, { status }).then(setAssistant).catch((error: unknown) => {
-      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not update that task.')
+      setAssistantError(error instanceof Error ? error.message : 'The assistant could not update that task.')
     })
   }
   const assignTask = (taskId: string, threadId: string): void => {
     if (!threadId) return
     setAssistantError('')
     void OpenCode.assignLabAssistantTask(taskId, threadId).then(setAssistant).catch((error: unknown) => {
-      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not assign that task.')
+      setAssistantError(error instanceof Error ? error.message : 'The assistant could not assign that task.')
     })
   }
   const answerQuestion = (questionId: string, answerId: string): void => {
     setAssistantError('')
     void OpenCode.answerLabAssistant(questionId, answerId).then(setAssistant).catch((error: unknown) => {
-      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not record that decision.')
+      setAssistantError(error instanceof Error ? error.message : 'The assistant could not record that decision.')
     })
   }
   const saveWorkflow = (): void => {
     if (!workflowDraft) return
     setAssistantError('')
     void OpenCode.configureLabAssistantWorkflow(workflowDraft).then(setAssistant).catch((error: unknown) => {
-      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not save that workflow.')
+      setAssistantError(error instanceof Error ? error.message : 'The assistant could not save that workflow.')
     })
   }
   const startWorkflow = (taskId: string): void => {
     setAssistantError('')
     void OpenCode.startLabAssistantWorkflow(taskId).then(setAssistant).catch((error: unknown) => {
-      setAssistantError(error instanceof Error ? error.message : 'The Lab Assistant could not start that workflow.')
+      setAssistantError(error instanceof Error ? error.message : 'The assistant could not start that workflow.')
     })
   }
 
@@ -191,13 +261,30 @@ export function LabAssistantPage(): React.JSX.Element {
       <header className="product-header">
         <div>
           <span className="product-eyebrow">Orchestration</span>
-          <h1>Lab Assistant</h1>
-          <p>Plan work across projects, resolve dependencies, and hand ready tasks to the right agent.</p>
+          <h1>Assistant</h1>
+          <p>Already caught up when you arrive: what needs you, what is running, and one standing conversation that can act on all of it.</p>
+          <form
+            className="lab-task-form assistant-ask"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const text = askText.trim()
+              setAskText('')
+              void openAssistantConversation(text || undefined)
+            }}
+          >
+            <input
+              aria-label="Ask your assistant"
+              value={askText}
+              onChange={(event) => setAskText(event.target.value)}
+              placeholder="Ask your assistant — status, a task, a workflow…"
+            />
+            <button type="submit">Ask</button>
+          </form>
         </div>
         <div className="lab-assistant-counts">
           <strong>{activeTasks.length}</strong><span>active tasks</span>
           <strong>{activeIncidents.length}</strong><span>CI failures</span>
-          <strong>{openQuestions.length}</strong><span>open decisions</span>
+          <strong>{attentionCount}</strong><span>need you</span>
         </div>
       </header>
 
@@ -205,10 +292,10 @@ export function LabAssistantPage(): React.JSX.Element {
 
       <div className="lab-assistant-layout">
         <main>
-          <section className="product-section" aria-label="Lab Assistant decisions">
+          <section className="product-section" aria-label="Assistant attention">
             <div className="product-section-head">
-              <div><h2>Decisions</h2><p>Questions that block ordering or execution.</p></div>
-              <span>{openQuestions.length}</span>
+              <div><h2>Attention</h2><p>Everything waiting on you, from every control plane, in one list.</p></div>
+              <span>{attentionCount}</span>
             </div>
             <div className="lab-decision-list">
               {openQuestions.map((question) => (
@@ -224,16 +311,82 @@ export function LabAssistantPage(): React.JSX.Element {
                   </div>
                 </article>
               ))}
-              {openQuestions.length === 0 ? (
+              {pendingAsks.map((item) => (
+                <WorkflowAskRow key={`${item.run.id}:${item.seq}`} item={item} name={workflowNames.get(item.run.workflowId) ?? 'Workflow'} />
+              ))}
+              {awaitingApproval.map((workflow) => (
+                <article className="lab-decision" key={workflow.id}>
+                  <div>
+                    <strong>{workflow.name} is waiting for your approval</strong>
+                    <small>Agent-authored workflow · review the script before its triggers go live.</small>
+                  </div>
+                  <div className="lab-decision-options">
+                    <button onClick={() => showPage('workflows')}>Review script</button>
+                  </div>
+                </article>
+              ))}
+              {attentionRuns.map((run) => (
+                <article className="lab-decision" key={run.id}>
+                  <div>
+                    <strong>{workflowNames.get(run.workflowId) ?? 'A workflow'} needs attention</strong>
+                    <small>{run.error ?? 'The run stopped short.'}</small>
+                  </div>
+                  <div className="lab-decision-options">
+                    <button onClick={() => showPage('workflows')}>Open workflows</button>
+                  </div>
+                </article>
+              ))}
+              {attentionCount === 0 ? (
                 <div className="product-empty lab-quiet">
-                  <strong>Nothing needs a decision.</strong>
-                  <span>{assistant?.activities[0]?.detail ?? 'New orchestration decisions will appear here.'}</span>
+                  <strong>Nothing needs you.</strong>
+                  <span>{assistant?.activities[0]?.detail ?? 'Questions, approvals, and stuck runs will appear here.'}</span>
                 </div>
               ) : null}
             </div>
           </section>
 
-          <section className="product-section" aria-label="Lab Assistant CI monitoring">
+          <section className="product-section" aria-label="Assistant now">
+            <div className="product-section-head">
+              <div><h2>Now</h2><p>Runs and conversations in motion.</p></div>
+              <span>{activeRuns.length + busyThreads.length}</span>
+            </div>
+            <div className="lab-decision-list">
+              {activeRuns.map((run) => {
+                const lastThread = [...run.journal].reverse().find((entry) => entry.threadId)?.threadId
+                return (
+                  <article className="lab-decision" key={run.id}>
+                    <div>
+                      <strong>{workflowNames.get(run.workflowId) ?? 'Workflow'} · {run.status}</strong>
+                      <small>{run.journal.at(-1)?.label ?? 'Starting…'}</small>
+                    </div>
+                    <div className="lab-decision-options">
+                      {lastThread ? <button onClick={() => selectSession(lastThread, false)}>Thread</button> : null}
+                      <button onClick={() => showPage('workflows')}>Details</button>
+                    </div>
+                  </article>
+                )
+              })}
+              {busyThreads.map((thread) => (
+                <article className="lab-decision" key={thread.threadId}>
+                  <div>
+                    <strong>{thread.title}</strong>
+                    <small>{thread.projectPath || 'Global'}</small>
+                  </div>
+                  <div className="lab-decision-options">
+                    <button onClick={() => selectSession(thread.threadId, false)}>Open</button>
+                  </div>
+                </article>
+              ))}
+              {activeRuns.length + busyThreads.length === 0 ? (
+                <div className="product-empty lab-quiet">
+                  <strong>Nothing is running.</strong>
+                  <span>Active workflow runs and busy conversations will appear here.</span>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="product-section" aria-label="Assistant CI monitoring">
             <div className="product-section-head">
               <div><h2>CI monitoring</h2><p>GitHub Actions failures routed to their owning agents.</p></div>
               <span>{activeIncidents.length}</span>
@@ -271,7 +424,7 @@ export function LabAssistantPage(): React.JSX.Element {
             </div>
           </section>
 
-          <section className="product-section" aria-label="Lab Assistant managed workflow">
+          <section className="product-section" aria-label="Assistant managed workflow">
             <div className="product-section-head">
               <div><h2>Managed workflow</h2><p>Hand a task from planning to implementation and bounded review. Runs execute on the durable workflow engine — follow them on the Workflows page.</p></div>
             </div>
@@ -336,14 +489,14 @@ export function LabAssistantPage(): React.JSX.Element {
             ) : <div className="product-empty">Connect an agent backend to configure the managed workflow.</div>}
           </section>
 
-          <section className="product-section" aria-label="Lab Assistant tasks">
+          <section className="product-section" aria-label="Assistant tasks">
             <div className="product-section-head">
               <div><h2>Task queue</h2><p>Global and project work, ordered by readiness.</p></div>
               <span>{tasks.length}</span>
             </div>
             <form className="lab-task-form" onSubmit={createTask}>
               <input
-                aria-label="New Lab Assistant task"
+                aria-label="New assistant task"
                 value={newTaskTitle}
                 onChange={(event) => setNewTaskTitle(event.target.value)}
                 placeholder="What should happen next?"

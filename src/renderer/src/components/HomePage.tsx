@@ -225,7 +225,7 @@ export function HomePage(): React.JSX.Element {
             </button>
             <button onClick={() => showPage('lab-assistant')}>
               <span><LabMark size={18} /></span>
-              <strong>Lab Assistant</strong>
+              <strong>Assistant</strong>
               <small>Plan and orchestrate work</small>
             </button>
           </section>

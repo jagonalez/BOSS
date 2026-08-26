@@ -33,7 +33,7 @@ function commandItems(): PaletteItem[] {
 function pageItems(): PaletteItem[] {
   return [
     { id: 'go.home', label: 'Go to Home', hint: 'Go', keywords: 'threads overview continue recent', run: () => showPage('home') },
-    { id: 'go.lab-assistant', label: 'Go to Lab Assistant', hint: 'Go', keywords: 'orchestration tasks decisions', run: () => showPage('lab-assistant') },
+    { id: 'go.lab-assistant', label: 'Go to Assistant', hint: 'Go', keywords: 'orchestration tasks decisions assistant', run: () => showPage('lab-assistant') },
     { id: 'go.automations', label: 'Go to Automations', hint: 'Go', keywords: 'scheduled cron runs', run: () => showPage('automations') },
     { id: 'go.sites', label: 'Go to Sites', hint: 'Go', keywords: 'publish web deploy', run: () => showPage('sites') }
   ]

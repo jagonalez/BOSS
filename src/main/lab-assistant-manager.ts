@@ -269,7 +269,7 @@ export class LabAssistantManager {
   private notifyQuestion(question: LabAssistantQuestion): void {
     this.host.notify({
       type: 'task.needs_attention',
-      title: 'Lab Assistant needs a decision',
+      title: 'Assistant needs a decision',
       body: question.prompt,
       createdAt: question.createdAt
     })
@@ -575,7 +575,7 @@ export class LabAssistantManager {
           })
           this.host.notify({
             type: 'task.completed',
-            title: `Lab Assistant completed ${task.title}`,
+            title: `Assistant completed ${task.title}`,
             body: 'Implementation and review are complete.',
             threadId: task.assignedThreadId,
             projectPath: task.projectPath,

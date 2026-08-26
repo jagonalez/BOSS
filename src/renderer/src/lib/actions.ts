@@ -1093,6 +1093,33 @@ export async function refreshAutomations(): Promise<void> {
   }
 }
 
+/** The assistant is one persistent, global conversation — something that is
+ *  already caught up when you arrive, not a chat you re-explain yourself to.
+ *  First call creates and seeds it; every later call reopens the same thread. */
+export async function openAssistantConversation(text?: string): Promise<void> {
+  const state = appStore.getState()
+  const existingId = Object.values(state.sessionMeta).find((meta) => meta.kind === 'assistant')?.sessionId
+  const existing = existingId ? state.sessions.find((session) => session.id === existingId) : undefined
+  if (existing) {
+    selectSession(existing.id, false)
+    if (text?.trim()) await sendPrompt(text.trim(), existing.id)
+    return
+  }
+  const backendId = state.engine
+  const session = await OpenCode.createSession('Assistant', backendId, 'global')
+  applyBackendDefaults(session.id, backendId)
+  upsertSessionMeta(session.id, { kind: 'assistant', projectPath: '' })
+  await refreshSessions()
+  await refreshProviders(session.id)
+  selectSession(session.id, false)
+  const seed = [
+    '[BOSS assistant]',
+    'You are this user\'s standing BOSS assistant — one persistent conversation, not a one-off chat. Keep their work moving with the BOSS tools: see what other threads are doing (boss_threads_list, boss_threads_read), hand work to new worktree threads, author and run durable workflows (boss_workflow_*), and keep reports for results worth keeping. Be brief, act rather than narrate, and surface only what genuinely needs the user. When asked for status, check the live tools instead of answering from memory.',
+    ...(text?.trim() ? ['', 'First request:', text.trim()] : [])
+  ].join('\n')
+  await sendPrompt(seed, session.id)
+}
+
 /** Workflows are agent-authored: this opens a fresh conversation seeded with
  *  the request and the method (create → test → iterate → summarize), which is
  *  the page's only creation path. The human's job is approving the result. */

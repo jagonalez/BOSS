@@ -226,7 +226,7 @@ export interface ReviewRun {
 export interface SessionMeta {
   sessionId: string
   projectPath?: string
-  kind: 'main' | 'side' | 'fork' | 'delegate'
+  kind: 'main' | 'side' | 'fork' | 'delegate' | 'assistant'
   forkedFrom?: { sessionId: string; messageId?: string }
   gitBranch?: string
   reviews: ReviewRun[]

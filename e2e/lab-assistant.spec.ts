@@ -1,14 +1,14 @@
-import { control, expect, lastBackendCall, test } from './fixtures'
+import { backendCalls, control, expect, lastBackendCall, test } from './fixtures'
 
 async function openLabAssistant(appPage: Parameters<typeof control>[0]): Promise<void> {
-  await appPage.getByRole('button', { name: 'Lab Assistant', exact: true }).click()
-  await expect(appPage.getByRole('heading', { name: 'Lab Assistant', exact: true })).toBeVisible()
+  await appPage.getByRole('button', { name: 'Assistant', exact: true }).click()
+  await expect(appPage.getByRole('heading', { name: 'Assistant', exact: true })).toBeVisible()
 }
 
 test('Lab Assistant surfaces and records a merge-order decision', async ({ appPage }) => {
   await control(appPage).then((item) => item.resetCalls())
   await openLabAssistant(appPage)
-  const assistant = appPage.getByRole('region', { name: 'Lab Assistant decisions' })
+  const assistant = appPage.getByRole('region', { name: 'Assistant attention' })
   await expect(assistant).toBeVisible()
   await expect(assistant).toContainText('Which should merge first?')
 
@@ -30,8 +30,8 @@ test('Lab Assistant surfaces and records a merge-order decision', async ({ appPa
 test('Lab Assistant creates, unblocks, and assigns project tasks', async ({ appPage }) => {
   await control(appPage).then((item) => item.resetCalls())
   await openLabAssistant(appPage)
-  const assistant = appPage.getByRole('region', { name: 'Lab Assistant tasks' })
-  await assistant.getByRole('textbox', { name: 'New Lab Assistant task' }).fill('Monitor test failures')
+  const assistant = appPage.getByRole('region', { name: 'Assistant tasks' })
+  await assistant.getByRole('textbox', { name: 'New assistant task' }).fill('Monitor test failures')
   await assistant.getByRole('combobox', { name: 'Task project' }).selectOption({ label: 'project' })
   await assistant.getByRole('combobox', { name: 'Task dependency' }).selectOption({ label: 'After Plan task workflow' })
   await assistant.getByRole('button', { name: 'Add task' }).click()
@@ -68,7 +68,7 @@ test('Lab Assistant creates, unblocks, and assigns project tasks', async ({ appP
 
 test('Lab Assistant shows the failed CI evidence routed to an owning agent', async ({ appPage }) => {
   await openLabAssistant(appPage)
-  const assistant = appPage.getByRole('region', { name: 'Lab Assistant CI monitoring' })
+  const assistant = appPage.getByRole('region', { name: 'Assistant CI monitoring' })
   const incident = assistant.locator('article.lab-ci-incident').filter({
     has: appPage.getByText('CI', { exact: true })
   })
@@ -85,7 +85,7 @@ test('Lab Assistant shows the failed CI evidence routed to an owning agent', asy
 test('Lab Assistant saves and starts a managed planner, implementer, reviewer workflow', async ({ appPage }) => {
   await control(appPage).then((item) => item.resetCalls())
   await openLabAssistant(appPage)
-  const workflow = appPage.getByRole('region', { name: 'Lab Assistant managed workflow' })
+  const workflow = appPage.getByRole('region', { name: 'Assistant managed workflow' })
 
   // Runs execute on the durable workflow engine and live on the Workflows
   // page; this section is the role configuration plus the start action.
@@ -102,7 +102,7 @@ test('Lab Assistant saves and starts a managed planner, implementer, reviewer wo
     }
   })
 
-  const tasks = appPage.getByRole('region', { name: 'Lab Assistant tasks' })
+  const tasks = appPage.getByRole('region', { name: 'Assistant tasks' })
   const readyTask = tasks.locator('article.lab-task').filter({
     has: appPage.getByText('Plan task workflow', { exact: true })
   })
@@ -112,4 +112,29 @@ test('Lab Assistant saves and starts a managed planner, implementer, reviewer wo
     taskId: 'assistant-task-plan'
   })
   await expect(readyTask).toContainText('running')
+})
+
+test('the assistant home surfaces workflow attention and opens the standing conversation', async ({ appPage }) => {
+  await openLabAssistant(appPage)
+
+  // The workflow engine's pending ask and the approval request both land in
+  // the one Attention list.
+  const attention = appPage.getByRole('region', { name: 'Assistant attention' })
+  await expect(attention).toContainText('Mute the flaky monitor?')
+  await expect(attention).toContainText('Datadog alert watcher is waiting for your approval')
+
+  // Asking routes into one persistent global conversation, seeded once.
+  await appPage.getByRole('textbox', { name: 'Ask your assistant' }).fill('what is running right now?')
+  await appPage.getByRole('button', { name: 'Ask', exact: true }).click()
+  const created = await lastBackendCall(appPage, 'thread.create')
+  expect(created.request).toMatchObject({ type: 'thread.create', title: 'Assistant', scope: 'global' })
+  await expect
+    .poll(async () =>
+      (await backendCalls(appPage, 'thread.followups.add')).some((call) => {
+        const text = String(call.request.text ?? '')
+        return text.includes('[BOSS assistant]') && text.includes('what is running right now?')
+      })
+    )
+    .toBe(true)
+  await expect(appPage.locator('.workspace-shell')).toBeVisible()
 })
