@@ -457,6 +457,55 @@ test('shows a Codex message while Codex is still working', async ({ appPage }) =
   await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
 })
 
+test('does not reload an image-heavy Codex history while live parts stream', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  const title = 'Codex image generation performance'
+  const session = await fixture.spawnThread('codex', title)
+  const sessionId = String(session.id)
+  const messageId = 'assistant-image-heavy-e2e'
+  await appPage.locator('.session-row').filter({ hasText: title }).click()
+  await fixture.resetCalls()
+
+  await fixture.emit({
+    type: 'session.status',
+    properties: { sessionID: sessionId, status: { type: 'busy' } }
+  })
+  await fixture.emit({
+    type: 'message.updated',
+    properties: { info: { id: messageId, sessionID: sessionId, role: 'assistant' } }
+  })
+  for (let index = 0; index < 8; index += 1) {
+    await fixture.emit({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: `image-progress-${index}`,
+          type: 'text',
+          sessionID: sessionId,
+          messageID: messageId,
+          text: `Generated image concept ${index + 1}.`
+        }
+      }
+    })
+  }
+  await expect(appPage.getByText('Generated image concept 8.')).toBeVisible()
+
+  // Wait past the old 300 ms debounce. A busy thread already arrived through
+  // incremental events, so no thread.messages request should be made.
+  const checkAfter = Date.now() + 450
+  await expect.poll(async () => {
+    if (Date.now() < checkAfter) return -1
+    return (await backendCalls(appPage))
+      .filter((call) => call.request.type === 'thread.messages')
+      .length
+  }, { timeout: 1_500 }).toBe(0)
+
+  await fixture.emit({ type: 'session.idle', properties: { sessionID: sessionId } })
+  await expect.poll(async () => (await backendCalls(appPage))
+    .filter((call) => call.request.type === 'thread.messages')
+    .length).toBe(1)
+})
+
 test('keeps Codex steering between tool rounds and hides inspection screenshots', async ({ appPage }) => {
   const fixture = await control(appPage)
   await fixture.installCodexOrderingThread()

@@ -103,6 +103,20 @@ test('the prune requires both an idle thread and a trustworthy history', () => {
   )
 })
 
+test('BOSS-owned Codex threads consult stored history before starting a native read', () => {
+  const start = source.indexOf('async messagesList(threadId: string')
+  assert.ok(start > 0, 'expected messagesList')
+  const body = source.slice(start, source.indexOf('\n  async ', start + 10))
+  const storedHistory = body.indexOf("binding.backendId === 'codex'")
+  const nativeRead = body.indexOf('ensureStarted')
+  assert.ok(storedHistory > 0, 'expected the stored-history guard')
+  assert.ok(nativeRead > storedHistory, 'the guard must run before a native backend history request')
+  assert.ok(
+    body.includes('return this.transcripts.messages(threadId, limit)'),
+    'the safe path must return the sanitized TranscriptStore projection'
+  )
+})
+
 test('a send that reaches the backend restores pruning', () => {
   // Left suspended, one failed send would disable pruning for the life of the
   // thread and let genuinely-removed messages linger for ever.
