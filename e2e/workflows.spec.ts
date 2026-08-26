@@ -60,8 +60,11 @@ test('new workflows are described to an agent, never written in a form', async (
   expect(created.request).toMatchObject({ type: 'thread.create', title: 'New workflow' })
   await expect
     .poll(async () =>
-      (await backendCalls(appPage, 'thread.followups.add')).some((call) => {
-        const text = String(call.request.text ?? '')
+      // An idle thread gets a direct thread.send; a busy one gets a queued
+      // follow-up. The seeded prompt is valid arriving either way.
+      (await backendCalls(appPage)).some((call) => {
+        if (call.request.type !== 'thread.send' && call.request.type !== 'thread.followups.add') return false
+        const text = JSON.stringify(call.request)
         return text.includes('[Workflow authoring request]') && text.includes('Watch CI on main')
       })
     )
@@ -84,8 +87,11 @@ test('refining goes through an agent conversation seeded with the workflow id', 
   expect(created.request).toMatchObject({ type: 'thread.create', title: 'Refine workflow · Datadog alert watcher' })
   await expect
     .poll(async () =>
-      (await backendCalls(appPage, 'thread.followups.add')).some((call) => {
-        const text = String(call.request.text ?? '')
+      // An idle thread gets a direct thread.send; a busy one gets a queued
+      // follow-up. The seeded prompt is valid arriving either way.
+      (await backendCalls(appPage)).some((call) => {
+        if (call.request.type !== 'thread.send' && call.request.type !== 'thread.followups.add') return false
+        const text = JSON.stringify(call.request)
         return text.includes('[Workflow refinement request]') && text.includes('workflow-watcher-seed')
       })
     )
