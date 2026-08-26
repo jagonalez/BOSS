@@ -26,6 +26,15 @@ test('a stored image reads back through the url it was given', () => {
   assert.deepEqual(read.data, Buffer.from(PNG, 'base64'))
 })
 
+test('storing a native-history replay reuses the live image', () => {
+  const images = store()
+  const live = images.write('thread-1', 'image/png', PNG)
+  const history = images.write('thread-1', 'image/png', PNG)
+
+  assert.ok(live)
+  assert.deepEqual(history, live)
+})
+
 test('a url pointing outside the store reads nothing', () => {
   // The host and path come from the renderer, so escaping has to fail here
   // rather than reach the filesystem. A real file is planted where the escape

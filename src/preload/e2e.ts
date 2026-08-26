@@ -365,6 +365,33 @@ function codexOrderingMessages(sessionID: string): MessageWithParts[] {
         {
           id: 'computer-after-image', type: 'file', sessionID, messageID: 'assistant-codex-order-1',
           state: { status: 'completed', name: 'boss_computer', mime: 'image/png', url: image }
+        },
+        {
+          id: 'custom-image-call', type: 'tool', sessionID, messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', tool: 'image_gen', title: 'Generate two logo studies', input: { prompt: 'Two studies' } }
+        },
+        {
+          // Stable ids mirror BackendManager's projection of image blocks 1
+          // and 3 from one custom_tool_call_output. Replaying these parts below
+          // must update rather than append them.
+          id: 'tool-image-custom-image-output-1', type: 'file', sessionID, messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', name: 'Codex image 1', mime: 'image/png', url: image }
+        },
+        {
+          id: 'tool-image-custom-image-output-3', type: 'file', sessionID, messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', name: 'Codex image 2', mime: 'image/png', url: image }
+        },
+        {
+          id: 'custom-image-output', type: 'tool', sessionID, messageID: 'assistant-codex-order-1',
+          state: {
+            status: 'completed',
+            output: [
+              { type: 'text', text: 'First study.' },
+              { type: 'text', text: '[Image shown above: image/png]' },
+              { type: 'text', text: 'Second study.' },
+              { type: 'text', text: '[Image shown above: image/png]' }
+            ]
+          }
         }
       ]
     }

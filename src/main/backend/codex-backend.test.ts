@@ -241,17 +241,13 @@ test('a tool image becomes a content block rather than base64 in the text', () =
     !/return\s*\{\s*text,\s*images\s*\}/.test(body),
     'dynamicToolOutput must not return the shape nothing downstream reads'
   )
-  assert.ok(
-    body.includes("{ type: 'text', text }"),
-    'the surviving text should be a text block'
-  )
-  assert.ok(body.includes('dataUrlImage('), 'an image should be split out of its data URL')
+  assert.ok(body.includes('codexToolOutput(item.contentItems)'), 'dynamic output should use the shared ordered adapter')
 
-  // The store is handed a mime and base64, so the data URL has to be taken
-  // apart rather than passed on whole.
-  const helper = source.slice(source.indexOf('function dataUrlImage('))
-  assert.ok(helper.includes("type: 'image'"), 'the block should be an image block')
-  assert.ok(/mimeType/.test(helper) && /data/.test(helper), 'it should carry mimeType and data')
+  const custom = source.slice(
+    source.indexOf("item.type === 'customToolCallOutput'"),
+    source.indexOf("if (item.type === 'commandExecution')")
+  )
+  assert.ok(custom.includes('codexToolOutput(item.output)'), 'snake-case custom output should use the image adapter too')
 })
 
 test('title generation is a bounded structured turn in an ephemeral thread', () => {
