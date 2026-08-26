@@ -6,6 +6,7 @@ import test from 'node:test'
 import type { GitHubDelivery } from '../shared/automation-trigger'
 import type { BossEvent } from '../shared/notification'
 import type { SupervisedThread } from '../shared/supervision'
+import type { LabAssistantWorkflowConfig, LabAssistantWorkflowRole } from '../shared/lab-assistant'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
 import { LabAssistantManager, type LabAssistantHost } from './lab-assistant-manager.ts'
 
@@ -81,15 +82,30 @@ function fixture(
   manager: LabAssistantManager
   messages: Array<{ threadId: string; message: string }>
   notifications: BossEvent[]
+  stages: Array<{ role: LabAssistantWorkflowRole; backendId: string; sourceThreadId?: string; threadId: string }>
+  dispatches: Array<{ threadId: string; role: LabAssistantWorkflowRole; sourceThreadId?: string; instruction: string }>
+  verdicts: Map<string, { verdict: 'pass' | 'changes-requested'; notes: string[] }>
 } {
   const root = mkdtempSync(join(tmpdir(), 'boss-lab-assistant-manager-'))
   const messages: Array<{ threadId: string; message: string }> = []
   const notifications: BossEvent[] = []
+  const stages: Array<{ role: LabAssistantWorkflowRole; backendId: string; sourceThreadId?: string; threadId: string }> = []
+  const dispatches: Array<{ threadId: string; role: LabAssistantWorkflowRole; sourceThreadId?: string; instruction: string }> = []
+  const verdicts = new Map<string, { verdict: 'pass' | 'changes-requested'; notes: string[] }>()
   const host: LabAssistantHost = {
     threads: () => threads,
     messageAgent: async (threadId, message) => { messages.push({ threadId, message }) },
     ...(refreshPullRequests ? { refreshPullRequests } : {}),
     ...(inspectWorkflowRun ? { inspectWorkflowRun } : {}),
+    createWorkflowStage: async (input) => {
+      const threadId = `${input.role}-${stages.length + 1}`
+      stages.push({ role: input.role, backendId: input.backendId, sourceThreadId: input.sourceThreadId, threadId })
+      return threadId
+    },
+    runWorkflowStage: async (threadId, role, _agent, instruction, sourceThreadId) => {
+      dispatches.push({ threadId, role, sourceThreadId, instruction })
+    },
+    workflowReviewVerdict: async (threadId) => verdicts.get(threadId),
     emit: () => {},
     notify: (event) => { notifications.push(event) }
   }
@@ -97,8 +113,22 @@ function fixture(
     root,
     manager: new LabAssistantManager(join(root, 'assistant.json'), host, () => 1_800_000_000_000),
     messages,
-    notifications
+    notifications,
+    stages,
+    dispatches,
+    verdicts
   }
+}
+
+const managedWorkflow: LabAssistantWorkflowConfig = {
+  planner: { backendId: 'claude' },
+  implementer: { backendId: 'codex' },
+  reviewers: [{ backendId: 'lab' }],
+  maxReviewCycles: 2
+}
+
+function completedResult(threadId: string, status = 'completed'): Record<string, unknown> {
+  return { type: 'thread.result', properties: { threadId, result: { status } } }
 }
 
 test('two clean PRs create one durable merge-order question and persist the answer', async () => {
@@ -151,6 +181,106 @@ test('a conflicted PR is routed once to the matching worktree owner', async () =
     assert.equal(messages[0].threadId, 'agent-codex')
     assert.match(messages[0].message, /conflict/i)
     assert.equal((await manager.snapshot()).pullRequests[0].conflictRoutedTo, 'agent-codex')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('managed workflow persists and advances planner to implementer to reviewer pass', async () => {
+  const { root, manager, stages, dispatches, verdicts } = fixture()
+  try {
+    let snapshot = await manager.createTask({ title: 'Build managed workflow', projectPath: '/tmp/BOSS' })
+    const taskId = snapshot.tasks[0].id
+    await manager.configureWorkflow(managedWorkflow)
+    snapshot = await manager.startWorkflow(taskId)
+    assert.equal(snapshot.workflowRuns[0].stage, 'planning')
+    assert.equal(stages[0].backendId, 'claude')
+    assert.match(dispatches[0].instruction, /Do not edit files/)
+
+    await manager.observeBackendEvent(completedResult(stages[0].threadId))
+    snapshot = await manager.snapshot()
+    assert.equal(snapshot.workflowRuns[0].stage, 'implementing')
+    assert.equal(stages[1].role, 'implementer')
+    assert.equal(stages[1].sourceThreadId, stages[0].threadId)
+    assert.equal(snapshot.tasks[0].assignedThreadId, stages[1].threadId)
+
+    await manager.observeBackendEvent(completedResult(stages[1].threadId))
+    snapshot = await manager.snapshot()
+    assert.equal(snapshot.workflowRuns[0].stage, 'reviewing')
+    assert.equal(stages[2].role, 'reviewer')
+    assert.equal(stages[2].sourceThreadId, stages[1].threadId)
+    assert.match(dispatches[2].instruction, /exactly PASS or CHANGES_REQUESTED/)
+
+    verdicts.set(stages[2].threadId, { verdict: 'pass', notes: [] })
+    await manager.observeBackendEvent(completedResult(stages[2].threadId))
+    snapshot = await manager.snapshot()
+    assert.equal(snapshot.workflowRuns[0].status, 'completed')
+    assert.equal(snapshot.workflowRuns[0].reviews[0].status, 'passed')
+    assert.equal(snapshot.tasks[0].status, 'done')
+
+    const restored = new LabAssistantManager(join(root, 'assistant.json'), {
+      threads: () => [], messageAgent: async () => {}, emit: () => {}, notify: () => {}
+    })
+    const durable = await restored.snapshot()
+    assert.equal(durable.workflowConfig?.implementer.backendId, 'codex')
+    assert.equal(durable.workflowRuns[0].status, 'completed')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('review changes return to the same implementer before a second review cycle', async () => {
+  const { root, manager, stages, dispatches, verdicts } = fixture()
+  try {
+    const created = await manager.createTask({ title: 'Revise until approved', projectPath: '/tmp/BOSS' })
+    const taskId = created.tasks[0].id
+    await manager.configureWorkflow(managedWorkflow)
+    await manager.startWorkflow(taskId)
+    await manager.observeBackendEvent(completedResult(stages[0].threadId))
+    const implementerThreadId = stages[1].threadId
+    await manager.observeBackendEvent(completedResult(implementerThreadId))
+    const firstReviewerThreadId = stages[2].threadId
+    verdicts.set(firstReviewerThreadId, { verdict: 'changes-requested', notes: ['Add the missing regression test.'] })
+
+    await manager.observeBackendEvent(completedResult(firstReviewerThreadId))
+    let snapshot = await manager.snapshot()
+    assert.equal(snapshot.workflowRuns[0].stage, 'implementing')
+    assert.equal(snapshot.workflowRuns[0].reviewCycle, 2)
+    assert.equal(snapshot.workflowRuns[0].implementerThreadId, implementerThreadId)
+    assert.equal(stages.filter((stage) => stage.role === 'implementer').length, 1)
+    assert.equal(dispatches.at(-1)?.threadId, implementerThreadId)
+    assert.equal(dispatches.at(-1)?.sourceThreadId, firstReviewerThreadId)
+    assert.match(dispatches.at(-1)?.instruction ?? '', /missing regression test/)
+
+    await manager.observeBackendEvent(completedResult(implementerThreadId))
+    const secondReviewerThreadId = stages[3].threadId
+    verdicts.set(secondReviewerThreadId, { verdict: 'pass', notes: [] })
+    await manager.observeBackendEvent(completedResult(secondReviewerThreadId))
+    snapshot = await manager.snapshot()
+    assert.equal(snapshot.workflowRuns[0].status, 'completed')
+    assert.deepEqual(snapshot.workflowRuns[0].reviews.map((review) => review.status), ['changes-requested', 'passed'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('managed workflow asks the user when review changes exhaust the cycle limit', async () => {
+  const { root, manager, stages, verdicts, notifications } = fixture()
+  try {
+    const created = await manager.createTask({ title: 'Bounded review', projectPath: '/tmp/BOSS' })
+    await manager.configureWorkflow({ ...managedWorkflow, maxReviewCycles: 1 })
+    await manager.startWorkflow(created.tasks[0].id)
+    await manager.observeBackendEvent(completedResult(stages[0].threadId))
+    await manager.observeBackendEvent(completedResult(stages[1].threadId))
+    verdicts.set(stages[2].threadId, { verdict: 'changes-requested', notes: ['Still unsafe.'] })
+    await manager.observeBackendEvent(completedResult(stages[2].threadId))
+
+    const snapshot = await manager.snapshot()
+    assert.equal(snapshot.workflowRuns[0].status, 'needs-attention')
+    assert.equal(snapshot.questions.at(-1)?.status, 'open')
+    assert.match(snapshot.questions.at(-1)?.prompt ?? '', /still requests changes/i)
+    assert.ok(notifications.some((event) => event.type === 'task.needs_attention'))
+    assert.equal(stages.length, 3)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

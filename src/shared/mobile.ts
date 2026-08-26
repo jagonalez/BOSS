@@ -33,7 +33,8 @@ const LOCAL_REQUESTS = new Set<BackendRequest['type']>([
   'assistant.answer',
   'assistant.task.create',
   'assistant.task.update',
-  'assistant.task.assign'
+  'assistant.task.assign',
+  'assistant.workflow.start'
 ])
 
 /** Pairing is a control-only relationship, so it also exposes the thread

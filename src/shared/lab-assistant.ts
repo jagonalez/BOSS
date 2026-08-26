@@ -1,7 +1,53 @@
+import type { BackendId, BackendModelPreference } from './backend'
+
 export type LabAssistantPullRequestState = 'open' | 'merged' | 'closed'
 export type LabAssistantMergeability = 'clean' | 'conflicted' | 'unknown'
 export type LabAssistantTaskStatus = 'inbox' | 'ready' | 'blocked' | 'running' | 'review' | 'done'
 export type LabAssistantCiConclusion = 'failure' | 'timed_out' | 'action_required' | 'startup_failure' | 'success'
+export type LabAssistantWorkflowRole = 'planner' | 'implementer' | 'reviewer'
+export type LabAssistantWorkflowStatus = 'running' | 'needs-attention' | 'completed' | 'stopped'
+export type LabAssistantWorkflowStage = 'planning' | 'implementing' | 'reviewing'
+
+export interface LabAssistantAgentConfig {
+  backendId: BackendId
+  model?: BackendModelPreference
+  instruction?: string
+}
+
+export interface LabAssistantWorkflowConfig {
+  planner: LabAssistantAgentConfig
+  implementer: LabAssistantAgentConfig
+  reviewers: LabAssistantAgentConfig[]
+  maxReviewCycles: number
+}
+
+export interface LabAssistantWorkflowReview {
+  cycle: number
+  index: number
+  threadId: string
+  backendId: BackendId
+  status: 'running' | 'passed' | 'changes-requested' | 'no-verdict' | 'failed'
+  notes?: string
+  startedAt: number
+  finishedAt?: number
+}
+
+export interface LabAssistantWorkflowRun {
+  id: string
+  taskId: string
+  title: string
+  projectPath: string
+  status: LabAssistantWorkflowStatus
+  stage: LabAssistantWorkflowStage
+  config: LabAssistantWorkflowConfig
+  plannerThreadId?: string
+  implementerThreadId?: string
+  reviewCycle: number
+  reviews: LabAssistantWorkflowReview[]
+  createdAt: number
+  updatedAt: number
+  completedAt?: number
+}
 
 export interface LabAssistantTask {
   id: string
@@ -106,13 +152,14 @@ export interface LabAssistantQuestion {
 
 export interface LabAssistantActivity {
   id: string
-  kind: 'pull-request' | 'ci' | 'agent-message' | 'decision' | 'task'
+  kind: 'pull-request' | 'ci' | 'agent-message' | 'decision' | 'task' | 'workflow'
   title: string
   detail: string
   repository?: string
   taskId?: string
   pullRequestId?: string
   ciIncidentId?: string
+  workflowRunId?: string
   threadId?: string
   createdAt: number
 }
@@ -128,4 +175,6 @@ export interface LabAssistantSnapshot {
   activities: LabAssistantActivity[]
   /** Keyed by "owner/repo:base-branch". */
   mergeOrders: Record<string, string[]>
+  workflowConfig?: LabAssistantWorkflowConfig
+  workflowRuns: LabAssistantWorkflowRun[]
 }

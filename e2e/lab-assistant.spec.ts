@@ -81,3 +81,36 @@ test('Lab Assistant shows the failed CI evidence routed to an owning agent', asy
   await expect(incident).toContainText('Source thread')
   await expect(incident.getByRole('button', { name: 'Open CI run 19' })).toBeVisible()
 })
+
+test('Lab Assistant saves and starts a managed planner, implementer, reviewer workflow', async ({ appPage }) => {
+  await control(appPage).then((item) => item.resetCalls())
+  await openLabAssistant(appPage)
+  const workflow = appPage.getByRole('region', { name: 'Lab Assistant managed workflow' })
+
+  await expect(workflow).toContainText('Previous managed task')
+  await expect(workflow).toContainText('review cycle 1/2')
+  await workflow.getByRole('spinbutton', { name: 'Maximum review cycles' }).fill('3')
+  await workflow.getByRole('button', { name: 'Save workflow' }).click()
+  expect((await lastBackendCall(appPage, 'assistant.workflow.configure')).request).toMatchObject({
+    type: 'assistant.workflow.configure',
+    config: {
+      planner: { backendId: 'claude' },
+      implementer: { backendId: 'codex' },
+      reviewers: [{ backendId: 'lab' }],
+      maxReviewCycles: 3
+    }
+  })
+
+  const tasks = appPage.getByRole('region', { name: 'Lab Assistant tasks' })
+  const readyTask = tasks.locator('article.lab-task').filter({
+    has: appPage.getByText('Plan task workflow', { exact: true })
+  })
+  await readyTask.getByRole('button', { name: 'Start workflow' }).click()
+  expect((await lastBackendCall(appPage, 'assistant.workflow.start')).request).toEqual({
+    type: 'assistant.workflow.start',
+    taskId: 'assistant-task-plan'
+  })
+  await expect(workflow).toContainText('Plan task workflow')
+  await expect(workflow).toContainText('planning')
+  await expect(readyTask).toContainText('running')
+})

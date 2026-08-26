@@ -37,6 +37,14 @@ const scripted: EvalRuntime<LabAssistantEvalInput, LabAssistantEvalObservation> 
         agent_id: 'agent-codex',
         message: 'The CI workflow failed on PR #22. Investigate Electron end-to-end; the failing step is Run npm run test:e2e.'
       })
+    } else if (context.scenarioId === 'lab-assistant.start-managed-workflow') {
+      input.world.execute('lab_assistant_start_workflow', {
+        work_item_id: 'work-managed',
+        planner_agent_id: 'agent-claude',
+        implementer_agent_id: 'agent-codex',
+        reviewer_agent_ids: ['agent-lab'],
+        max_review_cycles: 2
+      })
     } else {
       input.world.execute('lab_assistant_prepare_release', {
         project_id: 'boss',
@@ -65,6 +73,6 @@ test('simulated releases cannot dispatch before user approval', () => {
 
 test('the initial Lab Assistant scenarios grade durable actions and final state', async () => {
   const report = await runEvalSuite(scripted, LAB_ASSISTANT_EVAL_SCENARIOS)
-  assert.equal(report.summary.total, 4)
-  assert.equal(report.summary.passed, 4)
+  assert.equal(report.summary.total, 5)
+  assert.equal(report.summary.passed, 5)
 })
