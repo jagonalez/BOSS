@@ -1093,6 +1093,14 @@ export async function refreshAutomations(): Promise<void> {
   }
 }
 
+export async function refreshWorkflows(): Promise<void> {
+  try {
+    appStore.setState({ workflows: await OpenCode.workflowsList() })
+  } catch {
+    /* Workflows may still be starting during the first renderer refresh. */
+  }
+}
+
 export async function refreshReports(): Promise<void> {
   try {
     appStore.setState({ reports: await OpenCode.reportsList() })

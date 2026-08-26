@@ -145,8 +145,9 @@ test('the phone has a Lab Assistant inbox with durable decision actions', () => 
   assert.match(script, /type: 'assistant\.task\.update'/)
   assert.match(script, /type: 'assistant\.task\.assign'/)
   assert.match(script, /type: 'assistant\.workflow\.start'/)
-  assert.match(script, /Managed workflow/)
-  assert.match(script, /assistant\.workflowRuns/)
+  // Managed runs execute on the workflow engine now; the phone keeps the
+  // start action but no longer renders a run strip of its own.
+  assert.doesNotMatch(script, /assistant\.workflowRuns/)
   assert.match(script, /Start workflow/)
   assert.match(script, /function renderAssistant/)
   assert.match(script, /Task queue/)

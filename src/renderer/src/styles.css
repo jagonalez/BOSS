@@ -11396,3 +11396,52 @@ select:hover {
   font-size: 12px;
   padding: 3px 6px;
 }
+
+/* ---------------------------------------------------------------- workflows */
+
+.workflow-script {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  min-height: 200px;
+  resize: vertical;
+  white-space: pre;
+}
+
+.workflow-budget-row {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.workflow-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.workflow-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  font-size: 12px;
+}
+
+.workflow-answer {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.workflow-answer input {
+  flex: 1;
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--line-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: inherit;
+}

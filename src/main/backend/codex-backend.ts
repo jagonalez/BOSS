@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel, ThreadTitleGenerationOptions } from './backend'
 import { BACKEND_IDS, type BackendMessageOptions, type BackendModeId } from '@shared/backend'
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
-import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
@@ -199,6 +199,73 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
         body: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.body }
       },
       required: ['reportId'],
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'boss_workflow_list',
+    description: WORKFLOW_TOOL_DESCRIPTIONS.list,
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+  },
+  {
+    type: 'function',
+    name: 'boss_workflow_create',
+    description: WORKFLOW_TOOL_DESCRIPTIONS.create,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.name },
+        description: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.description },
+        script: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.script },
+        cron: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.cron },
+        eventType: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.eventType },
+        eventFilters: { type: 'object', description: WORKFLOW_TOOL_DESCRIPTIONS.eventFilters }
+      },
+      required: ['name', 'script'],
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'boss_workflow_update',
+    description: WORKFLOW_TOOL_DESCRIPTIONS.update,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId },
+        name: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.name },
+        description: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.description },
+        script: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.script },
+        cron: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.cron },
+        eventType: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.eventType },
+        eventFilters: { type: 'object', description: WORKFLOW_TOOL_DESCRIPTIONS.eventFilters }
+      },
+      required: ['workflowId'],
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'boss_workflow_run',
+    description: WORKFLOW_TOOL_DESCRIPTIONS.run,
+    inputSchema: {
+      type: 'object',
+      properties: { workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId } },
+      required: ['workflowId'],
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'boss_workflow_runs',
+    description: WORKFLOW_TOOL_DESCRIPTIONS.runs,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId },
+        limit: { type: 'integer', minimum: 1, maximum: 20, default: 5, description: WORKFLOW_TOOL_DESCRIPTIONS.limit }
+      },
       additionalProperties: false
     }
   },

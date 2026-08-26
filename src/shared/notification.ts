@@ -11,6 +11,8 @@ export type BossEventType =
   | 'automation.completed'
   | 'automation.failed'
   | 'review.completed'
+  | 'workflow.completed'
+  | 'workflow.needs_attention'
 
 export interface BossEvent {
   type: BossEventType
@@ -33,7 +35,8 @@ const ATTENTION_EVENTS = new Set<BossEventType>([
   'task.failed',
   'task.needs_attention',
   'automation.failed',
-  'review.completed'
+  'review.completed',
+  'workflow.needs_attention'
 ])
 
 /** Whether an event should reach a channel set to this level. */

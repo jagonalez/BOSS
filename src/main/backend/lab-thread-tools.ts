@@ -1,7 +1,7 @@
 // Relative, with the extension, so this module also loads under Node's
 // type-stripping test runner, which cannot resolve the @shared bundler alias.
 // @ts-expect-error Application builds use bundler resolution.
-import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '../../shared/thread-bus.ts'
+import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '../../shared/thread-bus.ts'
 import type { LabToolFunction } from './lab-tools'
 
 /** Lab's view of BOSS host tools.
@@ -130,6 +130,80 @@ export const THREAD_TOOL_DEFINITIONS: LabToolFunction[] = [
           body: { type: 'string', description: REPORT_TOOL_DESCRIPTIONS.body }
         },
         required: ['reportId']
+      }
+    }
+  }
+,
+  {
+    type: 'function',
+    function: {
+      name: 'boss_workflow_list',
+      description: WORKFLOW_TOOL_DESCRIPTIONS.list,
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'boss_workflow_create',
+      description: WORKFLOW_TOOL_DESCRIPTIONS.create,
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.name },
+          description: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.description },
+          script: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.script },
+          cron: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.cron },
+          eventType: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.eventType },
+          eventFilters: { type: 'object', description: WORKFLOW_TOOL_DESCRIPTIONS.eventFilters }
+        },
+        required: ['name', 'script']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'boss_workflow_update',
+      description: WORKFLOW_TOOL_DESCRIPTIONS.update,
+      parameters: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId },
+          name: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.name },
+          description: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.description },
+          script: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.script },
+          cron: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.cron },
+          eventType: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.eventType },
+          eventFilters: { type: 'object', description: WORKFLOW_TOOL_DESCRIPTIONS.eventFilters }
+        },
+        required: ['workflowId']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'boss_workflow_run',
+      description: WORKFLOW_TOOL_DESCRIPTIONS.run,
+      parameters: {
+        type: 'object',
+        properties: { workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId } },
+        required: ['workflowId']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'boss_workflow_runs',
+      description: WORKFLOW_TOOL_DESCRIPTIONS.runs,
+      parameters: {
+        type: 'object',
+        properties: {
+          workflowId: { type: 'string', description: WORKFLOW_TOOL_DESCRIPTIONS.workflowId },
+          limit: { type: 'integer', description: WORKFLOW_TOOL_DESCRIPTIONS.limit }
+        }
       }
     }
   }

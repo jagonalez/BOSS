@@ -611,6 +611,11 @@ export class ClaudeBackend implements Backend {
       'mcp__boss_thread_bus__boss_git_create_change_request',
       'mcp__boss_thread_bus__boss_reports_create',
       'mcp__boss_thread_bus__boss_reports_update',
+      'mcp__boss_thread_bus__boss_workflow_list',
+      'mcp__boss_thread_bus__boss_workflow_create',
+      'mcp__boss_thread_bus__boss_workflow_update',
+      'mcp__boss_thread_bus__boss_workflow_run',
+      'mcp__boss_thread_bus__boss_workflow_runs',
       ...QA_TOOL_DEFINITIONS.map((tool) => `mcp__boss_thread_bus__${tool.name}`),
       ...(this.threadBus?.agentToolNames() ?? []).map((name) => `mcp__boss_thread_bus__${name}`)
     ]

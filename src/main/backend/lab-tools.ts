@@ -125,7 +125,8 @@ export const LAB_TOOL_DEFINITIONS: LabToolFunction[] = [
         properties: {
           instruction: { type: 'string', description: 'The task for the sub-agent, stated in full with any context it needs.' },
           title: { type: 'string', description: 'Short name, e.g. "write the parser tests".' },
-          model: { type: 'string', description: 'Model for the sub-agent, e.g. a stronger one for work that writes code. Omit to use this thread\'s model.' }
+          model: { type: 'string', description: 'Model for the sub-agent, e.g. a stronger one for work that writes code. Omit to use this thread\'s model.' },
+          wait: { type: 'boolean', description: 'Pass false to spawn in the background and keep working; collect results later with wait_subagents. Default true: block until the sub-agent finishes.' }
         },
         required: ['instruction']
       }
