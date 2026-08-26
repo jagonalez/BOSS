@@ -159,10 +159,25 @@ const labAssistant = new LabAssistantManager(
     },
     refreshPullRequests: (repository) => listGitHubPullRequests(repository),
     inspectWorkflowRun: (repository, runId, attempt) => inspectGitHubWorkflowRun(repository, runId, attempt),
-    createWorkflowStage: async (input) => (await backendMgr.createLabAssistantStage(input)).id,
-    runWorkflowStage: (threadId, role, agent, instruction, sourceThreadId) =>
-      backendMgr.runLabAssistantStage(threadId, role, agent, instruction, sourceThreadId),
-    workflowReviewVerdict: (threadId) => backendMgr.labAssistantReviewVerdict(threadId),
+    // The managed pipeline runs on the durable workflow engine; passing an
+    // existing workflowId updates that task's pipeline instead of minting a
+    // new one. Referenced before workflowEngine's declaration below, which is
+    // safe because it is only called after startup completes.
+    startTaskWorkflow: async (input) => {
+      const definition = {
+        name: input.name,
+        projectPath: input.projectPath,
+        script: input.script,
+        triggers: [],
+        overlapPolicy: 'skip' as const,
+        ...(input.budget ? { budget: input.budget } : {})
+      }
+      const workflow = input.workflowId
+        ? await workflowEngine.update(input.workflowId, definition)
+        : await workflowEngine.create(definition, 'builtin', { enabled: false })
+      const run = await workflowEngine.runNow(workflow.id)
+      return { workflowId: workflow.id, runId: run.id }
+    },
     emit: (snapshot) => backendMgr.emit({ type: 'assistant.updated', properties: { snapshot } }),
     notify: (event) => notifications.publish(event)
   }

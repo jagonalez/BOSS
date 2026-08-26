@@ -158,7 +158,7 @@ var threadTitles = {};
 var automations = { automations: [], runs: [] };
 var reports = { reports: [] };
 var reportDetails = {};
-var assistant = { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {}, workflowRuns: [] };
+var assistant = { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {} };
 var messages = {};
 var permissions = {};
 var busy = {};
@@ -343,7 +343,7 @@ function refreshReports() {
 
 function refreshAssistant() {
   return api({ type: 'assistant.snapshot' }).then(function (snapshot) {
-    assistant = snapshot || { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {}, workflowRuns: [] };
+    assistant = snapshot || { tasks: [], taskPlans: {}, pullRequests: [], ciIncidents: [], questions: [], activities: [], mergeOrders: {} };
     if (view.name === 'assistant') render();
   });
 }
@@ -538,18 +538,6 @@ function renderAssistant() {
       '<a class="btn" style="display:inline-block;margin-top:8px;text-decoration:none" target="_blank" rel="noreferrer" href="' + esc(incident.url) + '">Open run</a></div>';
   });
   if (!incidents.length) html += '<div class="empty">No workflow failures observed.</div>';
-  html += '<div class="section">Managed workflow</div>';
-  (assistant.workflowRuns || []).slice(0, 6).forEach(function (run) {
-    html += '<div class="card"><div class="row"><span class="badge ' + esc(run.status) + '">' + esc(run.status) + '</span>' +
-      '<div style="flex:1;min-width:0"><div class="title">' + esc(run.title) + '</div><div class="sub">' +
-      esc(run.stage) + ' · review cycle ' + esc(run.reviewCycle) + '/' + esc(run.config.maxReviewCycles) + '</div></div></div>';
-    var latestReview = run.reviews && run.reviews.length ? run.reviews[run.reviews.length - 1] : null;
-    html += '<div class="row" style="margin-top:8px;flex-wrap:wrap">' +
-      (run.plannerThreadId ? '<button class="btn" onclick="openThread(\\\'' + run.plannerThreadId + '\\\')">Plan</button>' : '') +
-      (run.implementerThreadId ? '<button class="btn" onclick="openThread(\\\'' + run.implementerThreadId + '\\\')">Implementation</button>' : '') +
-      (latestReview ? '<button class="btn" onclick="openThread(\\\'' + latestReview.threadId + '\\\')">Review</button>' : '') + '</div></div>';
-  });
-  if (!(assistant.workflowRuns || []).length) html += '<div class="empty">No managed workflow runs yet.</div>';
   html += '<div class="section">Task queue</div>';
   if (accessRole === 'control') {
     var projects = {};

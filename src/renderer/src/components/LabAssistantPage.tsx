@@ -5,7 +5,7 @@ import type { LabAssistantAgentConfig, LabAssistantSnapshot, LabAssistantTaskSta
 import { appStore, useStore } from '../state/AppState'
 import { OpenCode } from '../lib/opencode'
 import { projectName } from '../lib/project-name'
-import { refreshBackendModels, selectSession } from '../lib/actions'
+import { refreshBackendModels } from '../lib/actions'
 import { ModelSelect } from './ModelSelect'
 
 function timeAgo(timestamp: number): string {
@@ -185,7 +185,6 @@ export function LabAssistantPage(): React.JSX.Element {
   }
 
   const availableBackends = backends.filter((backend) => backend.available)
-  const workflowRuns = assistant?.workflowRuns ?? []
 
   return (
     <div className="product-page lab-assistant-page">
@@ -274,8 +273,7 @@ export function LabAssistantPage(): React.JSX.Element {
 
           <section className="product-section" aria-label="Lab Assistant managed workflow">
             <div className="product-section-head">
-              <div><h2>Managed workflow</h2><p>Hand a task from planning to implementation and bounded review.</p></div>
-              <span>{workflowRuns.filter((run) => run.status === 'running').length} running</span>
+              <div><h2>Managed workflow</h2><p>Hand a task from planning to implementation and bounded review. Runs execute on the durable workflow engine — follow them on the Workflows page.</p></div>
             </div>
             {workflowDraft && availableBackends.length ? (
               <div className="lab-workflow-editor">
@@ -336,19 +334,6 @@ export function LabAssistantPage(): React.JSX.Element {
                 </div>
               </div>
             ) : <div className="product-empty">Connect an agent backend to configure the managed workflow.</div>}
-            <div className="lab-workflow-runs">
-              {workflowRuns.slice(0, 6).map((run) => (
-                <article className={`lab-workflow-run ${run.status}`} key={run.id}>
-                  <span>{run.status}</span>
-                  <div><strong>{run.title}</strong><small>{run.stage} · review cycle {run.reviewCycle}/{run.config.maxReviewCycles}</small></div>
-                  <div className="lab-task-actions">
-                    {run.plannerThreadId ? <button type="button" onClick={() => selectSession(run.plannerThreadId!, false)}>Plan</button> : null}
-                    {run.implementerThreadId ? <button type="button" onClick={() => selectSession(run.implementerThreadId!, false)}>Implementation</button> : null}
-                    {run.reviews.at(-1)?.threadId ? <button type="button" onClick={() => selectSession(run.reviews.at(-1)!.threadId, false)}>Review</button> : null}
-                  </div>
-                </article>
-              ))}
-            </div>
           </section>
 
           <section className="product-section" aria-label="Lab Assistant tasks">

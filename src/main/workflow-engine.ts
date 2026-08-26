@@ -114,6 +114,9 @@ export class WorkflowEngine {
   private readonly executions = new Map<string, LiveExecution>()
   private readonly waiters = new Map<string, Waiter>()
   private readonly agentThreads = new Map<string, { runId: string; seq: number }>()
+  /** Outcomes that arrived before their step finished registering — a very
+   *  fast backend can beat beginAgent's bookkeeping. Consumed on register. */
+  private readonly earlyOutcomes = new Map<string, AgentOutcome>()
   private started = false
   private stopped = false
   private readonly store: WorkflowStore
@@ -625,7 +628,9 @@ export class WorkflowEngine {
       else waiter.resolve(entry.result ?? null)
       return
     }
-    if (isActive(run.status)) this.launch(run)
+    // Relaunch only when no script instance is live; a live one either holds
+    // the waiter (handled above) or will read the journal when it gets there.
+    if (!this.executions.has(run.id) && isActive(run.status)) this.launch(run)
   }
 
   /** Derive the run status from what its journal is currently doing. */
@@ -657,6 +662,16 @@ export class WorkflowEngine {
     entry.threadId = threadId
     if (worktreeId) entry.worktreeId = worktreeId
     this.agentThreads.set(threadId, { runId: run.id, seq: entry.seq })
+    await this.consumeEarlyOutcome(threadId, run, entry)
+  }
+
+  /** Settle a step whose completion beat its registration. */
+  private async consumeEarlyOutcome(threadId: string, run: WorkflowRun, entry: JournalEntry): Promise<void> {
+    const early = this.earlyOutcomes.get(threadId)
+    if (!early) return
+    this.earlyOutcomes.delete(threadId)
+    this.agentThreads.delete(threadId)
+    await this.settleAgentEntry(run, entry, early)
   }
 
   private async beginJudge(workflow: Workflow, run: WorkflowRun, entry: JournalEntry, budget: WorkflowBudget, retry = false): Promise<void> {
@@ -681,11 +696,28 @@ export class WorkflowEngine {
     entry.threadId = threadId
     entry.attempts = (entry.attempts ?? 0) + 1
     this.agentThreads.set(threadId, { runId: run.id, seq: entry.seq })
+    await this.consumeEarlyOutcome(threadId, run, entry)
   }
 
   private async onAgentFinished(threadId: string, outcome: AgentOutcome): Promise<void> {
-    const location = this.agentThreads.get(threadId)
-    if (!location) return
+    let location = this.agentThreads.get(threadId)
+    if (!location) {
+      // A very fast backend can finish before beginAgent registers the
+      // mapping; the journal is the durable source of truth, so consult it
+      // before concluding the thread is not ours.
+      for (const run of this.store.runs) {
+        if (!isActive(run.status)) continue
+        const entry = run.journal.find((item) => item.status === 'started' && item.threadId === threadId)
+        if (entry) {
+          location = { runId: run.id, seq: entry.seq }
+          break
+        }
+      }
+      if (!location) {
+        this.earlyOutcomes.set(threadId, outcome)
+        return
+      }
+    }
     this.agentThreads.delete(threadId)
     const run = this.store.runs.find((item) => item.id === location.runId)
     if (!run || !isActive(run.status)) return

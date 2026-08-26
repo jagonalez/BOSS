@@ -55,7 +55,6 @@ import {
 import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
 import { backendVersionWarning } from '@shared/backend-version'
 import { contextHandoffPacket, delegatedContextInstruction } from '@shared/context-handoff'
-import type { LabAssistantAgentConfig, LabAssistantWorkflowRole } from '@shared/lab-assistant'
 
 interface ThreadBinding {
   id: string
@@ -860,105 +859,6 @@ export class BackendManager {
     worktree?: WorktreeInfo
   ): Promise<SessionInfo> {
     return this.sessionCreateInScope(backendId, scope, title, undefined, worktree)
-  }
-
-  /** Create a managed Lab Assistant stage without starting it yet.
-   *
-   *  Creation and dispatch are intentionally separate: Lab Assistant persists
-   *  the new thread id before a fast backend can finish and emit its result.
-   */
-  async createLabAssistantStage(input: {
-    role: LabAssistantWorkflowRole
-    backendId: BackendId
-    title: string
-    projectPath?: string
-    sourceThreadId?: string
-  }): Promise<SessionInfo> {
-    if (input.role === 'planner') {
-      if (!input.projectPath) throw new Error('A managed workflow needs a project path.')
-      return this.sessionCreateInScope(input.backendId, this.scopeFor(input.projectPath), input.title)
-    }
-
-    if (!input.sourceThreadId) throw new Error(`${input.role} needs a source thread.`)
-    const source = this.binding(input.sourceThreadId)
-    const lineage = {
-      kind: input.role === 'reviewer' ? 'review' as const : 'delegate' as const,
-      sourceThreadId: input.sourceThreadId,
-      sourceBackendId: source.backendId
-    }
-
-    if (input.role === 'reviewer') {
-      return this.sessionCreateInScope(
-        input.backendId,
-        {
-          projectId: source.projectId,
-          projectPath: source.projectPath,
-          executionPath: source.executionPath
-        },
-        input.title,
-        lineage,
-        source.worktree?.status === 'active' ? source.worktree : undefined
-      )
-    }
-
-    if (!this.worktrees) throw new Error('Git worktrees are not available.')
-    if (source.projectId === 'global' || !source.projectPath) {
-      throw new Error('Projectless chats cannot implement work in a Git worktree.')
-    }
-    const worktree = await this.worktrees.create({
-      projectId: source.projectId,
-      projectPath: source.projectPath,
-      sourcePath: source.executionPath || source.projectPath,
-      title: input.title,
-      ownerThreadId: undefined
-    })
-    try {
-      let created = await this.sessionCreateInScope(
-        input.backendId,
-        { projectId: source.projectId, projectPath: source.projectPath, executionPath: worktree.path },
-        input.title,
-        lineage,
-        worktree
-      )
-      await this.worktrees.setOwner(worktree.id, created.id)
-      const binding = this.binding(created.id)
-      binding.worktree = { ...worktree, ownerThreadId: created.id }
-      this.save()
-      created = this.session(binding)
-      this.reportSetupFailure(created.id, worktree.setupError, input.backendId)
-      return created
-    } catch (error) {
-      await this.worktrees.remove(worktree.id).catch(() => {})
-      throw error
-    }
-  }
-
-  async runLabAssistantStage(
-    threadId: string,
-    role: LabAssistantWorkflowRole,
-    agent: LabAssistantAgentConfig,
-    instruction: string,
-    sourceThreadId?: string
-  ): Promise<void> {
-    const prompt = sourceThreadId
-      ? await this.contextPacket(sourceThreadId, instruction)
-      : instruction
-    const preferredMode: BackendModeId = role === 'implementer'
-      ? (DEFINITIONS[agent.backendId].modes.some((mode) => mode.id === 'auto') ? 'auto'
-        : DEFINITIONS[agent.backendId].modes.some((mode) => mode.id === 'accept-edits') ? 'accept-edits' : 'ask')
-      : (DEFINITIONS[agent.backendId].modes.some((mode) => mode.id === 'plan') ? 'plan' : 'ask')
-    await this.sendMessage(
-      threadId,
-      [{ type: 'text', text: prompt }],
-      withBackendDefaults(agent.model ?? this.defaultModel(agent.backendId), { mode: preferredMode }, preferredMode)
-    )
-  }
-
-  async labAssistantReviewVerdict(threadId: string): Promise<ReturnType<typeof parseReviewVerdict>> {
-    const binding = this.binding(threadId)
-    const backend = await this.ensureStarted(binding.backendId)
-    const messages = await backend.messagesList(binding.nativeSessionId)
-    return parseReviewVerdict(lastAssistantText(messages))
   }
 
   attachAutomations(automations: { handle(request: BackendRequest): Promise<unknown> }): void {

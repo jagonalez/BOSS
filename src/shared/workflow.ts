@@ -210,6 +210,9 @@ export interface AgentCallOptions {
   model?: BackendModelPreference
   mode?: BackendModeId
   workspace?: 'worktree' | 'project' | 'none'
+  /** Run in the same checkout as a prior step's conversation (its threadId):
+   *  how a reviewer reads an implementer's worktree, or a fix step edits it. */
+  inWorktreeOf?: string
   maxMinutes?: number
   title?: string
 }

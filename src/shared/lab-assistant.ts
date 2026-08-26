@@ -4,9 +4,6 @@ export type LabAssistantPullRequestState = 'open' | 'merged' | 'closed'
 export type LabAssistantMergeability = 'clean' | 'conflicted' | 'unknown'
 export type LabAssistantTaskStatus = 'inbox' | 'ready' | 'blocked' | 'running' | 'review' | 'done'
 export type LabAssistantCiConclusion = 'failure' | 'timed_out' | 'action_required' | 'startup_failure' | 'success'
-export type LabAssistantWorkflowRole = 'planner' | 'implementer' | 'reviewer'
-export type LabAssistantWorkflowStatus = 'running' | 'needs-attention' | 'completed' | 'stopped'
-export type LabAssistantWorkflowStage = 'planning' | 'implementing' | 'reviewing'
 
 export interface LabAssistantAgentConfig {
   backendId: BackendId
@@ -21,34 +18,6 @@ export interface LabAssistantWorkflowConfig {
   maxReviewCycles: number
 }
 
-export interface LabAssistantWorkflowReview {
-  cycle: number
-  index: number
-  threadId: string
-  backendId: BackendId
-  status: 'running' | 'passed' | 'changes-requested' | 'no-verdict' | 'failed'
-  notes?: string
-  startedAt: number
-  finishedAt?: number
-}
-
-export interface LabAssistantWorkflowRun {
-  id: string
-  taskId: string
-  title: string
-  projectPath: string
-  status: LabAssistantWorkflowStatus
-  stage: LabAssistantWorkflowStage
-  config: LabAssistantWorkflowConfig
-  plannerThreadId?: string
-  implementerThreadId?: string
-  reviewCycle: number
-  reviews: LabAssistantWorkflowReview[]
-  createdAt: number
-  updatedAt: number
-  completedAt?: number
-}
-
 export interface LabAssistantTask {
   id: string
   title: string
@@ -58,6 +27,8 @@ export interface LabAssistantTask {
   status: LabAssistantTaskStatus
   dependsOn: string[]
   assignedThreadId?: string
+  /** The durable engine workflow driving this task's managed pipeline. */
+  workflowId?: string
   createdAt: number
   updatedAt: number
   completedAt?: number
@@ -176,5 +147,4 @@ export interface LabAssistantSnapshot {
   /** Keyed by "owner/repo:base-branch". */
   mergeOrders: Record<string, string[]>
   workflowConfig?: LabAssistantWorkflowConfig
-  workflowRuns: LabAssistantWorkflowRun[]
 }

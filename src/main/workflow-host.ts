@@ -77,9 +77,16 @@ export class BossWorkflowHost implements WorkflowHost {
     const workspace = request.options.workspace ?? (request.projectPath ? 'worktree' : 'none')
     // 'none' runs in the global scope: judges and analysis steps have no
     // business holding a checkout.
-    const scope = this.backends.scopeFor(workspace === 'none' ? '' : request.projectPath)
+    let scope = this.backends.scopeFor(workspace === 'none' && !request.options.inWorktreeOf ? '' : request.projectPath)
     let worktree: WorktreeInfo | undefined
-    if (workspace === 'worktree' && request.projectPath) {
+    if (request.options.inWorktreeOf) {
+      // Share a prior step's checkout: reviewer reads what the implementer
+      // wrote, a fix step edits it in place. Ownership stays with the
+      // original thread.
+      const owner = this.backends.threadInfo(request.options.inWorktreeOf)
+      if (!owner) throw new Error('The step whose worktree this one should share no longer exists.')
+      scope = { projectId: owner.projectId, projectPath: owner.projectPath, executionPath: owner.executionPath }
+    } else if (workspace === 'worktree' && request.projectPath) {
       if (!this.worktrees) throw new Error('Git worktrees are not available.')
       worktree = await this.worktrees.create({
         projectId: scope.projectId,
