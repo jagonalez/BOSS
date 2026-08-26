@@ -3,7 +3,7 @@ import type { ReportSummary } from '@shared/report'
 import { useStore, appStore } from '../state/AppState'
 import { MarkdownDocument } from '../lib/text'
 import { OpenCode } from '../lib/opencode'
-import { refreshReports, selectSession } from '../lib/actions'
+import { openReport, refreshReports, selectSession } from '../lib/actions'
 import { ChatIcon, FileIcon, ReloadIcon } from './icons'
 
 function timeAgo(ts: number): string {
@@ -66,7 +66,7 @@ export function ReportsPage(): React.JSX.Element {
     void OpenCode.markReportRead(selectedSummary.id).then(() => refreshReports()).catch(() => {})
   }, [selectedSummary?.id, selectedSummary?.readAt])
 
-  const choose = (id: string): void => appStore.setState({ selectedReportId: id, reportDetail: null })
+  const choose = (id: string): void => openReport(id)
 
   return (
     <div className="command-center reports-page">
