@@ -130,8 +130,11 @@ test('the assistant home surfaces workflow attention and opens the standing conv
   expect(created.request).toMatchObject({ type: 'thread.create', title: 'Assistant', scope: 'global' })
   await expect
     .poll(async () =>
-      (await backendCalls(appPage, 'thread.followups.add')).some((call) => {
-        const text = String(call.request.text ?? '')
+      // An idle thread gets a direct thread.send; a busy one gets a queued
+      // follow-up. The seeded prompt is valid arriving either way.
+      (await backendCalls(appPage)).some((call) => {
+        if (call.request.type !== 'thread.send' && call.request.type !== 'thread.followups.add') return false
+        const text = JSON.stringify(call.request)
         return text.includes('[BOSS assistant]') && text.includes('what is running right now?')
       })
     )
