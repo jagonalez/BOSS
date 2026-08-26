@@ -6,7 +6,7 @@ test('restores Computer Use after BOSS restarts', async ({ restartableApp }) => 
   await page.getByRole('button', { name: 'Agent defaults' }).click()
   let computerUse = page.getByRole('checkbox', { name: 'Computer use' })
   let row = page.locator('.ui-settings-row').filter({ has: computerUse })
-  await computerUse.check()
+  await computerUse.click()
   await expect(computerUse).toBeChecked()
   await expect(row.getByText('Ready')).toBeVisible()
   await expect.poll(() => page.evaluate(() => (
