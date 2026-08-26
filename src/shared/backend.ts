@@ -316,6 +316,14 @@ export type BackendRequest =
   /** The per-automation hook secret and full URL. Never included in snapshots,
    *  so phones and the relay cannot read it. */
   | { type: 'automation.webhook.token'; automationId: string }
+  | { type: 'workflow.list' }
+  | { type: 'workflow.create'; input: import('./workflow').WorkflowInput }
+  | { type: 'workflow.update'; workflowId: string; patch: Partial<import('./workflow').WorkflowInput> & { enabled?: boolean } }
+  | { type: 'workflow.delete'; workflowId: string }
+  | { type: 'workflow.run'; workflowId: string }
+  | { type: 'workflow.run.stop'; runId: string }
+  /** Answer a run's pending ask() step; seq names the journal entry. */
+  | { type: 'workflow.run.answer'; runId: string; seq: number; response: string }
   | { type: 'report.list' }
   | { type: 'report.get'; reportId: string }
   | { type: 'report.read'; reportId: string }

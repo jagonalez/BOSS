@@ -275,6 +275,7 @@ export class BackendManager {
   private notifications?: NotificationRouter
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
+  private workflows?: { handle(request: BackendRequest): Promise<unknown> }
   private reports?: { handle(request: BackendRequest): Promise<unknown> }
   private assistant?: { handle(request: BackendRequest): Promise<unknown> }
   private mcpHub?: { handle(request: BackendRequest): Promise<unknown> }
@@ -962,6 +963,10 @@ export class BackendManager {
 
   attachAutomations(automations: { handle(request: BackendRequest): Promise<unknown> }): void {
     this.automations = automations
+  }
+
+  attachWorkflows(workflows: { handle(request: BackendRequest): Promise<unknown> }): void {
+    this.workflows = workflows
   }
 
   attachReports(reports: { handle(request: BackendRequest): Promise<unknown> }): void {
@@ -2679,6 +2684,10 @@ export class BackendManager {
     if (request.type.startsWith('automation.')) {
       if (!this.automations) throw new Error('Automations are not available.')
       return this.automations.handle(request)
+    }
+    if (request.type.startsWith('workflow.')) {
+      if (!this.workflows) throw new Error('Workflows are not available.')
+      return this.workflows.handle(request)
     }
     if (request.type.startsWith('report.')) {
       if (!this.reports) throw new Error('Reports are not available.')

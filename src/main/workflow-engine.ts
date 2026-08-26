@@ -16,6 +16,7 @@ import type {
   WorkflowsSnapshot
 } from '../shared/workflow'
 import type { EventPattern } from '../shared/workflow'
+import type { BackendRequest } from '../shared/backend'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
 import { WORKFLOW_BUDGET_DEFAULTS, clampResult, hashArgs, judgePrompt, matchesPattern, parseJudgeOutcome } from '../shared/workflow.ts'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
@@ -49,6 +50,9 @@ export interface WorkflowHost {
   collectOutcome(threadId: string): Promise<AgentOutcome | null>
   abortAgent(threadId: string): Promise<void>
   onAgentFinished(callback: (threadId: string, outcome: AgentOutcome) => void): void
+  /** Re-arm supervision (deadline, permission handling) for a thread that was
+   *  already running before an app restart. */
+  watchAgent?(threadId: string, deadlineAt: number): void
   notify(notice: { title: string; body: string; attention: boolean }): void
   /** Optional capabilities; the matching primitive throws when absent. */
   createChangeRequest?(threadId: string, input: { title?: string; body?: string; baseBranch?: string; draft?: boolean }): Promise<unknown>
@@ -140,6 +144,28 @@ export class WorkflowEngine {
   stop(): void {
     this.stopped = true
     this.bus.stop()
+  }
+
+  async handle(request: BackendRequest): Promise<unknown> {
+    switch (request.type) {
+      case 'workflow.list':
+        await this.store.load()
+        return this.snapshot()
+      case 'workflow.create':
+        return this.create(request.input)
+      case 'workflow.update':
+        return this.update(request.workflowId, request.patch)
+      case 'workflow.delete':
+        return this.delete(request.workflowId)
+      case 'workflow.run':
+        return this.runNow(request.workflowId)
+      case 'workflow.run.stop':
+        return this.stopRun(request.runId)
+      case 'workflow.run.answer':
+        return this.answer(request.runId, request.seq, request.response)
+      default:
+        throw new Error(`Unsupported workflow request: ${request.type}`)
+    }
   }
 
   // ---------------------------------------------------------------- CRUD
@@ -740,6 +766,12 @@ export class WorkflowEngine {
     if (entry.op === 'agent' || entry.op === 'judge') {
       if (entry.threadId && this.host.isAgentActive(entry.threadId)) {
         this.agentThreads.set(entry.threadId, { runId: run.id, seq: entry.seq })
+        const options = (entry.args as { options?: { maxMinutes?: number } }).options
+        const maxMinutes =
+          entry.op === 'judge'
+            ? Math.min(10, budget.maxAgentMinutes)
+            : Math.min(options?.maxMinutes ?? budget.maxAgentMinutes, budget.maxAgentMinutes)
+        this.host.watchAgent?.(entry.threadId, entry.startedAt + maxMinutes * 60_000)
         return
       }
       if (entry.threadId) {

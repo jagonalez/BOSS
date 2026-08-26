@@ -24,6 +24,12 @@ import { WorktreeManager } from './worktree-manager'
 import { NotificationRouter } from './notification-router'
 import { AutomationHooks } from './automation-hooks'
 import { AutomationManager } from './automation-manager'
+import { EventBus } from './event-bus'
+import { WorkflowStore } from './workflow-store'
+import { WorkflowEngine } from './workflow-engine'
+import { BossWorkflowHost } from './workflow-host'
+import { githubDeliveryEvent } from '../shared/workflow-events'
+import { randomUUID } from 'node:crypto'
 import { ReportManager } from './report-manager'
 import { LabAssistantManager } from './lab-assistant-manager'
 import { inspectGitHubWorkflowRun, listGitHubPullRequests } from './lab-assistant-github'
@@ -165,7 +171,6 @@ backendMgr.attachAssistant(labAssistant)
 backendMgr.onEvent((event) => {
   void labAssistant.observeBackendEvent(event)
 })
-automations.setWebhookObserver((delivery) => labAssistant.observeGitHub(delivery))
 // GitHub webhooks are delivered to a loopback endpoint; exposing it to the
 // internet is the user's tunnel, exactly like the mobile page.
 const automationHooks = new AutomationHooks({ deliver: (id, token, event, body) => automations.deliverWebhook(id, token, event, body) })
@@ -210,6 +215,26 @@ const reviews = new ReviewManager(join(app.getPath('userData'), 'review-comments
 // A thread opens its own pull or merge request through the bus, so the forge is reached from here
 // rather than from the sandbox the agent's own shell runs in.
 threadBus.attachReviews(reviews)
+// Durable workflows: the engine replays journaled scripts over the event bus;
+// the host gives its steps real agent conversations, worktrees, notifications,
+// and change requests.
+const workflowHost = new BossWorkflowHost({ backends: backendMgr, worktrees, reviews, notifications })
+const workflowStore = new WorkflowStore(
+  join(app.getPath('userData'), 'workflows.json'),
+  join(app.getPath('userData'), 'workflow-runs.json')
+)
+const workflowBus = new EventBus(join(app.getPath('userData'), 'workflow-subscriptions.json'))
+const workflowEngine = new WorkflowEngine(workflowStore, workflowBus, workflowHost, {
+  onSnapshot: (snapshot) => backendMgr.emit({ type: 'workflows.updated', properties: { snapshot } })
+})
+backendMgr.attachWorkflows(workflowEngine)
+// Every authenticated GitHub delivery reaches both durable control planes:
+// Lab Assistant's PR/CI observers and the workflow event bus.
+automations.setWebhookObserver(async (delivery) => {
+  const event = githubDeliveryEvent(delivery, randomUUID(), Date.now())
+  if (event) await workflowBus.publish(event).catch(() => {})
+  await labAssistant.observeGitHub(delivery)
+})
 
 let ipcReady = false
 
@@ -468,6 +493,7 @@ app.whenReady().then(() => {
     await mcpHub.start()
     await labAssistant.start()
     await automations.start()
+    await workflowEngine.start()
     await automationHooks.start()
     await telegram.start()
     await webAccess.start()
@@ -499,6 +525,8 @@ app.on('before-quit', () => {
   void webAccess.stop()
   void relayClient.stop()
   void automations.stop()
+  workflowEngine.stop()
+  workflowHost.stop()
   void automationHooks.stop()
   void telegram.stop()
   void mcpHub.stop()
