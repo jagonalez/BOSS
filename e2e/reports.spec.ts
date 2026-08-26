@@ -34,3 +34,17 @@ test('an automation run opens its saved report without losing the source thread'
   await expect(appPage.locator('.reports-page')).toBeVisible()
   await expect(appPage.getByRole('article', { name: 'Report detail' })).toContainText('Codex changelog')
 })
+
+test('clicking the already selected report keeps its loaded detail visible', async ({ appPage }) => {
+  await appPage.getByRole('button', { name: 'Reports' }).click()
+
+  const inbox = appPage.getByRole('region', { name: 'Report inbox' })
+  const report = inbox.getByRole('button', { name: /Launch readiness brief/ })
+  const detail = appPage.getByRole('article', { name: 'Report detail' })
+
+  await expect(detail).toContainText('Ship behind a feature flag.')
+  await report.click()
+
+  await expect(detail).toContainText('Ship behind a feature flag.')
+  await expect(detail).not.toContainText('Loading report')
+})
