@@ -74,6 +74,7 @@ interface Rig {
   bus: EventBus
   host: MockHost
   engine: WorkflowEngine
+  drainSaves: () => Promise<void>
   setNow: (value: number) => void
 }
 
@@ -82,25 +83,45 @@ let now = 1_000_000
 async function rig(dir?: string, prefix = 'thread', beforeStart?: (host: MockHost) => void): Promise<Rig> {
   const base = dir ?? (await mkdtemp(join(tmpdir(), 'boss-workflows-')))
   const store = new WorkflowStore(join(base, 'workflows.json'), join(base, 'workflow-runs.json'))
+  const save = store.save.bind(store)
+  const pendingSaves = new Set<Promise<void>>()
+  store.save = async () => {
+    const pending = save()
+    pendingSaves.add(pending)
+    try {
+      await pending
+    } finally {
+      pendingSaves.delete(pending)
+    }
+  }
   const bus = new EventBus(join(base, 'subscriptions.json'), { now: () => now })
   const host = new MockHost(prefix)
   const engine = new WorkflowEngine(store, bus, host, { now: () => now })
   beforeStart?.(host)
   await engine.start()
-  return { dir: base, store, bus, host, engine, setNow: (value) => (now = value) }
+  return {
+    dir: base,
+    store,
+    bus,
+    host,
+    engine,
+    drainSaves: async () => {
+      while (pendingSaves.size > 0) await Promise.allSettled([...pendingSaves])
+    },
+    setNow: (value) => (now = value)
+  }
+}
+
+async function stop(rigged: Rig): Promise<void> {
+  rigged.engine.stop()
+  await rigged.drainSaves()
 }
 
 async function drop(rigged: Rig): Promise<void> {
-  rigged.engine.stop()
-  // A final persist may still be in flight; retry the cleanup briefly.
-  for (let i = 0; i < 10; i += 1) {
-    try {
-      await rm(rigged.dir, { recursive: true, force: true })
-      return
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-  }
+  // rm({ force: true }) succeeds while a save is between its two file writes;
+  // removing the directory then made that save reject after the test ended.
+  // Stop future persistence and drain writes already in flight before cleanup.
+  await stop(rigged)
   await rm(rigged.dir, { recursive: true, force: true })
 }
 
@@ -268,7 +289,7 @@ test('a run parked on waitFor survives an app restart', async () => {
     const run = await first.engine.runNow(workflow.id)
     runId = run.id
     await until(async () => (await persistedRun(dir, run.id))?.status === 'waiting', 'persisted waiting state')
-    first.engine.stop()
+    await stop(first)
   } catch (error) {
     await drop(first)
     throw error
@@ -300,7 +321,7 @@ test('an agent step whose thread vanished over a restart re-performs in a fresh 
     const run = await first.engine.runNow(workflow.id)
     runId = run.id
     await until(async () => Boolean((await persistedRun(dir, run.id))?.journal[0]?.threadId), 'persisted agent step')
-    first.engine.stop()
+    await stop(first)
   } catch (error) {
     await drop(first)
     throw error
@@ -329,7 +350,7 @@ test('an agent outcome that arrived while the app was down is collected, not re-
     runId = run.id
     await until(async () => Boolean((await persistedRun(dir, run.id))?.journal[0]?.threadId), 'persisted agent step')
     threadId = first.host.requests[0].threadId
-    first.engine.stop()
+    await stop(first)
   } catch (error) {
     await drop(first)
     throw error
@@ -360,7 +381,7 @@ test('editing the script mid-run invalidates the journal tail and resumes with t
     const run = await first.engine.runNow(workflow.id)
     runId = run.id
     await until(async () => (await persistedRun(dir, run.id))?.status === 'waiting', 'persisted waiting state')
-    first.engine.stop()
+    await stop(first)
   } catch (error) {
     await drop(first)
     throw error
@@ -372,7 +393,7 @@ test('editing the script mid-run invalidates the journal tail and resumes with t
   let third: Rig | undefined
   try {
     await second.engine.update(workflowId, { script: `log('same'); const ev = await waitFor({ type: 'new.event' }); return 'new:' + ev.data.tag` })
-    second.engine.stop()
+    await stop(second)
 
     third = await rig(dir, 'reborn')
     // Wait until the replay dropped the stale tail and parked on the new
@@ -577,7 +598,7 @@ test('the approval mode persists and rides the snapshot', async () => {
     assert.equal(first.engine.snapshot().approvalMode, 'ask')
     await first.engine.setApprovalMode('auto')
     assert.equal(first.engine.snapshot().approvalMode, 'auto')
-    first.engine.stop()
+    await stop(first)
   } catch (error) {
     await drop(first)
     throw error

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { join, resolve, extname } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 
 /** The scheme the renderer loads a stored image through.
  *
@@ -37,11 +37,16 @@ export class ImageStore {
   write(threadId: string, mimeType: string, base64: string): { url: string; mime: string } | undefined {
     const extension = EXTENSIONS[mimeType]
     if (!extension) return undefined
-    const name = `${randomUUID()}${extension}`
+    const bytes = Buffer.from(base64, 'base64')
+    // Native history repeats the same content blocks after the live stream.
+    // Content-addressing makes that replay reuse the file it already stored
+    // instead of leaking a fresh attachment on every thread reopen.
+    const name = `${createHash('sha256').update(bytes).digest('hex')}${extension}`
     const directory = join(this.root, threadId)
     try {
       mkdirSync(directory, { recursive: true })
-      writeFileSync(join(directory, name), Buffer.from(base64, 'base64'))
+      const file = join(directory, name)
+      if (!existsSync(file)) writeFileSync(file, bytes)
     } catch {
       // A screenshot that cannot be saved is not worth failing a run over; the
       // tool result still reaches the model either way.

@@ -192,8 +192,8 @@ test('an image part joins the tool message that produced it', () => {
   // stayed in the open turn and was drawn again under every later reply until
   // the user spoke. That is the repeated-screenshot report. The image has to
   // land in the message that produced it.
-  const start = source.indexOf('private emitImagePart(')
-  assert.ok(start > 0, 'expected an emitImagePart method')
+  const start = source.indexOf('private toolImagePart(')
+  assert.ok(start > 0, 'expected a toolImagePart method')
   const body = source.slice(start, source.indexOf('\n  }', start))
   assert.ok(
     !body.includes('assistant-tool-image-'),
@@ -206,7 +206,7 @@ test('an image part joins the tool message that produced it', () => {
   // rather than falling back to whichever assistant message is current.
   const extract = source.slice(source.indexOf('private extractToolResultImages('))
   assert.ok(
-    /emitImagePart\(binding, context\.tool, stored, part\.messageID\)/.test(extract),
+    /toolImagePart\(binding, context\.tool, stored, part\.messageID, part\.id, blockIndex\)/.test(extract),
     'a lifted image should be anchored to its own tool part'
   )
 })
@@ -214,17 +214,27 @@ test('an image part joins the tool message that produced it', () => {
 test('the same image reported twice is shown once, and two images stay two', () => {
   // The renderer replaces a part carrying an id it already holds in that
   // message and appends anything else, so a random id per emission turned one
-  // re-reported screenshot into a second picture. Naming the part after the
-  // stored image makes the identity the picture itself.
-  const body = source.slice(source.indexOf('private emitImagePart('))
+  // re-reported screenshot into a second picture. Naming the part after its
+  // producing tool block makes live and history agree without collapsing two
+  // equal images at different positions.
+  const body = source.slice(source.indexOf('private toolImagePart('), source.indexOf('private emitImagePart('))
   assert.ok(
     !/id:\s*`tool-image-\$\{randomUUID\(\)\}`/.test(body),
     'an image part must not take a fresh id on every emission'
   )
   assert.ok(
-    body.includes('id: `tool-image-${stored.url}`'),
-    'the part id should follow the stored image, which is unique per written image'
+    body.includes('id: `tool-image-${toolPartId}-${blockIndex}`'),
+    'the part id should be stable across live/history while retaining each block position'
   )
+})
+
+test('native history extracts tool images through the same path as live events', () => {
+  const history = source.slice(source.indexOf('async messagesList('), source.indexOf('async sendMessage('))
+  assert.ok(history.includes('this.extractToolResultImages(binding,'), 'history must strip and store raw image blocks')
+  assert.ok(history.includes('return [...extracted.images, extracted.part]'), 'images should retain live event ordering before the tool output')
+
+  const live = source.slice(source.indexOf('private forwardEvent('), source.indexOf('private async sessionCreateInScope('))
+  assert.ok(live.includes('for (const image of extracted.images) this.emitImagePart(binding, image)'))
 })
 
 test('computer inspection images are stripped before the transcript stores them', () => {

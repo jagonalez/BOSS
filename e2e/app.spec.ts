@@ -537,6 +537,44 @@ test('keeps Codex steering between tool rounds and hides inspection screenshots'
   await expect(appPage.getByRole('img', { name: 'boss_computer' })).toHaveCount(1)
 })
 
+test('shows Codex custom output images live and once after history reload', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  await fixture.installCodexOrderingThread()
+  await appPage.locator('.session-row').filter({ hasText: 'Codex steering order' }).click()
+
+  const images = appPage.getByRole('img', { name: /Codex image [12]/ })
+  await expect(images).toHaveCount(2)
+  await expect(images.nth(0)).toHaveAttribute('alt', 'Codex image 1')
+  await expect(images.nth(1)).toHaveAttribute('alt', 'Codex image 2')
+  const transcript = appPage.locator('.messages:visible')
+  await expect(transcript).not.toContainText('data:image/png;base64')
+
+  // item/completed can repeat what item/started already surfaced. Stable part
+  // ids make this a replacement, not a third and fourth picture.
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  for (const [id, name] of [
+    ['tool-image-custom-image-output-1', 'Codex image 1'],
+    ['tool-image-custom-image-output-3', 'Codex image 2']
+  ]) {
+    await fixture.emit({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id, type: 'file', sessionID: 'thread-codex-ordering', messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', name, mime: 'image/png', url: image }
+        }
+      }
+    })
+  }
+  await expect(images).toHaveCount(2)
+
+  // Leaving and reopening asks the backend fixture for native history again.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'Codex steering order' }).click()
+  await expect(images).toHaveCount(2)
+  await expect(transcript).not.toContainText('data:image/png;base64')
+})
+
 test('a failed Codex send keeps the message retryable and shows it after retry', async ({ appPage }) => {
   const title = 'Codex failed message test'
   await control(appPage).then((item) => item.spawnThread('codex', title))

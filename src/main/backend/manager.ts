@@ -310,10 +310,13 @@ export class BackendManager {
    *  block and printed base64 where a picture belonged. The bytes go to the
    *  store, an image part is emitted beside the tool call, and the output the
    *  tool part keeps is the same content with the image block replaced by a
-   *  short note. Returns the part unchanged when there is nothing to move, so
-   *  the ordinary case costs one type check. */
-  private extractToolResultImages(binding: ThreadBinding, part: MessageWithParts['parts'][number]): MessageWithParts['parts'][number] {
-    if (part.type !== 'tool' || !this.images) return part
+   *  short note. Returns the part plus any extracted image parts; when there is
+   *  nothing to move, the ordinary case still costs one type check. */
+  private extractToolResultImages(
+    binding: ThreadBinding,
+    part: MessageWithParts['parts'][number]
+  ): { part: MessageWithParts['parts'][number]; images: Part[] } {
+    if (part.type !== 'tool' || !this.images) return { part, images: [] }
     const contextKey = `${binding.id}:${part.messageID}:${part.id}`
     const previousContext = this.toolResultContexts.get(contextKey)
     const incomingTool = typeof part.state?.tool === 'string' ? part.state.tool : undefined
@@ -325,11 +328,12 @@ export class BackendManager {
       this.toolResultContexts.set(contextKey, context)
     }
     const output = part.state?.output
-    if (!Array.isArray(output)) return part
+    if (!Array.isArray(output)) return { part, images: [] }
     this.toolResultContexts.delete(contextKey)
     const surfaceImage = shouldSurfaceToolImage(context.tool, context.input)
     let changed = false
-    const rewritten = output.map((block) => {
+    const images: Part[] = []
+    const rewritten = output.map((block, blockIndex) => {
       const image = toolResultImage(block)
       if (!image) return block
       if (!surfaceImage) {
@@ -344,31 +348,38 @@ export class BackendManager {
         return { type: 'text', text: `[Image omitted: ${image.mimeType} could not be displayed.]` }
       }
       changed = true
-      // The image came out of this tool part, so it belongs to the same
-      // message — no need to fall back to whichever assistant message is
-      // current.
-      this.emitImagePart(binding, context.tool, stored, part.messageID)
+      images.push(this.toolImagePart(binding, context.tool, stored, part.messageID, part.id, blockIndex))
       return { type: 'text', text: `[Image shown above: ${stored.mime}]` }
     })
-    if (!changed) return part
-    return { ...part, state: { ...part.state, output: rewritten } }
+    if (!changed) return { part, images: [] }
+    return { part: { ...part, state: { ...part.state, output: rewritten } }, images }
   }
 
-  /** Record and announce one stored image as a part of its own. */
-  private emitImagePart(binding: ThreadBinding, tool: string, stored: { url: string; mime: string }, messageId: string): void {
-    // Named after the image it shows, not the moment it was emitted. The
-    // renderer replaces a part with the same id in the same message and appends
-    // anything else, so a random id made a re-reported image a second picture
-    // rather than the same one. The stored url is already unique per written
-    // image, which makes it the identity: emit the same image twice and the
-    // reader sees it once, while two different images stay two.
-    const part: Part = {
-      id: `tool-image-${stored.url}`,
+  /** Make one stored image stable across a live event and its history echo.
+   *
+   * The producing tool part and content-block position are the identity. A
+   * reload therefore updates the live image instead of appending a duplicate,
+   * while two images in one output retain two distinct ordered parts even when
+   * their bytes happen to be identical. */
+  private toolImagePart(
+    binding: ThreadBinding,
+    tool: string,
+    stored: { url: string; mime: string },
+    messageId: string,
+    toolPartId: string,
+    blockIndex: number
+  ): Part {
+    return {
+      id: `tool-image-${toolPartId}-${blockIndex}`,
       type: 'file',
       sessionID: binding.id,
       messageID: messageId,
       state: { status: 'completed', name: tool, mime: stored.mime, url: stored.url }
     }
+  }
+
+  /** Record and announce one stored image as a part of its own. */
+  private emitImagePart(binding: ThreadBinding, part: Part): void {
     this.transcripts?.recordPart(this.transcriptSource(binding), part)
     this.emit({
       type: 'message.part.updated',
@@ -1298,10 +1309,12 @@ export class BackendManager {
         // the store lives on the manager, and because a part arriving from any
         // backend gets the same treatment. It also keeps the base64 out of
         // SQLite: what is recorded below is the stripped part.
-        properties.part = this.extractToolResultImages(
+        const extracted = this.extractToolResultImages(
           binding,
           properties.part as MessageWithParts['parts'][number]
         )
+        for (const image of extracted.images) this.emitImagePart(binding, image)
+        properties.part = extracted.part
         this.transcripts?.recordPart(
           this.transcriptSource(binding),
           properties.part as MessageWithParts['parts'][number]
@@ -1599,7 +1612,13 @@ export class BackendManager {
     }
     const normalized = messages.map((message) => ({
       info: { ...message.info, sessionID: threadId },
-      parts: message.parts.map((part) => ({ ...part, sessionID: threadId }))
+      parts: message.parts.flatMap((part) => {
+        // Native history contains the same raw content blocks as the live
+        // stream. Run both through one extractor so reopening cannot restore
+        // base64 into the tool card or append a second copy of an image.
+        const extracted = this.extractToolResultImages(binding, { ...part, sessionID: threadId })
+        return [...extracted.images, extracted.part]
+      })
     }))
     if (!this.transcripts) return limit ? normalized.slice(-limit) : normalized
     this.transcripts.reconcile(this.transcriptSource(binding), normalized, {
