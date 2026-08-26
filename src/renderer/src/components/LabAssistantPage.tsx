@@ -5,7 +5,8 @@ import type { LabAssistantAgentConfig, LabAssistantSnapshot, LabAssistantTaskSta
 import { appStore, useStore } from '../state/AppState'
 import { OpenCode } from '../lib/opencode'
 import { projectName } from '../lib/project-name'
-import { openAssistantConversation, refreshBackendModels, refreshWorkflows, selectSession, showPage } from '../lib/actions'
+import { askAssistant, loadMessages, refreshBackendModels, refreshWorkflows, selectSession, showPage } from '../lib/actions'
+import { ChatView } from './ChatView'
 import type { WorkflowRun } from '@shared/workflow'
 import { ModelSelect } from './ModelSelect'
 
@@ -174,6 +175,15 @@ export function LabAssistantPage(): React.JSX.Element {
     void refreshWorkflows()
   }, [])
   const [askText, setAskText] = useState('')
+  const sessionMeta = useStore(appStore, (s) => s.sessionMeta)
+  const sessions = useStore(appStore, (s) => s.sessions)
+  const assistantSessionId = useMemo(() => {
+    const id = Object.values(sessionMeta).find((meta) => meta.kind === 'assistant')?.sessionId
+    return id && sessions.some((session) => session.id === id) ? id : null
+  }, [sessionMeta, sessions])
+  useEffect(() => {
+    if (assistantSessionId) void loadMessages(assistantSessionId)
+  }, [assistantSessionId])
 
   const workflowNames = useMemo(
     () => new Map((workflowsSnapshot?.workflows ?? []).map((workflow) => [workflow.id, workflow.name])),
@@ -269,7 +279,9 @@ export function LabAssistantPage(): React.JSX.Element {
               event.preventDefault()
               const text = askText.trim()
               setAskText('')
-              void openAssistantConversation(text || undefined)
+              // The conversation lives in the pane on this page: asking never
+              // teleports you into the chat workspace.
+              void askAssistant(text || undefined)
             }}
           >
             <input
@@ -553,6 +565,25 @@ export function LabAssistantPage(): React.JSX.Element {
         </main>
 
         <aside>
+          <section className="product-section assistant-pane" aria-label="Assistant conversation">
+            <div className="product-section-head">
+              <div><h2>Your assistant</h2><p>One standing conversation with the BOSS tools.</p></div>
+              {assistantSessionId ? (
+                <button type="button" onClick={() => selectSession(assistantSessionId, false)}>Open in workspace</button>
+              ) : null}
+            </div>
+            {assistantSessionId ? (
+              <div className="assistant-pane-chat">
+                <ChatView sessionId={assistantSessionId} active />
+              </div>
+            ) : (
+              <div className="product-empty lab-quiet">
+                <strong>No assistant yet.</strong>
+                <span>Ask something above and the standing conversation starts here — seeded once with its role and tools, reused forever after.</span>
+              </div>
+            )}
+          </section>
+
           <section className="product-section lab-activity">
             <div className="product-section-head"><h2>Recent activity</h2></div>
             <div className="lab-activity-list">
