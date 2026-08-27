@@ -49,14 +49,3 @@ export interface AgentReportPatch {
   summary?: string
   body?: string
 }
-
-/** Remove the machine-readable summary instruction from the presentation copy.
- * It is useful metadata, but a poor final paragraph in a report. */
-export function reportBodyFromAssistantText(text: string): string {
-  const lines = text.trim().split('\n')
-  let last = lines.length - 1
-  while (last >= 0 && !lines[last].trim()) last -= 1
-  const match = last >= 0 ? lines[last].trim().match(/^SUMMARY:\s*(.+)$/i) : null
-  if (match) lines.splice(last, 1)
-  return lines.join('\n').trim() || match?.[1].trim() || ''
-}

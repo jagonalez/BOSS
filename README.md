@@ -90,7 +90,7 @@ because an SVG is a document that can carry script.
 
 ## Reports
 
-When an automation finishes with an assistant response, BOSS saves the complete final answer in `userData/reports.json`. The **Reports** page is the presentation layer for that result; the automation thread remains available as its provenance and working context. Reports follow the automation's run-retention setting and disappear when their run or automation is removed.
+Agents create reports explicitly when a result is worth keeping as a durable artifact. BOSS stores them in `userData/reports.json`; the **Reports** page presents the result while its source thread remains available as provenance and working context. Deleting a report removes only the artifact, never its source thread.
 
 The mobile PWA exposes the same report inbox and detail through authenticated read-only requests. Because reports are local-first, the BOSS desktop still needs to be reachable directly or through the encrypted relay for a phone to retrieve them.
 

@@ -512,7 +512,6 @@ export function installE2EApi(boss: BossApi): void {
     workspace: 'worktree',
     overlapPolicy: 'skip',
     catchUp: true,
-    saveReport: true,
     notify: 'events',
     maxRunMinutes: 30,
     keepRuns: 50,
@@ -526,7 +525,6 @@ export function installE2EApi(boss: BossApi): void {
   const automationRunsFixture: Array<Record<string, unknown>> = [{
     id: 'run-report-seed',
     automationId: 'automation-webhook-seed',
-    reportId: 'report-codex-seed',
     threadId: 'thread-report-source',
     trigger: 'schedule',
     status: 'success',
@@ -1370,6 +1368,12 @@ export function installE2EApi(boss: BossApi): void {
         if (!report) throw new Error(`Unknown fixture report ${request.reportId}`)
         if (!report.readAt) report.readAt = Date.now()
         return structuredClone(report)
+      }
+      case 'report.delete': {
+        const report = reportsFixture.find((item) => item.id === request.reportId)
+        if (!report) throw new Error(`Unknown fixture report ${request.reportId}`)
+        reportsFixture = reportsFixture.filter((item) => item.id !== request.reportId)
+        return undefined
       }
       case 'automation.create': {
         const now = Date.now()

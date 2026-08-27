@@ -266,6 +266,7 @@ export const OpenCode = {
   reportsList: () => backendRequest<ReportsSnapshot>({ type: 'report.list' }),
   report: (reportId: string) => backendRequest<Report>({ type: 'report.get', reportId }),
   markReportRead: (reportId: string) => backendRequest<Report>({ type: 'report.read', reportId }),
+  deleteReport: (reportId: string) => backendRequest<void>({ type: 'report.delete', reportId }),
   createAutomation: (input: AutomationInput) => backendRequest<Automation>({ type: 'automation.create', input }),
   updateAutomation: (automationId: string, patch: Partial<AutomationInput> & { enabled?: boolean }) =>
     backendRequest<Automation>({ type: 'automation.update', automationId, patch }),

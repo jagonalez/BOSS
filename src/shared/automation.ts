@@ -45,8 +45,6 @@ export interface AutomationInput {
   workspace: AutomationWorkspace
   overlapPolicy: AutomationOverlapPolicy
   catchUp: boolean
-  /** Save the final answer as a durable report artifact. */
-  saveReport?: boolean
   notify: AutomationNotifyMode
   maxRunMinutes: number
   keepRuns: number
@@ -68,8 +66,6 @@ export interface Automation extends AutomationInput {
 export interface AutomationRun {
   id: string
   automationId: string
-  /** Durable presentation copy of this run's final answer, when one exists. */
-  reportId?: string
   threadId?: string
   worktreeId?: string
   trigger: AutomationRunTrigger
@@ -92,7 +88,6 @@ export const AUTOMATION_DEFAULTS = {
   workspace: 'worktree' as AutomationWorkspace,
   overlapPolicy: 'skip' as AutomationOverlapPolicy,
   catchUp: true,
-  saveReport: true,
   notify: 'events' as AutomationNotifyMode,
   maxRunMinutes: 30,
   keepRuns: 50

@@ -1184,6 +1184,20 @@ export function openReport(reportId: string): void {
   })
 }
 
+export async function deleteReport(reportId: string): Promise<void> {
+  try {
+    await OpenCode.deleteReport(reportId)
+    const reports = await OpenCode.reportsList()
+    appStore.setState({
+      reports,
+      selectedReportId: reports.reports[0]?.id ?? null,
+      reportDetail: null
+    })
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+  }
+}
+
 export async function setThreadBusPolicy(policy: CollaborationPolicy | null, projectId: string): Promise<void> {
   try {
     appStore.setState({ threadBus: await OpenCode.setThreadBusPolicy(policy, projectId) })
