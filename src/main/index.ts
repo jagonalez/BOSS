@@ -147,7 +147,7 @@ threadBus.attachReports(reports)
 const automations = new AutomationManager({
   stateFile: join(app.getPath('userData'), 'automations.json'),
   runsFile: join(app.getPath('userData'), 'automation-runs.json')
-}, backendMgr, worktrees, reports)
+}, backendMgr, worktrees)
 backendMgr.attachAutomations(automations)
 automations.attachNotifications(notifications)
 const labAssistant = new LabAssistantManager(

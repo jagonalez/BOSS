@@ -3,8 +3,8 @@ import type { ReportSummary } from '@shared/report'
 import { useStore, appStore } from '../state/AppState'
 import { MarkdownDocument } from '../lib/text'
 import { OpenCode } from '../lib/opencode'
-import { openReport, refreshReports, selectSession } from '../lib/actions'
-import { ChatIcon, FileIcon, ReloadIcon } from './icons'
+import { deleteReport, openReport, refreshReports, selectSession } from '../lib/actions'
+import { ChatIcon, FileIcon, ReloadIcon, TrashIcon } from './icons'
 
 function timeAgo(ts: number): string {
   const diff = Date.now() - ts
@@ -74,7 +74,7 @@ export function ReportsPage(): React.JSX.Element {
         <div>
           <span className="command-eyebrow">BOSS</span>
           <h1>Reports</h1>
-          <p>Durable artifacts created by your agents and automations. Open the source thread when you need the working context.</p>
+          <p>Durable artifacts your agents intentionally create. Open the source thread when you need the working context.</p>
         </div>
         <button className="btn-ghost" onClick={() => void refreshReports()} title="Refresh reports">
           <ReloadIcon size={13} /> Refresh
@@ -90,7 +90,7 @@ export function ReportsPage(): React.JSX.Element {
           <div className="report-list">
             {visible.length
               ? visible.map((report) => <ReportCard key={report.id} report={report} selected={selectedSummary?.id === report.id} onSelect={() => choose(report.id)} />)
-              : <div className="command-empty">{filter === 'unread' ? 'You’re caught up.' : 'No reports yet. Ask an agent to create one, or enable reports for an automation.'}</div>}
+              : <div className="command-empty">{filter === 'unread' ? 'You’re caught up.' : 'No reports yet. Ask an agent to create one when you need a durable artifact.'}</div>}
           </div>
         </section>
 
@@ -108,11 +108,27 @@ export function ReportsPage(): React.JSX.Element {
                     {selectedSummary.source.kind === 'automation' ? ` · ${selectedSummary.source.automationName}` : ' · Agent-created'}
                   </p>
                 </div>
-                {selectedSummary.threadId ? (
-                  <button className="btn-ghost" onClick={() => selectSession(selectedSummary.threadId!, false)}>
-                    <ChatIcon size={13} /> Source thread
+                <div className="report-detail-actions">
+                  {selectedSummary.threadId ? (
+                    <button className="btn-ghost" onClick={() => selectSession(selectedSummary.threadId!, false)}>
+                      <ChatIcon size={13} /> Source thread
+                    </button>
+                  ) : null}
+                  <button
+                    className="btn-ghost danger"
+                    onClick={() => appStore.setState({
+                      confirm: {
+                        title: 'Delete report?',
+                        message: `Delete "${selectedSummary.title}"? The source thread will not be deleted.`,
+                        confirmLabel: 'Delete',
+                        destructive: true,
+                        action: () => void deleteReport(selectedSummary.id)
+                      }
+                    })}
+                  >
+                    <TrashIcon size={13} /> Delete
                   </button>
-                ) : null}
+                </div>
               </header>
               {selectedSummary.summary ? <div className="report-summary">{selectedSummary.summary}</div> : null}
               <div className="report-document">

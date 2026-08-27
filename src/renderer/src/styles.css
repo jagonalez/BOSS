@@ -3804,6 +3804,13 @@ body.workspace-dragging .workspace-tab-slot {
   font-size: 11px;
 }
 
+.report-detail-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .report-summary {
   margin: 16px 24px 0;
   padding: 10px 12px;

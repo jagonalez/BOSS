@@ -9,24 +9,20 @@ import type {
   AutomationRunTrigger,
   AutomationsSnapshot
 } from '../shared/automation'
-import { AUTOMATION_DEFAULTS } from '../shared/automation'
+// @ts-expect-error Node's type-stripping test runner needs the extension.
+import { AUTOMATION_DEFAULTS } from '../shared/automation.ts'
 import type { BackendRequest } from '../shared/backend'
 import type { FileDiff, MessageWithParts } from '../shared/opencode'
-import { extractSummary, lastAssistantText } from '../shared/thread-result'
-import { reportBodyFromAssistantText } from '../shared/report'
-import {
-  describeWebhookDelivery,
-  githubPayloadVariables,
-  isWebhookEvent,
-  parseGitHubDelivery,
-  templatePrompt,
-  webhookTriggerMatches
-} from '../shared/automation-trigger'
+// @ts-expect-error Node's type-stripping test runner needs the extension.
+import { extractSummary } from '../shared/thread-result.ts'
+// @ts-expect-error Node's type-stripping test runner needs the extension.
+import { describeWebhookDelivery, githubPayloadVariables, isWebhookEvent, parseGitHubDelivery, templatePrompt, webhookTriggerMatches } from '../shared/automation-trigger.ts'
 import type { GitHubDelivery } from '../shared/automation-trigger'
 import type { NotificationRouter } from './notification-router'
 import type { WebhookSettings } from '../shared/notification'
 import type { WorktreeInfo } from '../shared/worktree'
-import { cronError, missedCronFires, nextCronTime } from './cron'
+// @ts-expect-error Node's type-stripping test runner needs the extension.
+import { cronError, missedCronFires, nextCronTime } from './cron.ts'
 import type { BackendManager } from './backend/manager'
 import type { WorktreeManager } from './worktree-manager'
 
@@ -64,10 +60,6 @@ interface AutomationManagerOptions {
   runsFile: string
 }
 
-interface AutomationReports {
-  createForAutomation(automation: Automation, run: AutomationRun, body: string): Promise<{ id: string } | undefined>
-}
-
 const TICK_MS = 30_000
 const PERMISSION_GRACE_MS = 2_500
 
@@ -88,12 +80,18 @@ export type WebhookDeliveryResult = 'started' | 'queued' | 'skipped'
 
 /** Carries the HTTP status the hook endpoint should answer with. */
 export class WebhookDeliveryError extends Error {
-  constructor(message: string, readonly status: number) {
+  readonly status: number
+
+  constructor(message: string, status: number) {
     super(message)
+    this.status = status
   }
 }
 
 export class AutomationManager {
+  private readonly options: AutomationManagerOptions
+  private readonly backends: BackendManager
+  private readonly worktrees?: WorktreeManager
   private loaded = false
   private automations: Automation[] = []
   private notifyWebhookUrl = ''
@@ -108,11 +106,14 @@ export class AutomationManager {
   private webhookObserver?: (delivery: GitHubDelivery) => unknown | Promise<unknown>
 
   constructor(
-    private readonly options: AutomationManagerOptions,
-    private readonly backends: BackendManager,
-    private readonly worktrees?: WorktreeManager,
-    private readonly reports?: AutomationReports
-  ) {}
+    options: AutomationManagerOptions,
+    backends: BackendManager,
+    worktrees?: WorktreeManager
+  ) {
+    this.options = options
+    this.backends = backends
+    this.worktrees = worktrees
+  }
 
   private async load(): Promise<void> {
     if (this.loaded) return
@@ -135,8 +136,10 @@ export class AutomationManager {
         // Migrate the pre-notify-mode boolean field.
         const legacy = automation.notify as unknown
         if (typeof legacy === 'boolean') automation.notify = legacy ? 'events' : 'off'
-        // Reports predate the per-automation choice, and were always enabled.
-        if (typeof automation.saveReport !== 'boolean') automation.saveReport = true
+        // Older releases could copy every final response into Reports. Reports
+        // are now intentional agent-created artifacts, so discard that retired
+        // preference while keeping existing report files intact.
+        delete (automation as Automation & { saveReport?: boolean }).saveReport
       }
     } catch {
       /* First launch starts with no automations. */
@@ -305,13 +308,13 @@ export class AutomationManager {
     const projectPath = input.projectPath.trim()
     const workspace = projectPath ? input.workspace : 'none'
     if (workspace === 'worktree' && !this.worktrees) throw new Error('Git worktrees are not available.')
+    const { saveReport: _retiredSaveReport, ...current } = input as AutomationInput & { saveReport?: boolean }
     return {
-      ...input,
+      ...current,
       name,
       projectPath,
       workspace,
       webhook,
-      saveReport: input.saveReport !== false,
       maxRunMinutes: Math.max(1, Math.min(24 * 60, Math.round(input.maxRunMinutes || AUTOMATION_DEFAULTS.maxRunMinutes))),
       keepRuns: Math.max(1, Math.min(500, Math.round(input.keepRuns || AUTOMATION_DEFAULTS.keepRuns)))
     }
@@ -661,7 +664,6 @@ export class AutomationManager {
     active.pendingPermissions.clear()
     this.active.delete(automation.id)
 
-    let reportBody = ''
     if (run.threadId && status !== 'failure') {
       try {
         const messages = (await this.backends.handle({
@@ -670,7 +672,6 @@ export class AutomationManager {
           limit: 50
         })) as MessageWithParts[]
         run.summary = extractSummary(messages) ?? run.summary
-        reportBody = reportBodyFromAssistantText(lastAssistantText(messages))
       } catch {
         /* A missing summary never fails the run. */
       }
@@ -685,11 +686,6 @@ export class AutomationManager {
     if (run.worktreeId && run.changedFiles === 0 && this.worktrees) {
       // A clean worktree has no review value; remove() refuses dirty ones, which keeps real changes safe.
       await this.worktrees.remove(run.worktreeId).catch(() => {})
-    }
-
-    if (automation.saveReport !== false && reportBody) {
-      const report = await this.reports?.createForAutomation(automation, run, reportBody).catch(() => undefined)
-      if (report) run.reportId = report.id
     }
 
     if (status === 'failure' || status === 'timeout') {

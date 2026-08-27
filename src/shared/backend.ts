@@ -329,6 +329,7 @@ export type BackendRequest =
   | { type: 'report.list' }
   | { type: 'report.get'; reportId: string }
   | { type: 'report.read'; reportId: string }
+  | { type: 'report.delete'; reportId: string }
   | { type: 'assistant.snapshot' }
   | { type: 'assistant.answer'; questionId: string; answerId: string }
   | { type: 'assistant.task.create'; input: import('./lab-assistant').LabAssistantTaskInput }

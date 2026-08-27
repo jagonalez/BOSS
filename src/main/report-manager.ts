@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { Automation, AutomationRun } from '../shared/automation'
+import type { AutomationRun } from '../shared/automation'
 import type { BackendRequest } from '../shared/backend'
 import type { AgentReportInput, AgentReportPatch, Report, ReportSummary, ReportsSnapshot } from '../shared/report'
 
@@ -117,39 +117,6 @@ export class ReportManager {
     this.onChange?.(this.snapshotNow())
   }
 
-  async createForAutomation(
-    automation: Automation,
-    run: AutomationRun,
-    body: string
-  ): Promise<Report | undefined> {
-    await this.load()
-    const content = body.trim()
-    if (!content || !run.finishedAt) return undefined
-    const existing = this.reports.find((report) =>
-      report.source.kind === 'automation' && report.source.runId === run.id)
-    if (existing) return { ...existing }
-    const report: Report = {
-      id: randomUUID(),
-      source: {
-        kind: 'automation',
-        automationId: automation.id,
-        automationName: automation.name,
-        runId: run.id,
-        status: run.status
-      },
-      ...(run.threadId ? { threadId: run.threadId } : {}),
-      projectPath: automation.projectPath,
-      title: automation.name,
-      ...(run.summary ? { summary: run.summary } : {}),
-      body: content,
-      createdAt: run.finishedAt,
-      updatedAt: run.finishedAt
-    }
-    this.reports.push(report)
-    await this.saveAndEmit()
-    return { ...report }
-  }
-
   async createFromAgent(input: AgentReportInput): Promise<Report> {
     await this.load()
     const now = Date.now()
@@ -200,6 +167,14 @@ export class ReportManager {
     return { ...report }
   }
 
+  async delete(id: string): Promise<void> {
+    await this.load()
+    const index = this.reports.findIndex((item) => item.id === id)
+    if (index === -1) throw new Error('Report not found.')
+    this.reports.splice(index, 1)
+    await this.saveAndEmit()
+  }
+
   async handle(request: BackendRequest): Promise<unknown> {
     switch (request.type) {
       case 'report.list':
@@ -212,6 +187,8 @@ export class ReportManager {
       }
       case 'report.read':
         return this.markRead(request.reportId)
+      case 'report.delete':
+        return this.delete(request.reportId)
       default:
         throw new Error(`Unsupported report request: ${request.type}`)
     }
