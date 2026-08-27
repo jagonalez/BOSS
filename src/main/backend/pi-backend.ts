@@ -462,6 +462,7 @@ export default function (pi: ExtensionAPI) {
     description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktree)},
     parameters: Type.Object({
       instruction: Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction)} }),
+      project: Type.Optional(Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeProject)} })),
       agent: Type.Optional(Type.Union([
         Type.Literal("opencode"),
         Type.Literal("pi"),

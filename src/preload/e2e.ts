@@ -905,16 +905,17 @@ export function installE2EApi(boss: BossApi): void {
     return `data:audio/wav;base64,${btoa(binary)}`
   }
 
-  const createThread = (backendId: BackendId, title?: string): SessionInfo => {
+  const createThread = (backendId: BackendId, title?: string, projectPath = PROJECT): SessionInfo => {
     const preference = defaults[backendId]
     const id = `thread-created-${nextThread++}`
+    const isPrimaryProject = projectPath === PROJECT
     const session: SessionInfo = {
       id,
       backendId,
       nativeSessionId: `native-${id}`,
-      projectId: 'boss-e2e',
-      projectPath: PROJECT,
-      executionPath: CHECKOUT,
+      projectId: isPrimaryProject ? 'boss-e2e' : `boss-e2e-${projectPath.split('/').filter(Boolean).at(-1)}`,
+      projectPath,
+      executionPath: isPrimaryProject ? CHECKOUT : `${projectPath}/.boss/worktrees/${id}`,
       title: title || `New ${backendId} thread`,
       time: { created: Date.now(), updated: Date.now() },
       model: preference ? { id: preference.modelID, provider: preference.providerID } : undefined
@@ -1590,6 +1591,16 @@ export function installE2EApi(boss: BossApi): void {
      *  renderer list it. */
     spawnThread: (backendId: BackendId, title: string) => {
       const session = createThread(backendId, title)
+      const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId })
+      for (const listener of eventListeners) listener(data)
+      return structuredClone(session)
+    },
+    /** Model the result of boss_threads_spawn_worktree with its optional
+     * project argument. Main announces it exactly like every agent-created
+     * thread; the renderer must retain its target project rather than moving it
+     * under whichever project is currently open. */
+    spawnThreadInProject: (backendId: BackendId, title: string, projectPath: string) => {
+      const session = createThread(backendId, title, projectPath)
       const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId })
       for (const listener of eventListeners) listener(data)
       return structuredClone(session)

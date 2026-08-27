@@ -62,7 +62,7 @@ export interface ThreadBusHost {
   threadList(projectId: string): ThreadBusThread[]
   threadMessages(threadId: string, limit: number): Promise<MessageWithParts[]>
   deliverThreadMessage(threadId: string, body: string): Promise<void>
-  spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId): Promise<ThreadBusThread>
+  spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId, project?: string): Promise<ThreadBusThread>
   useWorktree(threadId: string): Promise<{ path: string; branch: string }>
   leaveWorktree(threadId: string): Promise<{ path: string; branch: string }>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
@@ -410,6 +410,7 @@ export class ThreadBus {
         if (policy !== 'collaborate') throw new Error('This project does not allow agents to create worktree threads.')
         const instruction = stringArg(args, 'instruction')
         const requestedAgent = stringArg(args, 'agent')
+        const project = stringArg(args, 'project')
         if (!instruction) throw new Error('An implementation instruction is required.')
         if (instruction.length > MAX_BODY) throw new Error(`Instructions are limited to ${MAX_BODY.toLocaleString()} characters.`)
         let agent: BackendId | undefined
@@ -417,7 +418,7 @@ export class ThreadBus {
           if (!isBackendId(requestedAgent)) throw new Error(`Agent must be one of: ${BACKEND_IDS.join(', ')}.`)
           agent = requestedAgent
         }
-        return this.host.spawnWorktreeThread(caller.id, instruction, agent)
+        return this.host.spawnWorktreeThread(caller.id, instruction, agent, project || undefined)
       }
       case 'boss_threads_leave_worktree':
         return this.host.leaveWorktree(caller.id)
@@ -768,6 +769,7 @@ export class ThreadBus {
           type: 'object',
           properties: {
             instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction },
+            project: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeProject },
             agent: {
               type: 'string',
               enum: [...BACKEND_IDS],

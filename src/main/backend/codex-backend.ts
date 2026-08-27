@@ -135,6 +135,7 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
       type: 'object',
       properties: {
         instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction },
+        project: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeProject },
         agent: {
           type: 'string',
           enum: [...BACKEND_IDS],

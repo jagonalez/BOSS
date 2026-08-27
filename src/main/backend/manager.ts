@@ -55,6 +55,8 @@ import {
 import { hostPermissionResponse, resolveThreadMode } from '@shared/permission-mode'
 import { backendVersionWarning } from '@shared/backend-version'
 import { contextHandoffPacket, delegatedContextInstruction } from '@shared/context-handoff'
+import { loadState } from '../state-store'
+import { knownProjectCandidates } from '../project-target'
 
 interface ThreadBinding {
   id: string
@@ -2030,8 +2032,8 @@ export class BackendManager {
     return { path: binding.projectPath, branch: worktree.branch }
   }
 
-  async spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId): Promise<ThreadBusThread> {
-    const created = await this.forkIntoWorktree(threadId, instruction, undefined, agent)
+  async spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId, project?: string): Promise<ThreadBusThread> {
+    const created = await this.forkIntoWorktree(threadId, instruction, undefined, agent, project)
     const info = this.threadInfo(created.id)
     if (!info) throw new Error('The worktree thread was created but could not be registered.')
     return info
@@ -2372,16 +2374,22 @@ export class BackendManager {
     threadId: string,
     instruction?: string,
     options?: BackendMessageOptions,
-    targetBackendId?: BackendId
+    targetBackendId?: BackendId,
+    targetProject?: string
   ): Promise<SessionInfo> {
     if (!this.worktrees) throw new Error('Git worktrees are not available.')
     const source = this.binding(threadId)
     const backendId = targetBackendId ?? source.backendId
     if (source.projectId === 'global' || !source.projectPath) throw new Error('Projectless chats cannot create Git worktrees.')
-    const worktree = await this.worktrees.create({
+    const target = targetProject ? this.knownProjectScope(targetProject) : {
       projectId: source.projectId,
       projectPath: source.projectPath,
-      sourcePath: source.executionPath || source.projectPath,
+      executionPath: source.executionPath || source.projectPath
+    }
+    const worktree = await this.worktrees.create({
+      projectId: target.projectId,
+      projectPath: target.projectPath,
+      sourcePath: target.executionPath,
       title: source.title,
       ownerThreadId: undefined
     })
@@ -2394,7 +2402,7 @@ export class BackendManager {
       )
       created = await this.sessionCreateInScope(
         backendId,
-        { projectId: source.projectId, projectPath: source.projectPath, executionPath: worktree.path },
+        { projectId: target.projectId, projectPath: target.projectPath, executionPath: worktree.path },
         `${source.title ?? 'Untitled'} · worktree`,
         { kind: 'fork', sourceThreadId: threadId, sourceBackendId: source.backendId },
         worktree
@@ -2416,6 +2424,22 @@ export class BackendManager {
       withBackendDefaults(this.defaultModel(backendId), options, 'ask')
     )
     return this.session(binding)
+  }
+
+  /** Resolve an agent's target only among projects the user put in BOSS.
+   * Accepting an arbitrary path here would let a collaborating thread expand
+   * its own filesystem scope without the user ever opening that folder. */
+  private knownProjectScope(requested: string): ProjectScope {
+    const known = loadState().projects ?? []
+    const matches = knownProjectCandidates(requested, known)
+    if (!matches.length) {
+      const available = known.map((path) => basename(path)).join(', ') || 'none'
+      throw new Error(`Project ${requested} is not open in BOSS. Available projects: ${available}.`)
+    }
+    if (matches.length > 1) {
+      throw new Error(`Project name ${requested} is ambiguous. Use one of these full paths: ${matches.join(', ')}.`)
+    }
+    return this.scopeFor(matches[0])
   }
 
   /** Say that a worktree's setup script failed.
