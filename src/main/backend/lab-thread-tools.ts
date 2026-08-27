@@ -78,6 +78,7 @@ export const THREAD_TOOL_DEFINITIONS: LabToolFunction[] = [
         type: 'object',
         properties: {
           instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction },
+          project: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeProject },
           agent: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeAgent }
         },
         required: ['instruction']

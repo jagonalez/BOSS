@@ -441,6 +441,21 @@ test('a thread an agent spawned shows the model it runs on, not the app default'
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Claude Opus 5' })).toBeVisible()
 })
 
+test('a thread an agent spawned in another project stays under that project', async ({ appPage }) => {
+  const target = '/tmp/boss-e2e/other-project'
+  const spawned = await control(appPage).then((item) =>
+    item.spawnThreadInProject('codex', 'Cross-project worker', target)
+  )
+  expect(spawned).toMatchObject({ projectPath: target, executionPath: `${target}/.boss/worktrees/thread-created-1` })
+
+  const project = appPage.locator('.project-row').filter({ hasText: 'other-project' })
+  await expect(project).toBeVisible()
+  const worker = project.locator('..').locator('.session-row').filter({ hasText: 'Cross-project worker' })
+  await expect(worker).toBeVisible()
+  await worker.click()
+  await expect(appPage.getByRole('tab', { name: 'Cross-project worker' })).toBeVisible()
+})
+
 test('a Claude thread can submit a message without a transport error', async ({ appPage }) => {
   const title = 'Claude SDK executable test'
   await control(appPage).then((item) => item.spawnThread('claude', title))

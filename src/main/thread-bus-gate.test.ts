@@ -130,3 +130,33 @@ test('every agent backend registers the report artifact toolchain', () => {
   assert.ok(gate.indexOf("tool === 'boss_reports_create'") < policy, 'creating a local report must not require collaboration')
   assert.ok(gate.indexOf("tool === 'boss_reports_update'") < policy, 'updating a local report must not require collaboration')
 })
+
+test('worktree spawning carries an optional target project through every backend', () => {
+  const spawn = source.slice(
+    source.indexOf("case 'boss_threads_spawn_worktree':"),
+    source.indexOf("case 'boss_threads_leave_worktree':")
+  )
+  assert.ok(spawn.includes("stringArg(args, 'project')"), 'the bus should read the requested project')
+  assert.ok(spawn.includes('project || undefined'), 'the bus should pass the target to the manager')
+
+  for (const file of [
+    join(import.meta.dirname, 'backend', 'codex-backend.ts'),
+    join(import.meta.dirname, 'backend', 'pi-backend.ts'),
+    join(import.meta.dirname, 'opencode-server.ts'),
+    join(import.meta.dirname, 'backend', 'lab-thread-tools.ts')
+  ]) {
+    const backend = readFileSync(file, 'utf8')
+    assert.ok(
+      backend.includes('spawnWorktreeProject'),
+      `${file} should expose the optional target project in its tool schema`
+    )
+  }
+
+  const fork = manager.slice(
+    manager.indexOf('async forkIntoWorktree('),
+    manager.indexOf('/** Say that a worktree', manager.indexOf('async forkIntoWorktree('))
+  )
+  assert.ok(fork.includes('this.knownProjectScope(targetProject)'), 'the target should be restricted to known projects')
+  assert.ok(fork.includes('projectId: target.projectId'), 'the worktree should belong to the target project')
+  assert.ok(fork.includes('projectPath: target.projectPath'), 'the child thread should remain grouped under the target project')
+})
