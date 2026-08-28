@@ -12,6 +12,7 @@ import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from '@shared/sandbox'
 import { toolLabel } from '@shared/tool-label'
 import { compactionCompletedEvents } from './compaction-events'
 import { splitCodexTurnItems } from './codex-turn-order'
+import { codexToolOutput } from './codex-tool-output'
 
 type RpcId = string | number
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
@@ -134,6 +135,7 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
       type: 'object',
       properties: {
         instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction },
+        project: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.spawnWorktreeProject },
         agent: {
           type: 'string',
           enum: [...BACKEND_IDS],
@@ -365,38 +367,7 @@ function userInputs(parts: unknown[]): Array<Record<string, unknown>> {
 
 function dynamicToolOutput(item: CodexItem): unknown {
   if (!item.contentItems?.length) return item.result ?? item.error
-  const text = item.contentItems
-    .filter((entry) => entry.type === 'inputText' || entry.text)
-    .map((entry) => entry.text ?? '')
-    .filter(Boolean)
-    .join('\n')
-  // Content blocks, not a shape of our own. The manager lifts an image out of a
-  // tool result only when the output is an array of blocks it recognises, and
-  // the renderer stringifies whatever it cannot read — so returning {text,
-  // images} printed the data URL as a wall of base64 where the picture belonged.
-  // Emitting the same block shape Claude and MCP use puts codex on the path
-  // that already stores the bytes and shows them.
-  const images = item.contentItems
-    .filter((entry) => entry.type === 'inputImage' && entry.imageUrl)
-    .map((entry) => dataUrlImage(entry.imageUrl))
-    .filter((image): image is { type: 'image'; mimeType: string; data: string } => Boolean(image))
-  if (!images.length) return text
-  return [...(text ? [{ type: 'text', text }] : []), ...images]
-}
-
-/** The mime and bytes inside a `data:` URL, or undefined if it is not one.
- *
- *  Codex hands an image back as the data URL BOSS itself sent, so the parts are
- *  split out again here rather than passed on whole: the image store takes a
- *  mime type and base64, and a URL that is not base64 is not something it can
- *  write. */
-function dataUrlImage(url?: string): { type: 'image'; mimeType: string; data: string } | undefined {
-  if (!url) return undefined
-  const match = /^data:([^;,]+);base64,(.*)$/s.exec(url)
-  if (!match) return undefined
-  const [, mimeType, data] = match
-  if (!mimeType || !data) return undefined
-  return { type: 'image', mimeType, data }
+  return codexToolOutput(item.contentItems)
 }
 
 function itemPart(sessionId: string, messageId: string, item: CodexItem): Part | null {
@@ -425,15 +396,12 @@ function itemPart(sessionId: string, messageId: string, item: CodexItem): Part |
     }
   }
   if (item.type === 'customToolCallOutput' || item.type === 'custom_tool_call_output') {
-    const output = Array.isArray(item.output)
-      ? (item.output as Array<{ text?: string }>).map((entry) => entry.text ?? '').filter(Boolean).join('\n')
-      : item.output
     return {
       id: item.call_id ?? item.callId ?? item.id,
       type: 'tool',
       sessionID: sessionId,
       messageID: messageId,
-      state: { status: 'completed', output }
+      state: { status: 'completed', output: codexToolOutput(item.output) }
     }
   }
   if (item.type === 'commandExecution') {

@@ -47,6 +47,20 @@ test('boots the real Electron renderer without covering it with a modal', async 
   })).toEqual({ count: 1, visible: false })
 })
 
+test('ships a loadable square favicon with the renderer', async ({ appPage }) => {
+  const favicon = appPage.locator('link[rel="icon"]')
+  await expect(favicon).toHaveAttribute('href', './favicon.ico')
+
+  const dimensions = await favicon.evaluate(async (element) => {
+    const image = new Image()
+    image.src = (element as HTMLLinkElement).href
+    await image.decode()
+    return { width: image.naturalWidth, height: image.naturalHeight }
+  })
+
+  expect(dimensions).toEqual({ width: 256, height: 256 })
+})
+
 test('sets Automatic QA for one thread without sending the command to the agent', async ({ appPage }) => {
   const fixture = await control(appPage)
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
@@ -427,6 +441,21 @@ test('a thread an agent spawned shows the model it runs on, not the app default'
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Claude Opus 5' })).toBeVisible()
 })
 
+test('a thread an agent spawned in another project stays under that project', async ({ appPage }) => {
+  const target = '/tmp/boss-e2e/other-project'
+  const spawned = await control(appPage).then((item) =>
+    item.spawnThreadInProject('codex', 'Cross-project worker', target)
+  )
+  expect(spawned).toMatchObject({ projectPath: target, executionPath: `${target}/.boss/worktrees/thread-created-1` })
+
+  const project = appPage.locator('.project-row').filter({ hasText: 'other-project' })
+  await expect(project).toBeVisible()
+  const worker = project.locator('..').locator('.session-row').filter({ hasText: 'Cross-project worker' })
+  await expect(worker).toBeVisible()
+  await worker.click()
+  await expect(appPage.getByRole('tab', { name: 'Cross-project worker' })).toBeVisible()
+})
+
 test('a Claude thread can submit a message without a transport error', async ({ appPage }) => {
   const title = 'Claude SDK executable test'
   await control(appPage).then((item) => item.spawnThread('claude', title))
@@ -457,6 +486,55 @@ test('shows a Codex message while Codex is still working', async ({ appPage }) =
   await expect(appPage.locator('.msg.assistant')).toHaveCount(0)
 })
 
+test('does not reload an image-heavy Codex history while live parts stream', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  const title = 'Codex image generation performance'
+  const session = await fixture.spawnThread('codex', title)
+  const sessionId = String(session.id)
+  const messageId = 'assistant-image-heavy-e2e'
+  await appPage.locator('.session-row').filter({ hasText: title }).click()
+  await fixture.resetCalls()
+
+  await fixture.emit({
+    type: 'session.status',
+    properties: { sessionID: sessionId, status: { type: 'busy' } }
+  })
+  await fixture.emit({
+    type: 'message.updated',
+    properties: { info: { id: messageId, sessionID: sessionId, role: 'assistant' } }
+  })
+  for (let index = 0; index < 8; index += 1) {
+    await fixture.emit({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: `image-progress-${index}`,
+          type: 'text',
+          sessionID: sessionId,
+          messageID: messageId,
+          text: `Generated image concept ${index + 1}.`
+        }
+      }
+    })
+  }
+  await expect(appPage.getByText('Generated image concept 8.')).toBeVisible()
+
+  // Wait past the old 300 ms debounce. A busy thread already arrived through
+  // incremental events, so no thread.messages request should be made.
+  const checkAfter = Date.now() + 450
+  await expect.poll(async () => {
+    if (Date.now() < checkAfter) return -1
+    return (await backendCalls(appPage))
+      .filter((call) => call.request.type === 'thread.messages')
+      .length
+  }, { timeout: 1_500 }).toBe(0)
+
+  await fixture.emit({ type: 'session.idle', properties: { sessionID: sessionId } })
+  await expect.poll(async () => (await backendCalls(appPage))
+    .filter((call) => call.request.type === 'thread.messages')
+    .length).toBe(1)
+})
+
 test('keeps Codex steering between tool rounds and hides inspection screenshots', async ({ appPage }) => {
   const fixture = await control(appPage)
   await fixture.installCodexOrderingThread()
@@ -472,6 +550,44 @@ test('keeps Codex steering between tool rounds and hides inspection screenshots'
   // The first computer result was model-only inspection context. The second
   // opted into the transcript, so exactly that one is visible to the user.
   await expect(appPage.getByRole('img', { name: 'boss_computer' })).toHaveCount(1)
+})
+
+test('shows Codex custom output images live and once after history reload', async ({ appPage }) => {
+  const fixture = await control(appPage)
+  await fixture.installCodexOrderingThread()
+  await appPage.locator('.session-row').filter({ hasText: 'Codex steering order' }).click()
+
+  const images = appPage.getByRole('img', { name: /Codex image [12]/ })
+  await expect(images).toHaveCount(2)
+  await expect(images.nth(0)).toHaveAttribute('alt', 'Codex image 1')
+  await expect(images.nth(1)).toHaveAttribute('alt', 'Codex image 2')
+  const transcript = appPage.locator('.messages:visible')
+  await expect(transcript).not.toContainText('data:image/png;base64')
+
+  // item/completed can repeat what item/started already surfaced. Stable part
+  // ids make this a replacement, not a third and fourth picture.
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  for (const [id, name] of [
+    ['tool-image-custom-image-output-1', 'Codex image 1'],
+    ['tool-image-custom-image-output-3', 'Codex image 2']
+  ]) {
+    await fixture.emit({
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id, type: 'file', sessionID: 'thread-codex-ordering', messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', name, mime: 'image/png', url: image }
+        }
+      }
+    })
+  }
+  await expect(images).toHaveCount(2)
+
+  // Leaving and reopening asks the backend fixture for native history again.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.session-row').filter({ hasText: 'Codex steering order' }).click()
+  await expect(images).toHaveCount(2)
+  await expect(transcript).not.toContainText('data:image/png;base64')
 })
 
 test('a failed Codex send keeps the message retryable and shows it after retry', async ({ appPage }) => {

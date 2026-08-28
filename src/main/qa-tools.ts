@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { isComputerUseActionOperation, type QaAgentTool, type QaPolicy, type QaPolicyState, type AgentToolResult } from '@shared/qa'
+import { isComputerUseActionOperation, normalizeComputerUseArguments, type QaAgentTool, type QaPolicy, type QaPolicyState, type AgentToolResult } from '@shared/qa'
 import type { BrowseManager } from './browse'
 import type { ComputerUse } from './computer-use'
 
@@ -110,7 +110,7 @@ export class QaTools {
         const operation = stringArg(args, 'operation')
         if (isComputerUseActionOperation(operation)) this.requireAutomatic(policy, `run computer action ${operation}`)
         const input = objectArg(objectArg(args).arguments)
-        return this.computer.call(operation, input)
+        return this.computer.call(operation, normalizeComputerUseArguments(operation, input))
       }
     }
   }

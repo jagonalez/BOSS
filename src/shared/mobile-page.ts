@@ -468,7 +468,7 @@ function renderAutomations() {
 
 function renderReports() {
   var all = (reports.reports || []).slice().sort(function (a, b) { return b.updatedAt - a.updatedAt; });
-  if (!all.length) return '<div class="empty">No reports yet. Ask an agent to create one, or enable reports for an automation.</div>';
+  if (!all.length) return '<div class="empty">No reports yet. Ask an agent to create one when you need a durable artifact.</div>';
   var html = '';
   all.forEach(function (report) {
     var source = report.source && report.source.kind === 'automation' ? 'Automation' : ((report.source && report.source.backendId) || 'Agent');

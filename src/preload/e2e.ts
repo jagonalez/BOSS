@@ -365,6 +365,33 @@ function codexOrderingMessages(sessionID: string): MessageWithParts[] {
         {
           id: 'computer-after-image', type: 'file', sessionID, messageID: 'assistant-codex-order-1',
           state: { status: 'completed', name: 'boss_computer', mime: 'image/png', url: image }
+        },
+        {
+          id: 'custom-image-call', type: 'tool', sessionID, messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', tool: 'image_gen', title: 'Generate two logo studies', input: { prompt: 'Two studies' } }
+        },
+        {
+          // Stable ids mirror BackendManager's projection of image blocks 1
+          // and 3 from one custom_tool_call_output. Replaying these parts below
+          // must update rather than append them.
+          id: 'tool-image-custom-image-output-1', type: 'file', sessionID, messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', name: 'Codex image 1', mime: 'image/png', url: image }
+        },
+        {
+          id: 'tool-image-custom-image-output-3', type: 'file', sessionID, messageID: 'assistant-codex-order-1',
+          state: { status: 'completed', name: 'Codex image 2', mime: 'image/png', url: image }
+        },
+        {
+          id: 'custom-image-output', type: 'tool', sessionID, messageID: 'assistant-codex-order-1',
+          state: {
+            status: 'completed',
+            output: [
+              { type: 'text', text: 'First study.' },
+              { type: 'text', text: '[Image shown above: image/png]' },
+              { type: 'text', text: 'Second study.' },
+              { type: 'text', text: '[Image shown above: image/png]' }
+            ]
+          }
         }
       ]
     }
@@ -512,7 +539,6 @@ export function installE2EApi(boss: BossApi): void {
     workspace: 'worktree',
     overlapPolicy: 'skip',
     catchUp: true,
-    saveReport: true,
     notify: 'events',
     maxRunMinutes: 30,
     keepRuns: 50,
@@ -526,7 +552,6 @@ export function installE2EApi(boss: BossApi): void {
   const automationRunsFixture: Array<Record<string, unknown>> = [{
     id: 'run-report-seed',
     automationId: 'automation-webhook-seed',
-    reportId: 'report-codex-seed',
     threadId: 'thread-report-source',
     trigger: 'schedule',
     status: 'success',
@@ -878,16 +903,17 @@ export function installE2EApi(boss: BossApi): void {
     return `data:audio/wav;base64,${btoa(binary)}`
   }
 
-  const createThread = (backendId: BackendId, title?: string): SessionInfo => {
+  const createThread = (backendId: BackendId, title?: string, projectPath = PROJECT): SessionInfo => {
     const preference = defaults[backendId]
     const id = `thread-created-${nextThread++}`
+    const isPrimaryProject = projectPath === PROJECT
     const session: SessionInfo = {
       id,
       backendId,
       nativeSessionId: `native-${id}`,
-      projectId: 'boss-e2e',
-      projectPath: PROJECT,
-      executionPath: CHECKOUT,
+      projectId: isPrimaryProject ? 'boss-e2e' : `boss-e2e-${projectPath.split('/').filter(Boolean).at(-1)}`,
+      projectPath,
+      executionPath: isPrimaryProject ? CHECKOUT : `${projectPath}/.boss/worktrees/${id}`,
       title: title || `New ${backendId} thread`,
       time: { created: Date.now(), updated: Date.now() },
       model: preference ? { id: preference.modelID, provider: preference.providerID } : undefined
@@ -1371,6 +1397,12 @@ export function installE2EApi(boss: BossApi): void {
         if (!report.readAt) report.readAt = Date.now()
         return structuredClone(report)
       }
+      case 'report.delete': {
+        const report = reportsFixture.find((item) => item.id === request.reportId)
+        if (!report) throw new Error(`Unknown fixture report ${request.reportId}`)
+        reportsFixture = reportsFixture.filter((item) => item.id !== request.reportId)
+        return undefined
+      }
       case 'automation.create': {
         const now = Date.now()
         const created = {
@@ -1534,6 +1566,8 @@ export function installE2EApi(boss: BossApi): void {
      *  recorded, which is exactly what those tests are about, so this reaches
      *  the real channel. Reading only — it creates nothing. */
     realProjectList: (): Promise<string[]> => ipcRenderer.invoke(IpcChannels.ProjectList),
+    computerUseCall: (operation: string, args: Record<string, unknown>) =>
+      ipcRenderer.invoke(IpcChannels.E2EComputerUseCall, operation, args),
     calls: () => structuredClone(calls),
     sessions: () => structuredClone(sessions),
     defaults: () => structuredClone(defaults),
@@ -1561,6 +1595,16 @@ export function installE2EApi(boss: BossApi): void {
      *  renderer list it. */
     spawnThread: (backendId: BackendId, title: string) => {
       const session = createThread(backendId, title)
+      const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId })
+      for (const listener of eventListeners) listener(data)
+      return structuredClone(session)
+    },
+    /** Model the result of boss_threads_spawn_worktree with its optional
+     * project argument. Main announces it exactly like every agent-created
+     * thread; the renderer must retain its target project rather than moving it
+     * under whichever project is currently open. */
+    spawnThreadInProject: (backendId: BackendId, title: string, projectPath: string) => {
+      const session = createThread(backendId, title, projectPath)
       const data = JSON.stringify({ type: 'session.created', properties: { info: session }, backendId })
       for (const listener of eventListeners) listener(data)
       return structuredClone(session)

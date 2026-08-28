@@ -147,7 +147,7 @@ threadBus.attachReports(reports)
 const automations = new AutomationManager({
   stateFile: join(app.getPath('userData'), 'automations.json'),
   runsFile: join(app.getPath('userData'), 'automation-runs.json')
-}, backendMgr, worktrees, reports)
+}, backendMgr, worktrees)
 backendMgr.attachAutomations(automations)
 automations.attachNotifications(notifications)
 const labAssistant = new LabAssistantManager(
@@ -255,7 +255,7 @@ automations.setWebhookObserver(async (delivery) => {
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, pty, speech, sites, updates, reviews, projectFiles, takePendingCliOpen }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, qaTools, pty, speech, sites, updates, reviews, projectFiles, takePendingCliOpen }
 }
 
 function registerIpcOnce(): void {

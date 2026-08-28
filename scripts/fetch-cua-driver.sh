@@ -11,7 +11,9 @@ cd "$(dirname "$0")/.."
 # Pin rather than track latest: a nightly build that silently changes its
 # bundled driver is not reproducible, and a driver regression would look like
 # a BOSS regression. Raise this deliberately.
-VERSION="${CUA_DRIVER_VERSION:-0.19.3}"
+# 0.20.0 is the first release that verifies exact-window foreground focus
+# before dispatch, avoiding the activation race in the final delivery rung.
+VERSION="${CUA_DRIVER_VERSION:-0.20.0}"
 REPO="trycua/cua"
 STAGE="cua-driver-rs-${VERSION}-darwin-universal"
 TARBALL="${STAGE}.tar.gz"

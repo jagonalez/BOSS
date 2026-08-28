@@ -126,21 +126,23 @@ test('the assistant home surfaces workflow attention and opens the standing conv
   await expect(attention).toContainText('Mute the flaky monitor?')
   await expect(attention).toContainText('Datadog alert watcher is waiting for your approval')
 
-  // Asking routes into one persistent global conversation, seeded once.
+  // Asking routes into one persistent global conversation, seeded once —
+  // and the conversation appears in the page's own pane rather than
+  // teleporting you to the chat workspace.
   await appPage.getByRole('textbox', { name: 'Ask your assistant' }).fill('what is running right now?')
   await appPage.getByRole('button', { name: 'Ask', exact: true }).click()
   const created = await lastBackendCall(appPage, 'thread.create')
   expect(created.request).toMatchObject({ type: 'thread.create', title: 'Assistant', scope: 'global' })
-  await expect
-    .poll(async () =>
-      // An idle thread gets a direct thread.send; a busy one gets a queued
-      // follow-up. The seeded prompt is valid arriving either way.
-      (await backendCalls(appPage)).some((call) => {
-        if (call.request.type !== 'thread.send' && call.request.type !== 'thread.followups.add') return false
-        const text = JSON.stringify(call.request)
-        return text.includes('[BOSS assistant]') && text.includes('what is running right now?')
-      })
-    )
-    .toBe(true)
-  await expect(appPage.locator('.workspace-shell')).toBeVisible()
+  const sent = async (marker: string): Promise<boolean> =>
+    // An idle thread gets a direct thread.send; a busy one gets a queued
+    // follow-up. The prompt is valid arriving either way.
+    (await backendCalls(appPage)).some((call) => {
+      if (call.request.type !== 'thread.send' && call.request.type !== 'thread.followups.add') return false
+      return JSON.stringify(call.request).includes(marker)
+    })
+  await expect.poll(() => sent('[BOSS assistant]')).toBe(true)
+  await expect.poll(() => sent('what is running right now?')).toBe(true)
+  await expect(appPage.locator('.lab-assistant-page')).toBeVisible()
+  await expect(appPage.getByRole('region', { name: 'Assistant conversation' })).toBeVisible()
+  await expect(appPage.locator('.workspace-shell')).not.toBeVisible()
 })

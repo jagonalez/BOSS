@@ -1095,29 +1095,33 @@ export async function refreshAutomations(): Promise<void> {
 
 /** The assistant is one persistent, global conversation — something that is
  *  already caught up when you arrive, not a chat you re-explain yourself to.
- *  First call creates and seeds it; every later call reopens the same thread. */
-export async function openAssistantConversation(text?: string): Promise<void> {
+ *  Created and seeded once; reused forever after. Returns its session id and
+ *  never navigates, so the Assistant home can embed it in place. */
+export async function ensureAssistantSession(): Promise<string> {
   const state = appStore.getState()
   const existingId = Object.values(state.sessionMeta).find((meta) => meta.kind === 'assistant')?.sessionId
   const existing = existingId ? state.sessions.find((session) => session.id === existingId) : undefined
-  if (existing) {
-    selectSession(existing.id, false)
-    if (text?.trim()) await sendPrompt(text.trim(), existing.id)
-    return
-  }
+  if (existing) return existing.id
   const backendId = state.engine
   const session = await OpenCode.createSession('Assistant', backendId, 'global')
   applyBackendDefaults(session.id, backendId)
   upsertSessionMeta(session.id, { kind: 'assistant', projectPath: '' })
   await refreshSessions()
   await refreshProviders(session.id)
-  selectSession(session.id, false)
   const seed = [
     '[BOSS assistant]',
-    'You are this user\'s standing BOSS assistant — one persistent conversation, not a one-off chat. Keep their work moving with the BOSS tools: see what other threads are doing (boss_threads_list, boss_threads_read), hand work to new worktree threads, author and run durable workflows (boss_workflow_*), and keep reports for results worth keeping. Be brief, act rather than narrate, and surface only what genuinely needs the user. When asked for status, check the live tools instead of answering from memory.',
-    ...(text?.trim() ? ['', 'First request:', text.trim()] : [])
+    'You are this user\'s standing BOSS assistant — one persistent conversation, not a one-off chat. Keep their work moving with the BOSS tools: see what other threads are doing (boss_threads_list, boss_threads_read), hand work to new worktree threads, author and run durable workflows (boss_workflow_*), and keep reports for results worth keeping. Be brief, act rather than narrate, and surface only what genuinely needs the user. When asked for status, check the live tools instead of answering from memory.'
   ].join('\n')
   await sendPrompt(seed, session.id)
+  return session.id
+}
+
+/** Ask from anywhere: routes into the standing conversation in place. */
+export async function askAssistant(text?: string): Promise<string> {
+  const id = await ensureAssistantSession()
+  void loadMessages(id)
+  if (text?.trim()) await sendPrompt(text.trim(), id)
+  return id
 }
 
 /** Workflows are agent-authored: this opens a fresh conversation seeded with
@@ -1182,6 +1186,20 @@ export function openReport(reportId: string): void {
     selectedReportId: reportId,
     ...(detail?.id === reportId ? {} : { reportDetail: null })
   })
+}
+
+export async function deleteReport(reportId: string): Promise<void> {
+  try {
+    await OpenCode.deleteReport(reportId)
+    const reports = await OpenCode.reportsList()
+    appStore.setState({
+      reports,
+      selectedReportId: reports.reports[0]?.id ?? null,
+      reportDetail: null
+    })
+  } catch (error) {
+    appStore.setState({ lastError: errorSummary(error) })
+  }
 }
 
 export async function setThreadBusPolicy(policy: CollaborationPolicy | null, projectId: string): Promise<void> {

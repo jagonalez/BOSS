@@ -66,6 +66,7 @@ test('read-only access cannot mutate task or automation state', () => {
     'automation.run',
     'automation.stop',
     'report.read',
+    'report.delete',
     'assistant.answer',
     'assistant.task.create',
     'assistant.task.update',

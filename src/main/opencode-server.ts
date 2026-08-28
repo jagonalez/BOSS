@@ -193,6 +193,7 @@ export const spawn_worktree = tool({
   description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktree)},
   args: {
     instruction: tool.schema.string().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeInstruction)}),
+    project: tool.schema.string().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeProject)}).optional(),
     agent: tool.schema.enum(["opencode", "pi", "codex", "claude"])
       .describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktreeAgent)}).optional()
   },

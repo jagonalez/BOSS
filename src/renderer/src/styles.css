@@ -3804,6 +3804,13 @@ body.workspace-dragging .workspace-tab-slot {
   font-size: 11px;
 }
 
+.report-detail-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .report-summary {
   margin: 16px 24px 0;
   padding: 10px 12px;
@@ -11467,4 +11474,25 @@ select:hover {
 .assistant-ask {
   margin-top: 10px;
   max-width: 560px;
+}
+
+.assistant-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.assistant-pane-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+  max-height: 640px;
+  overflow: hidden;
+  border: 1px solid var(--line-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.assistant-pane-chat > * {
+  flex: 1;
+  min-height: 0;
 }
