@@ -326,7 +326,7 @@ export function addWorkspaceTab(
       return
     }
   }
-  if (kind === 'review' || kind === 'files') {
+  if (kind === 'review' || kind === 'files' || kind === 'agents') {
     // Deduped by owner as well as checkout, so asking twice from one thread
     // reuses its tab. Deduping on the checkout alone handed a thread the tab
     // belonging to whichever thread asked first — the diff was right, but the
@@ -769,7 +769,8 @@ export function addResourceToSession(sessionId: string, kind: WorkspaceTabKind):
     ? { contextPath: path, worktreeId: session?.worktree?.id, contextLabel: session?.worktree?.branch ?? 'Main' }
     : undefined
 
-  addWorkspaceTab(placement.groupId, kind, sessionId, checkout)
+  const checkoutBacked = kind === 'terminal' || kind === 'review' || kind === 'files'
+  addWorkspaceTab(placement.groupId, kind, sessionId, checkoutBacked ? checkout : undefined)
   showPage('project')
 }
 

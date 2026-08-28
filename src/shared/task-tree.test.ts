@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 // Node's type-stripping test runner requires explicit extensions.
 // @ts-expect-error Application code uses bundler resolution.
-import { buildTaskTree, flattenTaskTree } from './task-tree.ts'
+import { buildTaskTree, descendantTaskNodes, flattenTaskTree } from './task-tree.ts'
 import type { SupervisedThread, ThreadLineage } from './supervision.ts'
 
 function thread(threadId: string, updatedAt: number, lineage?: ThreadLineage): SupervisedThread {
@@ -41,6 +41,29 @@ test('nests a worker spawned by another worker', () => {
     flattenTaskTree(roots).map((node) => [node.thread.threadId, node.depth]),
     [['root', 0], ['mid', 1], ['leaf', 2]]
   )
+})
+
+test('uses a native parent id when BOSS lineage is absent', () => {
+  const parent = thread('parent', 3)
+  const worker = { ...thread('native-worker', 2), parentID: 'parent' }
+  const roots = buildTaskTree([parent, worker])
+  assert.deepEqual(roots[0].children.map((child) => child.thread.threadId), ['native-worker'])
+})
+
+test('returns descendants relative to one thread even when the owner is absent', () => {
+  const direct = { ...thread('direct', 3), parentID: 'owner' }
+  const nested = thread('nested', 4, delegate('direct'))
+  const unrelated = thread('unrelated', 5)
+  assert.deepEqual(
+    descendantTaskNodes([nested, unrelated, direct], 'owner').map((node) => [node.thread.threadId, node.depth]),
+    [['direct', 0], ['nested', 1]]
+  )
+})
+
+test('prefers explicit BOSS lineage over a native parent id', () => {
+  const worker = { ...thread('worker', 2, delegate('boss-parent')), parentID: 'native-parent' }
+  assert.deepEqual(descendantTaskNodes([worker], 'boss-parent').map((node) => node.thread.threadId), ['worker'])
+  assert.deepEqual(descendantTaskNodes([worker], 'native-parent'), [])
 })
 
 // Measured against real state: most lineage records point at a thread that is

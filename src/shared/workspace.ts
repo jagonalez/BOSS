@@ -1,6 +1,6 @@
 export type AppPage = 'home' | 'lab-assistant' | 'automations' | 'workflows' | 'reports' | 'sites' | 'project' | 'chat'
 
-export type WorkspaceTabKind = 'thread' | 'browser' | 'terminal' | 'review' | 'files'
+export type WorkspaceTabKind = 'thread' | 'agents' | 'browser' | 'terminal' | 'review' | 'files'
 export type SplitDirection = 'horizontal' | 'vertical'
 export type DropPosition = 'center' | 'left' | 'right' | 'top' | 'bottom'
 export type TerminalStartLocation = 'focused-checkout' | 'project-root'

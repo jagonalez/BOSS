@@ -7,6 +7,7 @@ import { BrowseTab } from './BrowseTab'
 import { TerminalTab } from './TerminalTab'
 import { ReviewTab } from './ReviewTab'
 import { FilesTab } from './FilesTab'
+import { AgentsTab } from './AgentsTab'
 import {
   activateWorkspaceView,
   activateWorkspaceTab,
@@ -34,7 +35,7 @@ import {
 } from '../lib/actions'
 import { SESSION_DRAG_TYPE, TAB_DRAG_TYPE, activeWorkspaceView, conversationGroupId, panelGroupId, findGroup, findSessionTab, threadCheckout, walkGroups, walkTabs, workspaceMenuRight } from '../lib/workspaces'
 import { tabContentNode } from '../lib/tab-content-nodes'
-import { BACKEND_MARKS, BackIcon, ChatIcon, ChevronIcon, FilesIcon, GlobeIcon, PanelIcon, PlusIcon, RenameIcon, ReviewIcon, TerminalIcon, TrashIcon } from './icons'
+import { BACKEND_MARKS, BackIcon, ChatIcon, ChevronIcon, FilesIcon, ForkIcon, GlobeIcon, PanelIcon, PlusIcon, RenameIcon, ReviewIcon, TerminalIcon, TrashIcon } from './icons'
 import { BackendBadge } from './BackendControls'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 
@@ -45,6 +46,7 @@ const TAB_TYPES: Array<{
   icon: (props: { size?: number }) => React.JSX.Element
 }> = [
   { kind: 'thread', label: 'Thread', icon: ChatIcon },
+  { kind: 'agents', label: 'Agents', icon: ForkIcon },
   { kind: 'browser', label: 'Browser', icon: GlobeIcon },
   { kind: 'terminal', label: 'Terminal', icon: TerminalIcon },
   { kind: 'review', label: 'Review', icon: ReviewIcon },
@@ -360,13 +362,18 @@ function AddMenu({
     )
   }
 
-  const resources = TAB_TYPES.filter((item) => item.kind !== 'thread')
+  const resources = TAB_TYPES.filter((item) => {
+    if (item.kind === 'thread') return false
+    const needsCheckout = item.kind === 'terminal' || item.kind === 'review' || item.kind === 'files'
+    return !needsCheckout || Boolean(inherited)
+  })
 
   return (
     <div className="workspace-add-menu">
       <div className="workspace-menu-title">Add to {owner?.title || 'this thread'}</div>
       {resources.map(({ kind, label, icon: Icon }) => {
         const scoped = kind === 'terminal' || kind === 'review' || kind === 'files'
+        const owned = scoped || kind === 'agents'
         return (
           <button
             key={kind}
@@ -375,7 +382,7 @@ function AddMenu({
               // Record the owning thread, not just its checkout. A resource can
               // be dragged into any view, so the sidebar needs to know which
               // thread to list it under once it no longer sits beside one.
-              addWorkspaceTab(groupId, kind, scoped ? ownerId ?? undefined : undefined, scoped ? inherited : undefined)
+              addWorkspaceTab(groupId, kind, owned ? ownerId ?? undefined : undefined, scoped ? inherited : undefined)
               close()
             }}
           >
@@ -426,6 +433,11 @@ function TabContent({
       break
     case 'browser':
       content = <BrowseTab id={`workspace-${item.id}`} visible={active && viewShowing} />
+      break
+    case 'agents':
+      content = item.sessionId
+        ? <AgentsTab sessionId={item.sessionId} active={active && viewShowing} />
+        : <div className="workspace-unbound">Choose a thread for this Agents tab.</div>
       break
     case 'terminal':
       content = (
@@ -576,11 +588,6 @@ function GroupView({ group, viewId, conversation = false, panel = false }: {
   const focused = view?.focusedGroupId === group.id && workspace?.activeViewId === viewId
   const arrived = Boolean(highlightedTabId && group.tabs.some((item) => item.id === highlightedTabId))
   const sessions = useStore(appStore, (state) => state.sessions)
-  // A chat has no project, so there is no checkout to hand a terminal.
-  const ownsCheckout = (sessionId: string): boolean => {
-    const session = sessions.find((candidate) => candidate.id === sessionId)
-    return Boolean(session && (session.projectPath ?? session.directory ?? session.path))
-  }
   const movable = Boolean(view && walkTabs(view.root).length > 1)
   // An empty pane opens its own add menu, which is right when the user made the
   // pane. Single mode's panel is created for them by the bar button, which is
@@ -784,13 +791,13 @@ function GroupView({ group, viewId, conversation = false, panel = false }: {
             >
               <TabLabel item={item} group={group} />
               {/* On the thread's own tab, so "add to this thread" needs no
-                  explaining. A resource tab owns nothing, and a chat has no
-                  checkout to give, so neither gets one. */}
-              {item.kind === 'thread' && item.sessionId && ownsCheckout(item.sessionId) ? (
+                  explaining. Checkout-backed choices are filtered from chats,
+                  while their Agents pane remains available. */}
+              {item.kind === 'thread' && item.sessionId ? (
                 <span
                   className="workspace-tab-add-inline"
                   role="button"
-                  title="Add a terminal, files or review to this thread"
+                  title="Add a resource to this thread"
                   onClick={(event) => {
                     event.stopPropagation()
                     const trigger = event.currentTarget.getBoundingClientRect()
@@ -1213,7 +1220,7 @@ function SinglePanelButton(): React.JSX.Element | null {
             if (!panelId) ensurePanel(view.id)
             setOpen(true)
           }}
-          title={panelHasTabs ? 'Close the panel' : open ? 'Close the panel' : 'Open a terminal, browser, files, or a side chat beside this thread'}
+          title={panelHasTabs ? 'Close the panel' : open ? 'Close the panel' : 'Open agents, a terminal, browser, files, or a side chat beside this thread'}
         >
           <PanelIcon size={13} />
         </button>

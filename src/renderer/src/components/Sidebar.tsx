@@ -35,7 +35,7 @@ import {
   togglePin,
   exportSessionMarkdown
 } from '../lib/actions'
-import { BACKEND_MARKS, BranchIcon, ChatIcon, ChevronIcon, ExternalIcon, FileIcon, FilesIcon, FolderIcon, GearIcon, GlobeIcon, LabMark, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
+import { BACKEND_MARKS, BranchIcon, ChatIcon, ChevronIcon, ExternalIcon, FileIcon, FilesIcon, FolderIcon, ForkIcon, GearIcon, GlobeIcon, LabMark, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -59,6 +59,7 @@ interface CtxMenu {
 /** What a thread can own. No thread here: a pane holds one, and it arrives by
  *  being dragged or clicked, not from this menu. */
 const ADDABLE: Array<{ kind: WorkspaceTabKind; label: string }> = [
+  { kind: 'agents', label: 'Agents' },
   { kind: 'terminal', label: 'Terminal' },
   { kind: 'files', label: 'Files' },
   { kind: 'review', label: 'Review' },
@@ -256,6 +257,7 @@ function SessionRow({
 }
 
 const RESOURCE_LABELS: Record<string, string> = {
+  agents: 'Agents',
   terminal: 'Terminal',
   review: 'Review',
   files: 'Files',
@@ -263,6 +265,7 @@ const RESOURCE_LABELS: Record<string, string> = {
 }
 
 const RESOURCE_ICONS: Record<string, (props: { size?: number }) => React.JSX.Element> = {
+  agents: ForkIcon,
   terminal: TerminalIcon,
   review: ReviewIcon,
   files: FilesIcon,
@@ -942,29 +945,29 @@ export function Sidebar(): React.JSX.Element {
                   <ExternalIcon size={12} />
                 </button>
               ) : null}
-              {/* A chat has no checkout, so a terminal or diff has nowhere to
-                  point and Add is left out entirely. */}
-              {(ctx.session.projectPath ?? ctx.session.directory ?? ctx.session.path) ? (
-                <CtxSubmenu label="Add">
-                  {ADDABLE.map(({ kind, label }) => {
-                    const Icon = RESOURCE_ICONS[kind] ?? ChatIcon
-                    return (
-                      <button
-                        key={kind}
-                        className="ctx-item"
-                        onClick={() => {
-                          const target = ctx.session!
-                          setCtx(null)
-                          addResourceToSession(target.id, kind)
-                        }}
-                      >
-                        <Icon size={13} />
-                        <span>{label}</span>
-                      </button>
-                    )
-                  })}
-                </CtxSubmenu>
-              ) : null}
+              <CtxSubmenu label="Add">
+                {ADDABLE.filter(({ kind }) => {
+                  const needsCheckout = kind === 'terminal' || kind === 'files' || kind === 'review'
+                  const hasCheckout = Boolean(ctx.session?.projectPath ?? ctx.session?.directory ?? ctx.session?.path)
+                  return !needsCheckout || hasCheckout
+                }).map(({ kind, label }) => {
+                  const Icon = RESOURCE_ICONS[kind] ?? ChatIcon
+                  return (
+                    <button
+                      key={kind}
+                      className="ctx-item"
+                      onClick={() => {
+                        const target = ctx.session!
+                        setCtx(null)
+                        addResourceToSession(target.id, kind)
+                      }}
+                    >
+                      <Icon size={13} />
+                      <span>{label}</span>
+                    </button>
+                  )
+                })}
+              </CtxSubmenu>
               {menuItem('Rename…', () => appStore.setState({ renameTarget: ctx.session!.id }))}
               {menuItem('Delegate…', () => appStore.setState({ delegateTarget: ctx.session!.id }))}
               {menuItem('Goal & budget…', () => appStore.setState({ policyTarget: ctx.session!.id }))}

@@ -424,6 +424,19 @@ test('quick-create uses the configured backend and exposes its defaults on the n
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Claude Opus 5' })).toBeVisible()
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Auto' })).toBeVisible()
   await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'high' })).toBeVisible()
+
+  // A chat has no checkout, but its backend can still spawn children. Its +
+  // therefore keeps Agents (and Browser) while hiding checkout-backed tools.
+  await appPage.locator('.workspace-tab.active').filter({ hasText: 'New claude thread' })
+    .locator('.workspace-tab-add-inline[title="Add a resource to this thread"]').click()
+  const menu = appPage.locator('.workspace-add-menu:visible')
+  await expect(menu.getByRole('button', { name: 'Agents' })).toBeVisible()
+  await expect(menu.getByRole('button', { name: 'Browser' })).toBeVisible()
+  await expect(menu.getByRole('button', { name: 'Terminal' })).toHaveCount(0)
+  await expect(menu.getByRole('button', { name: 'Files' })).toHaveCount(0)
+  await expect(menu.getByRole('button', { name: 'Review' })).toHaveCount(0)
+  await menu.getByRole('button', { name: 'Agents' }).click()
+  await expect(appPage.getByRole('region', { name: 'Agents for New claude thread' })).toContainText('No subagents yet')
 })
 
 test('a thread an agent spawned shows the model it runs on, not the app default', async ({ appPage }) => {
@@ -704,6 +717,17 @@ test('delegation sends the chosen backend, worktree placement, and target defaul
   expect(staleRequest).toBeGreaterThan(history)
   expect(handoff.lastIndexOf('Follow only CURRENT TASK above.')).toBeGreaterThan(staleRequest)
   await expect(appPage.locator('.delegate-modal')).toHaveCount(0)
+
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.workspace-tab.active').filter({ hasText: 'Source thread' })
+    .locator('.workspace-tab-add-inline[title="Add a resource to this thread"]').click()
+  await appPage.locator('.workspace-add-menu:visible').getByRole('button', { name: 'Agents' }).click()
+  const agents = appPage.getByRole('region', { name: 'Agents for Source thread' })
+  await expect(agents).toContainText('1 subagent across all backends')
+  const worker = agents.getByRole('article', { name: /Delegated worker, Claude, Completed/ })
+  await expect(worker).toContainText('Audited the workflow and reported the gaps.')
+  await worker.getByRole('button', { name: 'Open thread' }).click()
+  await expect(appPage.getByRole('tab', { name: /Delegated worker/ })).toBeVisible()
 })
 
 test('ask mode surfaces permission requests and replies from the card', async ({ appPage }) => {
@@ -1324,7 +1348,8 @@ test('the composer meter reports what backends recorded and hides when they repo
 /** Open the review surface for the source thread's checkout. */
 async function openReviewTab(page: Parameters<typeof control>[0]): Promise<void> {
   await page.locator('.session-row').filter({ hasText: 'Source thread' }).click()
-  await page.locator('.workspace-tab-add-inline[title="Add a terminal, files or review to this thread"]').click()
+  await page.locator('.workspace-tab.active').filter({ hasText: 'Source thread' })
+    .locator('.workspace-tab-add-inline[title="Add a resource to this thread"]').click()
   await page.locator('.workspace-add-menu-item').filter({ hasText: 'Review' }).click()
 }
 

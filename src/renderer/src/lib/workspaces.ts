@@ -82,7 +82,7 @@ export function workspaceView(name = 'Workspace', root: WorkspaceNode = group())
  *
  *  The conversation owns the left pane and never leaves it — in single mode it
  *  is the thread, not a tab you can close. Everything the thread accumulates
- *  (terminals, browsers, files, a side chat) goes in the right pane, which is
+ *  (agents, terminals, browsers, files, a side chat) goes in the right pane, which is
  *  an ordinary group and so brings its own tab strip, drag and drop, and close
  *  buttons with it.
  *
@@ -107,7 +107,7 @@ export function conversationGroupId(view: WorkspaceView): string {
   return groups.find((item) => item.tabs.some((entry) => entry.kind === 'thread'))?.id ?? groups[0].id
 }
 
-/** The pane a thread's terminals, files and reviews belong in: the one that is
+/** The pane a thread's agents, terminals, files and reviews belong in: the one that is
  *  not its conversation. Undefined when the view has no second pane yet. */
 export function panelGroupId(view: WorkspaceView): string | undefined {
   const conversation = conversationGroupId(view)
