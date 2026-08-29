@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { knowledgeFreshness, validateProductGraph, type ProductGraph, type ProductGraphNode } from './product-graph.ts'
+import { knowledgeFreshness, productGraphShapeError, validateProductGraph, type ProductGraph, type ProductGraphNode } from './product-graph.ts'
 
 const now = 1_788_000_000_000
 
@@ -56,6 +56,57 @@ test('graph validation catches duplicate, dangling, and semantically invalid rel
     'duplicate-relation',
     'dangling-relation'
   ])
+})
+
+test('runtime shape validation accepts every Product Graph node variant', () => {
+  const graph: ProductGraph = {
+    version: 1,
+    nodes: [
+      node({ id: 'product', kind: 'product', name: 'Product', purpose: 'Purpose' }),
+      node({ id: 'component', kind: 'component', name: 'Component', componentType: 'service' }),
+      node({ id: 'codebase', kind: 'codebase', name: 'Codebase', sourceKind: 'git', remote: 'https://example.test/repo.git' }),
+      node({ id: 'checkout', kind: 'checkout', name: 'Checkout', path: '/tmp/orbit', branch: 'main', main: true }),
+      node({ id: 'environment', kind: 'environment', name: 'Environment', environmentType: 'production' }),
+      node({ id: 'platform', kind: 'platform', name: 'Platform', platformType: 'cloud', externalRef: 'platform-1' }),
+      node({ id: 'deployment', kind: 'deployment', name: 'Deployment', health: 'healthy', observedAt: now }),
+      node({ id: 'project', kind: 'project', name: 'Project', outcome: 'Ship', successCriteria: ['Green'], status: 'active', health: 'on-track', startedAt: now }),
+      node({ id: 'work-item', kind: 'work-item', name: 'Work item', workType: 'code', acceptanceCriteria: ['Done'], status: 'running' }),
+      node({ id: 'run', kind: 'run', name: 'Run', threadIds: ['thread-1'], status: 'running', startedAt: now }),
+      node({ id: 'rollout', kind: 'rollout', name: 'Rollout', status: 'running', stages: [{ id: 'stage-1', name: 'Production', status: 'running', environmentId: 'environment' }] }),
+      node({ id: 'signal', kind: 'signal', name: 'Signal', signalType: 'monitor' }),
+      node({ id: 'observation', kind: 'observation', name: 'Observation', observedAt: now, status: 'healthy', value: { latency: 10 } }),
+      node({ id: 'artifact', kind: 'artifact', name: 'Artifact', artifactType: 'test-result' }),
+      node({ id: 'decision', kind: 'decision', name: 'Decision', status: 'accepted', decidedAt: now }),
+      node({
+        id: 'knowledge', kind: 'knowledge', name: 'Knowledge', knowledgeType: 'architecture', content: 'Fictional context',
+        sources: [{ resourceId: 'codebase', revision: 'abc', paths: [{ path: 'README.md', contentHash: 'hash' }], scopeHash: 'scope' }],
+        generatedAt: now, generator: { model: 'test-model', promptVersion: '1' }, freshness: 'fresh'
+      })
+    ],
+    relations: [{ id: 'relation', kind: 'contains', sourceId: 'product', targetId: 'component', createdAt: now, metadata: { source: 'test' } }]
+  }
+
+  assert.equal(productGraphShapeError(graph), null)
+})
+
+test('runtime shape validation rejects unknown, incomplete, and nested malformed values', () => {
+  const base = { version: 1, nodes: [], relations: [] }
+  const invalid = [
+    { ...base, nodes: [{ id: 'bad', kind: 'imaginary', name: 'Bad', createdAt: now, updatedAt: now }] },
+    { ...base, nodes: [{ id: 'codebase', kind: 'codebase', name: 'Missing source kind', createdAt: now, updatedAt: now }] },
+    { ...base, nodes: [{ id: 'product', kind: 'product', name: 'Bad time', createdAt: Number.POSITIVE_INFINITY, updatedAt: now }] },
+    { ...base, relations: [{ id: 'relation', kind: 'imaginary', sourceId: 'a', targetId: 'b', createdAt: now }] },
+    {
+      ...base,
+      nodes: [{
+        id: 'knowledge', kind: 'knowledge', name: 'Bad receipt', createdAt: now, updatedAt: now,
+        knowledgeType: 'architecture', content: 'Context', sources: [{ resourceId: 'codebase' }],
+        generatedAt: now, generator: { model: 'test-model', promptVersion: '1' }, freshness: 'fresh'
+      }]
+    }
+  ]
+
+  for (const value of invalid) assert.ok(productGraphShapeError(value), JSON.stringify(value))
 })
 
 test('knowledge remains fresh across unrelated commits when its discovery scope is unchanged', () => {

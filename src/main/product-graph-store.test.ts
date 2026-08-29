@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ProjectCheckout, ProjectScope } from './project-identity'
@@ -52,6 +52,7 @@ test('a replaced graph is validated, persisted, and read back by a fresh store',
     const afterReplace = await store.current()
     assert.equal(afterReplace.source, 'persisted')
     assert.equal(existsSync(fixture.file), true)
+    assert.deepEqual(await readdir(fixture.dir), ['product-graph.json'])
 
     // A new instance stands in for the next app launch reading the same file.
     const reloaded = new ProductGraphStore(fixture.file)
@@ -192,13 +193,104 @@ test('replace rejects payloads that are not version 1 documents', async () => {
   const fixture = await open()
   try {
     const store = new ProductGraphStore(fixture.file)
-    for (const bad of [null, 'orbit', 7, { version: 1 }, { version: 2, nodes: [], relations: [] }, { version: 1, nodes: [], relations: 'none' }]) {
+    for (const bad of [
+      null,
+      'orbit',
+      7,
+      { version: 1 },
+      { version: 2, nodes: [], relations: [] },
+      { version: 1, nodes: [], relations: 'none' },
+      { version: 1, nodes: [{ id: 'bad', kind: 'imaginary', name: 'Bad', createdAt: 100, updatedAt: 100 }], relations: [] },
+      { version: 1, nodes: [{ id: 'codebase', kind: 'codebase', name: 'Incomplete', createdAt: 100, updatedAt: 100 }], relations: [] }
+    ]) {
       const result = await store.replace(bad)
       assert.equal(result.ok, false)
       assert.deepEqual(result.issues, [])
       assert.ok(result.error)
     }
     assert.equal(existsSync(fixture.file), false)
+  } finally {
+    await close(fixture)
+  }
+})
+
+test('a persisted document with an invalid runtime shape falls back without being overwritten', async () => {
+  const fixture = await open()
+  try {
+    const malformed = {
+      version: 1,
+      nodes: [{ id: 'bad', kind: 'imaginary', name: 'Bad', createdAt: 100, updatedAt: 100 }],
+      relations: []
+    }
+    const text = JSON.stringify(malformed)
+    await writeFile(fixture.file, text, 'utf8')
+
+    const snapshot = await new ProductGraphStore(fixture.file).current()
+    assert.equal(snapshot.source, 'malformed-file')
+    assert.deepEqual(snapshot.graph, { version: 1, nodes: [], relations: [] })
+    assert.equal(await readFile(fixture.file, 'utf8'), text)
+  } finally {
+    await close(fixture)
+  }
+})
+
+test('concurrent replacements are serialized and the final snapshot matches the last write', async () => {
+  const fixture = await open()
+  try {
+    const starts: Array<Promise<void>> = []
+    const release: Array<() => void> = []
+    const started: Array<() => void> = []
+    for (let index = 0; index < 2; index += 1) {
+      starts.push(new Promise((resolve) => started.push(resolve)))
+    }
+    const gates = [
+      new Promise<void>((resolve) => release.push(resolve)),
+      new Promise<void>((resolve) => release.push(resolve))
+    ]
+    const writes: ProductGraph[] = []
+    const store = new ProductGraphStore(fixture.file, undefined, async (_file, document) => {
+      const index = writes.length
+      writes.push(structuredClone(document))
+      started[index]()
+      await gates[index]
+    })
+    const firstGraph = orbitGraph()
+    firstGraph.nodes[0].name = 'First'
+    const secondGraph = orbitGraph()
+    secondGraph.nodes[0].name = 'Second'
+
+    const first = store.replace(firstGraph)
+    const second = store.replace(secondGraph)
+    await starts[0]
+    assert.deepEqual(writes.map((graph) => graph.nodes[0].name), ['First'])
+    release[0]()
+    assert.equal((await first).ok, true)
+    await starts[1]
+    assert.deepEqual(writes.map((graph) => graph.nodes[0].name), ['First', 'Second'])
+    release[1]()
+    assert.equal((await second).ok, true)
+    assert.equal((await store.current()).graph.nodes[0].name, 'Second')
+  } finally {
+    await close(fixture)
+  }
+})
+
+test('a failed replacement does not poison later writes', async () => {
+  const fixture = await open()
+  try {
+    let attempt = 0
+    const store = new ProductGraphStore(fixture.file, undefined, async () => {
+      attempt += 1
+      if (attempt === 1) throw new Error('simulated write failure')
+    })
+    const failed = await store.replace(orbitGraph())
+    assert.equal(failed.ok, false)
+    assert.equal(failed.error, 'simulated write failure')
+
+    const recovered = orbitGraph()
+    recovered.nodes[0].name = 'Recovered'
+    assert.equal((await store.replace(recovered)).ok, true)
+    assert.equal((await store.current()).graph.nodes[0].name, 'Recovered')
   } finally {
     await close(fixture)
   }

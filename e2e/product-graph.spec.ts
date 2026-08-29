@@ -64,5 +64,15 @@ test('an invalid replace is refused with typed issues and keeps the stored graph
   const unshaped = await fixture.productGraphReplace({ version: 1, nodes: 'many' })
   expect(unshaped.ok).toBe(false)
   expect(unshaped.error).toBeTruthy()
+
+  // IPC values are untrusted at runtime even though the renderer API is typed.
+  // Unknown discriminants and missing variant fields must never reach disk.
+  const structurallyInvalid = await fixture.productGraphReplace({
+    version: 1,
+    nodes: [{ id: 'node_bad', kind: 'imaginary', name: 'Bad', createdAt: 100, updatedAt: 100 }],
+    relations: []
+  })
+  expect(structurallyInvalid.ok).toBe(false)
+  expect(structurallyInvalid.error).toContain('nodes[0].kind')
   expect((await fixture.productGraphGet() as E2EProductGraphSnapshot).graph).toEqual(ORBIT_GRAPH)
 })

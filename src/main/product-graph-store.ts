@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import type {
   ProductGraph,
   ProductGraphDocumentSource,
@@ -8,7 +9,7 @@ import type {
   ProductGraphValidationIssue
 } from '../shared/product-graph'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
-import { validateProductGraph } from '../shared/product-graph.ts'
+import { productGraphShapeError, validateProductGraph } from '../shared/product-graph.ts'
 
 /** Produces the folder-project projection a missing file adopts. Returning
  *  null (no known project) seeds an empty graph instead. */
@@ -21,6 +22,8 @@ interface GraphEnvelope {
   nodes: unknown[]
   relations: unknown[]
 }
+
+export type ProductGraphWriter = (graphFile: string, document: ProductGraph) => Promise<void>
 
 /** Shape check only: arrays of objects. The version gate happens separately,
  *  so an unknown version is distinguishable from a malformed file. */
@@ -43,6 +46,19 @@ function safeIssues(graph: ProductGraph): ProductGraphValidationIssue[] {
   }
 }
 
+async function writeProductGraphAtomically(graphFile: string, document: ProductGraph): Promise<void> {
+  const directory = dirname(graphFile)
+  const temporary = join(directory, `.${basename(graphFile)}.${process.pid}.${randomUUID()}.tmp`)
+  await mkdir(directory, { recursive: true })
+  try {
+    await writeFile(temporary, JSON.stringify(document, null, 2), 'utf8')
+    await rename(temporary, graphFile)
+  } catch (error) {
+    await unlink(temporary).catch(() => {})
+    throw error
+  }
+}
+
 /** Durable home of the Product Graph document.
  *
  *  One versioned JSON file in the app data directory, following the store
@@ -60,15 +76,18 @@ function safeIssues(graph: ProductGraph): ProductGraphValidationIssue[] {
  *    advisories so a hand-edited file degrades visibly instead of bricking. */
 export class ProductGraphStore {
   private loading?: Promise<void>
+  private replacements: Promise<void> = Promise.resolve()
   private snapshot: ProductGraphSnapshot = { graph: EMPTY_GRAPH, source: 'seeded-empty', issues: [] }
   private readonly seedLegacy: ProductGraphSeedSource | undefined
   private readonly graphFile: string
+  private readonly writeDocument: ProductGraphWriter
 
   // Explicit assignments: Node's strip-only TS loader (used by the unit
   // tests) cannot handle parameter properties.
-  constructor(graphFile: string, seedLegacy?: ProductGraphSeedSource) {
+  constructor(graphFile: string, seedLegacy?: ProductGraphSeedSource, writeDocument: ProductGraphWriter = writeProductGraphAtomically) {
     this.graphFile = graphFile
     this.seedLegacy = seedLegacy
+    this.writeDocument = writeDocument
   }
 
   /** Memoized: concurrent first callers share one read, so a late file read
@@ -82,16 +101,22 @@ export class ProductGraphStore {
    *  offer, so a fresh install always has a graph to read. */
   async current(): Promise<ProductGraphSnapshot> {
     await this.load()
+    await this.replacements
     return structuredClone(this.snapshot)
   }
 
   /** Replace the whole document after validation. A refused document changes
    *  nothing in memory or on disk, so the previous graph keeps serving. */
-  async replace(input: unknown): Promise<ProductGraphReplaceResult> {
+  replace(input: unknown): Promise<ProductGraphReplaceResult> {
+    const operation = this.replacements.then(() => this.doReplace(input))
+    this.replacements = operation.then(() => {}, () => {})
+    return operation
+  }
+
+  private async doReplace(input: unknown): Promise<ProductGraphReplaceResult> {
     await this.load()
-    if (!isGraphEnvelope(input) || input.version !== 1) {
-      return { ok: false, issues: [], error: 'A Product Graph document is version 1 with node and relation arrays.' }
-    }
+    const shapeError = productGraphShapeError(input)
+    if (shapeError) return { ok: false, issues: [], error: shapeError }
     const graph = input as ProductGraph
     let issues: ProductGraphValidationIssue[]
     try {
@@ -100,10 +125,10 @@ export class ProductGraphStore {
       return { ok: false, issues: [], error: error instanceof Error ? error.message : String(error) }
     }
     if (issues.length > 0) return { ok: false, issues }
-    const document = structuredClone(graph)
+    let document: ProductGraph
     try {
-      await mkdir(dirname(this.graphFile), { recursive: true })
-      await writeFile(this.graphFile, JSON.stringify(document, null, 2))
+      document = structuredClone(graph)
+      await this.writeDocument(this.graphFile, document)
     } catch (error) {
       return { ok: false, issues: [], error: error instanceof Error ? error.message : String(error) }
     }
@@ -146,6 +171,12 @@ export class ProductGraphStore {
     // written; nothing this build serves or writes may silently re-derive it.
     if (parsed.version !== 1) {
       this.snapshot = { graph: EMPTY_GRAPH, source: 'unsupported-version', issues: [] }
+      return
+    }
+
+    if (productGraphShapeError(parsed)) {
+      const seeded = this.seed()
+      this.snapshot = { graph: seeded.graph, source: 'malformed-file', issues: [] }
       return
     }
 
