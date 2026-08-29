@@ -24,6 +24,7 @@ import type {
 } from './ipc'
 import type { SpeechStatus, TtsSpeakResult, TtsStatus } from './speech'
 import type { BackendRequest } from './backend'
+import type { ProductGraph, ProductGraphReplaceResult, ProductGraphSnapshot } from './product-graph'
 import type { AddReviewCommentInput, ChangeRequestFileDiff, CreateChangeRequestInput, CreatedChangeRequest, ReviewComment, ReviewSnapshot, SubmitReviewEvent } from './review'
 
 export interface BossApi {
@@ -123,6 +124,13 @@ export interface BossApi {
   asrTranscribe(req: AsrTranscribeRequest): Promise<AsrTranscribeResult>
 
   backendRequest(req: BackendRequest): Promise<unknown>
+
+  /** The durable Product Graph document: the graph, where it came from, and
+   *  any validation advisories found when it was loaded. */
+  productGraphGet(): Promise<ProductGraphSnapshot>
+  /** Replace the whole graph. Main validates first; a refused document is
+   *  reported without touching what is already stored. */
+  productGraphReplace(graph: ProductGraph): Promise<ProductGraphReplaceResult>
 
   sitesList(): Promise<SiteInfo[]>
   sitesPublish(folder: string, name?: string): Promise<SiteInfo>

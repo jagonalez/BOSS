@@ -139,8 +139,20 @@ interface ProductGraph {
 }
 ```
 
-Persistence will be added only after lifecycle, ownership, and deletion rules
-are settled. Existing state files remain authoritative until then.
+A main-process store now persists this envelope durably in the app data
+directory and reloads it across restarts. Renderer access is a narrow typed
+pair — read the current document, or replace it whole after runtime shape and
+semantic validation; no partial writes and no user-visible Product surface yet.
+Replacements are serialized and written through an atomic rename so competing
+requests cannot leave memory and disk on different versions. The load rules are
+deterministic: a missing file adopts the folder-project compatibility
+projection (or starts empty when no project is known) without writing it; a
+malformed file falls back to that same seed; an unknown schema version is
+never adopted and stays on disk untouched until an explicit replace. A
+persisted document that fails validation still loads, with its issues exposed
+as advisories, while a refused replace changes nothing. Lifecycle, ownership,
+and deletion rules for graph content remain open; existing state files stay
+authoritative for folder projects.
 
 ## Relationships
 

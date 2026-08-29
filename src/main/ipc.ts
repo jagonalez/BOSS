@@ -26,6 +26,7 @@ import type { BackendManager } from './backend/manager'
 import type { BackendRequest } from '@shared/backend'
 import type { AsrTranscribeRequest, TtsSpeakRequest, UpdateChannel } from '@shared/ipc'
 import type { ReviewManager } from './review-manager'
+import type { ProductGraphStore } from './product-graph-store'
 import { projectCheckouts } from './project-identity'
 import { cliStatus, installCli, uninstallCli } from './cli-command'
 import { loadState, saveState } from './state-store'
@@ -46,6 +47,7 @@ export interface IpcDeps {
   updates: UpdateChecker
   reviews: ReviewManager
   projectFiles: ProjectFiles
+  productGraph: ProductGraphStore
   /** A `boss` command result that landed before the renderer could listen.
    *  Collected once, on mount. */
   takePendingCliOpen: () => ProjectOpenedEvent | null
@@ -125,6 +127,12 @@ export function registerIpc(deps: IpcDeps): void {
   )
 
   ipcMain.handle(IpcChannels.BackendRequest, (_e, req: BackendRequest) => deps.backends.handle(req))
+
+  // The store validates replaces and owns the file; the renderer neither
+  // names paths nor writes partial updates.
+  ipcMain.handle(IpcChannels.ProductGraphGet, () => deps.productGraph.current())
+
+  ipcMain.handle(IpcChannels.ProductGraphReplace, (_e, graph: unknown) => deps.productGraph.replace(graph))
 
   // The renderer serializes; main asks where to keep the file and writes it.
   // A cancelled dialog is a normal outcome, not a failure, so it resolves null.

@@ -32,6 +32,30 @@ export interface E2ECall {
   args?: string[]
 }
 
+export interface E2EProductGraphIssue {
+  code: string
+  path: string
+  message: string
+}
+
+/** Structural views of the Product Graph IPC results. Kept structural so the
+ *  suite still builds if the shared types move. */
+export interface E2EProductGraphSnapshot {
+  source: string
+  issues: E2EProductGraphIssue[]
+  graph: {
+    version: number
+    nodes: Array<{ id: string; kind: string; name: string } & Record<string, unknown>>
+    relations: Array<{ id: string; kind: string; sourceId: string; targetId: string } & Record<string, unknown>>
+  }
+}
+
+export interface E2EProductGraphReplaceResult {
+  ok: boolean
+  issues: E2EProductGraphIssue[]
+  error?: string
+}
+
 interface E2EControl {
   calls(): Promise<E2ECall[]>
   sessions(): Promise<Array<Record<string, unknown>>>
@@ -51,6 +75,8 @@ interface E2EControl {
   spawnThreadInProject(backendId: string, title: string, projectPath: string): Promise<Record<string, unknown>>
   installLongThread(turnCount?: number): Promise<Record<string, unknown>>
   installCodexOrderingThread(): Promise<Record<string, unknown>>
+  productGraphGet(): Promise<E2EProductGraphSnapshot>
+  productGraphReplace(graph: unknown): Promise<E2EProductGraphReplaceResult>
 }
 
 export async function control(page: Page): Promise<E2EControl> {
@@ -93,6 +119,13 @@ export async function control(page: Page): Promise<E2EControl> {
     ),
     installCodexOrderingThread: () => page.evaluate(
       () => (window as unknown as { bossE2E: E2EControl }).bossE2E.installCodexOrderingThread()
+    ),
+    productGraphGet: () => page.evaluate(
+      () => (window as unknown as { bossE2E: E2EControl }).bossE2E.productGraphGet()
+    ),
+    productGraphReplace: (graph) => page.evaluate(
+      (value) => (window as unknown as { bossE2E: E2EControl }).bossE2E.productGraphReplace(value),
+      graph
     )
   }
 }

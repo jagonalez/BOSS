@@ -16,6 +16,7 @@ import type { MessageWithParts, SessionInfo } from '../shared/opencode'
 import { contextHandoffPacket, delegatedContextInstruction } from '../shared/context-handoff'
 import { titleFromFirstPrompt } from '../shared/thread-title'
 import type { LabAssistantSnapshot } from '../shared/lab-assistant'
+import type { ProductGraphReplaceResult, ProductGraphSnapshot } from '../shared/product-graph'
 
 type RecordedCall =
   | { channel: 'api'; request: ApiRequest }
@@ -1589,6 +1590,14 @@ export function installE2EApi(boss: BossApi): void {
      *  recorded, which is exactly what those tests are about, so this reaches
      *  the real channel. Reading only — it creates nothing. */
     realProjectList: (): Promise<string[]> => ipcRenderer.invoke(IpcChannels.ProjectList),
+    /** The real Product Graph channels, like computerUseCall above.
+     *  Durability across a restart is exactly what the test must prove, so
+     *  these reach main's store and disk on the temporary profile rather than
+     *  a renderer-side stand-in. The boss.* methods of the same name stay on
+     *  their real preload implementation too — the fixture does not stub them. */
+    productGraphGet: (): Promise<ProductGraphSnapshot> => ipcRenderer.invoke(IpcChannels.ProductGraphGet),
+    productGraphReplace: (graph: unknown): Promise<ProductGraphReplaceResult> =>
+      ipcRenderer.invoke(IpcChannels.ProductGraphReplace, graph),
     computerUseCall: (operation: string, args: Record<string, unknown>) =>
       ipcRenderer.invoke(IpcChannels.E2EComputerUseCall, operation, args),
     calls: () => structuredClone(calls),
