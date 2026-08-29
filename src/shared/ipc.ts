@@ -267,7 +267,12 @@ export const IpcChannels = {
   UpdateChannelSet: 'update:channel-set',
   UpdateChanged: 'update:changed',
   /** Write a thread's Markdown export to a file the user picks. */
-  ThreadExportMarkdown: 'thread:export-markdown'
+  ThreadExportMarkdown: 'thread:export-markdown',
+  /** Read the durable Product Graph document, with its provenance and any
+   *  validation advisories. */
+  ProductGraphGet: 'product-graph:get',
+  /** Replace the Product Graph document after main validates it. */
+  ProductGraphReplace: 'product-graph:replace'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

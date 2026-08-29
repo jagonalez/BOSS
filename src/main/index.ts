@@ -49,6 +49,9 @@ import { GitHubReviewProvider } from './github-review-provider'
 import { GitLabReviewProvider } from './gitlab-review-provider'
 import { restoreShellPath } from './shell-path'
 import { BinaryOverrides, setBinaryOverrideSource } from './backend-bin'
+import { ProductGraphStore } from './product-graph-store'
+import { legacyProjectGraph } from './product-graph-legacy'
+import { gitCommonDirectory, projectCheckouts, projectScope } from './project-identity'
 
 const mainDir = dirname(fileURLToPath(import.meta.url))
 const e2e = process.env.BOSS_E2E === '1'
@@ -251,11 +254,29 @@ automations.setWebhookObserver(async (delivery) => {
   if (event) await workflowBus.publish(event).catch(() => {})
   await labAssistant.observeGitHub(delivery)
 })
+// The graph gets its own versioned envelope next to the other stores. The
+// folder-project list stays the authority for the seed: a missing graph file
+// adopts the current project's Codebase/Checkout projection, and only an
+// explicit replace makes a document durable.
+const productGraphStore = new ProductGraphStore(
+  join(app.getPath('userData'), 'product-graph.json'),
+  () => {
+    const projectPath = loadState().projectPath
+    if (!projectPath) return null
+    const scope = projectScope(projectPath)
+    return legacyProjectGraph({
+      scope,
+      checkouts: projectCheckouts(scope.projectPath),
+      sourceKind: gitCommonDirectory(scope.projectPath) ? 'git' : 'directory',
+      now: Date.now()
+    })
+  }
+)
 
 let ipcReady = false
 
 function ipcDeps(): IpcDeps {
-  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, qaTools, pty, speech, sites, updates, reviews, projectFiles, takePendingCliOpen }
+  return { server, api, events, backends: backendMgr, browse: browse!, optional, computerUse, qaTools, pty, speech, sites, updates, reviews, projectFiles, productGraph: productGraphStore, takePendingCliOpen }
 }
 
 function registerIpcOnce(): void {

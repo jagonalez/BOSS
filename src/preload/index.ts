@@ -104,6 +104,11 @@ const boss: BossApi = {
 
   backendRequest: (req) => ipcRenderer.invoke(IpcChannels.BackendRequest, req),
 
+  // Main owns the graph file and validates every replace; the renderer only
+  // ever sees the whole document or a typed refusal.
+  productGraphGet: () => ipcRenderer.invoke(IpcChannels.ProductGraphGet),
+  productGraphReplace: (graph) => ipcRenderer.invoke(IpcChannels.ProductGraphReplace, graph),
+
   sitesList: () => ipcRenderer.invoke(IpcChannels.SitesList),
   sitesPublish: (folder: string, name?: string) => ipcRenderer.invoke(IpcChannels.SitesPublish, { folder, name }),
   sitesRemove: (id: string) => ipcRenderer.invoke(IpcChannels.SitesRemove, id),

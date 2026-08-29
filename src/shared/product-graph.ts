@@ -202,6 +202,37 @@ export interface ProductGraph {
   relations: ProductGraphRelation[]
 }
 
+/** How the current in-memory document was established.
+ *
+ *  `persisted` means it was read from disk or written by a replace. The seed
+ *  outcomes stand in for a missing or unusable file: a missing file adopts the
+ *  folder-project projection when one is known, a malformed file falls back to
+ *  that same seed, and an unknown schema version is not adopted at all — the
+ *  document stays untouched on disk until an explicit replace takes over. */
+export type ProductGraphDocumentSource =
+  | 'persisted'
+  | 'seeded-empty'
+  | 'seeded-legacy-project'
+  | 'malformed-file'
+  | 'unsupported-version'
+
+export interface ProductGraphSnapshot {
+  graph: ProductGraph
+  source: ProductGraphDocumentSource
+  /** Validation issues found in the document as loaded. Advisories on read:
+   *  only a replace is gated on them. */
+  issues: ProductGraphValidationIssue[]
+}
+
+export interface ProductGraphReplaceResult {
+  ok: boolean
+  /** Populated when validation refused the document. */
+  issues: ProductGraphValidationIssue[]
+  /** Populated when the document was rejected before validation, or the
+   *  write itself failed. */
+  error?: string
+}
+
 export type KnowledgeFreshness = 'fresh' | 'stale' | 'unknown'
 
 export interface KnowledgeSourceState {
