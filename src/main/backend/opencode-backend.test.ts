@@ -84,10 +84,14 @@ test('a todo that arrives with an id keeps it', async () => {
 })
 
 test('status reconciliation clears a submitted run when OpenCode reports it idle', async () => {
-  const { backend, requests } = harness({})
+  const { backend, requests } = harness({}, [], {
+    '/session': { id: 'ses_worktree', directory: '/tmp/project' }
+  })
   const received: unknown[] = []
   backend.onEvent((event) => received.push(event))
-  backend.setSessionDirectory('ses_worktree', '/tmp/worktree')
+  // Created in the project root, then re-pointed at a worktree for its runs.
+  await backend.sessionCreate('worktree thread', '/tmp/project/.boss/worktrees/wt')
+  backend.setSessionDirectory('ses_worktree', '/tmp/project/.boss/worktrees/wt')
   await backend.sendMessage('ses_worktree', [{ type: 'text', text: 'test' }])
 
   const internal = backend as unknown as {
@@ -97,8 +101,49 @@ test('status reconciliation clears a submitted run when OpenCode reports it idle
   internal.submittedAt.set('ses_worktree', Date.now() - 4_000)
   await internal.reconcileStatuses()
 
-  assert.ok(requests.some((request) => request.path === '/session/status' && request.directory === '/tmp/worktree'))
+  // The poll has to ask about the scope the session is stored under. Asking
+  // the worktree scope answered "nothing is running here" for a session that
+  // was mid-run, and the synthetic idle marked the thread finished while it
+  // was still working.
+  assert.ok(requests.some((request) => request.path === '/session/status' && request.directory === '/tmp/project'))
   assert.deepEqual(received, [{ type: 'session.idle', sessionID: 'ses_worktree' }])
+})
+
+test('status reconciliation honors a busy answer from the stored scope, not the worktree', async () => {
+  // The live failure this file's directory split exists for: the session's
+  // records sit in the project root, its runs happen in a worktree, and only
+  // the root scope knows the run is busy.
+  const { backend } = harness(
+    { ses_worktree: { type: 'busy' } },
+    [],
+    { '/session': { id: 'ses_worktree', directory: '/tmp/project' } }
+  )
+  const received: unknown[] = []
+  backend.onEvent((event) => received.push(event))
+  await backend.sessionCreate('worktree thread', '/tmp/project/.boss/worktrees/wt')
+  backend.setSessionDirectory('ses_worktree', '/tmp/project/.boss/worktrees/wt')
+  await backend.sendMessage('ses_worktree', [{ type: 'text', text: 'test' }])
+
+  const internal = backend as unknown as { reconcileStatuses(): Promise<void> }
+  await internal.reconcileStatuses()
+
+  assert.deepEqual(received, [], 'a busy run must not be declared idle')
+})
+
+test('the todo list is read from the stored scope, or a worktree thread shows none', async () => {
+  const { backend, requests } = harness({}, [], {
+    '/session': { id: 'ses_mixed', directory: '/tmp/project' }
+  })
+  await backend.sessionCreate('worktree thread', '/tmp/project/.boss/worktrees/wt')
+  backend.setSessionDirectory('ses_mixed', '/tmp/project/.boss/worktrees/wt')
+
+  await backend.todosGet('ses_mixed')
+
+  // publishTodosAfterToolCall re-reads the list the moment the agent writes
+  // it; a read scoped to the worktree came back empty every time and the
+  // thread's todo panel never filled in.
+  const todo = requests.find((request) => request.path === '/session/ses_mixed/todo')
+  assert.equal(todo?.directory, '/tmp/project')
 })
 
 test('stopping the server forgets which sessions it was running', async () => {
@@ -112,7 +157,7 @@ test('stopping the server forgets which sessions it was running', async () => {
   const internal = backend as unknown as {
     observedStatuses: Map<string, string>
     submittedAt: Map<string, number>
-    sessionDirectories: Map<string, string>
+    executionDirectories: Map<string, string>
   }
   assert.equal(internal.observedStatuses.get('ses_worktree'), 'busy')
 
@@ -120,9 +165,9 @@ test('stopping the server forgets which sessions it was running', async () => {
 
   assert.equal(internal.observedStatuses.size, 0)
   assert.equal(internal.submittedAt.size, 0)
-  // Which checkout a session belongs to is BOSS's own knowledge, and a
-  // restarted server still needs telling.
-  assert.equal(internal.sessionDirectories.get('ses_worktree'), '/tmp/worktree')
+  // Which checkout a session runs in is BOSS's own knowledge, and a restarted
+  // server still needs telling.
+  assert.equal(internal.executionDirectories.get('ses_worktree'), '/tmp/worktree')
 })
 
 test('status reconciliation preserves a run OpenCode still reports busy', async () => {
@@ -138,13 +183,18 @@ test('status reconciliation preserves a run OpenCode still reports busy', async 
   assert.deepEqual(received, [])
 })
 
-test('a read scopes to the thread checkout, not the last project selected', async () => {
-  // Every call carries the session's own directory. Before this went through
+test('a read scopes to the checkout the session is stored under, not the last project selected', async () => {
+  // Every read carries the session's own directory. Before this went through
   // the generated client, most calls sent none and OpenCode fell back to
   // whichever project the server had open — so a thread in a worktree could
   // read the wrong checkout.
-  const { backend, requests } = harness({})
-  backend.setSessionDirectory('ses_worktree', '/tmp/worktree')
+  const { backend, requests } = harness({}, [], {
+    '/session': { id: 'ses_worktree', directory: '/tmp/worktree' }
+  })
+  // A session created for a worktree is stored under the worktree's own
+  // scope — OpenCode resolves the create directory, and the record answers
+  // with where it filed it.
+  await backend.sessionCreate('worktree thread', '/tmp/worktree')
 
   await backend.messagesList('ses_worktree')
   await backend.todosGet('ses_worktree')
@@ -153,6 +203,31 @@ test('a read scopes to the thread checkout, not the last project selected', asyn
   const scoped = requests.filter((request) => request.path.includes('ses_worktree'))
   assert.equal(scoped.length, 3)
   for (const request of scoped) assert.equal(request.directory, '/tmp/worktree')
+})
+
+test('a session re-pointed at a worktree keeps its records where they were created', async () => {
+  // Runs execute in the worktree; reads still scope to the project root the
+  // session was created under. Collapsing the two made every read of a
+  // re-pointed thread miss — the todo list stayed empty and the status poll
+  // invented an idle mid-run.
+  const { backend, requests } = harness({}, [], {
+    '/session': { id: 'ses_mixed', directory: '/tmp/project' }
+  })
+  await backend.sessionCreate('worktree thread', '/tmp/project/.boss/worktrees/wt')
+  backend.setSessionDirectory('ses_mixed', '/tmp/project/.boss/worktrees/wt')
+
+  await backend.sendMessage('ses_mixed', [{ type: 'text', text: 'test' }])
+  await backend.runCommand('ses_mixed', '/review', '')
+
+  const runs = requests.filter((request) => request.path === '/session/ses_mixed/prompt_async'
+    || request.path === '/session/ses_mixed/command')
+  assert.equal(runs.length, 2)
+  for (const run of runs) assert.equal(run.directory, '/tmp/project/.boss/worktrees/wt')
+
+  // The history read lands after the runs, so it is the last request — and it
+  // goes to the root the session is stored under, not the worktree.
+  await backend.messagesList('ses_mixed')
+  assert.equal(requests.at(-1)?.directory, '/tmp/project')
 })
 
 test('a thread with no checkout of its own falls back to the current project', async () => {

@@ -71,9 +71,12 @@ export interface Backend {
   /** Sessions */
   sessionsList(): Promise<SessionInfo[]>
   sessionCreate(title?: string, directory?: string): Promise<SessionInfo>
-  /** Bind a native session to its checkout and the trusted writable roots for
-   *  that checkout. Sandboxing backends use the roots; other backends may
-   *  ignore the third argument. */
+  /** Point the session's runs at this checkout and, for sandboxing backends,
+   *  grant only the Git metadata that belongs to that project. This is where
+   *  work happens, which for OpenCode is not the same as where the session is
+   *  stored: a session created in the project root keeps its records there even
+   *  after its runs move into a worktree. Sandboxing backends use the roots;
+   *  other backends may ignore the third argument. */
   setSessionDirectory?(id: string, directory: string, writableRoots?: string[]): void
   /** Tell a sandboxing backend what the sandbox may do. Optional: only
    *  backends that run the agent in a sandbox implement it. */
