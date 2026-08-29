@@ -2564,6 +2564,195 @@ body.workspace-dragging .workspace-tab-slot {
   color: var(--text-faint);
 }
 
+/* Thread-owned subagent activity. The indentation is deliberately shallow:
+   enough to show delegation depth without sacrificing the card at pane size. */
+.agents-tab {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-pane);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.agents-tab-header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.agents-tab-mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.agents-tab-header > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agents-tab-header strong {
+  overflow: hidden;
+  font-size: var(--type-section-title);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-tab-header small {
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+.agents-list {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.agent-card {
+  position: relative;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-left: calc(var(--agent-depth) * 22px);
+  padding: 11px 11px 11px 13px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.agent-card:hover {
+  border-color: var(--line-default);
+  background: var(--surface-raised);
+}
+
+.agent-card-line {
+  position: absolute;
+  top: -9px;
+  left: -14px;
+  width: 12px;
+  height: 28px;
+  border-bottom: 1px solid var(--line-default);
+  border-left: 1px solid var(--line-default);
+  border-radius: 0 0 0 7px;
+}
+
+.agent-card.root .agent-card-line { display: none; }
+
+.agent-card-main { min-width: 0; }
+
+.agent-card-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-card-heading > strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--type-control);
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-status {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--surface-control);
+  font-size: var(--type-label);
+  font-weight: 620;
+}
+
+.agent-status.attention { color: var(--yellow); background: var(--yellow-soft); }
+.agent-status.working { color: var(--green); background: var(--green-soft); }
+.agent-status.done { color: var(--accent); background: var(--accent-soft); }
+
+.agent-card-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+.agent-card-meta > span:not(.backend-badge) + span:not(.backend-badge)::before {
+  content: '·';
+  margin-right: 8px;
+  color: var(--line-strong);
+}
+
+.agent-card p {
+  margin: 7px 0 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--type-meta);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: var(--type-meta);
+}
+
+.agent-open:hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.agent-open:disabled { cursor: default; opacity: 0.45; }
+
+.agents-tab-empty {
+  flex: 1;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  padding: 24px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.agents-tab-empty strong { color: var(--text-muted); font-size: var(--type-control); }
+.agents-tab-empty span { max-width: 360px; font-size: var(--type-meta); line-height: 1.5; }
+.agents-tab-empty.error { color: var(--red); }
+
+@media (max-width: 760px) {
+  .agent-card { grid-template-columns: minmax(0, 1fr); }
+  .agent-open { justify-self: start; }
+}
+
 /* Backend identity and explicit cross-thread handoffs */
 .backend-badge {
   display: inline-flex;

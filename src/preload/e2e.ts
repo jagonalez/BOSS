@@ -911,9 +911,9 @@ export function installE2EApi(boss: BossApi): void {
       id,
       backendId,
       nativeSessionId: `native-${id}`,
-      projectId: isPrimaryProject ? 'boss-e2e' : `boss-e2e-${projectPath.split('/').filter(Boolean).at(-1)}`,
-      projectPath,
-      executionPath: isPrimaryProject ? CHECKOUT : `${projectPath}/.boss/worktrees/${id}`,
+      projectId: !projectPath ? 'global' : isPrimaryProject ? 'boss-e2e' : `boss-e2e-${projectPath.split('/').filter(Boolean).at(-1)}`,
+      projectPath: projectPath || undefined,
+      executionPath: !projectPath ? undefined : isPrimaryProject ? CHECKOUT : `${projectPath}/.boss/worktrees/${id}`,
       title: title || `New ${backendId} thread`,
       time: { created: Date.now(), updated: Date.now() },
       model: preference ? { id: preference.modelID, provider: preference.providerID } : undefined
@@ -1014,7 +1014,7 @@ export function installE2EApi(boss: BossApi): void {
       // backend's advertised capabilities changes because it was restarted.
       case 'backend.restart': return backends
       case 'thread.list': return sessions
-      case 'thread.create': return createThread(request.backendId, request.title)
+      case 'thread.create': return createThread(request.backendId, request.title, request.scope === 'global' ? '' : PROJECT)
       case 'thread.get': return sessions.find((session) => session.id === request.threadId)
       case 'thread.backend.set': {
         const found = sessions.find((session) => session.id === request.threadId)
@@ -1203,7 +1203,20 @@ export function installE2EApi(boss: BossApi): void {
             : request.instruction,
           messages: messages[request.threadId] ?? []
         })
-        return createThread(request.backendId, request.type === 'thread.delegate' ? 'Delegated worker' : 'Continued thread')
+        const created = createThread(
+          request.backendId,
+          request.type === 'thread.delegate' ? 'Delegated worker' : 'Continued thread',
+          source?.projectPath ?? (source?.projectId === 'global' ? '' : PROJECT)
+        )
+        if (request.type === 'thread.delegate') {
+          created.parentID = request.threadId
+          created.lineage = {
+            kind: 'delegate',
+            sourceThreadId: request.threadId,
+            sourceBackendId: source?.backendId
+          }
+        }
+        return created
       }
       case 'thread.fork':
       case 'thread.worktree.create': return createThread(sessions.find((session) => session.id === request.threadId)?.backendId ?? 'opencode', 'Forked thread')
@@ -1219,10 +1232,20 @@ export function installE2EApi(boss: BossApi): void {
             executionPath: session.executionPath || '',
             updatedAt: session.time?.updated || Date.now(),
             running: false,
+            parentID: session.parentID,
+            lineage: session.lineage,
             // Source is intentionally recent so Home's card export path is
             // covered as well as the sidebar row.
             attention: session.id === 'thread-source'
               ? { kind: 'completed', createdAt: Date.now() - 1_000, detail: 'Fixture run completed' }
+              : undefined,
+            result: session.lineage?.kind === 'delegate'
+              ? {
+                  summary: 'Audited the workflow and reported the gaps.',
+                  changedFiles: 2,
+                  finishedAt: Date.now(),
+                  status: 'completed'
+                }
               : undefined,
             usage: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
           })),
