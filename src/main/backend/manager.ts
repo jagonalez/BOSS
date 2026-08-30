@@ -131,6 +131,8 @@ interface RoomManagerHandle {
   room(threadId: string): Promise<import('@shared/room').RoomState>
   setRecipient(threadId: string, recipient: string): Promise<import('@shared/room').RoomState>
   join(threadId: string, roleId: string, backendId?: BackendId): Promise<import('@shared/room').RoomParticipant | undefined>
+  startShape(threadId: string, shape: import('@shared/room').RoomShape): Promise<import('@shared/room').RoomState>
+  nextAfter(threadId: string, roleId: string): Promise<string | undefined>
   touch(threadId: string, roleId: string, state?: import('@shared/room').ParticipantState): Promise<void>
   briefFor(notes: import('@shared/room').JobNotes): string
   currentTeam(): Promise<import('@shared/room').RoomTeam | undefined>
@@ -1904,6 +1906,27 @@ export class BackendManager {
     return false
   }
 
+  /** Bring in whoever follows the participant that just finished.
+   *
+   *  They arrive when the work reaches them, not up front: a reviewer with
+   *  nothing yet to read would burn a session and go stale before it was
+   *  useful. Best effort — a handover that cannot start must not fail the run
+   *  that just succeeded. */
+  private async handOver(threadId: string): Promise<void> {
+    const binding = this.bindings.get(threadId)
+    const room = binding?.parentID
+    const finished = binding?.roleId
+    if (!room || !finished || !this.rooms) return
+    try {
+      const next = await this.rooms.nextAfter(room, finished)
+      if (!next) return
+      await this.rooms.join(room, next)
+      await this.rooms.setRecipient(room, next)
+    } catch {
+      /* The run finished. A handover that will not start is not its failure. */
+    }
+  }
+
   /** Mark a run finished.
    *
    *  A participant's run also finishes its room, because the room is what the
@@ -1912,6 +1935,10 @@ export class BackendManager {
    *  room permanently unable to accept a message. */
   private settleBusy(threadId: string): boolean {
     const wasBusy = this.busyThreads.delete(threadId)
+    // A participant that just finished hands over to whoever comes next. Without
+    // this the shape stopped after its first agent: a reviewer never arrived
+    // when the builder finished, so "build and review" only ever built.
+    if (wasBusy) void this.handOver(threadId)
     const parent = this.bindings.get(threadId)?.parentID
     if (!parent || !this.busyThreads.delete(parent)) return wasBusy
     const parentBinding = this.bindings.get(parent)
@@ -3065,6 +3092,7 @@ export class BackendManager {
         await this.rooms?.join(request.threadId, request.roleId)
         return this.rooms?.room(request.threadId)
       }
+      case 'room.shape.set': return this.rooms?.startShape(request.threadId, request.shape)
       case 'room.assistant.mark': return this.markAssistantThread(request.threadId)
       case 'room.team.get': return this.rooms?.currentTeam()
       case 'room.team.set': return this.rooms?.configureTeam(request.team)

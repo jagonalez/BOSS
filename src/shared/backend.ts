@@ -276,6 +276,7 @@ export type BackendRequest =
   | { type: 'room.get'; threadId: string }
   | { type: 'room.recipient.set'; threadId: string; recipient: string }
   | { type: 'room.join'; threadId: string; roleId: string }
+  | { type: 'room.shape.set'; threadId: string; shape: import('./room').RoomShape }
   | { type: 'room.assistant.mark'; threadId: string }
   | { type: 'room.team.get' }
   | { type: 'room.team.set'; team: import('./room').RoomTeam }

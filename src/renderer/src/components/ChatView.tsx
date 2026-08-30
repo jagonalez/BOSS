@@ -4,7 +4,7 @@ import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId, QueuedFollowUp } from '@shared/backend'
 import { composerRecovery, retryPayload } from '../lib/send-recovery'
-import { abortRun, addAnnotation, endBranch, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setRoomRecipient, setVariant, speakText, startBranch, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
+import { abortRun, addAnnotation, endBranch, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setRoomRecipient, setVariant, speakText, startBranch, startShape, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -31,6 +31,7 @@ import { overrideFor, recipientKind, recipientLabel, recipientOptions, retarget,
 import { briefOf } from '@shared/job-notes'
 import { authorTone } from '../lib/author-tone'
 import { emptyRoomState } from '@shared/room'
+import type { RoomShape } from '@shared/room'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -581,6 +582,13 @@ const EMPTY_HISTORY: string[] = []
 const EMPTY_FOLLOW_UPS: QueuedFollowUp[] = []
 /** Stable empty list: a fresh [] would defeat the turn's memo on every render. */
 const EMPTY_BRANCH: MessageWithParts[] = []
+/** The three shapes, in order of how much ceremony they add. A one-line fix
+ *  should not need a plan, a builder, and a reviewer. */
+const SHAPES: Array<{ id: RoomShape; label: string; detail: string }> = [
+  { id: 'direct', label: 'Just do it', detail: 'One agent, no review.' },
+  { id: 'reviewed', label: 'Build and review', detail: 'A fresh agent checks the work afterwards.' },
+  { id: 'full', label: 'The full run', detail: 'Research, plan, build, then review.' }
+]
 /** A thread that has never grown past one agent still addresses BOSS, so the
  *  composer always has a recipient and can never send into nowhere. */
 const EMPTY_ROOM = emptyRoomState()
@@ -1105,6 +1113,23 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
           />
         ) : null}
         <div className="composer-input">
+          {/* How this job runs, offered once. The user picks the shape, never
+              BOSS. It disappears once someone has joined, because the choice
+              has been made and the room now names who is in it. */}
+          {hasSession && room.participants.length === 0 && !branchOf ? (
+            <div className="composer-shape">
+              <span>Run this as</span>
+              {SHAPES.map((shape) => (
+                <button
+                  key={shape.id}
+                  onClick={() => effectiveSession && startShape(effectiveSession, shape.id)}
+                  title={shape.detail}
+                >
+                  {shape.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           {/* What a fresh agent will read when it joins. Collapsed, because it
               is not something to keep in view — but a reviewer's whole brief is
               in here, so the user must be able to see what it will be told. */}

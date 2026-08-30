@@ -208,6 +208,41 @@ export class RoomManager {
     })
   }
 
+  /** Choose how a job runs, and bring in whoever starts it.
+   *
+   *  The shape was recorded and then nothing happened: no participant ever
+   *  joined, so every room stayed empty and read as an ordinary chat. Only the
+   *  first role joins — a reviewer arrives when the builder finishes, not
+   *  before, and starting all of them at once would burn sessions on agents
+   *  with nothing yet to read. */
+  async startShape(threadId: string, shape: RoomShape): Promise<RoomState> {
+    await this.setShape(threadId, shape)
+    const team = await this.currentTeam()
+    const first = team ? rolesForShape(shape, team)[0] : undefined
+    if (first) {
+      await this.join(threadId, first)
+      await this.setRecipient(threadId, first)
+    }
+    return this.room(threadId)
+  }
+
+  /** Who follows the role that just finished, under this room's shape.
+   *
+   *  Nothing follows when the shape is done, when the room has no shape, or
+   *  when the next role has already joined — a reviewer that is already here
+   *  does not arrive twice. */
+  async nextAfter(threadId: string, roleId: string): Promise<string | undefined> {
+    await this.load()
+    const room = this.rooms[threadId]
+    const team = this.team
+    if (!room?.shape || !team) return undefined
+    const order = rolesForShape(room.shape, team)
+    const next = order[order.indexOf(roleId) + 1]
+    if (!next || order.indexOf(roleId) < 0) return undefined
+    const already = room.participants.find((entry) => entry.roleId === next)
+    return already && already.state !== 'done' ? undefined : next
+  }
+
   /** Bring a participant into the room, starting its hidden thread.
    *
    *  Participants join when the work reaches them: a reviewer appears once the

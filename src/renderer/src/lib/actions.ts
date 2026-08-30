@@ -14,6 +14,7 @@ import type { FanOutWorker } from '@shared/fan-out'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import { composeAnnotatedPrompt, createAnnotation, remainingAnnotations, sideChatSeedPrompt, type Annotation, type AnnotationAnchor } from '@shared/annotations'
 import { emptyRoomState } from '@shared/room'
+import type { RoomShape } from '@shared/room'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import { threadIsWorking } from './status'
@@ -2414,6 +2415,20 @@ export function updateAnnotationNote(sessionID: string, id: string, note: string
  *  Not a fork: the same room, the same participants, the same addressing rules.
  *  Going through five review findings in one stream is what tangles them, and
  *  the user asked to work through them one at a time. */
+/** Choose how this job runs, and bring in whoever starts it.
+ *
+ *  The user picks the shape, never BOSS. Recording it without starting anyone
+ *  left every room empty, so the whole feature was invisible. */
+export function startShape(sessionID: string, shape: RoomShape): void {
+  void OpenCode.startShape(sessionID, shape)
+    .then((room) => {
+      appStore.setState((s) => ({ rooms: { ...s.rooms, [sessionID]: room } }))
+    })
+    .catch(() => {
+      /* Nothing changed on screen, so nothing has to be undone. */
+    })
+}
+
 export function startBranch(sessionID: string, messageId: string): void {
   appStore.setState((s) => ({
     branchDrafts: { ...s.branchDrafts, [sessionID]: messageId },

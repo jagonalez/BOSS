@@ -1044,6 +1044,28 @@ export function installE2EApi(boss: BossApi): void {
         rooms[request.threadId] = { ...current, recipient: request.recipient }
         return rooms[request.threadId]
       }
+      case 'room.shape.set': {
+        const current = rooms[request.threadId] ?? { ...emptyRoom }
+        const first = roomTeam?.roles.find((entry) => entry.id === 'builder')
+        rooms[request.threadId] = {
+          ...current,
+          shape: request.shape,
+          ...(first
+            ? {
+                recipient: first.id,
+                participants: [{
+                  roleId: first.id,
+                  label: first.label,
+                  backendId: first.backendId,
+                  threadId: `participant-${first.id}`,
+                  state: 'active' as const,
+                  joinedAt: 0
+                }]
+              }
+            : {})
+        }
+        return rooms[request.threadId]
+      }
       case 'room.join': {
         const current = rooms[request.threadId] ?? { ...emptyRoom }
         const role = roomTeam?.roles.find((entry) => entry.id === request.roleId)

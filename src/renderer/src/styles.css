@@ -1630,6 +1630,34 @@ textarea {
   padding: 0 8px;
 }
 
+/* How this job runs, offered once. Gone as soon as someone joins: the choice
+   has been made, and the room then names who is in it. */
+.composer-shape {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 3px 2px 6px;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+.composer-shape button {
+  padding: 2px 9px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--type-meta);
+  cursor: pointer;
+}
+
+.composer-shape button:hover {
+  border-color: var(--text-faint);
+  color: var(--text);
+}
+
 /* Says the next message will land inside a branch, and offers the way out.
    Without it a reply would quietly go somewhere the user did not expect. */
 .composer-branch {

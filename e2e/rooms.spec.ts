@@ -260,3 +260,17 @@ test('the team says which agent BOSS runs on', async ({ appPage }) => {
   await expect(boss.locator('.role-fixed')).toHaveText('always')
   await expect(boss.locator('.role-remove')).toHaveCount(0)
 })
+
+test('choosing how a job runs brings in the agent that starts it', async ({ appPage }) => {
+  // The shape was recorded and then nothing happened: every room stayed empty
+  // and read as an ordinary chat.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const shape = appPage.locator('.composer-shape')
+  if (await shape.count() === 0) return
+
+  await shape.locator('button', { hasText: 'Build and review' }).click()
+
+  // The chooser is gone, because the choice has been made.
+  await expect(shape).toHaveCount(0)
+  await expect(appPage.locator('.recipient-chip')).toHaveText(/Builder/)
+})

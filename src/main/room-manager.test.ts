@@ -405,3 +405,66 @@ test('BOSS runs on the agent the team says, not on a borrowed one', async () => 
   assert.equal(joined?.backendId, 'codex')
   await h.cleanup()
 })
+
+test('choosing a shape brings in the agent that starts it', async () => {
+  // The shape was recorded and then nothing happened, so every room stayed
+  // empty and read as an ordinary chat.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+
+  const room = await h.manager.startShape('room-1', 'reviewed')
+  assert.deepEqual(room.participants.map((entry) => entry.roleId), ['builder'])
+  assert.equal(room.recipient, 'builder', 'the composer aims at whoever just arrived')
+  await h.cleanup()
+})
+
+test('only the first agent starts, because the rest have nothing to read yet', async () => {
+  // A reviewer brought in up front would burn a session and go stale before it
+  // was useful.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+
+  const room = await h.manager.startShape('room-1', 'full')
+  assert.equal(room.participants.length, 1)
+  assert.equal(room.participants[0].roleId, 'researcher')
+  await h.cleanup()
+})
+
+test('a reviewer follows the builder', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.startShape('room-1', 'reviewed')
+
+  assert.equal(await h.manager.nextAfter('room-1', 'builder'), 'reviewer')
+  await h.cleanup()
+})
+
+test('nothing follows the last agent in a shape', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.startShape('room-1', 'reviewed')
+
+  assert.equal(await h.manager.nextAfter('room-1', 'reviewer'), undefined)
+  await h.cleanup()
+})
+
+test('an agent already in the room does not arrive twice', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.startShape('room-1', 'reviewed')
+  await h.manager.join('room-1', 'reviewer')
+
+  assert.equal(await h.manager.nextAfter('room-1', 'builder'), undefined)
+  await h.cleanup()
+})
+
+test('a thread with no shape hands over to nobody', async () => {
+  // An ordinary conversation is not a run, so finishing a turn must not start
+  // a reviewer the user never asked for.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.join('room-1', 'builder')
+
+  assert.equal(await h.manager.nextAfter('room-1', 'builder'), undefined)
+  await h.cleanup()
+})
