@@ -28,6 +28,7 @@ import { groupTranscriptTurns, searchTranscript, type TranscriptTurn } from '../
 import { splitBranches } from '@shared/room-routing'
 import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
 import { recipientKind, recipientLabel, recipientOptions, retarget } from '../lib/recipient'
+import { briefOf } from '@shared/job-notes'
 import { emptyRoomState } from '@shared/room'
 
 function partText(part: Part): string {
@@ -599,6 +600,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const annotations = useStore(appStore, (s) => (effectiveSession ? s.annotations[effectiveSession] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
   const room = useStore(appStore, (s) => (effectiveSession ? s.rooms[effectiveSession] ?? EMPTY_ROOM : EMPTY_ROOM))
   const branchOf = useStore(appStore, (s) => (effectiveSession ? s.branchDrafts[effectiveSession] : undefined))
+  const roomNotes = useMemo(() => briefOf(room.notes), [room.notes])
   const [text, setText] = useState('')
   const [recipientOpen, setRecipientOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1091,6 +1093,15 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
           />
         ) : null}
         <div className="composer-input">
+          {/* What a fresh agent will read when it joins. Collapsed, because it
+              is not something to keep in view — but a reviewer's whole brief is
+              in here, so the user must be able to see what it will be told. */}
+          {hasSession && roomNotes ? (
+            <details className="room-notes">
+              <summary>What this job agreed</summary>
+              <pre>{roomNotes}</pre>
+            </details>
+          ) : null}
           {hasSession && branchOf ? (
             <div className="composer-branch">
               <span>Replying under one point</span>
@@ -1125,6 +1136,32 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
                 {recipientLabel(room, room.recipient)}
                 <span className="caret">▾</span>
               </button>
+              {/* Who else is here, beside the chip rather than in a panel of
+                  their own. The user looks here before sending anyway, and a
+                  participant that is working or was dropped is exactly what
+                  changes who they address. */}
+              {room.participants.length > 0 ? (
+                <span className="room-who">
+                  {room.participants
+                    .filter((entry) => entry.state !== 'done' && entry.roleId !== room.recipient)
+                    .map((entry) => (
+                      <button
+                        key={entry.roleId}
+                        className={`room-who-one ${entry.state}`}
+                        title={
+                          entry.state === 'working'
+                            ? `${entry.label} is working`
+                            : entry.state === 'stale'
+                              ? `${entry.label} went idle — talking to it starts a fresh one`
+                              : entry.label
+                        }
+                        onClick={() => effectiveSession && setRoomRecipient(effectiveSession, entry.roleId)}
+                      >
+                        {entry.label}
+                      </button>
+                    ))}
+                </span>
+              ) : null}
             </div>
           )}
           <textarea

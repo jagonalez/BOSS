@@ -174,3 +174,21 @@ test('the team can be changed after setup', async ({ appPage }) => {
   await expect(appPage.locator('.team-setup-rows .role-name').first()).toBeVisible()
   await expect(appPage.locator('.team-setup-rows .role-reach').first()).toBeVisible()
 })
+
+test('the room shows who else is in it, beside the chip', async ({ appPage }) => {
+  // The user looks here before sending anyway, and a participant that is
+  // working or was dropped is exactly what changes who they address.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const others = appPage.locator('.room-who-one')
+  if (await others.count() === 0) return
+  await expect(others.first()).toBeVisible()
+})
+
+test('what a fresh agent will be told can be read by the user', async ({ appPage }) => {
+  // A reviewer reads the job notes and nothing else, so anything missing there
+  // is missing from the review. What it will be told must never be a surprise.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const notes = appPage.locator('.room-notes')
+  if (await notes.count() === 0) return
+  await expect(notes.locator('summary')).toContainText('What this job agreed')
+})

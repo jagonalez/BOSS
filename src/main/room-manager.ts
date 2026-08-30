@@ -4,6 +4,8 @@ import type { BackendId } from '../shared/backend'
 import type { JobNotes, RoomParticipant, RoomRole, RoomShape, RoomState, RoomTeam } from '../shared/room'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
 import { PARTICIPANT_STALE_AFTER_MS, ROOM_ASSISTANT_ID, emptyRoomState, participantIsStale } from '../shared/room.ts'
+// @ts-expect-error Node's type-stripping test runner needs the extension.
+import { briefOf } from '../shared/job-notes.ts'
 
 interface StoredRoomState {
   version: 1
@@ -287,24 +289,11 @@ export class RoomManager {
    *
    *  Deliberately not the previous participant's transcript. A reviewer that
    *  only has the plan and the diff cannot be misled by the builder's account
-   *  of itself, and that is exactly why its verdict is worth something. */
+   *  of itself, and that is exactly why its verdict is worth something. The
+   *  user sees the same text in the thread, so what a reviewer will be told is
+   *  never a surprise. */
   briefFor(notes: JobNotes): string {
-    const lines: string[] = []
-    if (notes.agreed.length > 0) {
-      lines.push('AGREED')
-      for (const item of notes.agreed) lines.push(`· ${item}`)
-    }
-    if (notes.decided.length > 0) {
-      if (lines.length > 0) lines.push('')
-      lines.push('DECIDED')
-      for (const item of notes.decided) lines.push(`· ${item.text} (${item.by})`)
-    }
-    if (notes.changed.length > 0) {
-      if (lines.length > 0) lines.push('')
-      lines.push('CHANGED')
-      for (const item of notes.changed) lines.push(`· ${item}`)
-    }
-    return lines.join('\n')
+    return briefOf(notes)
   }
 
   /** Forget a room once its thread is gone, so state does not accumulate for
