@@ -1377,6 +1377,7 @@ export class BackendManager {
       directory: binding.executionPath || native?.directory,
       path: binding.executionPath || native?.path,
       parentID: binding.parentID,
+      roleId: binding.roleId,
       lineage: binding.lineage,
       worktree: binding.worktree,
       mode: this.modeFor(binding),

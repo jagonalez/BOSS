@@ -1042,13 +1042,21 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     }
   }
 
+  // A room's agent, opened directly. It runs in its own hidden thread and is
+  // driven by its room, so there is nothing to type here — but the old wording
+  // named a thing the user has never heard of and offered no reason, which read
+  // as the app being broken.
   if (activeSession?.parentID) {
     return (
       <div className="composer-wrap">
         <div className="child-session-bar">
-          <span>Subagent sessions cannot be prompted.</span>
+          <span>
+            {activeSession.roleId
+              ? 'This is one agent working inside a conversation. Talk to it there, so everyone in it sees what you said.'
+              : 'This thread is driven by another one.'}
+          </span>
           <button className="btn-ghost" onClick={() => void selectSession(activeSession.parentID!)}>
-            Back to main session
+            Open that conversation
           </button>
         </div>
       </div>

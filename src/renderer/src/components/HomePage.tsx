@@ -173,12 +173,26 @@ export function HomePage(): React.JSX.Element {
     }
   }, [cardMenu])
 
+  // A room's agents run in hidden threads of their own. Listed here they read
+  // as ordinary chats that are empty — the room holds the conversation — and
+  // opening one is a dead end, because an agent may only be reached through its
+  // room. They are still in the snapshot, which is what the agents panel of a
+  // thread is built from; they just are not conversations.
   const recent = useMemo(
-    () => (snapshot?.threads ?? []).filter((thread) => !thread.archived).slice(0, 8),
+    () => (snapshot?.threads ?? [])
+      .filter((thread) => !thread.archived && !thread.parentID)
+      .slice(0, 8),
     [snapshot]
   )
-  const running = (snapshot?.threads ?? []).filter((thread) => !thread.archived && thread.running).length
-  const needsYou = (snapshot?.threads ?? []).filter((thread) =>
+  // Conversations, not threads. A room's agent runs inside its room and the
+  // room is busy for the whole run, so counting both said two things were
+  // working when one was.
+  const conversations = useMemo(
+    () => (snapshot?.threads ?? []).filter((thread) => !thread.parentID),
+    [snapshot]
+  )
+  const running = conversations.filter((thread) => !thread.archived && thread.running).length
+  const needsYou = conversations.filter((thread) =>
     thread.attention?.kind === 'permission'
     || thread.attention?.kind === 'question'
     || thread.attention?.kind === 'error'

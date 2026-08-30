@@ -387,7 +387,10 @@ export function Sidebar(): React.JSX.Element {
    *  a decision, then what is still going. A thread lands in exactly one
    *  bucket, so the counts add up to the list. */
   const reviewBuckets = useMemo(() => {
-    const threads = supervision?.threads ?? []
+    // Conversations only. A room's agents run in hidden threads, and listing
+    // one here sent the user to a chat that is empty — the room holds the
+    // conversation — and that refuses to be typed into.
+    const threads = (supervision?.threads ?? []).filter((thread) => !thread.parentID)
     const needs: Array<{ thread: SupervisedThread; detail: string }> = []
     const ready: Array<{ thread: SupervisedThread; detail: string }> = []
     const running: Array<{ thread: SupervisedThread; detail: string }> = []

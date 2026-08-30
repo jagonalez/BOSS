@@ -414,3 +414,24 @@ test('a room survives being left and come back to', async ({ appPage }) => {
 
   await expect(appPage.locator('.recipient-chip')).toHaveText(/BOSS/)
 })
+
+test('a room\'s agents are not listed as conversations', async ({ appPage }) => {
+  // They run in hidden threads of their own. Listed, they read as ordinary
+  // chats that are empty — the room holds the conversation — and opening one is
+  // a dead end, because an agent may only be reached through its room.
+  await appPage.locator('.sidebar-tab', { hasText: 'Needs you' }).click()
+  const rows = appPage.locator('.sidebar-section.attention .session-row')
+  const count = await rows.count()
+  for (let index = 0; index < count; index += 1) {
+    await expect(rows.nth(index)).not.toContainText('·')
+  }
+})
+
+test('opening a room\'s agent says what it is and offers the way back', async ({ appPage }) => {
+  // The old wording named a thing the user has never heard of and gave no
+  // reason, which read as the app being broken.
+  const bar = appPage.locator('.child-session-bar')
+  if (await bar.count() === 0) return
+  await expect(bar).toContainText('inside a conversation')
+  await expect(bar.locator('button')).toHaveText('Open that conversation')
+})

@@ -33,6 +33,10 @@ export interface SessionInfo {
    *  reloads mid-run reads the truth instead of inferring one from timestamps. */
   busy?: boolean
   parentID?: string
+  /** Which role in a room this thread runs, when it is a room's agent rather
+   *  than a conversation of its own. Present only on a hidden thread, and only
+   *  so the app can say what it is looking at in the user's own words. */
+  roleId?: string
   lineage?: import('./supervision').ThreadLineage
 }
 
