@@ -219,7 +219,7 @@ test('a suggested reviewer differs from the suggested builder when there is a ch
 
 test('one connected agent still yields a usable team', () => {
   const roles = suggestedRoles(['claude'])
-  assert.equal(roles.length, 5)
+  assert.equal(roles.length, 6, 'BOSS plus the five working roles')
   assert.ok(
     roles.every((role) => role.backendId === 'claude'),
     'a single agent fills every role rather than blocking setup'
@@ -364,7 +364,44 @@ test('two reads at once both wait for the file, so a saved team is never missed'
   const reopened = new RoomManager(h.stateFile, h.host, () => h.now())
   const [first, second] = await Promise.all([reopened.currentTeam(), reopened.currentTeam()])
 
-  assert.equal(first?.roles.length, TEAM.roles.length)
-  assert.equal(second?.roles.length, TEAM.roles.length, 'the second caller must not race past the read')
+  // One more than saved: a team stored before BOSS had a row gets one on load.
+  assert.equal(first?.roles.length, TEAM.roles.length + 1)
+  assert.equal(second?.roles.length, TEAM.roles.length + 1, 'the second caller must not race past the read')
+  await h.cleanup()
+})
+
+test('BOSS is a row in the team, so its agent is visible and changeable', async () => {
+  // It used to borrow whichever role happened to read rather than write, so the
+  // answer was invisible and moved whenever the team did.
+  const roles = suggestedRoles(['claude', 'codex'])
+  const boss = roles.find((role) => role.id === 'boss')
+  assert.equal(boss?.label, 'BOSS')
+  assert.equal(boss?.mode, 'plan', 'it coordinates and never edits code')
+  assert.equal(roles[0].id, 'boss', 'first, because it is who the user talks to')
+})
+
+test('a team saved before BOSS had a row gets one on load', async () => {
+  // An existing user would otherwise never see which agent their assistant runs
+  // on, and the setting they were told about would not be there.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+
+  const reopened = new RoomManager(h.stateFile, h.host, () => h.now())
+  const team = await reopened.currentTeam()
+  const boss = team?.roles.find((role) => role.id === 'boss')
+  assert.equal(boss?.label, 'BOSS')
+  assert.equal(boss?.backendId, 'claude', 'it inherits from whichever role read rather than wrote')
+  await h.cleanup()
+})
+
+test('BOSS runs on the agent the team says, not on a borrowed one', async () => {
+  const h = await harness()
+  await h.manager.configureTeam({
+    ...TEAM,
+    roles: [{ id: 'boss', label: 'BOSS', backendId: 'codex', mode: 'plan' }, ...TEAM.roles]
+  })
+
+  const joined = await h.manager.join('room-1', 'boss')
+  assert.equal(joined?.backendId, 'codex')
   await h.cleanup()
 })

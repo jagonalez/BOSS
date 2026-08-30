@@ -3,6 +3,7 @@ import type { BackendId } from '@shared/backend'
 import type { RoomRole } from '@shared/room'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { REACH_CHOICES } from '../lib/team-roles'
+import { ROOM_ASSISTANT_ID } from '@shared/room'
 
 /** The team, editable.
  *
@@ -54,14 +55,20 @@ export function TeamRoles({
               <option key={choice.mode} value={choice.mode}>{choice.label}</option>
             ))}
           </select>
-          <button
-            className="role-remove"
-            aria-label={`Remove ${role.label}`}
-            title="Remove this role"
-            onClick={() => onChange(roles.filter((entry) => entry.id !== role.id))}
-          >
-            ×
-          </button>
+          {/* BOSS cannot be removed. It is who the user talks to, and every
+              room needs it; a team without one would have nobody to ask. */}
+          {role.id === ROOM_ASSISTANT_ID ? (
+            <span className="role-fixed" title="BOSS is always on your team">always</span>
+          ) : (
+            <button
+              className="role-remove"
+              aria-label={`Remove ${role.label}`}
+              title="Remove this role"
+              onClick={() => onChange(roles.filter((entry) => entry.id !== role.id))}
+            >
+              ×
+            </button>
+          )}
         </div>
       ))}
       {roles.length === 0 ? (

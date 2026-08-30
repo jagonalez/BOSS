@@ -24,6 +24,7 @@ export const REACH_CHOICES: Array<{ mode: RoomRole['mode']; label: string }> = [
  *  name would never be reached, because what a shape means is defined in terms
  *  of these. */
 export const ADDABLE_ROLES: RoomRole[] = [
+  // BOSS is not here: it cannot be removed, so it can never need adding back.
   { id: 'researcher', label: 'Researcher', backendId: 'claude', mode: 'plan' },
   { id: 'planner', label: 'Planner', backendId: 'claude', mode: 'plan' },
   { id: 'builder', label: 'Builder', backendId: 'codex', mode: 'auto' },

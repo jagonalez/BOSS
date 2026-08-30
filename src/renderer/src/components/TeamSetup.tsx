@@ -19,6 +19,9 @@ function suggested(available: BackendId[]): RoomRole[] {
   // reviewer differs from the builder whenever there is a choice.
   const reviewer = available.find((id) => id !== builder) ?? builder
   return [
+    // First, because it is who the user talks to. It coordinates and never
+    // edits code, so it reads only.
+    { id: 'boss', label: 'BOSS', backendId: strongest, mode: 'plan' },
     { id: 'researcher', label: 'Researcher', backendId: strongest, mode: 'plan' },
     { id: 'planner', label: 'Planner', backendId: strongest, mode: 'plan' },
     { id: 'builder', label: 'Builder', backendId: builder, mode: 'auto' },

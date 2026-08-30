@@ -34,10 +34,26 @@ export interface RoomHost {
   roomPaths(roomThreadId: string): { projectPath: string; executionPath: string } | undefined
 }
 
-/** BOSS's own role, taken from whichever configured role reads rather than
- *  writes. It coordinates and never edits code, so it inherits a reader's
- *  permissions and the strongest agent the user connected. */
+/** Add BOSS to a team saved before it had a row of its own.
+ *
+ *  Without this an existing user would never see which agent their assistant
+ *  runs on, and the setting they were told about would not be there. */
+function withAssistant(team: RoomTeam): RoomTeam {
+  if (team.roles.some((role) => role.id === ROOM_ASSISTANT_ID)) return team
+  const inherited = assistantRole(team)
+  return inherited ? { ...team, roles: [inherited, ...team.roles] } : team
+}
+
+/** BOSS's own role.
+ *
+ *  A real row in the team, so the user can see which agent it runs on and
+ *  change it. It used to borrow whichever role happened to read rather than
+ *  write, which meant the answer was invisible and moved whenever the team did.
+ *
+ *  It falls back only for a team saved before BOSS had a row of its own. */
 function assistantRole(team: RoomTeam): RoomRole | undefined {
+  const own = team.roles.find((role) => role.id === ROOM_ASSISTANT_ID)
+  if (own) return own
   const reader = team.roles.find((role) => role.mode === 'plan') ?? team.roles[0]
   if (!reader) return undefined
   return { id: ROOM_ASSISTANT_ID, label: 'BOSS', backendId: reader.backendId, mode: 'plan' }
@@ -55,6 +71,9 @@ export function suggestedRoles(available: readonly BackendId[]): RoomRole[] {
    * A second opinion from the same model is not a second opinion. */
   const reviewer = available.find((id) => id !== builder) ?? builder
   return [
+    // First, because it is who the user talks to. It coordinates and never
+    // edits code, so it reads only.
+    { id: ROOM_ASSISTANT_ID, label: 'BOSS', backendId: strongest, mode: 'plan' },
     { id: 'researcher', label: 'Researcher', backendId: strongest, mode: 'plan' },
     { id: 'planner', label: 'Planner', backendId: strongest, mode: 'plan' },
     { id: 'builder', label: 'Builder', backendId: builder, mode: 'auto' },
@@ -106,7 +125,7 @@ export class RoomManager {
       const parsed = JSON.parse(await readFile(this.stateFile, 'utf8')) as Partial<StoredRoomState>
       if (parsed.version !== 1) return
       if (parsed.rooms && typeof parsed.rooms === 'object') this.rooms = parsed.rooms
-      if (parsed.team) this.team = parsed.team
+      if (parsed.team) this.team = withAssistant(parsed.team)
     } catch (error) {
       // A missing file is a first launch. A file that exists but will not parse
       // is damage, and starting empty would quietly discard every room. Refuse

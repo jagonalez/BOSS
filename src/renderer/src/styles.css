@@ -1765,6 +1765,14 @@ textarea {
   border-bottom: 1px solid var(--border);
 }
 
+/* BOSS cannot be removed, so it says so where the other rows have a remove
+   button rather than leaving a hole there. */
+.team-setup-row .role-fixed {
+  padding: 0 4px;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+}
+
 /* Adding back a role the user deleted. Only the ones a run knows how to place;
    an invented name would never be reached. */
 .team-add {

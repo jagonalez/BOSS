@@ -246,3 +246,17 @@ test('what needs you never swallows the projects list', async ({ appPage }) => {
   })
   expect(sizes.list / sizes.bar).toBeLessThan(0.5)
 })
+
+test('the team says which agent BOSS runs on', async ({ appPage }) => {
+  // It used to borrow whichever role happened to read rather than write, so the
+  // user had no way to see the answer or change it.
+  await appPage.getByRole('button', { name: 'Settings' }).click()
+  await appPage.locator('.settings-nav-group button', { hasText: 'Your team' }).click()
+
+  const boss = appPage.locator('.team-setup-row').filter({ has: appPage.locator('input[value="BOSS"]') })
+  if (await boss.count() === 0) return
+
+  await expect(boss.locator('.role-agent')).toBeVisible()
+  await expect(boss.locator('.role-fixed')).toHaveText('always')
+  await expect(boss.locator('.role-remove')).toHaveCount(0)
+})
