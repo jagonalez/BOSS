@@ -212,21 +212,57 @@ export class RoomManager {
     })
   }
 
-  /** Choose how a job runs, and bring in whoever starts it.
+  /** Choose how a job runs.
    *
-   *  The shape was recorded and then nothing happened: no participant ever
-   *  joined, so every room stayed empty and read as an ordinary chat. Only the
-   *  first role joins — a reviewer arrives when the builder finishes, not
-   *  before, and starting all of them at once would burn sessions on agents
-   *  with nothing yet to read. */
-  async startShape(threadId: string, shape: RoomShape): Promise<RoomState> {
-    await this.setShape(threadId, shape)
-    const team = await this.currentTeam()
-    const first = team ? rolesForShape(shape, team)[0] : undefined
-    if (first) {
-      await this.join(threadId, first)
-      await this.setRecipient(threadId, first)
-    }
+   *  Recording only. Picking a shape used to start an agent on the spot, before
+   *  the user had said what the job was — and because nothing removes an agent,
+   *  the choice could not be taken back. The row of buttons vanished at the
+   *  same moment, so the user was left with a decision they had made by
+   *  accident and could not undo.
+   *
+   *  Who starts is decided when the first message is sent, by `openingRole`. */
+  async chooseShape(threadId: string, shape: RoomShape): Promise<RoomState> {
+    return this.setShape(threadId, shape)
+  }
+
+  /** Who should answer this room's first message, if nobody has yet.
+   *
+   *  A shape names an order of roles; this is the first of them. Returns
+   *  nothing when the room has no shape, has no team, or already has someone in
+   *  it — in all three the message goes wherever it is addressed, as usual. */
+  async openingRole(threadId: string): Promise<string | undefined> {
+    await this.load()
+    const room = this.rooms[threadId]
+    // A room only ever has a shape because the user gave it one. Falling back
+    // to the team's default here would turn every ordinary chat into a job:
+    // asking a question in a plain conversation would silently start a builder,
+    // which is the opposite of what "do not ask me" means.
+    if (!room?.shape || !this.team) return undefined
+    if (room.participants.length > 0) return undefined
+    return rolesForShape(room.shape, this.team)[0]
+  }
+
+  /** The shape a new job takes when the user asked not to be asked each time.
+   *
+   *  Returns nothing when they want the choice, which is the default. Answering
+   *  "just build and review, always" and then still being asked every time is
+   *  the setting doing nothing — which is what it did, because it was written to
+   *  disk and read by nobody. */
+  async standingShape(): Promise<RoomShape | undefined> {
+    await this.load()
+    if (!this.team || this.team.askShape) return undefined
+    return this.team.defaultShape
+  }
+
+  /** Bring in the role that opens this room, and aim the composer at it.
+   *
+   *  Called when the first message is sent, not when the shape is picked. Only
+   *  the first role joins: a reviewer arrives when the builder finishes, and
+   *  starting all of them at once would burn sessions on agents with nothing
+   *  yet to read. */
+  async openWith(threadId: string, roleId: string): Promise<RoomState> {
+    await this.join(threadId, roleId)
+    await this.setRecipient(threadId, roleId)
     return this.room(threadId)
   }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { lineMark, parseCard, splitCards } from './room-cards.ts'
+import { CARD_INSTRUCTIONS, lineMark, parseCard, splitCards } from './room-cards.ts'
 
 test('a card carries a kind, a title, its lines, and what to do', () => {
   const card = parseCard(['kind: gate', 'title: Ready to ship', '11 files changed', 'do: Ship it', 'do: Hold'].join('\n'))
@@ -88,4 +88,16 @@ test('a line says whether it is done, off plan, or waiting', () => {
 test('a title containing a colon survives', () => {
   const card = parseCard('title: Ready: ship it')
   assert.equal(card?.title, 'Ready: ship it')
+})
+
+test('what an agent is told about cards is a card this parser accepts', () => {
+  // The instructions and the parser have to agree. Described in one place and
+  // read in another they drift, and a card that does not parse is silently just
+  // text — the agent believes it asked a question and the user sees a paragraph.
+  const segments = splitCards(CARD_INSTRUCTIONS)
+  const card = segments.find((segment) => segment.type === 'card')?.card
+  assert.equal(card?.kind, 'gate')
+  assert.equal(card?.title, 'Ready to ship')
+  assert.deepEqual(card?.actions, ['Ship it', 'Hold'])
+  assert.equal(card?.link?.label, 'Saved searches')
 })

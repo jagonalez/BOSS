@@ -14,8 +14,9 @@ import type {
   ThreadBusSnapshot,
   ThreadBusThread
 } from '@shared/thread-bus'
+import { isPresence, type Presence } from '@shared/notification'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
-import { NOTES_TOOL_DESCRIPTIONS, QUIET_TOOL_DESCRIPTIONS, REPORT_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { NOTES_TOOL_DESCRIPTIONS, PRESENCE_TOOL_DESCRIPTIONS, REPORT_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import type { Workflow, WorkflowInput, WorkflowRun, WorkflowTrigger, WorkflowsSnapshot } from '@shared/workflow'
 import { policyOverrides, policySource, resolvePolicy } from '@shared/collaboration-policy'
 import { projectScope } from './project-identity'
@@ -37,8 +38,8 @@ interface RoomNotesHandle {
 /** What the bus needs to stop and resume interrupting the user. Structural for
  *  the same reason as the engine handle below. */
 interface NotificationHandle {
-  setQuiet(quiet: boolean): Array<{ title: string; body: string }>
-  isQuiet(): boolean
+  setPresence(presence: Presence): Array<{ title: string; body: string }>
+  currentPresence(): Presence
 }
 
 /** What the bus needs from the workflow engine, kept structural so the bus
@@ -377,12 +378,15 @@ export class ThreadBus {
     // thread, so it is not gated by the collaboration policy. The user sets it
     // by saying so — "I'm stepping out" — which is why an agent needs a tool
     // for it at all.
-    if (tool === 'boss_quiet_set') {
+    if (tool === 'boss_presence_set') {
       if (!this.notifications) throw new Error('Notifications are not available.')
-      const quiet = booleanArg(args, 'quiet', true)
-      const held = this.notifications.setQuiet(quiet)
+      const wanted = stringArg(args, 'presence')
+      if (!isPresence(wanted)) {
+        throw new Error('presence must be "desk", "away", or "quiet".')
+      }
+      const held = this.notifications.setPresence(wanted)
       return {
-        quiet,
+        presence: wanted,
         // Named so the assistant can say what waited rather than leaving the
         // user to discover it.
         waiting: held.map((event) => ({ title: event.title, body: event.body }))
@@ -918,14 +922,18 @@ export class ThreadBus {
         }
       },
       {
-        name: 'boss_quiet_set',
-        description: QUIET_TOOL_DESCRIPTIONS.set,
+        name: 'boss_presence_set',
+        description: PRESENCE_TOOL_DESCRIPTIONS.set,
         inputSchema: {
           type: 'object',
           properties: {
-            quiet: { type: 'boolean', description: QUIET_TOOL_DESCRIPTIONS.quiet }
+            presence: {
+              type: 'string',
+              enum: ['desk', 'away', 'quiet'],
+              description: PRESENCE_TOOL_DESCRIPTIONS.presence
+            }
           },
-          required: ['quiet'],
+          required: ['presence'],
           additionalProperties: false
         }
       },

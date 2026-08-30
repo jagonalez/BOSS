@@ -6,7 +6,7 @@ import { basename, join } from 'node:path'
 import { trimToolOutput } from '../../shared/tool-output'
 import { ROOM_EVERYONE, ROOM_THREAD_AGENT } from '../../shared/room'
 import { isBackendId } from '../../shared/backend'
-import { catchUpFor, catchUpPrompt } from '../../shared/room-routing'
+import { catchUpFor, catchUpPrompt, deliveryFor } from '../../shared/room-routing'
 import { briefForRole, HANDOVER_PROMPT } from '../../shared/room-brief'
 import { runCommand } from '../review-provider'
 import type { Backend } from './backend'
@@ -133,9 +133,13 @@ interface RoomManagerHandle {
   room(threadId: string): Promise<import('@shared/room').RoomState>
   setRecipient(threadId: string, recipient: string): Promise<import('@shared/room').RoomState>
   join(threadId: string, roleId: string, backendId?: BackendId): Promise<import('@shared/room').RoomParticipant | undefined>
-  startShape(threadId: string, shape: import('@shared/room').RoomShape): Promise<import('@shared/room').RoomState>
+  chooseShape(threadId: string, shape: import('@shared/room').RoomShape): Promise<import('@shared/room').RoomState>
+  openingRole(threadId: string): Promise<string | undefined>
+  standingShape(): Promise<import('@shared/room').RoomShape | undefined>
+  openWith(threadId: string, roleId: string): Promise<import('@shared/room').RoomState>
   nextAfter(threadId: string, roleId: string): Promise<string | undefined>
   touch(threadId: string, roleId: string, state?: import('@shared/room').ParticipantState): Promise<void>
+  retireStale(threadId: string): Promise<string[]>
   briefFor(notes: import('@shared/room').JobNotes): string
   currentTeam(): Promise<import('@shared/room').RoomTeam | undefined>
   configureTeam(team: import('@shared/room').RoomTeam): Promise<import('@shared/room').RoomTeam>
@@ -198,6 +202,13 @@ interface BackendDefinition {
   capabilities: BackendCapabilities
   modes: BackendDescriptor['modes']
 }
+
+/** How long one participant may hold a broadcast before the round moves on.
+ *
+ *  Every ordinary ending settles a run, so this only catches a backend that has
+ *  gone silent without saying so. Generous, because cutting a real answer short
+ *  would be worse than a room held a few minutes longer than it should be. */
+const BROADCAST_TURN_LIMIT_MS = 10 * 60 * 1000
 
 const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
@@ -304,6 +315,20 @@ export class BackendManager {
   private readonly starting = new Map<BackendId, Promise<Backend>>()
   private readonly unsubscribers = new Map<BackendId, () => void>()
   private readonly busyThreads = new Set<string>()
+  /** Rooms part-way through answering a broadcast.
+   *
+   *  A participant finishing normally hands work to whoever is next in the
+   *  shape. During a broadcast that is wrong: asking everyone a question would
+   *  advance the work, because the builder's answer looks exactly like the
+   *  builder finishing its build. */
+  private readonly broadcasting = new Set<string>()
+  /** Who is waiting for a given thread's run to finish.
+   *
+   *  A backend's send resolves when the turn is dispatched, not when the agent
+   *  has answered. Anything that has to happen after a real answer — a
+   *  broadcast moving to the next participant — has to wait for the run to
+   *  settle instead. */
+  private readonly runWaiters = new Map<string, Array<() => void>>()
   private readonly followUpDeliveries = new Set<string>()
   /** Threads BOSS just stopped on purpose, so the abort a backend reports for
    *  that stop is not shown as a failed turn. Cleared by the next run. */
@@ -1836,8 +1861,35 @@ export class BackendManager {
     if (recipient === ROOM_EVERYONE) return undefined
     // The thread's own agent is the thread. Nothing to route to, and nothing to
     // join: this is what an ordinary conversation addresses before it has any
-    // roles in it.
-    if (recipient === ROOM_THREAD_AGENT) return undefined
+    // roles in it — unless a shape was chosen, in which case this first message
+    // is what brings its opening role in.
+    //
+    // Here rather than when the shape was picked. Picking used to start an
+    // agent on the spot, before the user had said what the job was, and because
+    // nothing removes an agent the choice could not be taken back.
+    if (recipient === ROOM_THREAD_AGENT) {
+      const opening = await this.rooms.openingRole(threadId)
+      if (!opening) return undefined
+      const room = await this.rooms.openWith(threadId, opening)
+      // A role that could not be started falls through to the thread's own
+      // agent rather than losing the message. The user still gets an answer;
+      // they do not get a message that went nowhere.
+      return room.participants.find((entry) => entry.roleId === opening)?.threadId
+    }
+    // Drop anyone who has been idle too long, before deciding where this goes.
+    // A stale participant is replaced rather than resumed: providers discount
+    // recently-sent context for about an hour, and past that a large old
+    // session costs its full size every time it is addressed. It is also more
+    // honest — a planner from last week would speak confidently about code that
+    // has since moved. Its job notes are what carry forward.
+    //
+    // Here rather than on a timer, because this is the moment the cost would be
+    // paid. A timer would also have to run while the app is closed to be worth
+    // anything, and nothing is stale until someone speaks to it again.
+    await this.rooms.retireStale(threadId).catch(() => {
+      /* Retiring is an economy, not a requirement. A room that cannot be tidied
+       * must still be able to take a message. */
+    })
     const room = await this.rooms.room(threadId)
     const existing = room.participants.find((entry) => entry.roleId === recipient)
     // A stale participant has no session left: its old context was dropped
@@ -1973,6 +2025,97 @@ export class BackendManager {
     return false
   }
 
+  /** Send one message to every participant, each answering once.
+   *
+   *  They answer in turn rather than together. A room runs one thing at a time,
+   *  and several agents streaming into one list at once is exactly the noise a
+   *  room exists to avoid. They also never answer each other: each is given the
+   *  user's message, not the replies of the ones before it.
+   *
+   *  The room's claim is already held by the caller and is released once, at
+   *  the end. Each participant's own run settles its own session, so without
+   *  holding the room the second agent would find the room idle and a user
+   *  message could start a competing run halfway through.
+   *
+   *  An agent that fails does not stop the rest. A broadcast is a question to
+   *  the room; one agent being unreachable is an answer missing, not a reason
+   *  to withhold the question from everyone else. */
+  private async broadcast(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
+    // Everything after the claim is inside the try, so neither the flag nor the
+    // claim can be stranded. Set outside it, a failed room read left the flag
+    // on for ever and that room never handed work along again — a silent,
+    // permanent fault from a single failed read.
+    this.broadcasting.add(threadId)
+    try {
+      const room = await this.rooms?.room(threadId)
+      const delivery = room ? deliveryFor(room, ROOM_EVERYONE) : undefined
+      if (!delivery || delivery.roleIds.length === 0) {
+        throw new Error('There is nobody in this room yet. Address a role, or start the work first.')
+      }
+      for (const roleId of delivery.roleIds) {
+        const routed = await this.routeToParticipant(threadId, { ...options, recipient: roleId })
+        if (!routed) continue
+        // Waited for before the send, because the send is what starts the run
+        // this waits on. Registered after would miss a run that finished first.
+        const answered = this.runEnds(routed)
+        const started = await this.sendToParticipant(threadId, routed, parts, { ...options, recipient: roleId })
+          .then(() => true)
+          .catch(() => false)
+        // A backend's send resolves when the turn is dispatched, not when the
+        // agent has answered. Awaiting only the send fired every participant
+        // within milliseconds and they all streamed into the one list at once
+        // — exactly the noise a room exists to prevent.
+        if (started) await answered
+        else this.forgetRunWaiters(routed)
+        // A participant that could not start releases the room on its way out,
+        // which is right for one message and wrong for a round: the agents
+        // after it are still to come. Taken back so the room stays busy until
+        // the round is over.
+        this.busyThreads.add(threadId)
+      }
+    } finally {
+      // Cleared before the room is released, so the settle below can hand over
+      // normally if the shape has somewhere left to go.
+      this.broadcasting.delete(threadId)
+      // Held across the whole round rather than settled per agent, so a user
+      // message cannot start a competing run halfway through.
+      this.settleBusy(threadId)
+    }
+  }
+
+  /** Resolves when this thread's current run settles, however it settles.
+   *
+   *  A backend's send resolves when the turn is dispatched rather than when the
+   *  agent has answered, so anything that must happen after a real answer waits
+   *  on this instead. */
+  private runEnds(threadId: string): Promise<void> {
+    return new Promise((resolve) => {
+      // Capped. Every ordinary ending settles the run — idle, an error, an
+      // abort, a backend dying — but a backend that simply goes silent would
+      // otherwise hold the round, and with it the room, for ever. Long enough
+      // that a real answer is never cut short.
+      const limit = setTimeout(() => this.forgetRunWaiters(threadId), BROADCAST_TURN_LIMIT_MS)
+      const waiting = this.runWaiters.get(threadId) ?? []
+      waiting.push(() => {
+        clearTimeout(limit)
+        resolve()
+      })
+      this.runWaiters.set(threadId, waiting)
+    })
+  }
+
+  /** Release everyone waiting on a run that will never start.
+   *
+   *  Without this a send that failed before reaching the backend would leave
+   *  the round waiting for an answer that is not coming, and the room busy for
+   *  ever. */
+  private forgetRunWaiters(threadId: string): void {
+    const waiting = this.runWaiters.get(threadId)
+    if (!waiting) return
+    this.runWaiters.delete(threadId)
+    for (const resolve of waiting) resolve()
+  }
+
   /** Bring in whoever follows the participant that just finished, and start it.
    *
    *  They arrive when the work reaches them, not up front: a reviewer with
@@ -1991,6 +2134,10 @@ export class BackendManager {
     const room = binding?.parentID
     const finished = binding?.roleId
     if (!room || !finished || !this.rooms) return
+    // Not in the middle of a broadcast. Asking everyone a question would
+    // otherwise advance the work: the builder answers, its run ends, and the
+    // reviewer is pulled in as though the build were finished.
+    if (this.broadcasting.has(room)) return
     try {
       // Back to reachable. It was set to 'working' when its run began and never
       // set back, so the room showed every agent that had ever spoken as still
@@ -2017,7 +2164,20 @@ export class BackendManager {
    *  room permanently unable to accept a message. */
   private settleBusy(threadId: string): boolean {
     const wasBusy = this.busyThreads.delete(threadId)
+    // Whoever is waiting for this run to end. A backend send resolves when the
+    // turn is dispatched, not when the agent has answered, so this is the only
+    // honest signal that one participant is done.
+    const waiting = this.runWaiters.get(threadId)
+    if (waiting) {
+      this.runWaiters.delete(threadId)
+      for (const resolve of waiting) resolve()
+    }
     const parent = this.bindings.get(threadId)?.parentID
+    // During a broadcast the room belongs to the round, not to any one
+    // participant. Without this the first agent to answer released the room and
+    // the composer went idle while the others were still writing — so a
+    // follow-up could start a competing run into the same list.
+    if (parent && this.broadcasting.has(parent)) return wasBusy
     if (!parent || !this.busyThreads.delete(parent)) {
       // A participant that just finished hands over to whoever comes next.
       // Without this the shape stopped after its first agent: a reviewer never
@@ -2059,13 +2219,19 @@ export class BackendManager {
     // disk, and two quick messages both reached that await and both found the
     // room idle — the very race the one-run-per-thread rule exists to stop,
     // walked around by a path that checked afterwards.
-    const routes = Boolean(options?.recipient) && options?.recipient !== ROOM_EVERYONE && Boolean(this.rooms)
+    const broadcasts = options?.recipient === ROOM_EVERYONE && Boolean(this.rooms)
+    const routes = (Boolean(options?.recipient) && options?.recipient !== ROOM_EVERYONE && Boolean(this.rooms)) || broadcasts
     if (routes) {
       if (this.busyThreads.has(threadId) && !this.followUpDeliveries.has(threadId)) {
         throw new Error(THREAD_BUSY_ERROR)
       }
       this.busyThreads.add(threadId)
     }
+    // Everyone answers, one at a time. The claim above is the room's, and a
+    // room runs one thing at a time, so they cannot run together — which is
+    // also what the user wants: several agents streaming into one list at once
+    // is the noise a room is supposed to avoid.
+    if (broadcasts) return this.broadcast(threadId, parts, options)
     const routed = await this.routeToParticipant(threadId, options).catch((error: unknown) => {
       // The claim has to come back, or a room whose participant could not be
       // started refuses every later message with no way out.
@@ -3182,7 +3348,15 @@ export class BackendManager {
         await this.rooms?.join(request.threadId, request.roleId)
         return this.rooms?.room(request.threadId)
       }
-      case 'room.shape.set': return this.rooms?.startShape(request.threadId, request.shape)
+      case 'room.shape.set': return this.rooms?.chooseShape(request.threadId, request.shape)
+      case 'room.shape.standing': return this.rooms?.standingShape()
+      case 'presence.get': return this.notifications?.currentPresence() ?? 'desk'
+      case 'presence.set': {
+        const waiting = this.notifications?.setPresence(request.presence) ?? []
+        // What was held while the bar was higher, so the user is told what
+        // waited rather than discovering it.
+        return { presence: request.presence, waiting }
+      }
       case 'room.assistant.mark': return this.markAssistantThread(request.threadId)
       case 'room.team.get': return this.rooms?.currentTeam()
       case 'room.team.set': return this.rooms?.configureTeam(request.team)

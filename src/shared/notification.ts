@@ -46,6 +46,41 @@ export function shouldNotify(level: NotifyLevel, type: BossEventType): boolean {
   return ATTENTION_EVENTS.has(type)
 }
 
+/** Where the user is, which sets the bar for interrupting them.
+ *
+ *  - `desk` — the desktop is the front door. Everything a channel wants gets
+ *    through, and a push is held back while a BOSS window is in front.
+ *  - `away` — only what needs a person: decisions, reviews, failures. Routine
+ *    completions wait, because a phone buzzing for finished work is what makes
+ *    people turn notifications off.
+ *  - `quiet` — silence, with no exceptions. Not even a failed release. Real
+ *    paging stays with the user's monitoring, which already wakes them; one
+ *    exception here would make the setting untrustworthy. */
+export type Presence = 'desk' | 'away' | 'quiet'
+
+export const PRESENCES: readonly Presence[] = ['desk', 'away', 'quiet']
+
+export function isPresence(value: unknown): value is Presence {
+  return typeof value === 'string' && (PRESENCES as readonly string[]).includes(value)
+}
+
+/** What each mode is called, and what it does, in the user's words. */
+export const PRESENCE_LABELS: Record<Presence, { label: string; detail: string }> = {
+  desk: { label: 'At my desk', detail: 'everything reaches you here' },
+  away: { label: 'Away', detail: 'only what needs a decision' },
+  quiet: { label: 'Do not disturb', detail: 'nothing gets through' }
+}
+
+/** Whether an event reaches a person at all, given where they are.
+ *
+ *  Separate from `shouldNotify`, which answers what a *channel* wants. Both
+ *  have to agree: presence is the user's bar, the level is the channel's. */
+export function presenceAllows(presence: Presence, type: BossEventType): boolean {
+  if (presence === 'quiet') return false
+  if (presence === 'away') return ATTENTION_EVENTS.has(type)
+  return true
+}
+
 /** The webhook settings a surface can read and change.
  *
  *  Returned by both webhook IPC calls so a client always sees the settled

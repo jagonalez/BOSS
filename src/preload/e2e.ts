@@ -13,6 +13,7 @@ import type {
 } from '../shared/backend'
 import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
 import type { MessageWithParts, SessionInfo } from '../shared/opencode'
+import type { Presence } from '../shared/notification'
 import type { RoomState, RoomTeam } from '../shared/room'
 import { contextHandoffPacket, delegatedContextInstruction } from '../shared/context-handoff'
 import { titleFromFirstPrompt } from '../shared/thread-title'
@@ -578,6 +579,8 @@ export function installE2EApi(boss: BossApi): void {
   }
   const emptyRoom: RoomState = { version: 1, participants: [], notes: { agreed: [], decided: [], changed: [], updatedAt: 0 }, recipient: 'agent' }
   const rooms: Record<string, RoomState> = {}
+  // Where the user is. Starts at the desk, the mode that hides nothing.
+  let presence: Presence = 'desk'
 
   let workflowApprovalMode = 'ask'
   // One agent-authored workflow ships pre-seeded, disabled, with a run parked
@@ -1044,27 +1047,19 @@ export function installE2EApi(boss: BossApi): void {
         rooms[request.threadId] = { ...current, recipient: request.recipient }
         return rooms[request.threadId]
       }
+      // Recording only, like the real thing. Choosing used to start an agent on
+      // the spot, before the user had said what the job was, and the choice
+      // could not then be taken back.
       case 'room.shape.set': {
         const current = rooms[request.threadId] ?? { ...emptyRoom }
-        const first = roomTeam?.roles.find((entry) => entry.id === 'builder')
-        rooms[request.threadId] = {
-          ...current,
-          shape: request.shape,
-          ...(first
-            ? {
-                recipient: first.id,
-                participants: [{
-                  roleId: first.id,
-                  label: first.label,
-                  backendId: first.backendId,
-                  threadId: `participant-${first.id}`,
-                  state: 'active' as const,
-                  joinedAt: 0
-                }]
-              }
-            : {})
-        }
+        rooms[request.threadId] = { ...current, shape: request.shape }
         return rooms[request.threadId]
+      }
+      case 'room.shape.standing': return roomTeam?.askShape === false ? roomTeam.defaultShape : undefined
+      case 'presence.get': return presence
+      case 'presence.set': {
+        presence = request.presence
+        return { presence, waiting: [] }
       }
       case 'room.join': {
         const current = rooms[request.threadId] ?? { ...emptyRoom }

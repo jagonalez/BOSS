@@ -123,3 +123,28 @@ export function lineMark(line: string): { mark?: 'done' | 'gap' | 'waiting'; tex
   if (line.startsWith('○ ')) return { mark: 'waiting', text: line.slice(2) }
   return { text: line }
 }
+
+/** How an agent is told to write a card.
+ *
+ *  Beside the parser rather than in whichever surface happens to seed an agent,
+ *  because the two have to agree: a format described in one place and read in
+ *  another drifts, and a card that does not parse is silently just text.
+ *
+ *  It used to live in the renderer and reach only the standing assistant, so a
+ *  builder or a reviewer — the agents with the most worth setting apart — could
+ *  not write a card at all. */
+export const CARD_INSTRUCTIONS = [
+  'When something needs a decision, an approval, or is a result worth setting apart, write a card instead of a paragraph:',
+  '',
+  '```boss-card',
+  'kind: gate',
+  'title: Ready to ship',
+  '11 files changed · 3 new tests',
+  '✓ 231 tests passed',
+  'do: Ship it',
+  'do: Hold',
+  'open: Saved searches@<thread id>',
+  '```',
+  '',
+  "kind is gate, attention, plan, or note. At most two `do:` lines — one way forward and one way out; more than that is a form, not a decision. A `do:` becomes a button that sends those exact words back as the user's reply, so phrase them as answers. `open:` links a thread by id, which is how you point at a room rather than describing where to look. Lines beginning ✓, ≠, or ○ render as done, off-plan, and waiting."
+].join('\n')

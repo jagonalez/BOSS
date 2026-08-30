@@ -16,7 +16,7 @@ import type {
 } from '@shared/opencode'
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendSubscriptionUsage, QueuedFollowUp } from '@shared/backend'
 import type { Annotation } from '@shared/annotations'
-import type { RoomState } from '@shared/room'
+import type { RoomState, RoomTeam } from '@shared/room'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -157,6 +157,12 @@ export interface AppState {
    *  recipient into the other. Main owns the durable copy; this mirrors it so
    *  the composer can render without waiting on a round trip. */
   rooms: Record<string, RoomState>
+  /** The team, as configured once in setup.
+   *
+   *  Held here because the composer needs one thing from it: whether the user
+   *  asked to choose the shape of every job. That answer was written to disk
+   *  and read by nobody, so the row of buttons appeared either way. */
+  team: RoomTeam | null
   /** The message each thread's composer is currently replying under, when the
    *  user took a point aside. Session-scoped like the drafts beside it. */
   branchDrafts: Record<string, string>
@@ -281,6 +287,7 @@ export const initialState: AppState = {
   attachments: {},
   annotations: {},
   rooms: {},
+  team: null,
   branchDrafts: {},
   followUps: {},
   history: {},

@@ -300,18 +300,18 @@ test('the team says which agent BOSS runs on', async ({ appPage }) => {
   await expect(boss.locator('.role-remove')).toHaveCount(0)
 })
 
-test('choosing how a job runs brings in the agent that starts it', async ({ appPage }) => {
-  // The shape was recorded and then nothing happened: every room stayed empty
-  // and read as an ordinary chat.
+test('choosing how a job runs starts nobody yet', async ({ appPage }) => {
+  // It used to bring an agent in on the spot, before the user had said what the
+  // job was, and the row vanished at the same moment — so a choice made by
+  // accident could not be taken back.
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
   const shape = appPage.locator('.composer-shape')
   if (await shape.count() === 0) return
 
   await shape.locator('button', { hasText: 'Build and review' }).click()
 
-  // The chooser is gone, because the choice has been made.
-  await expect(shape).toHaveCount(0)
-  await expect(appPage.locator('.recipient-chip')).toHaveText(/Builder/)
+  await expect(shape).toBeVisible()
+  await expect(shape.locator('button', { hasText: 'Build and review' })).toHaveClass(/on/)
 })
 
 test('a room reads as a room, with a speaker beside each message', async ({ appPage }) => {
@@ -352,4 +352,65 @@ test('the composer follows the chip when the recipient changes', async ({ appPag
   await appPage.locator('.recipient-option').filter({ hasText: 'Everyone' }).click()
 
   await expect(appPage.getByPlaceholder('Ask Everyone…')).toBeVisible()
+})
+
+test('choosing how a job runs can be changed until the first message', async ({ appPage }) => {
+  // It used to start an agent on the spot and vanish, so a choice made by
+  // accident could not be taken back.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const shapes = appPage.locator('.composer-shape button')
+  if (await shapes.count() === 0) return
+
+  await shapes.filter({ hasText: 'Just do it' }).click()
+  await expect(shapes.filter({ hasText: 'Just do it' })).toHaveClass(/on/)
+
+  await shapes.filter({ hasText: 'The full run' }).click()
+  await expect(shapes.filter({ hasText: 'The full run' })).toHaveClass(/on/)
+  await expect(shapes.filter({ hasText: 'Just do it' })).not.toHaveClass(/on/)
+})
+
+test('the row of shapes stays put after a choice', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const shapes = appPage.locator('.composer-shape button')
+  if (await shapes.count() === 0) return
+
+  await shapes.first().click()
+  await expect(appPage.locator('.composer-shape')).toBeVisible()
+})
+
+test('where you are is shown in the bar, and can be changed', async ({ appPage }) => {
+  // Only an agent could set this before, told in words, so a setting that
+  // decides whether a phone stays silent was invisible in the app.
+  await expect(appPage.locator('.presence-pill')).toContainText('At my desk')
+
+  await appPage.locator('.presence-pill').click()
+  await appPage.locator('.presence-menu button').filter({ hasText: 'Do not disturb' }).click()
+
+  await expect(appPage.locator('.presence-pill')).toContainText('Do not disturb')
+})
+
+test('every mode says what it does, not just what it is called', async ({ appPage }) => {
+  await appPage.locator('.presence-pill').click()
+  await expect(appPage.locator('.presence-detail')).toHaveText([
+    'everything reaches you here',
+    'only what needs a decision',
+    'nothing gets through'
+  ])
+})
+
+test('a room survives being left and come back to', async ({ appPage }) => {
+  // Nothing ever read a room from disk. It existed for a thread touched in this
+  // session and for no other, so reopening the app emptied every room on
+  // screen: participants gone, the chip back to a default, and the composer
+  // sending no recipient at all.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.recipient-chip').click()
+  await appPage.locator('.recipient-option').filter({ hasText: 'BOSS' }).click()
+  await expect(appPage.locator('.recipient-chip')).toHaveText(/BOSS/)
+
+  // Away and back, which is what selecting another thread does.
+  await appPage.locator('.sidebar-boss').click()
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+
+  await expect(appPage.locator('.recipient-chip')).toHaveText(/BOSS/)
 })

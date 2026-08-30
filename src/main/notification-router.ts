@@ -1,6 +1,6 @@
 import { Notification } from 'electron'
-import type { BossEvent, NotifyLevel } from '../shared/notification'
-import { shouldNotify } from '../shared/notification'
+import type { BossEvent, NotifyLevel, Presence } from '../shared/notification'
+import { presenceAllows, shouldNotify } from '../shared/notification'
 
 export interface NotificationSettings {
   desktop: NotifyLevel
@@ -41,13 +41,14 @@ export class NotificationRouter {
   /** Set by the host so a notification can be skipped while the user is
    *  already looking at BOSS. */
   private isForeground: () => boolean = () => false
-  /** Silence, with no exceptions.
+  /** Where the user is, which sets the bar for interrupting them.
    *
-   *  The user was explicit: do not disturb means nothing gets through, not even
-   *  a failed release. Real paging stays with their monitoring, which already
-   *  works and already wakes them. BOSS is not a pager, and one exception would
-   *  make the setting untrustworthy. */
-  private quiet = false
+   *  Three modes, because two were not enough: at the desk everything gets
+   *  through, away means only what needs a decision, and do not disturb is
+   *  silence with no exceptions — not even a failed release. Real paging stays
+   *  with the user's monitoring, which already wakes them, and one exception
+   *  here would make the setting untrustworthy. */
+  private presence: Presence = 'desk'
   /** What arrived while quiet, so returning does not mean finding out by
    *  accident that something needed an answer two hours ago. */
   private held: BossEvent[] = []
@@ -65,23 +66,28 @@ export class NotificationRouter {
     this.isForeground = probe
   }
 
-  /** Turn silence on or off. Returns what was held back, so the caller can tell
-   *  the user what waited rather than leaving them to notice. */
-  setQuiet(quiet: boolean): BossEvent[] {
-    this.quiet = quiet
-    if (quiet) return []
-    const waiting = this.held
-    this.held = []
+  /** Say where the user is. Returns what was held back while they were away, so
+   *  the caller can tell them what waited rather than leaving them to notice.
+   *
+   *  Held events are returned whenever the bar comes down, not only on the way
+   *  out of silence: going from away to the desk should also hand back the
+   *  routine things that were withheld. */
+  setPresence(presence: Presence): BossEvent[] {
+    const wasBarred = this.presence !== 'desk'
+    this.presence = presence
+    if (presence === 'quiet' || !wasBarred) return []
+    const waiting = this.held.filter((event) => presenceAllows(presence, event.type))
+    this.held = this.held.filter((event) => !presenceAllows(presence, event.type))
     return waiting
   }
 
-  isQuiet(): boolean {
-    return this.quiet
+  currentPresence(): Presence {
+    return this.presence
   }
 
   /** Deliver an event to every channel that wants it. */
   publish(event: BossEvent): void {
-    if (this.quiet) {
+    if (!presenceAllows(this.presence, event.type)) {
       // Held rather than dropped. Work keeps running while the user is away;
       // what needed them is what they came back for.
       this.held.push(event)

@@ -92,12 +92,27 @@ export function HomePage(): React.JSX.Element {
   const [cardMenuTop, setCardMenuTop] = useState<number | null>(null)
   const degradations = serviceDegradations(serverUrl, serverHealthy, backends)
 
+  // Whether the first read has come back, either way. The page has two faces —
+  // an empty one that asks what to build, and a full one that lists recent work
+  // — and it chose between them on a list that had not arrived yet. So every
+  // launch showed the empty face for a moment and then replaced it, which read
+  // as two different screens fighting.
+  //
+  // Tracked apart from the snapshot itself because a read that fails leaves the
+  // snapshot empty for ever, and a page that waited on the snapshot would then
+  // never render at all.
+  const [loaded, setLoaded] = useState(false)
   useEffect(() => {
     let disposed = false
     const refresh = (): void => {
-      void OpenCode.supervision().then((value) => {
-        if (!disposed) setSnapshot(value)
-      }).catch(() => {})
+      void OpenCode.supervision()
+        .then((value) => {
+          if (!disposed) setSnapshot(value)
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!disposed) setLoaded(true)
+        })
     }
     refresh()
     const timer = window.setInterval(refresh, 5_000)
@@ -178,6 +193,10 @@ export function HomePage(): React.JSX.Element {
   // A first launch has nothing to continue, nothing to search, and no summary
   // worth a panel. Showing all three anyway is what made an empty app look like
   // a control panel. One input is enough until there is work to show.
+  // Nothing until the first read is back. A blank frame is a moment the user
+  // does not notice; the wrong screen replacing itself is the thing they see.
+  if (!loaded) return <div className="product-page home-page home-blank" />
+
   if (recent.length === 0 && query.trim().length === 0) {
     return (
       <div className="product-page home-page home-blank">

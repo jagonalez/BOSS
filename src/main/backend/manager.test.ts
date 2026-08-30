@@ -389,3 +389,116 @@ test('a participant that finishes stops reading as working', () => {
     'clearing must come first, so a later failure cannot strand it as working'
   )
 })
+
+test('a broadcast reaches every participant, one at a time', () => {
+  // The code that works out who a broadcast goes to existed, was tested, and
+  // was called by nothing: sending to everyone quietly reached the thread's own
+  // agent instead.
+  const start = source.indexOf('private async broadcast(')
+  assert.ok(start > 0, 'expected a broadcast method')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.ok(/deliveryFor\(room, ROOM_EVERYONE\)/.test(body), 'it must ask who is in the room')
+  assert.ok(/for \(const roleId of delivery\.roleIds\)/.test(body), 'each participant answers')
+  assert.ok(
+    /await this\.sendToParticipant\(/.test(body),
+    'awaited in the loop, so two agents never stream into one list at once'
+  )
+})
+
+test('a broadcast holds the room until every participant has answered', () => {
+  // Released per agent, the room would look idle between them and a user
+  // message could start a competing run halfway through the round.
+  const start = source.indexOf('private async broadcast(')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.ok(/} finally {/.test(body), 'the claim must come back however the round ends')
+  const settles = [...body.matchAll(/this\.settleBusy\(threadId\)/g)]
+  assert.ok(settles.length >= 1, 'the room is released at the end')
+  assert.ok(
+    /this\.busyThreads\.add\(threadId\)/.test(body),
+    'a participant that fails releases the room on its way out; the round takes it back'
+  )
+})
+
+test('a broadcast does not advance the shape', () => {
+  // Otherwise asking everyone a question moves the work on: the builder answers,
+  // its run ends, and the reviewer is pulled in as though the build were done.
+  const start = source.indexOf('private async handOver(threadId: string')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.ok(
+    /this\.broadcasting\.has\(room\)/.test(body),
+    'a handover must not fire while the room is answering a broadcast'
+  )
+})
+
+test('an idle participant is retired before a message decides where to go', () => {
+  // The rule was written and tested and never ran: nothing called it, so a
+  // two-week-old session was resumed at its full cost and spoke confidently
+  // about code that had moved.
+  const start = source.indexOf('private async routeToParticipant(')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  const retire = body.indexOf('retireStale')
+  assert.ok(retire > 0, 'stale participants must be retired')
+  assert.ok(
+    retire < body.indexOf('this.rooms.room(threadId)'),
+    'retiring must come before the room is read, or the message routes to a session about to be dropped'
+  )
+})
+
+test('a broadcast cannot strand the flag that suppresses handovers', () => {
+  // Set outside the try, a failed room read left it on for ever, and that room
+  // never handed work along again — a silent, permanent fault from one failed
+  // read. Everything after the flag has to be inside the try.
+  const start = source.indexOf('private async broadcast(')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  const flag = body.indexOf('this.broadcasting.add(threadId)')
+  const opens = body.indexOf('try {')
+  assert.ok(flag > 0 && opens > 0, 'expected a flag and a try')
+  assert.ok(opens > flag, 'the flag is set first, so the try can always clear it')
+  assert.ok(
+    body.indexOf('await this.rooms?.room(threadId)') > opens,
+    'nothing that can throw may sit between the flag and the try'
+  )
+  assert.ok(/this\.broadcasting\.delete\(threadId\)/.test(body.slice(body.indexOf('} finally {'))),
+    'the flag is cleared in finally, whatever happened')
+})
+
+test('a broadcast waits for each agent to answer, not merely to start', () => {
+  // A backend's send resolves when the turn is dispatched, not when the agent
+  // has answered. Awaiting only the send fired every participant within
+  // milliseconds and they all streamed into one list at once — exactly the
+  // noise a room exists to prevent, hidden behind a loop that looked sequential.
+  const start = source.indexOf('private async broadcast(')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  const registered = body.indexOf('this.runEnds(routed)')
+  const sent = body.indexOf('this.sendToParticipant(')
+  assert.ok(registered > 0, 'the round must wait on the run, not on the send')
+  assert.ok(registered < sent, 'registered before the send, or a fast run finishes unheard')
+  assert.ok(/if \(started\) await answered/.test(body), 'the next agent waits for this one')
+  assert.ok(
+    /else this\.forgetRunWaiters\(routed\)/.test(body),
+    'a send that never started must not leave the round waiting for an answer'
+  )
+})
+
+test('a participant finishing does not release a room that is mid-broadcast', () => {
+  // The room belongs to the round, not to any one agent. Without this the
+  // fastest agent released the room while the others were still writing, and a
+  // follow-up could start a competing run into the same list.
+  const start = source.indexOf('private settleBusy(threadId: string)')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  const guard = body.indexOf('this.broadcasting.has(parent)')
+  assert.ok(guard > 0, 'a broadcast must hold the room across the whole round')
+  assert.ok(
+    guard < body.indexOf('this.busyThreads.delete(parent)'),
+    'the guard must come before the room is released'
+  )
+})
+
+test('waiting on a run cannot hang for ever', () => {
+  // Every ordinary ending settles a run, but a backend that goes silent without
+  // saying so would otherwise hold the round, and the room, indefinitely.
+  const start = source.indexOf('private runEnds(threadId: string)')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.ok(/BROADCAST_TURN_LIMIT_MS/.test(body), 'the wait must be capped')
+  assert.ok(/clearTimeout\(limit\)/.test(body), 'a run that ends normally must not leave a timer')
+})

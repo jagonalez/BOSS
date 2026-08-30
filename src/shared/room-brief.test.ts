@@ -77,3 +77,12 @@ test('the handover says nothing about the task', () => {
   // second, shorter version of its instructions could disagree with the first.
   assert.doesNotMatch(HANDOVER_PROMPT, /review|build|plan|research/i)
 })
+
+test('every participant is told how to write a card', () => {
+  // A reviewer reporting where the work went off plan, and a builder asking
+  // whether to go on, are the moments most worth setting apart. Neither could
+  // write a card: the format reached only the standing assistant.
+  for (const id of ['researcher', 'planner', 'builder', 'reviewer', 'boss']) {
+    assert.match(briefForRole({ id, label: id }), /```boss-card/, `${id} can write a card`)
+  }
+})

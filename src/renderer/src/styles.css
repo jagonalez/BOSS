@@ -1658,6 +1658,15 @@ textarea {
   color: var(--text);
 }
 
+/* The one chosen, marked and left in place. The row used to vanish the moment a
+   button was pressed, so the user could neither see what they had picked nor
+   change it. */
+.composer-shape button.on {
+  background: var(--bg-active, var(--bg-hover));
+  border-color: var(--text-faint);
+  color: var(--text);
+}
+
 /* Says the next message will land inside a branch, and offers the way out.
    Without it a reply would quietly go somewhere the user did not expect. */
 .composer-branch {
@@ -12538,4 +12547,124 @@ select:hover {
 .assistant-pane-chat > * {
   flex: 1;
   min-height: 0;
+}
+
+/* Where the user is, shown in the bar and set from it. Only an agent could set
+   this before, told in words, so a setting that decides whether a phone stays
+   silent was invisible in the app. */
+.presence {
+  -webkit-app-region: no-drag;
+  position: relative;
+}
+
+.presence-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.presence-pill:hover {
+  color: var(--text);
+}
+
+/* The colour is the whole point of the pill at a glance: green means everything
+   reaches you, and red means nothing does. */
+.presence-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.presence-pill.away .presence-dot { background: var(--yellow); }
+.presence-pill.quiet .presence-dot { background: var(--red); }
+.presence-pill.quiet { color: var(--text); }
+
+.presence-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: var(--shadow-lg);
+}
+
+.presence-menu button {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.presence-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.presence-menu button.on {
+  background: var(--bg-active, var(--bg-hover));
+}
+
+.presence-name {
+  font-size: var(--type-body);
+}
+
+/* What the mode does, in the user's own words rather than a name they would
+   have to learn. */
+.presence-detail {
+  font-size: var(--type-meta);
+  color: var(--text-faint);
+}
+
+/* What was withheld while the bar was higher. Coming back must not mean finding
+   out by accident that something needed an answer two hours ago. */
+.presence-waited {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--type-meta);
+  color: var(--text-muted);
+}
+
+.presence-waited button {
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  cursor: pointer;
+}
+
+.presence-waited button:hover {
+  color: var(--text);
 }

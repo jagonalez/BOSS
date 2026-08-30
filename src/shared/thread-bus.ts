@@ -90,7 +90,7 @@ export type ThreadBusAgentTool =
   | 'boss_git_create_change_request'
   // Not gated by the collaboration policy: quiet is about the user's own
   // attention, not about reaching another thread.
-  | 'boss_quiet_set'
+  | 'boss_presence_set'
   // Not gated by the collaboration policy: notes belong to the caller's own
   // job, and writing them is how that job survives its agents.
   | 'boss_notes_record'
@@ -135,9 +135,9 @@ export const THREAD_TOOL_DESCRIPTIONS = {
   createChangeRequestDraft: 'Open it as a draft.'
 } as const
 
-export const QUIET_TOOL_DESCRIPTIONS = {
-  set: 'Stop or resume interrupting the user. Turn it on when they say they are stepping out, going into a meeting, or want quiet; turn it off when they say they are back. While it is on nothing reaches them at all — no desktop notification and no phone push — and work keeps running. Turning it off returns what was held, so tell them what waited rather than letting them find out by accident.',
-  quiet: 'true to stop interrupting, false to resume.'
+export const PRESENCE_TOOL_DESCRIPTIONS = {
+  set: 'Say where the user is, which sets the bar for interrupting them. Set it when they tell you: "I am at my desk", "heading out", "in a meeting", "back now". Work keeps running whatever it is set to. Lowering the bar returns what was held while it was higher, so tell them what waited rather than letting them find out by accident.',
+  presence: '"desk" while they are at the machine, and everything reaches them. "away" for a phone: only what needs a decision, a review, or a failure. "quiet" for silence with no exceptions at all — use it when they ask not to be disturbed, and never assume it.'
 } as const
 
 export const NOTES_TOOL_DESCRIPTIONS = {

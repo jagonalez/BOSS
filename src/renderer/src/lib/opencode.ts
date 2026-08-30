@@ -14,6 +14,7 @@ import type {
 } from '@shared/opencode'
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, BackendSubscriptionUsage, DelegatePlacement, LabConnectionsSettings, LabConnectionUpdate, QueuedFollowUp, QueuedFollowUpAttachment, SandboxSettings, ThreadCreationScope, ThreadTitleSettings } from '@shared/backend'
 import type { FanOutWorker } from '@shared/fan-out'
+import type { Presence } from '@shared/notification'
 import type { RoomShape, RoomState, RoomTeam } from '@shared/room'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
@@ -155,11 +156,17 @@ export const OpenCode = {
   room: (id: string) => backendRequest<RoomState>({ type: 'room.get', threadId: id }),
   setRoomRecipient: (id: string, recipient: string) =>
     backendRequest<RoomState>({ type: 'room.recipient.set', threadId: id, recipient }),
-  startShape: (id: string, shape: RoomShape) =>
+  chooseShape: (id: string, shape: RoomShape) =>
     backendRequest<RoomState>({ type: 'room.shape.set', threadId: id, shape }),
   joinRoom: (id: string, roleId: string) =>
     backendRequest<RoomState>({ type: 'room.join', threadId: id, roleId }),
   markAssistant: (id: string) => backendRequest<void>({ type: 'room.assistant.mark', threadId: id }),
+  presence: () => backendRequest<Presence>({ type: 'presence.get' }),
+  setPresence: (presence: Presence) =>
+    backendRequest<{ presence: Presence; waiting: Array<{ title: string; body: string }> }>({
+      type: 'presence.set',
+      presence
+    }),
   team: () => backendRequest<RoomTeam | undefined>({ type: 'room.team.get' }),
   setTeam: (team: RoomTeam) => backendRequest<RoomTeam>({ type: 'room.team.set', team }),
   addFollowUp: (id: string, text: string, attachments?: QueuedFollowUpAttachment[], options?: BackendMessageOptions) =>

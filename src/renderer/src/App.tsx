@@ -60,7 +60,8 @@ import {
   setNativeViewsSuspended,
   loadActivity,
   loadAppearance,
-  recordActivity
+  recordActivity,
+  loadRoom
 } from './lib/actions'
 
 async function refreshAll(): Promise<void> {
@@ -91,7 +92,12 @@ export function App(): React.JSX.Element {
   const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget || s.policyTarget || s.paletteOpen))
 
   useEffect(() => {
-    void OpenCode.team().then((current) => setTeam(current ?? null)).catch(() => setTeam(null))
+    void OpenCode.team().then((current) => {
+      setTeam(current ?? null)
+      // Shared, because the composer needs to know whether the user asked to
+      // choose the shape of every job.
+      appStore.setState({ team: current ?? null })
+    }).catch(() => setTeam(null))
   }, [])
 
   useEffect(() => {
@@ -205,6 +211,11 @@ export function App(): React.JSX.Element {
             // Idle performs the one authoritative reconciliation itself. A
             // trailing message timer would otherwise repeat it 300 ms later.
             cancelMessageRefresh(sid)
+            // A run that ends may have changed who is in the room: a shape
+            // hands work along, so the reviewer arrives exactly here. Without
+            // this the new participant existed in main and was invisible on
+            // screen until the user clicked away and back.
+            void loadRoom(sid)
             // The turn is over, so a mode that was waiting for it now applies.
             if (appStore.getState().modePending[sid]) {
               appStore.setState((state) => {

@@ -4,7 +4,7 @@ import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId, QueuedFollowUp } from '@shared/backend'
 import { composerRecovery, retryPayload } from '../lib/send-recovery'
-import { abortRun, addAnnotation, endBranch, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setRoomRecipient, setVariant, speakText, startBranch, startShape, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
+import { abortRun, addAnnotation, endBranch, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setRoomRecipient, setVariant, speakText, startBranch, chooseShape, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -640,6 +640,13 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const room = useStore(appStore, (s) => (effectiveSession ? s.rooms[effectiveSession] ?? EMPTY_ROOM : EMPTY_ROOM))
   const branchOf = useStore(appStore, (s) => (effectiveSession ? s.branchDrafts[effectiveSession] : undefined))
   const roomNotes = useMemo(() => briefOf(room.notes), [room.notes])
+  // The user said in setup whether to be asked how each job runs. Answering
+  // "no" and still being asked is the setting doing nothing, which is what it
+  // did — it was written to disk and read by nobody. Absent while the team
+  // loads, the row is offered rather than hidden: a moment of asking is better
+  // than silently choosing for them.
+  const team = useStore(appStore, (s) => s.team)
+  const asksShape = team?.askShape ?? true
   // Who the composer is actually addressed to, which is what the chip already
   // says. It used to name the backend instead, so a message aimed at the
   // reviewer invited the user to "Ask Claude" — the one name in the room that
@@ -879,6 +886,21 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
     setAttachments([])
     setHistIdx(-1)
     setDraftBackup('')
+    // The user asked not to be asked how each job runs, so their answer is
+    // applied here rather than shown as a row of buttons. Recorded before the
+    // send, because the send is what brings in the role that opens the shape.
+    //
+    // Only on a room that has nobody in it and no shape yet: this must not turn
+    // an ordinary conversation into a job, and must not overwrite a shape the
+    // user picked by hand.
+    if (effectiveSession && !asksShape && !room.shape && room.participants.length === 0 && !branchOf) {
+      const standing = team?.defaultShape
+      // Through the action, not the raw call: the action is what writes the
+      // room back into the app. Called directly, main knew the shape and the
+      // screen did not — so the send that followed carried no recipient and the
+      // shape never opened its first agent.
+      if (standing) await chooseShape(effectiveSession, standing)
+    }
     // effectiveSession, not sessionId: the guard above and pushHistory both use
     // it, and sending to a different thread than the composer validated would
     // put the message in a thread the user was not looking at.
@@ -1153,16 +1175,21 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
           />
         ) : null}
         <div className="composer-input">
-          {/* How this job runs, offered once. The user picks the shape, never
-              BOSS. It disappears once someone has joined, because the choice
-              has been made and the room now names who is in it. */}
-          {hasSession && room.participants.length === 0 && !branchOf ? (
-            <div className="composer-shape">
+          {/* How this job runs. The user picks the shape, never BOSS.
+              The chosen one stays marked and the row stays put, so the choice
+              can be changed right up until the first message. It used to start
+              an agent on the spot and then vanish, which left the user with a
+              decision made by accident that nothing could undo. */}
+          {hasSession && room.participants.length === 0 && !branchOf && asksShape ? (
+            <div className="composer-shape" role="radiogroup" aria-label="How this job runs">
               <span>Run this as</span>
               {SHAPES.map((shape) => (
                 <button
                   key={shape.id}
-                  onClick={() => effectiveSession && startShape(effectiveSession, shape.id)}
+                  role="radio"
+                  aria-checked={room.shape === shape.id}
+                  className={room.shape === shape.id ? 'on' : ''}
+                  onClick={() => { if (effectiveSession) void chooseShape(effectiveSession, shape.id) }}
                   title={shape.detail}
                 >
                   {shape.label}

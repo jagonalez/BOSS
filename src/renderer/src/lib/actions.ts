@@ -1,6 +1,7 @@
 import { appStore, type Attachment, type FailedSend } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
+import { CARD_INSTRUCTIONS } from '@shared/room-cards'
 import type { MenuCommand, ProjectInfo, ProjectOpenedEvent } from '@shared/ipc'
 import { activityReducer, loadActivityFeed, saveActivityFeed, type ActivityKind } from './activity-feed'
 import { applyUiDensity, applyUiFontSize, loadUiDensityPreference, loadUiFontSizePreference, type UiDensity, type UiFontSize } from './themes'
@@ -1128,19 +1129,7 @@ const ASSISTANT_SEED = [
   '',
   'The user chooses the shape of every job — one agent, build then review, or the full run. Ask; never pick for them.',
   '',
-  'When something needs a decision, an approval, or is a plan worth setting apart, write a card instead of a paragraph:',
-  '',
-  '```boss-card',
-  'kind: gate',
-  'title: Ready to ship',
-  '11 files changed · 3 new tests',
-  '✓ 231 tests passed',
-  'do: Ship it',
-  'do: Hold',
-  'open: Saved searches@<thread id>',
-  '```',
-  '',
-  'kind is gate, attention, plan, or note. At most two `do:` lines — one way forward and one way out; more than that is a form, not a decision. A `do:` becomes a button that sends those exact words back as the user\'s reply, so phrase them as answers. `open:` links a thread by id, which is how you point at a room rather than describing where to look. Lines beginning ✓, ≠, or ○ render as done, off-plan, and waiting.'
+  CARD_INSTRUCTIONS
 ].join('\n')
 
 export async function ensureAssistantSession(): Promise<string> {
@@ -1931,6 +1920,20 @@ export async function refreshFiles(): Promise<void> {
   }
 }
 
+/** Read a thread's room from disk into the app.
+ *
+ *  Nothing did this. Room state was only ever written by choosing a shape or
+ *  changing the recipient, so it existed for a thread the user had touched in
+ *  this session and for no other. Reopening the app emptied every room on
+ *  screen: participants gone, the chip back to a default, and the composer
+ *  sending no recipient at all — which is also what stopped a saved shape ever
+ *  starting its first agent. */
+export async function loadRoom(sessionID: string): Promise<void> {
+  const room = await OpenCode.room(sessionID).catch(() => undefined)
+  if (!room) return
+  appStore.setState((s) => ({ rooms: { ...s.rooms, [sessionID]: room } }))
+}
+
 export function selectSession(id: string, bindWorkspace = true): void {
   const cur = appStore.getState()
   const session = cur.sessions.find((s) => s.id === id)
@@ -1946,6 +1949,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
     void refreshProviders(id)
     void refreshQaPolicy(id)
     void refreshFollowUps(id)
+    void loadRoom(id)
     return
   }
   if (session?.model?.id && !cur.modelsBySession[id]) setModel(session.model.id, id, session.model.provider)
@@ -1961,6 +1965,7 @@ export function selectSession(id: string, bindWorkspace = true): void {
   void refreshProviders(id)
   void refreshQaPolicy(id)
   void refreshFollowUps(id)
+  void loadRoom(id)
 }
 
 export async function refreshQaPolicy(threadId: string): Promise<void> {
@@ -2433,14 +2438,13 @@ export function updateAnnotationNote(sessionID: string, id: string, note: string
  *
  *  The user picks the shape, never BOSS. Recording it without starting anyone
  *  left every room empty, so the whole feature was invisible. */
-export function startShape(sessionID: string, shape: RoomShape): void {
-  void OpenCode.startShape(sessionID, shape)
-    .then((room) => {
-      appStore.setState((s) => ({ rooms: { ...s.rooms, [sessionID]: room } }))
-    })
-    .catch(() => {
-      /* Nothing changed on screen, so nothing has to be undone. */
-    })
+/** Record how a job runs. Awaitable, because a caller that sends straight after
+ *  has to know the room holds the shape first — the send is what brings in the
+ *  role that opens it. */
+export async function chooseShape(sessionID: string, shape: RoomShape): Promise<void> {
+  const room = await OpenCode.chooseShape(sessionID, shape).catch(() => undefined)
+  if (!room) return
+  appStore.setState((s) => ({ rooms: { ...s.rooms, [sessionID]: room } }))
 }
 
 export function startBranch(sessionID: string, messageId: string): void {

@@ -277,6 +277,14 @@ export type BackendRequest =
   | { type: 'room.recipient.set'; threadId: string; recipient: string }
   | { type: 'room.join'; threadId: string; roleId: string }
   | { type: 'room.shape.set'; threadId: string; shape: import('./room').RoomShape }
+  /** Where the user is, which sets the bar for interrupting them. Reading it
+   *  takes no argument; setting it returns what was held while the bar was
+   *  higher, so the user is told what waited. */
+  /** The shape a new job takes when the user asked not to be asked each time.
+   *  Undefined when they want the choice, which is the default. */
+  | { type: 'room.shape.standing' }
+  | { type: 'presence.get' }
+  | { type: 'presence.set'; presence: import('./notification').Presence }
   | { type: 'room.assistant.mark'; threadId: string }
   | { type: 'room.team.get' }
   | { type: 'room.team.set'; team: import('./room').RoomTeam }

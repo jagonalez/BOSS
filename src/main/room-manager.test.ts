@@ -436,14 +436,41 @@ test('BOSS runs on the agent the team says, not on a borrowed one', async () => 
   await h.cleanup()
 })
 
-test('choosing a shape brings in the agent that starts it', async () => {
-  // The shape was recorded and then nothing happened, so every room stayed
-  // empty and read as an ordinary chat.
+test('choosing a shape starts nobody, so the choice can still be changed', async () => {
+  // Picking used to start an agent on the spot, before the user had said what
+  // the job was. Nothing removes an agent, and the row of buttons vanished at
+  // the same moment, so the user was left with a decision made by accident that
+  // could not be undone.
   const h = await harness()
   await h.manager.configureTeam(TEAM)
 
-  const room = await h.manager.startShape('room-1', 'reviewed')
-  assert.deepEqual(room.participants.map((entry) => entry.roleId), ['builder'])
+  const room = await h.manager.chooseShape('room-1', 'reviewed')
+  assert.equal(room.shape, 'reviewed')
+  assert.deepEqual(room.participants, [], 'nobody starts until the user sends something')
+  assert.deepEqual(h.created, [], 'no session is burned on a choice being made')
+  await h.cleanup()
+})
+
+test('a shape can be changed while nobody has started', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+
+  await h.manager.chooseShape('room-1', 'reviewed')
+  const room = await h.manager.chooseShape('room-1', 'full')
+  assert.equal(room.shape, 'full')
+  assert.deepEqual(h.created, [])
+  await h.cleanup()
+})
+
+test('the first message brings in the role that opens the shape', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.chooseShape('room-1', 'reviewed')
+
+  const opening = await h.manager.openingRole('room-1')
+  assert.equal(opening, 'builder')
+  const room = await h.manager.openWith('room-1', opening!)
+  assert.deepEqual(room.participants.map((entry: { roleId: string }) => entry.roleId), ['builder'])
   assert.equal(room.recipient, 'builder', 'the composer aims at whoever just arrived')
   await h.cleanup()
 })
@@ -453,17 +480,38 @@ test('only the first agent starts, because the rest have nothing to read yet', a
   // was useful.
   const h = await harness()
   await h.manager.configureTeam(TEAM)
+  await h.manager.chooseShape('room-1', 'full')
 
-  const room = await h.manager.startShape('room-1', 'full')
+  const opening = await h.manager.openingRole('room-1')
+  assert.equal(opening, 'researcher')
+  const room = await h.manager.openWith('room-1', opening!)
   assert.equal(room.participants.length, 1)
-  assert.equal(room.participants[0].roleId, 'researcher')
+  await h.cleanup()
+})
+
+test('a room that already has someone opens nobody else', async () => {
+  // Otherwise every message into a running room would try to re-open it.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.chooseShape('room-1', 'reviewed')
+  await h.manager.openWith('room-1', 'builder')
+
+  assert.equal(await h.manager.openingRole('room-1'), undefined)
+  await h.cleanup()
+})
+
+test('a room with no shape opens nobody, so an ordinary chat stays one', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+
+  assert.equal(await h.manager.openingRole('room-1'), undefined)
   await h.cleanup()
 })
 
 test('a reviewer follows the builder', async () => {
   const h = await harness()
   await h.manager.configureTeam(TEAM)
-  await h.manager.startShape('room-1', 'reviewed')
+  await h.manager.chooseShape('room-1', 'reviewed')
 
   assert.equal(await h.manager.nextAfter('room-1', 'builder'), 'reviewer')
   await h.cleanup()
@@ -472,7 +520,7 @@ test('a reviewer follows the builder', async () => {
 test('nothing follows the last agent in a shape', async () => {
   const h = await harness()
   await h.manager.configureTeam(TEAM)
-  await h.manager.startShape('room-1', 'reviewed')
+  await h.manager.chooseShape('room-1', 'reviewed')
 
   assert.equal(await h.manager.nextAfter('room-1', 'reviewer'), undefined)
   await h.cleanup()
@@ -481,7 +529,7 @@ test('nothing follows the last agent in a shape', async () => {
 test('an agent already in the room does not arrive twice', async () => {
   const h = await harness()
   await h.manager.configureTeam(TEAM)
-  await h.manager.startShape('room-1', 'reviewed')
+  await h.manager.chooseShape('room-1', 'reviewed')
   await h.manager.join('room-1', 'reviewer')
 
   assert.equal(await h.manager.nextAfter('room-1', 'builder'), undefined)
@@ -496,5 +544,43 @@ test('a thread with no shape hands over to nobody', async () => {
   await h.manager.join('room-1', 'builder')
 
   assert.equal(await h.manager.nextAfter('room-1', 'builder'), undefined)
+  await h.cleanup()
+})
+
+test('an ordinary chat never opens a role, whatever the team default is', async () => {
+  // A regression caught in review. Falling back to the team's default inside
+  // openingRole turned every plain conversation into a job: asking a question
+  // silently started a builder, which is the opposite of what "do not ask me
+  // each time" means. The default belongs to a job, not to a chat.
+  const h = await harness()
+  await h.manager.configureTeam({ ...TEAM, askShape: false, defaultShape: 'reviewed' })
+
+  assert.equal(await h.manager.openingRole('room-1'), undefined)
+  assert.deepEqual(h.created, [], 'no agent is started by a plain message')
+  await h.cleanup()
+})
+
+test('the standing shape is offered to whoever starts a job, not applied by surprise', async () => {
+  const h = await harness()
+  await h.manager.configureTeam({ ...TEAM, askShape: false, defaultShape: 'reviewed' })
+  assert.equal(await h.manager.standingShape(), 'reviewed')
+  await h.cleanup()
+})
+
+test('a user who wants to be asked has no standing shape', async () => {
+  const h = await harness()
+  await h.manager.configureTeam({ ...TEAM, askShape: true, defaultShape: 'reviewed' })
+  assert.equal(await h.manager.standingShape(), undefined)
+  await h.cleanup()
+})
+
+test('a shape whose roles the user deleted opens nobody', async () => {
+  // The team is the user's. Deleting the builder must not leave a room with a
+  // shape it cannot staff, hanging on a role that does not exist.
+  const h = await harness()
+  await h.manager.configureTeam({ ...TEAM, roles: TEAM.roles.filter((role) => role.id !== 'builder') })
+  await h.manager.chooseShape('room-1', 'direct')
+
+  assert.equal(await h.manager.openingRole('room-1'), undefined)
   await h.cleanup()
 })

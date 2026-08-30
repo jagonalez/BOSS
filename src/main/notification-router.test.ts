@@ -114,7 +114,7 @@ test('do not disturb reaches every channel, with no exceptions', () => {
   // Real paging stays with their monitoring, which already wakes them. One
   // exception would make the setting untrustworthy.
   const h = harness()
-  h.router.setQuiet(true)
+  h.router.setPresence('quiet')
   h.publish(false)
   assert.deepEqual(h.posted, [], 'a phone push is silenced along with the desktop')
 })
@@ -123,43 +123,98 @@ test('what arrived while quiet is returned when quiet ends', () => {
   // Held rather than dropped: work keeps running while the user is away, and
   // what needed them is what they came back for.
   const h = harness()
-  h.router.setQuiet(true)
+  h.router.setPresence('quiet')
   h.router.publish(EVENT)
   h.router.publish(EVENT)
 
-  const waiting = h.router.setQuiet(false)
+  const waiting = h.router.setPresence('desk')
   assert.equal(waiting.length, 2)
   assert.equal(waiting[0].title, 'A thread needs you')
 })
 
 test('ending quiet twice does not report the same events again', () => {
   const h = harness()
-  h.router.setQuiet(true)
+  h.router.setPresence('quiet')
   h.router.publish(EVENT)
-  h.router.setQuiet(false)
-  assert.deepEqual(h.router.setQuiet(false), [], 'they were already reported once')
+  h.router.setPresence('desk')
+  assert.deepEqual(h.router.setPresence('desk'), [], 'they were already reported once')
 })
 
 test('turning quiet on returns nothing, because nothing has waited yet', () => {
   const h = harness()
-  assert.deepEqual(h.router.setQuiet(true), [])
+  assert.deepEqual(h.router.setPresence('quiet'), [])
 })
 
 test('events resume normally once quiet ends', () => {
   const h = harness()
-  h.router.setQuiet(true)
-  h.router.setQuiet(false)
+  h.router.setPresence('quiet')
+  h.router.setPresence('desk')
   h.publish(false)
   assert.equal(h.posted.length, 1, 'coming back reconnects the user to their work')
 })
 
 test('a long quiet spell keeps the newest events rather than growing forever', () => {
   const h = harness()
-  h.router.setQuiet(true)
+  h.router.setPresence('quiet')
   for (let index = 0; index < 150; index += 1) {
     h.router.publish({ ...EVENT, title: `event ${index}` })
   }
-  const waiting = h.router.setQuiet(false)
+  const waiting = h.router.setPresence('desk')
   assert.equal(waiting.length, 100)
   assert.equal(waiting.at(-1)?.title, 'event 149', 'the most recent are the ones worth showing')
+})
+
+test('away lets through what needs a decision', () => {
+  // The point of the mode: a phone is worth reaching for a question, a review,
+  // or a failure.
+  const h = harness()
+  h.router.setPresence('away')
+  h.publish(false)
+  assert.equal(h.posted.length, 1, 'something that blocks progress reaches the phone')
+})
+
+test('away holds routine completions back', () => {
+  // A phone buzzing for finished work is what makes people turn notifications
+  // off, and then they miss the one that mattered.
+  const h = harness()
+  h.router.setPresence('away')
+  h.router.publish({ ...EVENT, type: 'task.completed', title: 'Done' })
+  assert.deepEqual(h.posted, [])
+})
+
+test('coming back to the desk returns what was held while away', () => {
+  // Held rather than dropped, the same as silence. Returning must not mean
+  // finding out by accident.
+  const h = harness()
+  h.router.setPresence('away')
+  h.router.publish({ ...EVENT, type: 'task.completed', title: 'Done' })
+
+  const waiting = h.router.setPresence('desk')
+  assert.equal(waiting.length, 1)
+  assert.equal(waiting[0].title, 'Done')
+})
+
+test('going quiet returns nothing, because the bar went up rather than down', () => {
+  const h = harness()
+  h.router.setPresence('away')
+  h.router.publish({ ...EVENT, type: 'task.completed', title: 'Done' })
+  assert.deepEqual(h.router.setPresence('quiet'), [], 'nothing is handed back on the way into silence')
+})
+
+test('going from silence to away hands back only what away would allow', () => {
+  // The rest stays held. Handing a routine completion to a phone the moment
+  // someone says they are out is the noise the mode exists to stop.
+  const h = harness()
+  h.router.setPresence('quiet')
+  h.router.publish(EVENT)
+  h.router.publish({ ...EVENT, type: 'task.completed', title: 'Done' })
+
+  const waiting = h.router.setPresence('away')
+  assert.deepEqual(waiting.map((event: BossEvent) => event.title), ['A thread needs you'])
+  assert.deepEqual(h.router.setPresence('desk').map((event: BossEvent) => event.title), ['Done'])
+})
+
+test('the desk is where BOSS starts, so a fresh install is not silent', () => {
+  const h = harness()
+  assert.equal(h.router.currentPresence(), 'desk')
 })

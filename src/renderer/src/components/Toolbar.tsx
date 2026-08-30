@@ -2,6 +2,7 @@ import React from 'react'
 import { useStore, appStore } from '../state/AppState'
 import { serviceDegradations } from '../lib/status'
 import { ActivityBell, ActivityPanel } from './ActivityInbox'
+import { PresencePicker } from './PresencePicker'
 
 type AttentionKind = NonNullable<ReturnType<typeof appStore.getState>['attention']>['kind']
 
@@ -48,6 +49,10 @@ export function Toolbar(): React.JSX.Element | null {
           <span>{degradations.length === 1 ? degradations[0] : `${degradations.length} services degraded`}</span>
         </div>
       ) : null}
+      {/* Where you are, which decides what is allowed to interrupt you. Only an
+          agent could set it before, told in words — so a setting that decides
+          whether your phone stays silent was invisible in the app. */}
+      <PresencePicker />
       <div className="inbox-anchor">
         <ActivityBell />
         <ActivityPanel />
