@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import type { RoomRole, RoomShape, RoomTeam } from '@shared/room'
 import { appStore, useStore } from '../state/AppState'
 import { OpenCode } from '../lib/opencode'
@@ -31,12 +31,24 @@ export function TeamSettings(): React.JSX.Element {
       .finally(() => setLoading(false))
   }, [])
 
-  const write = (next: RoomTeam): void => {
+  // Every write replaces the whole file on disk. A change made by clicking
+  // happens once, so it saves at once; a name typed letter by letter would
+  // otherwise write ten times for one edit, and two of those could land out of
+  // order. Waiting for typing to stop costs nothing the user can feel.
+  const pending = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(pending.current), [])
+
+  const write = (next: RoomTeam, settle = false): void => {
     setTeam(next)
-    void OpenCode.setTeam(next).catch(() => {
-      /* The screen already shows the change. Refusing it would be worse than a
-       * write that has to be made again. */
-    })
+    window.clearTimeout(pending.current)
+    const save = (): void => {
+      void OpenCode.setTeam(next).catch(() => {
+        /* The screen already shows the change. Refusing it would be worse than a
+         * write that has to be made again. */
+      })
+    }
+    if (settle) pending.current = window.setTimeout(save, 400)
+    else save()
   }
 
   if (loading) return <div className="settings-note">Loading…</div>
@@ -64,7 +76,7 @@ export function TeamSettings(): React.JSX.Element {
       <TeamRoles
         roles={team.roles}
         available={available}
-        onChange={(roles: RoomRole[]) => write({ ...team, roles })}
+        onChange={(roles: RoomRole[], typing) => write({ ...team, roles }, typing)}
       />
 
       {canAdd.length > 0 ? (

@@ -194,4 +194,7 @@ anything was withheld.
    line.
 3. Is one hour the right idle threshold before a participant is replaced?
 4. Does presence set itself from window focus, or does the user set it by hand?
-5. Who writes the job notes, and when? Nothing writes them yet.
+5. The stylesheet still carries about sixty rules for the assistant page that
+   was deleted. They are wasted bytes rather than a defect — nothing renders
+   those class names — but they should go in a styling pass. Removing them by
+   script mangled the file once; do it by hand.

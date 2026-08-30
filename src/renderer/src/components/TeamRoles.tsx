@@ -16,10 +16,13 @@ export function TeamRoles({
 }: {
   roles: RoomRole[]
   available: BackendId[]
-  onChange: (roles: RoomRole[]) => void
+  /** `typing` is true while the user is still mid-edit in a text field, so a
+   *  caller that saves can wait for it to settle rather than writing per
+   *  keystroke. */
+  onChange: (roles: RoomRole[], typing?: boolean) => void
 }): React.JSX.Element {
-  const update = (id: string, patch: Partial<RoomRole>): void =>
-    onChange(roles.map((role) => (role.id === id ? { ...role, ...patch } : role)))
+  const update = (id: string, patch: Partial<RoomRole>, typing = false): void =>
+    onChange(roles.map((role) => (role.id === id ? { ...role, ...patch } : role)), typing)
 
   return (
     <div className="team-setup-rows">
@@ -29,7 +32,7 @@ export function TeamRoles({
             className="role-name"
             value={role.label}
             aria-label={`Name for the ${role.id} role`}
-            onChange={(event) => update(role.id, { label: event.target.value })}
+            onChange={(event) => update(role.id, { label: event.target.value }, true)}
           />
           <select
             className="role-agent"
