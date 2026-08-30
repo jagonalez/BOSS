@@ -229,3 +229,20 @@ test('a chat with no project is not squeezed thinner than its own text', async (
   const height = await rows.first().evaluate((node) => node.getBoundingClientRect().height)
   expect(height).toBeGreaterThan(28)
 })
+
+test('what needs you never swallows the projects list', async ({ appPage }) => {
+  // Unbounded, seven things waiting took the whole sidebar and left the projects
+  // a sliver the user could not scroll through.
+  const attention = appPage.locator('.sidebar-section.attention')
+  if (await attention.count() === 0) return
+
+  const sizes = await appPage.evaluate(() => {
+    const list = document.querySelector('.sidebar-section.attention')
+    const bar = document.querySelector('.sidebar')
+    return {
+      list: list?.getBoundingClientRect().height ?? 0,
+      bar: bar?.getBoundingClientRect().height ?? 1
+    }
+  })
+  expect(sizes.list / sizes.bar).toBeLessThan(0.5)
+})
