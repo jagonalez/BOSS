@@ -1671,7 +1671,10 @@ textarea {
 .team-setup {
   display: grid;
   place-items: center;
-  min-height: 100%;
+  /* Measured against the window, not the parent: the page it sits in has no
+     height of its own, so a percentage collapsed the card to its content and
+     pinned it to the top. */
+  min-height: 70vh;
   padding: 40px 24px;
   overflow-y: auto;
 }
@@ -1683,7 +1686,7 @@ textarea {
 
 .team-setup-card h2 {
   margin: 0 0 6px;
-  font-size: var(--type-title, 20px);
+  font-size: var(--type-section-title);
   font-weight: 600;
 }
 
@@ -1722,7 +1725,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: var(--surface);
+  background: var(--bg-elevated);
 }
 
 .team-setup-row {
@@ -1847,7 +1850,7 @@ textarea {
 .team-setup-actions button.primary {
   border-color: var(--text);
   background: var(--text);
-  color: var(--surface);
+  color: var(--bg);
   font-weight: 500;
 }
 
@@ -1873,7 +1876,7 @@ textarea {
 
 .home-blank-inner h1 {
   margin: 0 0 22px;
-  font-size: var(--type-display, 24px);
+  font-size: var(--type-page-title);
   font-weight: 600;
 }
 
@@ -1897,7 +1900,7 @@ textarea {
 .home-blank-start {
   border-color: var(--text);
   background: var(--text);
-  color: var(--surface);
+  color: var(--bg);
   font-weight: 500;
 }
 
@@ -2731,7 +2734,7 @@ textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
   z-index: 200;
 }
 
@@ -5630,7 +5633,7 @@ body.workspace-dragging .workspace-tab-slot {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
   padding: 4px;
   display: flex;
   flex-direction: column;
@@ -5714,7 +5717,7 @@ body.workspace-dragging .workspace-tab-slot {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-elevated);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -7805,8 +7808,8 @@ body.workspace-dragging .workspace-tab-slot {
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
-  box-shadow: var(--shadow-menu);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
 }
 
 .recipient-option {
@@ -7854,7 +7857,7 @@ body.workspace-dragging .workspace-tab-slot {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
   padding: 4px;
   z-index: 120;
   display: flex;
@@ -10033,7 +10036,7 @@ select:hover {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
   padding: 4px;
   z-index: 120;
   display: flex;
@@ -11115,7 +11118,7 @@ select:hover {
   border: 1px solid var(--line-default);
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
 }
 
 .workspace-tab-overflow-filter {
@@ -11337,7 +11340,7 @@ select:hover {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
   padding: 4px;
   /* Above `.ctx-menu` (200). Both are fixed and both aim at the cursor, so a
      right-click that opens the message menu over a live selection would
@@ -11504,7 +11507,7 @@ select:hover {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
   padding: 4px;
   z-index: 210;
 }
@@ -11620,7 +11623,7 @@ select:hover {
   background: var(--surface-overlay);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-menu);
+  box-shadow: var(--shadow-lg);
   z-index: 300;
 }
 

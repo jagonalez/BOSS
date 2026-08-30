@@ -123,3 +123,18 @@ test('a user message shows who it was addressed to', async ({ appPage }) => {
 
   await expect(appPage.locator('.msg.user .msg-role .to').last()).toContainText('boss')
 })
+
+test('the setup buttons show their words', async ({ appPage }) => {
+  // A theme name that does not exist makes the whole declaration do nothing, so
+  // the main button painted its label the same colour as its background. Only a
+  // person looking at it could tell.
+  const start = appPage.locator('.team-setup-actions button.primary')
+  if (await start.count() === 0) return
+
+  await expect(start).not.toBeEmpty()
+  const painted = await start.evaluate((node) => {
+    const style = getComputedStyle(node)
+    return { text: style.color, behind: style.backgroundColor }
+  })
+  expect(painted.text).not.toBe(painted.behind)
+})

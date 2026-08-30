@@ -43,3 +43,35 @@ test('white ink is never painted straight onto a themed fill', () => {
     assert.ok(!pattern.test(rules), `white ink is painted onto ${fill}; use the matching ink token`)
   }
 })
+
+test('every theme name used in this stylesheet is defined in it', () => {
+  // A name that does not exist makes the whole declaration do nothing, silently.
+  // A button whose text colour was spelled wrong painted its label the same
+  // colour as its background, and only a person looking at it could tell.
+  const declared = new Set((css.match(/^\s{2}--[a-z0-9-]+(?=:)/gm) ?? []).map((entry) => entry.trim()))
+  // Fallbacks are deliberate: `var(--maybe, 12px)` is a name that may be absent.
+  const used = (rules.match(/var\(\s*(--[a-z0-9-]+)\s*\)/g) ?? [])
+    .map((entry) => entry.replace(/var\(\s*|\s*\)/g, ''))
+
+  // Some names come from a theme file rather than from here, so only the ones
+  // this stylesheet is responsible for are checked: those it also declares a
+  // sibling of. That is enough to catch a misspelling.
+  const families = new Set([...declared].map((name) => name.split('-')[2] ?? name))
+  const suspect = [...new Set(used)].filter((name) => {
+    if (declared.has(name)) return false
+    return families.has(name.split('-')[2] ?? name)
+  })
+
+  // Six that predate this check. Each makes its declaration do nothing, so
+  // each is a real defect — listed rather than fixed here so the check can go
+  // in now and catch the next one, instead of waiting on a styling pass.
+  const KNOWN = ['--shadow-sm', '--shadow-md', '--shadow-xl', '--radius-md', '--text-secondary', '--accent-subtle']
+  const fresh = suspect.filter((name) => !KNOWN.includes(name))
+
+  assert.deepEqual(fresh, [], `these theme names are used but never defined:\n  ${fresh.join('\n  ')}`)
+  assert.deepEqual(
+    KNOWN.filter((name) => !suspect.includes(name)),
+    [],
+    'one of the known-missing names was defined or removed — take it off the list'
+  )
+})
