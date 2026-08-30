@@ -32,6 +32,7 @@ import { githubDeliveryEvent } from '../shared/workflow-events'
 import { randomUUID } from 'node:crypto'
 import { ReportManager } from './report-manager'
 import { LabAssistantManager } from './lab-assistant-manager'
+import { RoomManager } from './room-manager'
 import { inspectGitHubWorkflowRun, listGitHubPullRequests } from './lab-assistant-github'
 import { TelegramBot } from './telegram-bot'
 import { McpHub } from './mcp-hub'
@@ -185,6 +186,12 @@ const labAssistant = new LabAssistantManager(
     notify: (event) => notifications.publish(event)
   }
 )
+const rooms = new RoomManager(join(app.getPath('userData'), 'rooms.json'), {
+  createParticipantThread: (input) => backendMgr.createParticipantThread(input),
+  disposeParticipantThread: (threadId) => backendMgr.disposeParticipantThread(threadId),
+  roomPaths: (threadId) => backendMgr.roomPaths(threadId)
+})
+backendMgr.attachRooms(rooms)
 backendMgr.attachAssistant(labAssistant)
 backendMgr.onEvent((event) => {
   void labAssistant.observeBackendEvent(event)

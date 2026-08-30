@@ -7422,6 +7422,108 @@ body.workspace-dragging .workspace-tab-slot {
   min-height: 0;
 }
 
+/* Who a message was addressed to, so a reader can see later why an agent did
+   or did not act on it. */
+.msg-role .to {
+  color: var(--text-faint);
+}
+
+/* Who this message goes to. A room never allows an unaddressed message, so
+   the chip is always filled and always visible. */
+.composer-to {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.recipient-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--type-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.recipient-chip:hover {
+  border-color: var(--text-faint);
+  color: var(--text);
+}
+
+/* BOSS, a worker, and a broadcast read differently at a glance, so the user
+   can see who is about to answer without reading the name. */
+.recipient-chip.assistant {
+  color: var(--purple, var(--accent));
+  border-color: color-mix(in srgb, var(--purple, var(--accent)) 45%, transparent);
+  background: color-mix(in srgb, var(--purple, var(--accent)) 10%, transparent);
+}
+
+.recipient-chip.participant {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.recipient-chip.everyone {
+  color: var(--text-muted);
+  background: var(--surface-hover);
+}
+
+.recipient-chip .caret {
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+.recipient-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+}
+
+.recipient-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--type-meta);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recipient-option:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.recipient-option.active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.recipient-option .detail {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
 .composer {
   position: relative;
 }

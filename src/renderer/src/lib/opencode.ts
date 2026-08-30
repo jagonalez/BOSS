@@ -14,6 +14,7 @@ import type {
 } from '@shared/opencode'
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendMessageOptions, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendRequest, BackendSubscriptionUsage, DelegatePlacement, LabConnectionsSettings, LabConnectionUpdate, QueuedFollowUp, QueuedFollowUpAttachment, SandboxSettings, ThreadCreationScope, ThreadTitleSettings } from '@shared/backend'
 import type { FanOutWorker } from '@shared/fan-out'
+import type { RoomState, RoomTeam } from '@shared/room'
 import type { CollaborationPolicy, ThreadBusSnapshot } from '@shared/thread-bus'
 import type { WorktreeInfo, WorktreeSettings } from '@shared/worktree'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
@@ -151,6 +152,13 @@ export const OpenCode = {
     backendRequest<void>({ type: 'thread.send', threadId: id, parts, options: opts }),
   followUps: (id: string) =>
     backendRequest<QueuedFollowUp[]>({ type: 'thread.followups.list', threadId: id }),
+  room: (id: string) => backendRequest<RoomState>({ type: 'room.get', threadId: id }),
+  setRoomRecipient: (id: string, recipient: string) =>
+    backendRequest<RoomState>({ type: 'room.recipient.set', threadId: id, recipient }),
+  joinRoom: (id: string, roleId: string) =>
+    backendRequest<RoomState>({ type: 'room.join', threadId: id, roleId }),
+  team: () => backendRequest<RoomTeam | undefined>({ type: 'room.team.get' }),
+  setTeam: (team: RoomTeam) => backendRequest<RoomTeam>({ type: 'room.team.set', team }),
   addFollowUp: (id: string, text: string, attachments?: QueuedFollowUpAttachment[], options?: BackendMessageOptions) =>
     backendRequest<QueuedFollowUp[]>({ type: 'thread.followups.add', threadId: id, text, attachments, options }),
   updateFollowUp: (id: string, followUpId: string, text: string) =>

@@ -106,3 +106,55 @@ test('search finds messages in the complete transcript and tool output', () => {
     { turnKey: 'turn:tool-user', messageId: 'tool-answer' }
   ])
 })
+
+function authored(id: string, author: string, text: string): MessageWithParts {
+  return {
+    info: { id, role: 'assistant', sessionID: 'thread', author },
+    parts: [{ id: `${id}-text`, type: 'text', sessionID: 'thread', messageID: id, text }]
+  }
+}
+
+test('two agents replying in one turn stay separate, so they never speak with one voice', () => {
+  const turns = groupTranscriptTurns([
+    message('user-1', 'user', 'go through the review points'),
+    authored('a-1', 'builder', 'I reverted the storage change.'),
+    authored('a-2', 'reviewer', 'Confirmed against the diff.')
+  ])
+
+  assert.equal(turns.length, 2, 'the builder and the reviewer get a bubble each')
+  assert.equal(turns[0].assistants[0].info.author, 'builder')
+  assert.equal(turns[1].assistants[0].info.author, 'reviewer')
+  assert.equal(turns[1].user, undefined, 'only the first turn owns the user message')
+})
+
+test('consecutive messages from one agent stay in one bubble', () => {
+  const turns = groupTranscriptTurns([
+    message('user-1', 'user', 'fix it'),
+    authored('a-1', 'builder', 'Reproduced.'),
+    authored('a-2', 'builder', 'Fixed.')
+  ])
+
+  assert.equal(turns.length, 1, 'one agent talking twice is still one voice')
+  assert.equal(turns[0].assistants.length, 2)
+})
+
+test('a thread with a single unnamed agent groups exactly as it always did', () => {
+  const turns = groupTranscriptTurns([
+    message('user-1', 'user', 'hello'),
+    message('a-1', 'assistant', 'thinking'),
+    message('a-2', 'assistant', 'done')
+  ])
+
+  assert.equal(turns.length, 1, 'threads that never grew past one agent are untouched')
+  assert.equal(turns[0].assistants.length, 2)
+})
+
+test('split turns keep distinct keys, so the virtual list can tell them apart', () => {
+  const turns = groupTranscriptTurns([
+    message('user-1', 'user', 'go'),
+    authored('a-1', 'builder', 'one'),
+    authored('a-2', 'reviewer', 'two')
+  ])
+
+  assert.notEqual(turns[0].key, turns[1].key)
+})

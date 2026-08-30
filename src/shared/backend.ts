@@ -257,6 +257,11 @@ export type BackendRequest =
   | { type: 'thread.part'; threadId: string; messageId: string; partId: string }
   | { type: 'thread.send'; threadId: string; parts: unknown[]; options?: BackendMessageOptions }
   | { type: 'thread.followups.list'; threadId: string }
+  | { type: 'room.get'; threadId: string }
+  | { type: 'room.recipient.set'; threadId: string; recipient: string }
+  | { type: 'room.join'; threadId: string; roleId: string }
+  | { type: 'room.team.get' }
+  | { type: 'room.team.set'; team: import('./room').RoomTeam }
   | { type: 'thread.followups.add'; threadId: string; text: string; attachments?: QueuedFollowUpAttachment[]; options?: BackendMessageOptions }
   | { type: 'thread.followups.update'; threadId: string; followUpId: string; text: string }
   | { type: 'thread.followups.remove'; threadId: string; followUpId: string }

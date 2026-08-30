@@ -16,6 +16,7 @@ import type {
 } from '@shared/opencode'
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendSubscriptionUsage, QueuedFollowUp } from '@shared/backend'
 import type { Annotation } from '@shared/annotations'
+import type { RoomState } from '@shared/room'
 import type { ThreadBusSnapshot } from '@shared/thread-bus'
 import type { QaPolicy, QaPolicyState } from '@shared/qa'
 import type { AutomationsSnapshot } from '@shared/automation'
@@ -149,6 +150,13 @@ export interface AppState {
   /** Highlights pending on each thread's composer. Cleared on send: an
    *  annotation is a way to phrase one prompt, not a note kept on the thread. */
   annotations: Record<string, Annotation[]>
+  /** What each thread knows about who is in it and who the composer addresses.
+   *
+   *  Session-scoped like the drafts beside it: two threads have different
+   *  participants, and switching between them must not carry one thread's
+   *  recipient into the other. Main owns the durable copy; this mirrors it so
+   *  the composer can render without waiting on a round trip. */
+  rooms: Record<string, RoomState>
   followUps: Record<string, QueuedFollowUp[]>
   history: Record<string, string[]>
   archived: string[]
@@ -269,6 +277,7 @@ export const initialState: AppState = {
   drafts: {},
   attachments: {},
   annotations: {},
+  rooms: {},
   followUps: {},
   history: {},
   archived: [],

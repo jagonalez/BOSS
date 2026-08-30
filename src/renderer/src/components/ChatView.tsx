@@ -4,7 +4,7 @@ import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId, QueuedFollowUp } from '@shared/backend'
 import { composerRecovery, retryPayload } from '../lib/send-recovery'
-import { abortRun, addAnnotation, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setVariant, speakText, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
+import { abortRun, addAnnotation, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setRoomRecipient, setVariant, speakText, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -26,6 +26,8 @@ import { createAnnotation, type Annotation, type AnnotationAnchor } from '@share
 import { anchorFromSelection } from '../lib/annotation-anchor'
 import { groupTranscriptTurns, searchTranscript, type TranscriptTurn } from '../lib/transcript'
 import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
+import { recipientKind, recipientLabel, recipientOptions, retarget } from '../lib/recipient'
+import { emptyRoomState } from '@shared/room'
 
 function partText(part: Part): string {
   const value = part.text ?? part.state?.text ?? part.state?.content ?? part.state?.title ?? ''
@@ -366,7 +368,11 @@ function MessageView({
         </button>
       ) : null}
       <div className="msg-role">
-        <span>{isUser ? 'You' : 'Agent'}</span>
+        {/* A room holds several agents, so an assistant message says which one
+            spoke. Threads that never grew past a single agent have no author
+            and read exactly as they always did. */}
+        <span>{isUser ? 'You' : item.info.author ?? 'Agent'}</span>
+        {isUser && item.info.recipient ? <span className="to">to {item.info.recipient}</span> : null}
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
       </div>
       <MessageError messageId={item.info.id} error={item.info.error} />
@@ -568,6 +574,9 @@ const EMPTY_ANNOTATIONS: Annotation[] = []
 const EMPTY_ATTACHMENTS: Attachment[] = []
 const EMPTY_HISTORY: string[] = []
 const EMPTY_FOLLOW_UPS: QueuedFollowUp[] = []
+/** A thread that has never grown past one agent still addresses BOSS, so the
+ *  composer always has a recipient and can never send into nowhere. */
+const EMPTY_ROOM = emptyRoomState()
 
 function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const asrTargetId = React.useId()
@@ -585,7 +594,9 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const composerEpoch = useStore(appStore, (s) => s.composerEpoch)
   const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? EMPTY_ATTACHMENTS : EMPTY_ATTACHMENTS))
   const annotations = useStore(appStore, (s) => (effectiveSession ? s.annotations[effectiveSession] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
+  const room = useStore(appStore, (s) => (effectiveSession ? s.rooms[effectiveSession] ?? EMPTY_ROOM : EMPTY_ROOM))
   const [text, setText] = useState('')
+  const [recipientOpen, setRecipientOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [histIdx, setHistIdx] = useState(-1)
@@ -1076,14 +1087,49 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
           />
         ) : null}
         <div className="composer-input">
+          {hasSession && (
+            <div className="composer-to">
+              {recipientOpen && (
+                <div className="recipient-menu">
+                  {recipientOptions(room).map((option) => (
+                    <button
+                      key={option.id}
+                      className={`recipient-option ${option.id === room.recipient ? 'active' : ''}`}
+                      onClick={() => {
+                        if (effectiveSession) setRoomRecipient(effectiveSession, option.id)
+                        setRecipientOpen(false)
+                        textareaRef.current?.focus()
+                      }}
+                    >
+                      <span className="name">{option.label}</span>
+                      {option.detail ? <span className="detail">{option.detail}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                className={`recipient-chip ${recipientKind(room, room.recipient)}`}
+                onClick={() => setRecipientOpen((open) => !open)}
+                title="Who this message goes to"
+              >
+                {recipientLabel(room, room.recipient)}
+                <span className="caret">▾</span>
+              </button>
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             placeholder={hasSession ? working ? `Queue a follow-up for ${backendLabel}…` : `Ask ${backendLabel}…` : 'Start a thread'}
             value={text}
             onChange={(e) => {
-              setText(e.target.value)
+              // A leading @name aims the message and then leaves the text: the
+              // chip already carries the recipient, so repeating it in the body
+              // is noise the agent would have to read past.
+              const aimed = effectiveSession ? retarget(room, e.target.value) : { text: e.target.value }
+              if (aimed.recipient && effectiveSession) setRoomRecipient(effectiveSession, aimed.recipient)
+              setText(aimed.text)
               autoGrow()
-              refreshCompletion(e.target.value)
+              refreshCompletion(aimed.text)
             }}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
@@ -1309,6 +1355,13 @@ function TurnView({
               )
             ) : null}
           </div>
+          {/* Named only in a room. A turn's assistants are grouped by author, so
+              one name covers the whole bubble; two agents can never share one. */}
+          {turn.assistants[0]?.info.author ? (
+            <div className="msg-role">
+              <span>{turn.assistants[0].info.author}</span>
+            </div>
+          ) : null}
           <MessageError messageId={lastAssistant.info.id} error={lastAssistant.info.error} />
           <div className="msg-body" data-message-id={lastAssistant.info.id}>
             {modelChanged && model ? <span className="model-chip">{model}</span> : null}

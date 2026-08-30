@@ -115,6 +115,20 @@ interface ThreadBinding {
   assistant?: boolean
 }
 
+/** What the manager needs from the room manager.
+ *
+ *  Structural rather than an import so the two can be wired together without
+ *  the manager depending on the room manager's module, which in turn depends on
+ *  the manager for its host. */
+interface RoomManagerHandle {
+  room(threadId: string): Promise<import('@shared/room').RoomState>
+  setRecipient(threadId: string, recipient: string): Promise<import('@shared/room').RoomState>
+  join(threadId: string, roleId: string): Promise<import('@shared/room').RoomParticipant | undefined>
+  currentTeam(): Promise<import('@shared/room').RoomTeam | undefined>
+  configureTeam(team: import('@shared/room').RoomTeam): Promise<import('@shared/room').RoomTeam>
+  forget(threadId: string): Promise<void>
+}
+
 /** The stored form of a thread's model, from a preference or a sent message.
  *
  *  Both carry the same three fields, and dropping an absent variant keeps a
@@ -282,6 +296,7 @@ export class BackendManager {
   private images?: ImageStore
   private notifications?: NotificationRouter
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
+  private rooms?: RoomManagerHandle
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private workflows?: { handle(request: BackendRequest): Promise<unknown> }
   private reports?: { handle(request: BackendRequest): Promise<unknown> }
@@ -928,6 +943,10 @@ export class BackendManager {
     const binding = this.bindings.get(roomThreadId)
     if (!binding) return undefined
     return { projectPath: binding.projectPath, executionPath: binding.executionPath }
+  }
+
+  attachRooms(rooms: RoomManagerHandle): void {
+    this.rooms = rooms
   }
 
   attachAutomations(automations: { handle(request: BackendRequest): Promise<unknown> }): void {
@@ -1601,6 +1620,17 @@ export class BackendManager {
         .then((backend) => backend.sessionDelete(binding.nativeSessionId))
         .catch(() => { /* the native session outlives BOSS's record of it */ })
     }
+    // A room's participants live in hidden threads of their own. Deleting the
+    // room without them would leave sessions running for a conversation that no
+    // longer exists, which the user has no way to see or stop.
+    // Collected first: sessionDelete removes from the same map this iterates.
+    const participants = [...this.bindings.values()].filter((entry) => entry.parentID === threadId)
+    for (const participant of participants) {
+      await this.sessionDelete(participant.id).catch(() => {
+        /* One participant that will not go must not block deleting the room. */
+      })
+    }
+    void this.rooms?.forget(threadId)
     this.transcripts?.deleteThread(threadId)
     // The images belonged to the transcript, so they go with it rather than
     // sitting in userData for a thread that no longer exists.
@@ -2761,6 +2791,14 @@ export class BackendManager {
       case 'thread.create': return request.executionPath
         ? this.createScopedThread(request.backendId, this.scopeFor(request.executionPath), request.title ?? 'Untitled thread')
         : this.sessionCreate(request.backendId, request.title, undefined, request.scope)
+      case 'room.get': return this.rooms?.room(request.threadId)
+      case 'room.recipient.set': return this.rooms?.setRecipient(request.threadId, request.recipient)
+      case 'room.join': {
+        await this.rooms?.join(request.threadId, request.roleId)
+        return this.rooms?.room(request.threadId)
+      }
+      case 'room.team.get': return this.rooms?.currentTeam()
+      case 'room.team.set': return this.rooms?.configureTeam(request.team)
       case 'thread.backend.set': return this.setEmptyThreadBackend(request.threadId, request.backendId)
       case 'thread.get': return this.sessionGet(request.threadId)
       case 'thread.delete': return this.sessionDelete(request.threadId)

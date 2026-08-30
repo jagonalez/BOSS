@@ -112,9 +112,22 @@ export function groupTranscriptTurns(
       push()
       user = message
       assistants = []
-    } else {
-      assistants.push(message)
+      continue
     }
+    // A room holds several agents at once, and a turn renders its assistants as
+    // one bubble. Two different agents in one turn would speak with one voice
+    // and wear the first one's name, which is exactly the confusion the room is
+    // meant to remove. Break the turn when the author changes so the builder
+    // and the reviewer stay visibly separate. Threads with one agent have no
+    // author at all, so their grouping is untouched.
+    const author = message.info.author
+    const runningAuthor = assistants[0]?.info.author
+    if (assistants.length > 0 && author !== runningAuthor) {
+      push()
+      user = undefined
+      assistants = []
+    }
+    assistants.push(message)
   }
   push()
   return next

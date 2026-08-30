@@ -13,6 +13,7 @@ import { startMicCapture } from './mic'
 import type { FanOutWorker } from '@shared/fan-out'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import { composeAnnotatedPrompt, createAnnotation, remainingAnnotations, sideChatSeedPrompt, type Annotation, type AnnotationAnchor } from '@shared/annotations'
+import { emptyRoomState } from '@shared/room'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import { threadIsWorking } from './status'
@@ -2369,6 +2370,23 @@ export function updateAnnotationNote(sessionID: string, id: string, note: string
       )
     }
   }))
+}
+
+/** Point this thread's composer at a participant.
+ *
+ *  It stays where the user leaves it: a run of messages to one participant
+ *  should not need the name retyped, and an unaddressed message is never
+ *  allowed. Written locally first so the chip moves at once, then persisted, so
+ *  a restart reopens the thread aimed where it was left. */
+export function setRoomRecipient(sessionID: string, recipient: string): void {
+  appStore.setState((s) => {
+    const room = s.rooms[sessionID] ?? emptyRoomState()
+    return { rooms: { ...s.rooms, [sessionID]: { ...room, recipient } } }
+  })
+  void OpenCode.setRoomRecipient(sessionID, recipient).catch(() => {
+    /* The chip already moved. A failed write costs the user nothing until the
+     * next launch, and refusing the change would be worse. */
+  })
 }
 
 export function removeAnnotation(sessionID: string, id: string): void {
