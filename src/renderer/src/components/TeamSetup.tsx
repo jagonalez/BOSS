@@ -4,6 +4,7 @@ import type { RoomRole, RoomShape, RoomTeam } from '@shared/room'
 import { appStore, useStore } from '../state/AppState'
 import { OpenCode } from '../lib/opencode'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
+import { TeamRoles } from './TeamRoles'
 
 /** Roles BOSS proposes from the agents the user has already connected.
  *
@@ -24,16 +25,6 @@ function suggested(available: BackendId[]): RoomRole[] {
     { id: 'reviewer', label: 'Reviewer', backendId: reviewer, mode: 'plan' },
     { id: 'releaser', label: 'Releaser', backendId: builder, mode: 'ask' }
   ]
-}
-
-/** What each role may touch, said in plain words.
- *
- *  Deliberately never the name of a permission mode. The user answers "when
- *  should it stop and ask", not "which policy applies". */
-function reach(role: RoomRole): string {
-  if (role.mode === 'auto') return 'its own copy of the code'
-  if (role.mode === 'ask') return 'asks before shipping'
-  return 'reads only'
 }
 
 const ASK_OPTIONS: Array<{ shape: RoomShape | 'ask'; label: string; detail: string }> = [
@@ -113,49 +104,7 @@ export function TeamSetup({ onDone }: { onDone: () => void }): React.JSX.Element
           <>
             <h2>Your team</h2>
             <p className="team-setup-sub">BOSS filled this in from what you connected. Keep it, or change a row.</p>
-            <div className="team-setup-rows">
-              {roles.map((role) => (
-                <div className="team-setup-row" key={role.id}>
-                  <input
-                    className="role-name"
-                    value={role.label}
-                    aria-label={`Name for the ${role.id} role`}
-                    onChange={(event) =>
-                      setRoles((current) =>
-                        current.map((entry) =>
-                          entry.id === role.id ? { ...entry, label: event.target.value } : entry
-                        )
-                      )
-                    }
-                  />
-                  <select
-                    className="role-agent"
-                    value={role.backendId}
-                    aria-label={`Agent for ${role.label}`}
-                    onChange={(event) =>
-                      setRoles((current) =>
-                        current.map((entry) =>
-                          entry.id === role.id ? { ...entry, backendId: event.target.value as BackendId } : entry
-                        )
-                      )
-                    }
-                  >
-                    {available.map((id) => (
-                      <option key={id} value={id}>{BACKEND_SHORT_LABELS[id]}</option>
-                    ))}
-                  </select>
-                  <span className="reach">{reach(role)}</span>
-                  <button
-                    className="role-remove"
-                    aria-label={`Remove ${role.label}`}
-                    title="Remove this role"
-                    onClick={() => setRoles((current) => current.filter((entry) => entry.id !== role.id))}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
+            <TeamRoles roles={roles} available={available} onChange={setRoles} />
             <div className="team-setup-actions">
               <button onClick={() => setStep(1)}>Back</button>
               <button className="primary" onClick={() => setStep(3)} disabled={roles.length === 0}>

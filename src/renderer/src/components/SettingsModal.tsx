@@ -18,16 +18,18 @@ import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { CliStatus, UpdateChannel, UpdateStatus } from '@shared/ipc'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 import { McpSettings } from './McpSettings'
+import { TeamSettings } from './TeamSettings'
 import { MobileSettings } from './MobileSettings'
 import { TelegramSettings } from './TelegramSettings'
 import { ModelSelect, modelIsLocal } from './ModelSelect'
 
-type SettingsSection = 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram' | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
+type SettingsSection = 'team' | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram' | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
 const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
   {
     label: 'BOSS',
     items: [
+      { id: 'team', label: 'Your team' },
       { id: 'agents', label: 'Agent defaults' },
       { id: 'connections', label: 'Models & connections' },
       { id: 'usage', label: 'Usage' },
@@ -135,6 +137,10 @@ const VIEW_MODES: Array<{
 ]
 
 const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: string }> = {
+  team: {
+    title: 'Your team',
+    description: 'Who BOSS brings into a job, and what each one may touch.'
+  },
   agents: {
     title: 'Agent defaults',
     description: 'Choose how new BOSS threads start.'
@@ -800,6 +806,7 @@ export function SettingsModal(): React.JSX.Element | null {
               <p>{heading.description}</p>
             </div>
 
+            {section === 'team' ? <TeamSettings /> : null}
             {section === 'agents' ? (
               <div className="settings-group-stack">
                 <section className="settings-card">

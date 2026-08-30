@@ -332,12 +332,6 @@ export function Sidebar(): React.JSX.Element {
   const backends = useStore(appStore, (s) => s.backends)
   const workspace = useStore(appStore, (s) => s.projectWorkspace)
   const activeSessionId = useStore(appStore, (s) => s.activeSessionId)
-  const [tab, setTab] = useState<'projects' | 'chats' | 'review'>(() => {
-    try {
-      const saved = localStorage.getItem('boss.sidebarTab')
-      return saved === 'chats' || saved === 'review' ? saved : 'projects'
-    } catch { return 'projects' }
-  })
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [liftedCaps, setLiftedCaps] = useState<Set<string>>(new Set())
   const [openThreads, setOpenThreads] = useState<Set<string>>(new Set())
@@ -359,7 +353,9 @@ export function Sidebar(): React.JSX.Element {
   // panel polls it: the sidebar's own session list has neither.
   const [supervision, setSupervision] = useState<SupervisionSnapshot | null>(null)
   useEffect(() => {
-    if (tab !== 'review') return
+    // Always polling now that the list is always on screen. It was gated on a
+    // tab, so what needed the user only appeared once they went looking — which
+    // is backwards for the one thing they open the app to find.
     let disposed = false
     const refresh = (): void => {
       void OpenCode.supervision().then((value) => {
@@ -372,7 +368,7 @@ export function Sidebar(): React.JSX.Element {
       disposed = true
       window.clearInterval(timer)
     }
-  }, [tab])
+  }, [])
 
   /** Threads grouped by what they want from the user.
    *
@@ -402,8 +398,6 @@ export function Sidebar(): React.JSX.Element {
       { label: 'Running', threads: running }
     ].filter((bucket) => bucket.threads.length > 0)
   }, [supervision])
-
-  const needsYouCount = reviewBuckets.find((bucket) => bucket.label === 'Needs you')?.threads.length ?? 0
 
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -519,10 +513,6 @@ export function Sidebar(): React.JSX.Element {
     }
   }, [ctx])
 
-  const selectTab = (next: 'projects' | 'chats' | 'review'): void => {
-    setTab(next)
-    try { localStorage.setItem('boss.sidebarTab', next) } catch { /* ignore */ }
-  }
 
   const setHidden = (hidden: boolean): void => {
     setSidebarHidden(hidden)
@@ -654,51 +644,26 @@ export function Sidebar(): React.JSX.Element {
       </nav>
       <div className="sidebar-section-rule" />
 
-      <div className="sidebar-tabs" role="tablist" aria-label="Sidebar sections">
-        <button
-          role="tab"
-          aria-selected={tab === 'projects'}
-          className={`sidebar-tab ${tab === 'projects' ? 'active' : ''}`}
-          onClick={() => selectTab('projects')}
-        >
-          Projects
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === 'chats'}
-          className={`sidebar-tab ${tab === 'chats' ? 'active' : ''}`}
-          onClick={() => selectTab('chats')}
-        >
-          Chats{looseChats.length ? <small>{looseChats.length}</small> : null}
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === 'review'}
-          className={`sidebar-tab ${tab === 'review' ? 'active' : ''}`}
-          onClick={() => selectTab('review')}
-        >
-          Review{needsYouCount ? <small>{needsYouCount}</small> : null}
-        </button>
-        {tab === 'review' ? null : (
-          <IconButton
-            size="small"
-            className="section-add"
-            onClick={() => (tab === 'projects' ? void openProjectFolder() : void newGlobalChat())}
-            label={tab === 'projects' ? 'New project' : 'New chat'}
-          >
-            <PlusIcon size={12} />
-          </IconButton>
-        )}
+      {/* No tabs. The user scans for what needs them, then works; a tab hides
+          half of that behind a click. Attention sits above the work below, and
+          projectless chats get a heading rather than a place of their own. */}
+      <div className="sidebar-tabs">
+        <IconButton size="small" className="section-add" onClick={() => void openProjectFolder()} label="New project">
+          <PlusIcon size={12} />
+        </IconButton>
+        <IconButton size="small" className="section-add" onClick={() => void newGlobalChat()} label="New chat">
+          <ChatIcon size={12} />
+        </IconButton>
       </div>
 
-      {/* Above the tabs: matches() filters loose chats as well as project
-          threads, so one box serves both panels. */}
-      <div className="sidebar-filter" hidden={tab === 'review'}>
+      {/* One box for everything below it: projects, their threads, and the
+          chats that belong to no project. */}
+      <div className="sidebar-filter">
         <input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
-          placeholder={tab === 'projects' ? 'Filter threads' : 'Filter chats'}
-          aria-label={tab === 'projects' ? 'Filter threads' : 'Filter chats'}
+          placeholder="Filter"
+          aria-label="Filter threads"
           spellCheck={false}
         />
         {filter ? (
@@ -706,7 +671,35 @@ export function Sidebar(): React.JSX.Element {
         ) : null}
       </div>
 
-      <div className="sidebar-section projects" hidden={tab !== 'projects'}>
+      {/* What needs the user, above the work rather than behind a tab. This is
+          how they actually scan: not "which project", but "what is waiting". */}
+      {reviewBuckets.length > 0 ? (
+        <div className="sidebar-section attention">
+          {reviewBuckets.map((bucket) => (
+            <React.Fragment key={bucket.label}>
+              <div className="section-label">{bucket.label}<small>{bucket.threads.length}</small></div>
+              <div className="list">
+                {bucket.threads.map((entry) => (
+                  <div
+                    key={entry.thread.threadId}
+                    className={`item sub session-row ${activeSessionId === entry.thread.threadId ? 'active' : ''}`}
+                    onClick={() => selectSession(entry.thread.threadId)}
+                    title={entry.thread.title}
+                  >
+                    <span className={`session-state ${entry.thread.running ? 'busy' : 'idle'}`}><span /></span>
+                    <span className="session-copy">
+                      <span className="name">{entry.thread.title || 'Untitled'}</span>
+                      <span className="session-details">{entry.detail}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </React.Fragment>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="sidebar-section projects">
         <div
           className="list"
           ref={projectsRef}
@@ -819,41 +812,14 @@ export function Sidebar(): React.JSX.Element {
       </div>
       </div>
 
-      <div className="sidebar-section chats" hidden={tab !== 'chats'}>
-        <div className="list">
-          {looseChats.map(threadRow)}
-          {looseChats.length === 0 && (
-            <div className="sidebar-empty">No chats yet</div>
-          )}
+      {/* Under a heading with everything else. A chat that belongs to no
+          project is not a different kind of thing, and it did not earn a tab. */}
+      {looseChats.length > 0 ? (
+        <div className="sidebar-section chats">
+          <div className="section-label">No project<small>{looseChats.length}</small></div>
+          <div className="list">{looseChats.map(threadRow)}</div>
         </div>
-      </div>
-
-      <div className="sidebar-section review" hidden={tab !== 'review'}>
-        {reviewBuckets.map((bucket) => (
-          <React.Fragment key={bucket.label}>
-            <div className="section-label">{bucket.label}<small>{bucket.threads.length}</small></div>
-            <div className="list">
-              {bucket.threads.map((entry) => (
-                <div
-                  key={entry.thread.threadId}
-                  className={`item sub session-row ${activeSessionId === entry.thread.threadId ? 'active' : ''}`}
-                  onClick={() => selectSession(entry.thread.threadId)}
-                  title={entry.thread.title}
-                >
-                  <span className={`session-state ${entry.thread.running ? 'busy' : 'idle'}`}><span /></span>
-                  <span className="session-copy">
-                    <span className="name">{entry.thread.title || 'Untitled'}</span>
-                    <span className="session-details">{entry.detail}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </React.Fragment>
-        ))}
-        {reviewBuckets.length === 0 && (
-          <div className="sidebar-empty">{supervision ? 'Nothing needs you' : 'Loading…'}</div>
-        )}
-      </div>
+      ) : null}
 
       {archivedSessions.length > 0 && (
         <>

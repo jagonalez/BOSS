@@ -12,6 +12,7 @@
  */
 
 export type SettingsSectionId =
+  | 'team'
   | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram'
   | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
@@ -24,6 +25,11 @@ export interface SettingsEntry {
 }
 
 export const SETTINGS_INDEX: SettingsEntry[] = [
+  // Your team
+  { label: 'Your team', section: 'team', keywords: ['role', 'roles', 'builder', 'reviewer', 'planner', 'researcher'] },
+  { label: 'What a role may touch', section: 'team', keywords: ['permission', 'reads only', 'own copy', 'asks before'] },
+  { label: 'How work runs', section: 'team', keywords: ['shape', 'review', 'just do it', 'full run'] },
+
   // Agent defaults
   { label: 'Default agent', section: 'agents', keywords: ['backend', 'claude', 'codex', 'opencode', 'pi', 'lab'] },
   { label: 'Permission mode', section: 'agents', keywords: ['auto', 'approve', 'ask', 'plan', 'confirm'] },

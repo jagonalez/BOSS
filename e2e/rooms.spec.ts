@@ -149,3 +149,28 @@ test('the assistant page is the conversation, not a control panel', async ({ app
   await expect(appPage.locator('.lab-assistant-layout')).toHaveCount(0)
   await expect(appPage.locator('.product-section')).toHaveCount(0)
 })
+
+test('the sidebar shows what needs you above the work, not behind a tab', async ({ appPage }) => {
+  // Three tabs — projects, chats, review — hid half of what the user scans for
+  // behind a click. They open the app to find what is waiting, so it is first.
+  await expect(appPage.locator('.sidebar-tab')).toHaveCount(0)
+  await expect(appPage.locator('.sidebar-section.projects')).toBeVisible()
+})
+
+test('a chat with no project sits under a heading, not in its own place', async ({ appPage }) => {
+  // It is not a different kind of thing, and it did not earn a tab.
+  const loose = appPage.locator('.sidebar-section.chats')
+  if (await loose.count() === 0) return
+  await expect(loose.locator('.section-label')).toContainText('No project')
+})
+
+test('the team can be changed after setup', async ({ appPage }) => {
+  // Setup runs once and never appears again. Without this a user who deleted a
+  // role, or wanted a different agent reviewing, was stuck with the first
+  // launch's answer forever.
+  await appPage.getByRole('button', { name: 'Settings' }).click()
+  await appPage.locator('.settings-nav-group button', { hasText: 'Your team' }).click()
+
+  await expect(appPage.locator('.team-setup-rows .role-name').first()).toBeVisible()
+  await expect(appPage.locator('.team-setup-rows .role-reach').first()).toBeVisible()
+})
