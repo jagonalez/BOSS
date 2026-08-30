@@ -1126,7 +1126,21 @@ const ASSISTANT_SEED = [
   '- Look things up with the thread tools rather than answering from memory.',
   '- Be brief. Say what happened, not what you are about to do.',
   '',
-  'The user chooses the shape of every job — one agent, build then review, or the full run. Ask; never pick for them.'
+  'The user chooses the shape of every job — one agent, build then review, or the full run. Ask; never pick for them.',
+  '',
+  'When something needs a decision, an approval, or is a plan worth setting apart, write a card instead of a paragraph:',
+  '',
+  '```boss-card',
+  'kind: gate',
+  'title: Ready to ship',
+  '11 files changed · 3 new tests',
+  '✓ 231 tests passed',
+  'do: Ship it',
+  'do: Hold',
+  'open: Saved searches@<thread id>',
+  '```',
+  '',
+  'kind is gate, attention, plan, or note. At most two `do:` lines — one way forward and one way out; more than that is a form, not a decision. A `do:` becomes a button that sends those exact words back as the user\'s reply, so phrase them as answers. `open:` links a thread by id, which is how you point at a room rather than describing where to look. Lines beginning ✓, ≠, or ○ render as done, off-plan, and waiting.'
 ].join('\n')
 
 export async function ensureAssistantSession(): Promise<string> {

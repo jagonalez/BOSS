@@ -30,6 +30,8 @@ import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
 import { overrideFor, recipientKind, recipientLabel, recipientOptions, retarget, splitOverride } from '../lib/recipient'
 import { briefOf } from '@shared/job-notes'
 import { authorTone } from '../lib/author-tone'
+import { splitCards } from '@shared/room-cards'
+import { RoomCard } from './RoomCard'
 import { emptyRoomState } from '@shared/room'
 import type { RoomShape } from '@shared/room'
 
@@ -76,10 +78,31 @@ function Thinking({ id, text }: { id: string; text: string }): React.JSX.Element
   )
 }
 
-function PartView({ part }: { part: Part }): React.JSX.Element | null {
+function PartView({ part, sessionId }: { part: Part; sessionId?: string }): React.JSX.Element | null {
   switch (part.type) {
-    case 'text':
-      return <MessageText text={partText(part)} />
+    case 'text': {
+      // A card is a fenced block an agent writes, set apart from the prose
+      // because it is a moment the user acts on. Text with no card renders
+      // exactly as it always did, and a malformed card stays as written rather
+      // than disappearing.
+      const segments = splitCards(partText(part))
+      if (segments.length === 1 && segments[0].type === 'text') return <MessageText text={partText(part)} />
+      return (
+        <>
+          {segments.map((segment, index) =>
+            segment.type === 'card' && segment.card ? (
+              <RoomCard
+                key={`card-${index}`}
+                card={segment.card}
+                onAct={(answer) => { if (sessionId) void sendPrompt(answer, sessionId) }}
+              />
+            ) : (
+              <MessageText key={`text-${index}`} text={segment.text ?? ''} />
+            )
+          )}
+        </>
+      )
+    }
     case 'reasoning':
       return <Thinking id={part.id} text={partText(part)} />
     case 'tool': {
@@ -363,7 +386,7 @@ function MessageView({
   }
   return (
     <div
-      className={`msg ${isUser ? 'user' : 'assistant'}${searchMatch ? ' thread-search-match' : ''}${searchCurrent ? ' thread-search-current' : ''}`}
+      className={`msg ${item.info.author ? 'spoken' : ''} ${isUser ? 'user' : 'assistant'}${searchMatch ? ' thread-search-match' : ''}${searchCurrent ? ' thread-search-current' : ''}`}
       onContextMenu={onCtx ? (e) => onCtx(e, item) : undefined}
     >
       {onCtx ? (
@@ -371,10 +394,15 @@ function MessageView({
           ⋯
         </button>
       ) : null}
+      {/* A room reads as a room: a speaker beside each message rather than a
+          name stacked above a block. Only in a room — a thread with one agent
+          has no author and looks exactly as it always did. */}
+      {item.info.author ? (
+        <div className={`msg-avatar ${authorTone(item.info.author)}`} aria-hidden="true">
+          {item.info.author.slice(0, 1).toUpperCase()}
+        </div>
+      ) : null}
       <div className="msg-role">
-        {/* A room holds several agents, so an assistant message says which one
-            spoke. Threads that never grew past a single agent have no author
-            and read exactly as they always did. */}
         {isUser ? <span>You</span> : item.info.author
           ? <span className={`msg-who ${authorTone(item.info.author)}`}>{item.info.author}</span>
           : <span>Agent</span>}
@@ -1433,7 +1461,7 @@ function TurnView({
       ) : null}
       {turn.assistants.length > 0 ? (
         <div
-          className={`msg assistant${turn.assistants.some((message) => searchMatchIds?.has(message.info.id)) ? ' thread-search-match' : ''}${turn.assistants.some((message) => message.info.id === currentSearchMessageId) ? ' thread-search-current' : ''}`}
+          className={`msg assistant${turn.assistants[0]?.info.author ? ' spoken' : ''}${turn.assistants.some((message) => searchMatchIds?.has(message.info.id)) ? ' thread-search-match' : ''}${turn.assistants.some((message) => message.info.id === currentSearchMessageId) ? ' thread-search-current' : ''}`}
           onContextMenu={onCtx && lastAssistant ? (e) => onCtx(e, lastAssistant) : undefined}
         >
           {/* Inside msg-actions, not beside it: both anchor to the top-right
@@ -1477,11 +1505,16 @@ function TurnView({
           {/* Named only in a room. A turn's assistants are grouped by author, so
               one name covers the whole bubble; two agents can never share one. */}
           {turn.assistants[0]?.info.author ? (
-            <div className="msg-role">
-              <span className={`msg-who ${authorTone(turn.assistants[0].info.author)}`}>
-                {turn.assistants[0].info.author}
-              </span>
-            </div>
+            <>
+              <div className={`msg-avatar ${authorTone(turn.assistants[0].info.author)}`} aria-hidden="true">
+                {turn.assistants[0].info.author.slice(0, 1).toUpperCase()}
+              </div>
+              <div className="msg-role">
+                <span className={`msg-who ${authorTone(turn.assistants[0].info.author)}`}>
+                  {turn.assistants[0].info.author}
+                </span>
+              </div>
+            </>
           ) : null}
           <MessageError messageId={lastAssistant.info.id} error={lastAssistant.info.error} />
           <div className="msg-body" data-message-id={lastAssistant.info.id}>
@@ -1491,7 +1524,7 @@ function TurnView({
                 the prose explaining them. */}
             {segments.map((segment, index) =>
               segment.type === 'narrative' ? (
-                <PartViewMemo key={segment.part.id} part={segment.part} />
+                <PartViewMemo key={segment.part.id} part={segment.part} sessionId={sessionId} />
               ) : (
                 <StepCard
                   key={`steps-${index}-${segment.parts[0].id}`}

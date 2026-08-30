@@ -274,3 +274,25 @@ test('choosing how a job runs brings in the agent that starts it', async ({ appP
   await expect(shape).toHaveCount(0)
   await expect(appPage.locator('.recipient-chip')).toHaveText(/Builder/)
 })
+
+test('a room reads as a room, with a speaker beside each message', async ({ appPage }) => {
+  // A name stacked above a block reads as a transcript. The point of a room is
+  // seeing who is talking.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const spoken = appPage.locator('.msg.spoken')
+  if (await spoken.count() === 0) return
+
+  await expect(spoken.first().locator('.msg-avatar')).toBeVisible()
+})
+
+test('a card sets a decision apart from the prose', async ({ appPage }) => {
+  // These are the moments the user acts on, so they are not another paragraph.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const card = appPage.locator('.room-card')
+  if (await card.count() === 0) return
+
+  await expect(card.first().locator('.room-card-head')).not.toBeEmpty()
+  // At most two: one way forward and one way out. More is a form.
+  const actions = card.first().locator('.room-card-actions button:not(.room-card-link)')
+  expect(await actions.count()).toBeLessThanOrEqual(2)
+})

@@ -6958,6 +6958,175 @@ body.workspace-dragging .workspace-tab-slot {
   letter-spacing: 0.07em;
 }
 
+/* A card in a room: a plan, a decision, a gate, or a result. Set apart from the
+   prose because these are the moments the user acts on. */
+.room-card {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.room-card-head {
+  margin-bottom: 8px;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+/* Something the user must decide, and something they must approve. Coloured so
+   the two read differently from a note at a glance. */
+.room-card.attention {
+  border-color: color-mix(in srgb, var(--yellow) 45%, var(--border));
+}
+
+.room-card.attention .room-card-head {
+  color: var(--yellow);
+}
+
+.room-card.gate {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+}
+
+.room-card.gate .room-card-head {
+  color: var(--green);
+}
+
+.room-card-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.room-card-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.room-card-line .mark {
+  width: 13px;
+  flex: none;
+  text-align: center;
+  font-size: var(--type-meta);
+  color: var(--text-faint);
+}
+
+.room-card-line.done {
+  color: var(--text-muted);
+}
+
+.room-card-line.done .mark {
+  color: var(--green);
+}
+
+/* A gap between what was agreed and what happened. This is what the user reads
+   the card for, so it is the one thing that stands out. */
+.room-card-line.gap .mark {
+  color: var(--red, var(--yellow));
+}
+
+.room-card-line.waiting {
+  color: var(--text-faint);
+}
+
+.room-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+  flex-wrap: wrap;
+}
+
+.room-card-actions button {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--type-meta);
+  cursor: pointer;
+}
+
+.room-card-actions button:hover {
+  border-color: var(--text-faint);
+}
+
+.room-card-actions button.primary {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 500;
+}
+
+/* Opens the thread the card names. Reads as a link rather than a third choice,
+   because it is a way to look rather than a way to decide. */
+.room-card-actions .room-card-link {
+  margin-left: auto;
+  border-color: transparent;
+  color: var(--accent);
+}
+
+/* A room reads as a room: the speaker sits beside the words rather than
+   stacked above them. Only when a message names its speaker — a thread with one
+   agent keeps the layout it always had. */
+.msg.spoken {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  grid-template-areas: "who name" ". body";
+  column-gap: 10px;
+  row-gap: 3px;
+}
+
+.msg.spoken .msg-avatar {
+  grid-area: who;
+}
+
+.msg.spoken .msg-role {
+  grid-area: name;
+}
+
+.msg.spoken .msg-body,
+.msg.spoken .msg-branch {
+  grid-area: body;
+}
+
+/* The speaker, as a small square with its initial. Its colour comes from the
+   name, so the same agent looks the same everywhere. */
+.msg-avatar {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  font-size: var(--type-label);
+  font-weight: 700;
+}
+
+.msg-avatar.one {
+  color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 20%, transparent);
+}
+
+.msg-avatar.two {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.msg-avatar.three {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 20%, transparent);
+}
+
+.msg-avatar.four {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 20%, transparent);
+}
+
 /* Who spoke, when a room holds more than one agent. A name in plain text was
    easy to read past, and telling the builder from the reviewer at a glance is
    the whole reason the name is there. */
