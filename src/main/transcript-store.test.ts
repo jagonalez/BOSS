@@ -583,3 +583,23 @@ test('a point taken aside keeps its reply out of the main stream', () => {
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('the assistant answers into the room it was asked from', () => {
+  // BOSS runs in one standing conversation wherever it is called. Without this
+  // its answer would land in a thread the user was not looking at.
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    const inRoom = { threadId: 'room-1', backendId: 'claude' as const, nativeSessionId: 'native-boss', author: 'boss' }
+
+    store.recordMessage(inRoom, { id: 'm1', sessionID: 'native-boss', role: 'assistant', time: { created: 1 } })
+    store.flush()
+
+    const messages = store.messages('room-1')
+    assert.equal(messages.length, 1, 'the answer appears where the user asked')
+    assert.equal(messages[0].info.author, 'boss')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

@@ -305,6 +305,14 @@ export class BackendManager {
   private notifications?: NotificationRouter
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private rooms?: RoomManagerHandle
+  /** Where a thread's current run should be recorded, when that is not its own
+   *  thread.
+   *
+   *  BOSS answers from one standing conversation wherever it is called, so a
+   *  question asked inside a room runs there but belongs in the room the user
+   *  asked it in. Without this its answer would land in a conversation the user
+   *  was not looking at. */
+  private readonly recordInto = new Map<string, { threadId: string; author: string }>()
   /** Which branch each thread's current run belongs to, if any.
    *
    *  Per thread rather than one shared value: two threads run at once, and a
@@ -1260,6 +1268,16 @@ export class BackendManager {
     // exist so a reviewer can run on a different model, not so the transcript
     // splits into five lists nobody asked for. `author` is what keeps the
     // builder and the reviewer distinguishable inside that one list.
+    const redirect = this.recordInto.get(binding.id)
+    if (redirect) {
+      return {
+        threadId: redirect.threadId,
+        backendId: binding.backendId,
+        nativeSessionId: binding.nativeSessionId,
+        author: redirect.author,
+        ...(this.pendingBranch.get(redirect.threadId) ? { branchOf: this.pendingBranch.get(redirect.threadId) as string } : {})
+      }
+    }
     const participant = binding.parentID ? binding.roleId : undefined
     if (participant) {
       return {
@@ -1758,6 +1776,13 @@ export class BackendManager {
     return this.transcripts.messages(threadId, limit)
   }
 
+  /** The user's standing assistant thread, if one exists yet. */
+  private assistantThreadId(): string | undefined {
+    this.load()
+    for (const binding of this.bindings.values()) if (binding.assistant) return binding.id
+    return undefined
+  }
+
   /** Which participant's session should run this message, if any.
    *
    *  Returns nothing for a thread with no room, for a message to BOSS, and for
@@ -1770,7 +1795,13 @@ export class BackendManager {
   ): Promise<string | undefined> {
     const recipient = options?.recipient
     if (!recipient || !this.rooms) return undefined
-    if (recipient === ROOM_ASSISTANT_ID || recipient === ROOM_EVERYONE) return undefined
+    // A broadcast is answered by each participant in turn, which the room's own
+    // thread drives; there is no single session to route to.
+    if (recipient === ROOM_EVERYONE) return undefined
+    // BOSS answers from its own standing conversation, wherever it is called.
+    // Running it on the room's agent would make it a different assistant in
+    // every thread, holding none of what it knows about the rest of the work.
+    if (recipient === ROOM_ASSISTANT_ID) return this.assistantThreadId()
     const room = await this.rooms.room(threadId)
     const existing = room.participants.find((entry) => entry.roleId === recipient)
     // A stale participant has no session left: its old context was dropped
@@ -1807,10 +1838,16 @@ export class BackendManager {
     const catchUp = catchUpPrompt(missed.missed, recipient ?? '')
     if (catchUp) preface.push({ type: 'text', text: catchUp })
     if (recipient) await this.rooms?.touch(roomThreadId, recipient, 'working')
+    // BOSS runs in its own standing conversation but answers into the room the
+    // user asked from, so its reply appears where they are looking rather than
+    // in a thread they are not.
     await this.sendMessage(participantThreadId, [...preface, ...parts], {
       ...options,
       // Cleared so the participant's own send does not try to route again.
-      recipient: undefined
+      recipient: undefined,
+      ...(recipient === ROOM_ASSISTANT_ID
+        ? { recordInto: { threadId: roomThreadId, author: ROOM_ASSISTANT_ID } }
+        : {})
     })
   }
 
@@ -1861,6 +1898,13 @@ export class BackendManager {
     // stream.
     if (options?.branchOf) this.pendingBranch.set(threadId, options.branchOf)
     else this.pendingBranch.delete(threadId)
+    // Set and cleared in the same place, for the same run. BOSS answers from
+    // one standing conversation wherever it is called, so a question asked in a
+    // room runs there but is recorded in the room the user asked from. Any
+    // other send to this thread is its own conversation again.
+    if (options?.recordInto) this.recordInto.set(threadId, options.recordInto)
+    else this.recordInto.delete(threadId)
+
     // Carried as a message part, not only in the context prompt: opencode and
     // pi have no system-prompt hook and drop that field entirely. A goal is the
     // task itself rather than a fact about the checkout, so it has to reach

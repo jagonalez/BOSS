@@ -180,6 +180,13 @@ export interface BackendMessageOptions {
    *  A branch is the same room with the same participants; only where it is
    *  drawn differs. */
   branchOf?: string
+  /** Record this run's messages against another thread.
+   *
+   *  BOSS answers from one standing conversation wherever it is called, so a
+   *  question asked inside a room runs in its own session but belongs in the
+   *  room the user asked from. Without this its answer would land in a
+   *  conversation the user was not looking at. */
+  recordInto?: { threadId: string; author: string }
 }
 
 /** Fill a newly-created thread's first turn from the owning backend's saved
