@@ -192,3 +192,25 @@ test('what a fresh agent will be told can be read by the user', async ({ appPage
   if (await notes.count() === 0) return
   await expect(notes.locator('summary')).toContainText('What this job agreed')
 })
+
+test('the side panel has its own way to add files or a terminal', async ({ appPage }) => {
+  // The + that adds a resource lives on a thread's tab, and one-thread mode does
+  // not draw the conversation's tab strip. So the panel had no way in at all,
+  // and the thread's context menu in the sidebar was the only route.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const add = appPage.locator('.workspace-group-add')
+  if (await add.count() === 0) return
+
+  await add.first().click()
+  await expect(appPage.locator('.workspace-add-menu')).toBeVisible()
+})
+
+test('an empty pane does not offer to split itself', async ({ appPage }) => {
+  // An empty panel takes no width, so splitting it produced two halves of
+  // nothing and the buttons read as broken.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const empty = appPage.locator('.workspace-group').filter({ has: appPage.locator('.workspace-empty-group') })
+  if (await empty.count() === 0) return
+
+  await expect(empty.first().locator('.workspace-group-actions button[title*="Split"]')).toHaveCount(0)
+})

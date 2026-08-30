@@ -1811,6 +1811,23 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
     const stick = (): void => {
       if (followRef.current) el.scrollTop = el.scrollHeight
     }
+    // Opening the side panel narrows the conversation, so every message
+    // re-wraps and the list's total height changes underneath the user. Keeping
+    // the raw offset then moves them somewhere else entirely — usually near the
+    // top, which reads as the thread jumping. Hold the turn they were reading
+    // instead: the same words stay in the same place.
+    let width = el.clientWidth
+    const reflow = new ResizeObserver(() => {
+      if (el.clientWidth === width) return
+      width = el.clientWidth
+      if (followRef.current) {
+        el.scrollTop = el.scrollHeight
+        return
+      }
+      const bookmark = viewportBookmarks.get(viewportKey)
+      if (bookmark?.turnKey) restoreBookmark(bookmark)
+    })
+    reflow.observe(el)
     const observer = new ResizeObserver(stick)
     for (const child of el.children) observer.observe(child)
     const mutations = new MutationObserver(() => {
@@ -1819,10 +1836,11 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
     })
     mutations.observe(el, { childList: true })
     return () => {
+      reflow.disconnect()
       observer.disconnect()
       mutations.disconnect()
     }
-  }, [effectiveId])
+  }, [effectiveId, viewportKey, restoreBookmark])
 
   useEffect(() => {
     if (!msgCtx) return

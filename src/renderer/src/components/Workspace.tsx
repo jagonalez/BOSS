@@ -877,7 +877,29 @@ function GroupView({ group, viewId, conversation = false, panel = false }: {
           </button>
         ) : null}
         <div className="workspace-group-actions">
+          {/* The panel's own way to add a resource. The + that does this lives
+              on a thread's tab, and single mode does not draw the conversation's
+              tab strip — so the panel had no way in at all, and the thread's
+              context menu in the sidebar was the only route. */}
           {conversation ? null : (
+            <button
+              className="workspace-group-add"
+              title="Add files, review, or a terminal"
+              onClick={(event) => {
+                const trigger = event.currentTarget.getBoundingClientRect()
+                const container = event.currentTarget.closest('.workspace-group')?.getBoundingClientRect()
+                setMenuRight(container ? workspaceMenuRight(trigger.right, container.left, container.right) : 8)
+                setMenuOwnerId(undefined)
+                setMenuOpen((open) => !open)
+              }}
+            >
+              <PlusIcon size={11} />
+            </button>
+          )}
+          {/* Hidden while the pane is empty. An empty panel takes no width, so
+              splitting it produced two halves of nothing and the buttons looked
+              broken. There has to be something to split first. */}
+          {conversation || group.tabs.length === 0 ? null : (
             <>
               <button onClick={() => splitWorkspaceGroup(group.id, 'horizontal')} title="Split left and right">↔</button>
               <button onClick={() => splitWorkspaceGroup(group.id, 'vertical')} title="Split top and bottom">↕</button>
