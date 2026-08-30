@@ -665,14 +665,16 @@ export function Sidebar(): React.JSX.Element {
 
       {/* No tabs. The user scans for what needs them, then works; a tab hides
           half of that behind a click. Attention sits above the work below, and
-          projectless chats get a heading rather than a place of their own. */}
+          projectless chats get a heading rather than a place of their own.
+          The two ways to start something are named: as bare icons in an empty
+          row they said nothing about what they would do. */}
       <div className="sidebar-tabs">
-        <IconButton size="small" className="section-add" onClick={() => void openProjectFolder()} label="New project">
-          <PlusIcon size={12} />
-        </IconButton>
-        <IconButton size="small" className="section-add" onClick={() => void newGlobalChat()} label="New chat">
-          <ChatIcon size={12} />
-        </IconButton>
+        <button className="sidebar-start" onClick={() => void newGlobalChat()}>
+          <ChatIcon size={13} /><span>New chat</span>
+        </button>
+        <button className="sidebar-start" onClick={() => void openProjectFolder()}>
+          <PlusIcon size={13} /><span>Add project</span>
+        </button>
       </div>
 
       {/* One box for everything below it: projects, their threads, and the

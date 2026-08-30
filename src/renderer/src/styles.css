@@ -1728,6 +1728,28 @@ textarea {
   font-size: var(--type-meta);
 }
 
+/* The two ways to start something, named. As bare icons in an empty row they
+   said nothing about what they would do. */
+.sidebar-start {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 0;
+  padding: 5px 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--type-meta);
+  cursor: pointer;
+}
+
+.sidebar-start:hover {
+  border-color: var(--text-faint);
+  color: var(--text);
+}
+
 /* What needs the user, above the work. Separated by a line rather than a
    heading: it is not another list to read, it is the reason they opened the
    app. */
@@ -5875,8 +5897,8 @@ body.workspace-dragging .workspace-tab-slot {
 .sidebar-tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 8px 6px 6px 8px;
+  gap: 6px;
+  padding: 8px 8px 6px;
 }
 
 .sidebar-tab {

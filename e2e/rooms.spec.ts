@@ -155,6 +155,9 @@ test('the sidebar shows what needs you above the work, not behind a tab', async 
   // behind a click. They open the app to find what is waiting, so it is first.
   await expect(appPage.locator('.sidebar-tab')).toHaveCount(0)
   await expect(appPage.locator('.sidebar-section.projects')).toBeVisible()
+  // Both ways to start something say what they do. As bare icons in an empty
+  // row they explained nothing.
+  await expect(appPage.locator('.sidebar-start')).toHaveText(['New chat', 'Add project'])
 })
 
 test('a chat with no project sits under a heading, not in its own place', async ({ appPage }) => {
