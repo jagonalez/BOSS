@@ -655,9 +655,19 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   // The role's own name only. A one-off agent is named on the chip beside it,
   // and repeating it here would make the placeholder longer than most of the
   // messages typed into it.
+  // The standing conversation is BOSS, whatever its stored recipient says. One
+  // saved before this was true still holds the thread's own agent, which named
+  // the model — so the BOSS chat invited the user to "Ask Claude", the one name
+  // in it that nobody is called.
+  const isAssistant = useStore(
+    appStore,
+    (s) => (effectiveSession ? s.sessionMeta[effectiveSession]?.kind === 'assistant' : false)
+  )
   const askingLabel = useMemo(
-    () => recipientLabel(room, splitOverride(room.recipient).roleId, backendLabel),
-    [room, backendLabel]
+    () => (isAssistant
+      ? 'BOSS'
+      : recipientLabel(room, splitOverride(room.recipient).roleId, backendLabel)),
+    [isAssistant, room, backendLabel]
   )
   // Only offered for a real participant, and only agents other than the one it
   // already uses. Handing BOSS or a broadcast to another agent means nothing.

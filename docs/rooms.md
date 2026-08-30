@@ -108,8 +108,9 @@ The user's real pattern is different:
     - at the desk — interactive, the desktop is the front door;
     - away — push to the phone, decisions and reviews only;
     - do not disturb — silence, no exceptions.
-22. Do not disturb is set by telling BOSS, from anywhere, and applies to every
-    room.
+22. Presence is set by telling BOSS, from anywhere, or from the bar. It applies
+    to every room. Lowering the bar hands back what was held while it was
+    higher, so returning never means finding out by accident.
 23. BOSS never pages. Real alerting stays with the user's monitoring.
 
 ### Shape of a job
@@ -180,6 +181,24 @@ that followed came from that: two rooms crossing replies, a room stranded busy,
 a stale destination outliving its run. Removing the sharing removed all of them
 at once. If something must appear in two rooms, give it two sessions.
 
+**A backend's send resolves when the turn starts, not when the agent answers.**
+Anything that has to happen after a real answer — one participant of a broadcast
+before the next — waits for the run to settle instead. Awaiting the send looked
+sequential and fired every participant within milliseconds, so they all streamed
+into one list at once: the noise a room exists to prevent, hidden behind a loop
+that read correctly.
+
+**A room's state has to be read back, not only written.** It was written when a
+shape was chosen or a recipient changed, and read from disk by nothing, so a room
+existed for a thread touched in this session and for no other. Reopening emptied
+every room on screen and left the composer sending no recipient at all — which
+also meant a saved shape never started its first agent.
+
+**Choosing is not starting.** Picking a shape used to bring in an agent on the
+spot, before the user had said what the job was, and the row of choices vanished
+at the same moment. Nothing removes an agent, so the choice could not be taken
+back. The first message is what starts the work.
+
 **Catch-up cuts by position, not by reading each timestamp.** Stored order is
 not time order: a part that arrives before its message is appended at the end
 with no timestamp at all. Deciding message by message dropped exactly those, and
@@ -193,7 +212,10 @@ anything was withheld.
 2. Are job notes readable by the user? Current default: yes, as an expandable
    line.
 3. Is one hour the right idle threshold before a participant is replaced?
-4. Does presence set itself from window focus, or does the user set it by hand?
+4. Presence is set by hand, from the bar or by telling BOSS. It is not inferred
+   from window focus: a window left open on a machine the user walked away from
+   would read as "at my desk", which is the one answer that must never be
+   guessed wrong.
 5. The stylesheet still carries about sixty rules for the assistant page that
    was deleted. They are wasted bytes rather than a defect — nothing renders
    those class names — but they should go in a styling pass. Removing them by

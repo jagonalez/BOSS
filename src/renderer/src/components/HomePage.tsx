@@ -287,8 +287,8 @@ export function HomePage(): React.JSX.Element {
                 <div className="home-summary-row"><span>Projects</span><strong>{projects.length}</strong></div>
               </section>
               <section className="home-note">
-                <strong>Review stays focused.</strong>
-                <p>Permissions, questions, failures, and finished changes are waiting in the Review tab.</p>
+                <strong>What needs you stays together.</strong>
+                <p>Permissions, questions, failures, and finished changes are under Needs you.</p>
               </section>
             </aside>
           </div>

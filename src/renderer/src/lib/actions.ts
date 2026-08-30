@@ -14,7 +14,7 @@ import { startMicCapture } from './mic'
 import type { FanOutWorker } from '@shared/fan-out'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import { composeAnnotatedPrompt, createAnnotation, remainingAnnotations, sideChatSeedPrompt, type Annotation, type AnnotationAnchor } from '@shared/annotations'
-import { emptyRoomState } from '@shared/room'
+import { ROOM_ASSISTANT_ID, emptyRoomState } from '@shared/room'
 import type { RoomShape } from '@shared/room'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
 import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
@@ -1149,6 +1149,10 @@ export async function ensureAssistantSession(): Promise<string> {
   await OpenCode.markAssistant(session.id).catch(() => {
     /* Without the mark it still works, but only inside its own project. */
   })
+  // This conversation is BOSS, so the composer should say so. Left unset it
+  // fell back to naming the model, and the standing BOSS chat invited the user
+  // to "Ask Claude" — the one name in it that nobody is called.
+  setRoomRecipient(session.id, ROOM_ASSISTANT_ID)
   await sendPrompt(ASSISTANT_SEED, session.id)
   return session.id
 }

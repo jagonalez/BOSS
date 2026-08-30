@@ -181,3 +181,10 @@ test('a one-off agent is not repeated in the placeholder', () => {
   const state = room([participant({ roleId: 'reviewer', label: 'Reviewer' })])
   assert.equal(asking({ ...state, recipient: overrideFor('reviewer', 'codex') }), 'Reviewer')
 })
+
+test('a thread with no room named its own agent, which is right for a plain chat', () => {
+  // The standing BOSS conversation is the exception, and it is handled where
+  // the composer knows which thread it is rather than here: this function is
+  // given a room, and the assistant's thread does not have one.
+  assert.equal(asking(room([]), 'Codex'), 'Codex')
+})
