@@ -6,7 +6,7 @@ import { Workspace } from './components/Workspace'
 import { HomePage } from './components/HomePage'
 import { TeamSetup } from './components/TeamSetup'
 import { OpenCode } from './lib/opencode'
-import { LabAssistantPage } from './components/LabAssistantPage'
+import { BossPage } from './components/BossPage'
 import { SitesPage } from './components/SitesPage'
 import { AutomationsPage } from './components/AutomationsPage'
 import { WorkflowsPage } from './components/WorkflowsPage'
@@ -439,7 +439,7 @@ export function App(): React.JSX.Element {
     // and is never shown again.
     if (team === null && !setupDone) return <TeamSetup onDone={() => setSetupDone(true)} />
     if (activePage === 'home') return <HomePage />
-    if (activePage === 'lab-assistant') return <LabAssistantPage />
+    if (activePage === 'lab-assistant') return <BossPage />
     if (activePage === 'automations') return <AutomationsPage />
     if (activePage === 'workflows') return <WorkflowsPage />
     if (activePage === 'reports') return <ReportsPage />

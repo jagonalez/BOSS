@@ -138,3 +138,14 @@ test('the setup buttons show their words', async ({ appPage }) => {
   })
   expect(painted.text).not.toBe(painted.behind)
 })
+
+test('the assistant page is the conversation, not a control panel', async ({ appPage }) => {
+  // It used to wrap a chat in an attention list, a running-work strip, a build
+  // list, a role editor, and a task queue. The user never used it: chatting
+  // already felt natural, and the rest read as a panel to administer.
+  await appPage.locator('.sidebar-boss').click()
+
+  await expect(appPage.locator('.boss-page')).toBeVisible()
+  await expect(appPage.locator('.lab-assistant-layout')).toHaveCount(0)
+  await expect(appPage.locator('.product-section')).toHaveCount(0)
+})

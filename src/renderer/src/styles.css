@@ -1666,6 +1666,23 @@ textarea {
   margin: 0;
 }
 
+/* The standing conversation with BOSS, and nothing else. The surface this
+   replaces wrapped a chat in an attention list, a running-work strip, a build
+   list, a role editor, and a task queue — and went unused, because chatting
+   already felt natural and the rest read as a control panel. */
+.boss-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.boss-page-starting {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
 /* One-time team setup. Three screens, each arriving already answered: a form
    the user must complete before starting is what this screen exists to avoid. */
 .team-setup {
