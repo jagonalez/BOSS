@@ -10,6 +10,10 @@ interface TranscriptSource {
   threadId: string
   backendId: BackendId
   nativeSessionId: string
+  /** Which room participant produced this, when the thread is one of several
+   *  in a room. Stamped on every message it records so the builder and the
+   *  reviewer stay distinguishable in the one list the user reads. */
+  author?: string
 }
 
 interface StoredMessageRow {
@@ -252,7 +256,13 @@ export class TranscriptStore {
     const pending = this.pendingMessages.get(key)
     this.pendingMessages.set(key, {
       source,
-      info: mergeMessage(pending?.info, { ...info, sessionID: source.threadId })
+      info: mergeMessage(pending?.info, {
+        ...info,
+        sessionID: source.threadId,
+        // Only assistant messages carry an author. A user message already knows
+        // it is the user, and stamping one would claim a participant wrote it.
+        ...(source.author && info.role === 'assistant' ? { author: source.author } : {})
+      })
     })
     this.scheduleFlush()
   }

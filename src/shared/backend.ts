@@ -170,6 +170,12 @@ export interface BackendMessageOptions {
    *  it happens to be in, and infers the repository from whatever else it can
    *  see — one asked about a browser tab and guessed. */
   context?: string
+  /** Which room participant this message is addressed to.
+   *
+   *  Main routes on it: the message reaches that participant's own session,
+   *  which is how a reviewer can run on a different model from the builder in
+   *  one conversation. Absent on threads that never grew past a single agent. */
+  recipient?: string
 }
 
 /** Fill a newly-created thread's first turn from the owning backend's saved

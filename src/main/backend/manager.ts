@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { trimToolOutput } from '../../shared/tool-output'
+import { ROOM_ASSISTANT_ID, ROOM_EVERYONE } from '../../shared/room'
+import { catchUpFor, catchUpPrompt } from '../../shared/room-routing'
 import type { Backend } from './backend'
 import { threadContextPrompt } from './thread-context'
 import type {
@@ -106,6 +108,10 @@ interface ThreadBinding {
    *  and fell back to the global model — a toolbar that disagreed with the
    *  model the thread was actually running on. */
   model?: { providerID: string; modelID: string; variant?: string }
+  /** Which room role this thread runs, when it is a participant's hidden
+   *  thread. Stored here so the transcript path can name the author without an
+   *  asynchronous lookup, which every caller on that path assumes. */
+  roleId?: string
   /** This thread is the user's standing assistant.
    *
    *  It alone may read and message threads on other backends and in other
@@ -124,6 +130,8 @@ interface RoomManagerHandle {
   room(threadId: string): Promise<import('@shared/room').RoomState>
   setRecipient(threadId: string, recipient: string): Promise<import('@shared/room').RoomState>
   join(threadId: string, roleId: string): Promise<import('@shared/room').RoomParticipant | undefined>
+  touch(threadId: string, roleId: string, state?: import('@shared/room').ParticipantState): Promise<void>
+  briefFor(notes: import('@shared/room').JobNotes): string
   currentTeam(): Promise<import('@shared/room').RoomTeam | undefined>
   configureTeam(team: import('@shared/room').RoomTeam): Promise<import('@shared/room').RoomTeam>
   forget(threadId: string): Promise<void>
@@ -920,6 +928,7 @@ export class BackendManager {
     // parentID is what already hides a thread from the sidebar and blocks its
     // composer. A participant is driven through its room, never directly.
     binding.parentID = input.roomThreadId
+    binding.roleId = input.roleId
     this.save()
     return created.id
   }
@@ -1233,12 +1242,27 @@ export class BackendManager {
   }
 
   private transcriptSource(binding: ThreadBinding) {
+    // A participant's messages are recorded against the room, not its own
+    // hidden thread. The user sees one conversation; the separate sessions
+    // exist so a reviewer can run on a different model, not so the transcript
+    // splits into five lists nobody asked for. `author` is what keeps the
+    // builder and the reviewer distinguishable inside that one list.
+    const participant = binding.parentID ? binding.roleId : undefined
+    if (participant) {
+      return {
+        threadId: binding.parentID as string,
+        backendId: binding.backendId,
+        nativeSessionId: binding.nativeSessionId,
+        author: participant
+      }
+    }
     return {
       threadId: binding.id,
       backendId: binding.backendId,
       nativeSessionId: binding.nativeSessionId
     }
   }
+
 
   private session(binding: ThreadBinding, native?: SessionInfo): SessionInfo {
     return {
@@ -1718,7 +1742,69 @@ export class BackendManager {
     return this.transcripts.messages(threadId, limit)
   }
 
+  /** Which participant's session should run this message, if any.
+   *
+   *  Returns nothing for a thread with no room, for a message to BOSS, and for
+   *  a broadcast — all of which the room's own thread handles. Joining here
+   *  rather than earlier is what makes participants arrive when the work
+   *  reaches them: a reviewer exists once it is first addressed, not before. */
+  private async routeToParticipant(
+    threadId: string,
+    options?: BackendMessageOptions
+  ): Promise<string | undefined> {
+    const recipient = options?.recipient
+    if (!recipient || !this.rooms) return undefined
+    if (recipient === ROOM_ASSISTANT_ID || recipient === ROOM_EVERYONE) return undefined
+    const room = await this.rooms.room(threadId)
+    const existing = room.participants.find((entry) => entry.roleId === recipient)
+    // A stale participant has no session left: its old context was dropped
+    // rather than resent, so addressing it starts a fresh one that reads the
+    // job notes instead of a two-week-old transcript.
+    if (existing?.threadId && existing.state !== 'stale') return existing.threadId
+    const joined = await this.rooms.join(threadId, recipient)
+    return joined?.threadId
+  }
+
+  /** Run one room message inside a participant's session.
+   *
+   *  The participant is told what it missed while it was not addressed, so it
+   *  can read the room without acting on messages meant for someone else. That
+   *  catch-up is why several participants do not mean several copies of every
+   *  message: nothing is sent to anyone until they are spoken to. */
+  private async sendToParticipant(
+    roomThreadId: string,
+    participantThreadId: string,
+    parts: unknown[],
+    options?: BackendMessageOptions
+  ): Promise<void> {
+    const recipient = options?.recipient
+    const room = await this.rooms?.room(roomThreadId)
+    const participant = room?.participants.find((entry) => entry.roleId === recipient)
+    const missed = catchUpFor(this.transcripts?.messages(roomThreadId) ?? [], participant, now())
+    const notes = room ? this.rooms?.briefFor(room.notes) : undefined
+    const preface: unknown[] = []
+    // A participant that has never seen this room gets what the job agreed and
+    // decided, not the previous participant's transcript. A reviewer holding
+    // only the plan and the diff cannot be misled by the builder's account of
+    // itself, and that is exactly why its verdict is worth something.
+    if (missed.first && notes) preface.push({ type: 'text', text: `[JOB NOTES]\n${notes}` })
+    const catchUp = catchUpPrompt(missed.missed, recipient ?? '')
+    if (catchUp) preface.push({ type: 'text', text: catchUp })
+    if (recipient) await this.rooms?.touch(roomThreadId, recipient, 'working')
+    await this.sendMessage(participantThreadId, [...preface, ...parts], {
+      ...options,
+      // Cleared so the participant's own send does not try to route again.
+      recipient: undefined
+    })
+  }
+
   async sendMessage(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
+    // A message addressed to a room participant runs in that participant's own
+    // hidden session, which is how a reviewer can answer on a different model
+    // from the builder without either of them leaving the conversation. The
+    // room's own thread stays the visible one; only the run moves.
+    const routed = await this.routeToParticipant(threadId, options)
+    if (routed) return this.sendToParticipant(threadId, routed, parts, options)
     const binding = this.binding(threadId)
     // Stranded, not merely removed. A thread that left its worktree is back in
     // its project and can carry on; one whose worktree was reaped underneath it

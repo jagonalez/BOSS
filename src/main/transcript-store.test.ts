@@ -524,3 +524,40 @@ test('the local-id prefixes match the shared definition', () => {
   }
   assert.deepEqual(prefixes(local), prefixes(shared), 'the two prefix lists must stay identical')
 })
+
+test('a participant\'s reply lands in the room under its own name', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    const builder = { threadId: 'room-1', backendId: 'codex' as const, nativeSessionId: 'native-builder', author: 'builder' }
+    const reviewer = { threadId: 'room-1', backendId: 'claude' as const, nativeSessionId: 'native-reviewer', author: 'reviewer' }
+
+    store.recordMessage(builder, { id: 'm1', sessionID: 'native-builder', role: 'assistant', time: { created: 1 } })
+    store.recordMessage(reviewer, { id: 'm2', sessionID: 'native-reviewer', role: 'assistant', time: { created: 2 } })
+    store.flush()
+
+    const messages = store.messages('room-1')
+    assert.equal(messages.length, 2, 'the user reads one conversation, not one list per participant')
+    assert.equal(messages[0].info.author, 'builder')
+    assert.equal(messages[1].info.author, 'reviewer', 'two agents on two backends stay distinguishable')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('a user message in a room is never stamped with a participant name', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    const builder = { threadId: 'room-1', backendId: 'codex' as const, nativeSessionId: 'native-builder', author: 'builder' }
+
+    store.recordMessage(builder, { id: 'u1', sessionID: 'native-builder', role: 'user', time: { created: 1 } })
+    store.flush()
+
+    assert.equal(store.messages('room-1')[0].info.author, undefined, 'the user did not become the builder')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

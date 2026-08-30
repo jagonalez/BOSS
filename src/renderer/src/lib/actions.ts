@@ -2582,7 +2582,11 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   const mode = modeForSession(sessionID)
   const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
   const agent = mode === 'plan' ? 'plan' : cur.agent || 'build'
-  const options = { model: modelKey, agent, mode }
+  // Carried so main can route to the addressed participant's own session, and
+  // so the stored message says who it was for. A thread that never grew past
+  // one agent has no room state and sends exactly as it always did.
+  const recipient = cur.rooms[sessionID]?.recipient
+  const options = { model: modelKey, agent, mode, ...(recipient ? { recipient } : {}) }
   const queue = async (): Promise<boolean> => {
     try {
       const followUps = await OpenCode.addFollowUp(sessionID, body, attachments, options)
