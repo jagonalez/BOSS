@@ -129,3 +129,23 @@ test('a one-off agent does not change what kind of recipient it is', () => {
   const state = room([participant({ roleId: 'reviewer' })])
   assert.equal(recipientKind(state, 'reviewer@codex'), 'participant')
 })
+
+test('a thread with no roles offers its own agent by name', () => {
+  // Every thread opening addressed to BOSS made an ordinary conversation with
+  // Claude look like a BOSS chat.
+  const options = recipientOptions(room([]), 'Claude')
+  assert.equal(options[0].label, 'Claude')
+  assert.equal(options[0].kind, 'participant', 'it is who the user is talking to, not the assistant')
+})
+
+test('once a thread has roles, its own agent is no longer offered', () => {
+  // The roles are named, so this would be a second name for one of them.
+  const options = recipientOptions(room([participant({ roleId: 'builder', label: 'Builder' })]), 'Claude')
+  assert.deepEqual(options.map((option) => option.label), ['Builder', 'BOSS', 'Everyone'])
+})
+
+test('the chip names the thread agent rather than falling back to BOSS', () => {
+  const state = room([])
+  assert.equal(recipientLabel(state, 'agent', 'Codex'), 'Codex')
+  assert.equal(recipientKind(state, 'agent', 'Codex'), 'participant')
+})

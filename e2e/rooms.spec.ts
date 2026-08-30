@@ -4,21 +4,22 @@ import { backendCalls, expect, lastBackendCall, test } from './fixtures'
  *  message says who it is for. These scenarios cover what the user actually
  *  does with that — aim a message, change who it goes to, and see who spoke. */
 
-test('the composer always names who a message goes to', async ({ appPage }) => {
-  // A room never allows an unaddressed message. A thread that has never grown
-  // past one agent still addresses BOSS, so the chip is never empty and a
-  // message can never be sent into nowhere.
+test('the composer names the agent the thread runs on', async ({ appPage }) => {
+  // A room never allows an unaddressed message, and a thread that never grew
+  // past one agent addresses that agent. Defaulting to BOSS made every ordinary
+  // conversation look like a BOSS chat.
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
-  await expect(appPage.locator('.recipient-chip')).toHaveText(/BOSS/)
+  await expect(appPage.locator('.recipient-chip')).not.toHaveText(/BOSS/)
+  await expect(appPage.locator('.recipient-chip')).not.toBeEmpty()
 })
 
 test('picking a participant aims the next message at it', async ({ appPage }) => {
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
   await appPage.locator('.recipient-chip').click()
 
-  // BOSS and a broadcast are always offered; a room with no participants yet
-  // can still be talked to.
-  await expect(appPage.locator('.recipient-option')).toHaveCount(2)
+  // The thread's own agent, BOSS, and a broadcast. A thread with no roles yet
+  // can still be talked to, and BOSS is always reachable.
+  await expect(appPage.locator('.recipient-option')).toHaveCount(3)
   await appPage.locator('.recipient-option').filter({ hasText: 'Everyone' }).click()
 
   await expect(appPage.locator('.recipient-chip')).toHaveText(/Everyone/)
@@ -57,7 +58,7 @@ test('an unrecognised name is left alone, because a wrong aim is worse than none
   await composer.fill('@nobody do the thing')
 
   await expect(composer).toHaveValue('@nobody do the thing')
-  await expect(appPage.locator('.recipient-chip')).toHaveText(/BOSS/)
+  await expect(appPage.locator('.recipient-chip')).not.toHaveText(/BOSS/)
 })
 
 test('a sent message records who it was addressed to', async ({ appPage }) => {
@@ -67,7 +68,7 @@ test('a sent message records who it was addressed to', async ({ appPage }) => {
   await composer.press('Enter')
 
   const send = (await backendCalls(appPage, 'thread.send')).at(-1)
-  expect(send?.request).toMatchObject({ options: { recipient: 'boss' } })
+  expect(send?.request).toMatchObject({ options: { recipient: 'agent' } })
 })
 
 test('the sidebar leads with the assistant, not with a list of subsystems', async ({ appPage }) => {
@@ -121,7 +122,7 @@ test('a user message shows who it was addressed to', async ({ appPage }) => {
   await composer.fill('Status please.')
   await composer.press('Enter')
 
-  await expect(appPage.locator('.msg.user .msg-role .to').last()).toContainText('boss')
+  await expect(appPage.locator('.msg.user .msg-role .to').last()).toContainText('agent')
 })
 
 test('the setup buttons show their words', async ({ appPage }) => {

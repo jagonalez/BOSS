@@ -11,6 +11,12 @@ import type { SessionModel } from './opencode'
  *  role the user named in setup, so the ids here are opaque strings rather than
  *  a fixed union. */
 export const ROOM_ASSISTANT_ID = 'boss'
+/** The agent the thread itself runs on.
+ *
+ *  A thread that never grew into a room has one agent and no roles, so its
+ *  messages go to that agent — not to BOSS. Every thread opening addressed to
+ *  BOSS made an ordinary conversation with Claude look like a BOSS chat. */
+export const ROOM_THREAD_AGENT = 'agent'
 export const ROOM_USER_ID = 'you'
 
 /** Addressed to every participant. Each replies once; they never reply to each
@@ -140,7 +146,7 @@ export interface RoomState {
   recipient: string
 }
 
-export function emptyRoomState(recipient = ROOM_ASSISTANT_ID): RoomState {
+export function emptyRoomState(recipient = ROOM_THREAD_AGENT): RoomState {
   return { version: 1, participants: [], notes: { ...EMPTY_JOB_NOTES }, recipient }
 }
 

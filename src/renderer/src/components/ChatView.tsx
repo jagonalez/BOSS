@@ -1124,7 +1124,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
             <div className="composer-to">
               {recipientOpen && (
                 <div className="recipient-menu">
-                  {recipientOptions(room).map((option) => (
+                  {recipientOptions(room, backendLabel).map((option) => (
                     <button
                       key={option.id}
                       className={`recipient-option ${option.id === room.recipient ? 'active' : ''}`}
@@ -1164,11 +1164,11 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
                 </div>
               )}
               <button
-                className={`recipient-chip ${recipientKind(room, room.recipient)}`}
+                className={`recipient-chip ${recipientKind(room, room.recipient, backendLabel)}`}
                 onClick={() => setRecipientOpen((open) => !open)}
                 title="Who this message goes to"
               >
-                {recipientLabel(room, room.recipient)}
+                {recipientLabel(room, room.recipient, backendLabel)}
                 <span className="caret">▾</span>
               </button>
               {/* Who else is here, beside the chip rather than in a panel of

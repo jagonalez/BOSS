@@ -576,7 +576,7 @@ export function installE2EApi(boss: BossApi): void {
       { id: 'reviewer', label: 'Reviewer', backendId: 'claude', mode: 'plan' }
     ]
   }
-  const emptyRoom: RoomState = { version: 1, participants: [], notes: { agreed: [], decided: [], changed: [], updatedAt: 0 }, recipient: 'boss' }
+  const emptyRoom: RoomState = { version: 1, participants: [], notes: { agreed: [], decided: [], changed: [], updatedAt: 0 }, recipient: 'agent' }
   const rooms: Record<string, RoomState> = {}
 
   let workflowApprovalMode = 'ask'

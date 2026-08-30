@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { PARTICIPANT_STALE_AFTER_MS, ROOM_ASSISTANT_ID, ROOM_EVERYONE, addressable, emptyRoomState, findParticipant, isRoomShape, participantIsStale, resolveMention, stripLeadingMention } from './room.ts'
+import { PARTICIPANT_STALE_AFTER_MS, ROOM_ASSISTANT_ID, ROOM_EVERYONE, ROOM_THREAD_AGENT, addressable, emptyRoomState, findParticipant, isRoomShape, participantIsStale, resolveMention, stripLeadingMention } from './room.ts'
 import type { RoomParticipant, RoomState } from './room.ts'
 
 function participant(overrides: Partial<RoomParticipant> = {}): RoomParticipant {
@@ -19,9 +19,12 @@ function room(participants: RoomParticipant[]): RoomState {
   return { ...emptyRoomState(), participants }
 }
 
-test('a new room addresses BOSS, because it is the only participant that always exists', () => {
+test('a new thread addresses its own agent, not BOSS', () => {
+  // Defaulting to BOSS made every ordinary conversation look like a BOSS chat,
+  // whatever agent was actually running it. BOSS is something the user asks
+  // for; the thread's own agent is who they are already talking to.
   const state = emptyRoomState()
-  assert.equal(state.recipient, ROOM_ASSISTANT_ID, 'a room with no roles yet can still be talked to')
+  assert.equal(state.recipient, ROOM_THREAD_AGENT)
   assert.deepEqual(state.participants, [], 'roles join when the work reaches them, not up front')
 })
 

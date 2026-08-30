@@ -1,6 +1,6 @@
 import type { RoomState } from '../../../shared/room'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
-import { ROOM_ASSISTANT_ID, ROOM_EVERYONE, resolveMention } from '../../../shared/room.ts'
+import { ROOM_ASSISTANT_ID, ROOM_EVERYONE, ROOM_THREAD_AGENT, resolveMention } from '../../../shared/room.ts'
 
 /** One option in the recipient chip's menu. */
 export interface RecipientOption {
@@ -26,7 +26,7 @@ const STATE_DETAIL: Record<string, string> = {
  *  a broadcast come last and are always present: a room with no participants
  *  yet can still be talked to, and a broadcast that reaches nobody is harmless
  *  rather than an error. */
-export function recipientOptions(room: RoomState): RecipientOption[] {
+export function recipientOptions(room: RoomState, threadAgent?: string): RecipientOption[] {
   const participants = room.participants
     .filter((entry) => entry.state !== 'done')
     .map((entry) => ({
@@ -36,6 +36,12 @@ export function recipientOptions(room: RoomState): RecipientOption[] {
       kind: 'participant' as const
     }))
   return [
+    // The thread's own agent, first, and offered only while the thread has no
+    // roles yet. Once it is a room, its participants are named and this would
+    // be a second name for one of them.
+    ...(participants.length === 0 && threadAgent
+      ? [{ id: ROOM_THREAD_AGENT, label: threadAgent, detail: '', kind: 'participant' as const }]
+      : []),
     ...participants,
     { id: ROOM_ASSISTANT_ID, label: 'BOSS', detail: 'assistant', kind: 'assistant' as const },
     { id: ROOM_EVERYONE, label: 'Everyone', detail: 'one reply each', kind: 'everyone' as const }
@@ -60,17 +66,20 @@ export function splitOverride(recipient: string): { roleId: string; backendId?: 
   return { roleId: recipient.slice(0, at), backendId: recipient.slice(at + 1) }
 }
 
-export function recipientLabel(room: RoomState, id: string): string {
+export function recipientLabel(room: RoomState, id: string, threadAgent?: string): string {
   const { roleId, backendId } = splitOverride(id)
-  const label = recipientOptions(room).find((option) => option.id === roleId)?.label ?? 'BOSS'
+  const label = recipientOptions(room, threadAgent).find((option) => option.id === roleId)?.label
+    ?? threadAgent
+    ?? 'BOSS'
   // The agent is named only when it is not the one the role normally uses, so
   // an ordinary message stays one word.
   return backendId ? `${label} · ${backendId}` : label
 }
 
-export function recipientKind(room: RoomState, id: string): RecipientOption['kind'] {
+export function recipientKind(room: RoomState, id: string, threadAgent?: string): RecipientOption['kind'] {
   const { roleId } = splitOverride(id)
-  return recipientOptions(room).find((option) => option.id === roleId)?.kind ?? 'assistant'
+  return recipientOptions(room, threadAgent).find((option) => option.id === roleId)?.kind
+    ?? (roleId === ROOM_THREAD_AGENT ? 'participant' : 'assistant')
 }
 
 /** What typing in the composer should do to the chip.

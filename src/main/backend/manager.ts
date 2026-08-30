@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { trimToolOutput } from '../../shared/tool-output'
-import { ROOM_EVERYONE } from '../../shared/room'
+import { ROOM_EVERYONE, ROOM_THREAD_AGENT } from '../../shared/room'
 import { isBackendId } from '../../shared/backend'
 import { catchUpFor, catchUpPrompt } from '../../shared/room-routing'
 import type { Backend } from './backend'
@@ -1825,6 +1825,10 @@ export class BackendManager {
     // A broadcast is answered by each participant in turn, which the room's own
     // thread drives; there is no single session to route to.
     if (recipient === ROOM_EVERYONE) return undefined
+    // The thread's own agent is the thread. Nothing to route to, and nothing to
+    // join: this is what an ordinary conversation addresses before it has any
+    // roles in it.
+    if (recipient === ROOM_THREAD_AGENT) return undefined
     const room = await this.rooms.room(threadId)
     const existing = room.participants.find((entry) => entry.roleId === recipient)
     // A stale participant has no session left: its old context was dropped
