@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { trimToolOutput } from '../../shared/tool-output'
-import { ROOM_ASSISTANT_ID, ROOM_EVERYONE } from '../../shared/room'
+import { ROOM_EVERYONE } from '../../shared/room'
 import { catchUpFor, catchUpPrompt } from '../../shared/room-routing'
 import type { Backend } from './backend'
 import { threadContextPrompt } from './thread-context'
@@ -305,14 +305,6 @@ export class BackendManager {
   private notifications?: NotificationRouter
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private rooms?: RoomManagerHandle
-  /** Where a thread's current run should be recorded, when that is not its own
-   *  thread.
-   *
-   *  BOSS answers from one standing conversation wherever it is called, so a
-   *  question asked inside a room runs there but belongs in the room the user
-   *  asked it in. Without this its answer would land in a conversation the user
-   *  was not looking at. */
-  private readonly recordInto = new Map<string, { threadId: string; author: string }>()
   /** Which branch each thread's current run belongs to, if any.
    *
    *  Per thread rather than one shared value: two threads run at once, and a
@@ -1196,7 +1188,12 @@ export class BackendManager {
   private settleRunsOn(backendId: BackendId): void {
     for (const threadId of [...this.busyThreads]) {
       const binding = this.bindings.get(threadId)
-      if (binding?.backendId !== backendId) continue
+      if (!binding) continue
+      // A room runs on one backend while its participants run on others, which
+      // is the point. So a room left busy by a participant on the dead backend
+      // has to settle too, or its composer refuses every later message with no
+      // way back.
+      if (binding.backendId !== backendId && !this.hasBusyParticipantOn(threadId, backendId)) continue
       this.settleBusy(threadId)
       this.intentionalAborts.delete(threadId)
       this.transcripts?.finishRun(this.ownTranscriptSource(binding), 'error')
@@ -1292,16 +1289,6 @@ export class BackendManager {
     // exist so a reviewer can run on a different model, not so the transcript
     // splits into five lists nobody asked for. `author` is what keeps the
     // builder and the reviewer distinguishable inside that one list.
-    const redirect = this.recordInto.get(binding.id)
-    if (redirect) {
-      return {
-        threadId: redirect.threadId,
-        backendId: binding.backendId,
-        nativeSessionId: binding.nativeSessionId,
-        author: redirect.author,
-        ...(this.pendingBranch.get(redirect.threadId) ? { branchOf: this.pendingBranch.get(redirect.threadId) as string } : {})
-      }
-    }
     const participant = binding.parentID ? binding.roleId : undefined
     if (participant) {
       return {
@@ -1712,6 +1699,7 @@ export class BackendManager {
       })
     }
     this.pendingBranch.delete(threadId)
+    this.busyThreads.delete(threadId)
     void this.rooms?.forget(threadId)
     this.transcripts?.deleteThread(threadId)
     // The images belonged to the transcript, so they go with it rather than
@@ -1800,13 +1788,6 @@ export class BackendManager {
     return this.transcripts.messages(threadId, limit)
   }
 
-  /** The user's standing assistant thread, if one exists yet. */
-  private assistantThreadId(): string | undefined {
-    this.load()
-    for (const binding of this.bindings.values()) if (binding.assistant) return binding.id
-    return undefined
-  }
-
   /** Which participant's session should run this message, if any.
    *
    *  Returns nothing for a thread with no room, for a message to BOSS, and for
@@ -1822,10 +1803,6 @@ export class BackendManager {
     // A broadcast is answered by each participant in turn, which the room's own
     // thread drives; there is no single session to route to.
     if (recipient === ROOM_EVERYONE) return undefined
-    // BOSS answers from its own standing conversation, wherever it is called.
-    // Running it on the room's agent would make it a different assistant in
-    // every thread, holding none of what it knows about the rest of the work.
-    if (recipient === ROOM_ASSISTANT_ID) return this.assistantThreadId()
     const room = await this.rooms.room(threadId)
     const existing = room.participants.find((entry) => entry.roleId === recipient)
     // A stale participant has no session left: its old context was dropped
@@ -1878,10 +1855,7 @@ export class BackendManager {
       await this.sendMessage(participantThreadId, [...preface, ...parts], {
         ...options,
         // Cleared so the participant's own send does not try to route again.
-        recipient: undefined,
-        ...(recipient === ROOM_ASSISTANT_ID
-          ? { recordInto: { threadId: roomThreadId, author: ROOM_ASSISTANT_ID } }
-          : {})
+        recipient: undefined
       })
     } catch (error) {
       // The room was marked busy for a run that never started. Left set, its
@@ -1902,15 +1876,18 @@ export class BackendManager {
    *  user sees busy. Kept in one helper rather than repeated at each of the
    *  places a run can end, where one would eventually be forgotten and leave a
    *  room permanently unable to accept a message. */
+  /** Whether a room has a participant running on a backend that just died. */
+  private hasBusyParticipantOn(roomThreadId: string, backendId: BackendId): boolean {
+    for (const candidate of this.busyThreads) {
+      const binding = this.bindings.get(candidate)
+      if (binding?.parentID === roomThreadId && binding.backendId === backendId) return true
+    }
+    return false
+  }
+
   private settleBusy(threadId: string): boolean {
     const wasBusy = this.busyThreads.delete(threadId)
-    // Read before it is cleared: it is what says which room this run was
-    // answering into.
-    const parent = this.bindings.get(threadId)?.parentID ?? this.recordInto.get(threadId)?.threadId
-    // Where a thread's output goes belongs to one run. Left set, a late event
-    // from a finished run — or the next direct message to the same thread —
-    // would be recorded into a room the user is no longer looking at.
-    this.recordInto.delete(threadId)
+    const parent = this.bindings.get(threadId)?.parentID
     if (!parent || !this.busyThreads.delete(parent)) return wasBusy
     const parentBinding = this.bindings.get(parent)
     if (parentBinding) {
@@ -1930,14 +1907,14 @@ export class BackendManager {
     // room's own thread stays the visible one; only the run moves.
     const routed = await this.routeToParticipant(threadId, options)
     if (routed) {
-      // Both must be free. The room, because the user sees one conversation and
-      // a second message while someone is answering must queue exactly as it
-      // would in an ordinary thread. The participant too, because BOSS answers
-      // from one standing conversation shared by every room — without this,
-      // asking it from two rooms at once crossed their replies and left the
-      // first room permanently busy.
-      const busy = this.busyThreads.has(threadId) || this.busyThreads.has(routed)
-      if (busy && !this.followUpDeliveries.has(threadId)) throw new Error(THREAD_BUSY_ERROR)
+      // Checked against the room, because the user sees one conversation: a
+      // second message while someone is answering must queue exactly as it
+      // would in an ordinary thread. The participant needs no separate check —
+      // every participant belongs to exactly one room, so a busy room already
+      // means a busy participant.
+      if (this.busyThreads.has(threadId) && !this.followUpDeliveries.has(threadId)) {
+        throw new Error(THREAD_BUSY_ERROR)
+      }
       return this.sendToParticipant(threadId, routed, parts, options)
     }
     const binding = this.binding(threadId)
@@ -1974,18 +1951,10 @@ export class BackendManager {
     binding.updatedAt = now()
     this.save()
     // Set before the run opens, because opening it reads where this thread's
-    // messages belong. Left until after, the run row was written against the
-    // previous message's destination.
-    //
-    // The branch keeps a question and its answer together, or a point taken
-    // aside would answer in the main stream. The redirect exists because BOSS
-    // answers from one standing conversation wherever it is called, so a
-    // question asked in a room runs there but belongs in the room the user
-    // asked from. Both are cleared when the run settles.
+    // messages belong. The branch keeps a question and its answer together, or
+    // a point taken aside would answer in the main stream.
     if (options?.branchOf) this.pendingBranch.set(threadId, options.branchOf)
     else this.pendingBranch.delete(threadId)
-    if (options?.recordInto) this.recordInto.set(threadId, options.recordInto)
-    else this.recordInto.delete(threadId)
     this.transcripts?.beginRun(this.ownTranscriptSource(binding))
 
     // Carried as a message part, not only in the context prompt: opencode and
@@ -2322,7 +2291,8 @@ export class BackendManager {
       projectPath: binding.projectPath,
       executionPath: binding.executionPath,
       busy: this.busyThreads.has(binding.id),
-      ...(binding.assistant ? { assistant: true as const } : {})
+      ...(binding.assistant ? { assistant: true as const } : {}),
+      ...(binding.parentID ? { participant: true as const } : {})
     }
   }
 

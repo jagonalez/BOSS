@@ -32,6 +32,15 @@ export interface RoomHost {
   roomPaths(roomThreadId: string): { projectPath: string; executionPath: string } | undefined
 }
 
+/** BOSS's own role, taken from whichever configured role reads rather than
+ *  writes. It coordinates and never edits code, so it inherits a reader's
+ *  permissions and the strongest agent the user connected. */
+function assistantRole(team: RoomTeam): RoomRole | undefined {
+  const reader = team.roles.find((role) => role.mode === 'plan') ?? team.roles[0]
+  if (!reader) return undefined
+  return { id: ROOM_ASSISTANT_ID, label: 'BOSS', backendId: reader.backendId, mode: 'plan' }
+}
+
 /** Roles BOSS proposes when a user has connected agents but never opened setup.
  *
  *  These are defaults, not a fixed vocabulary. The user renames them freely, so
@@ -163,7 +172,13 @@ export class RoomManager {
       await this.load()
       const team = this.team
       if (!team) return undefined
-      const role = team.roles.find((entry) => entry.id === roleId)
+      // BOSS is a participant in every room, not a role the user configures.
+      // It joins the same way as the rest: one session per room, reading that
+      // room. It holds a map of what exists rather than transcripts, so a copy
+      // per room loses nothing and gains the room it is standing in.
+      const role = roleId === ROOM_ASSISTANT_ID
+        ? assistantRole(team)
+        : team.roles.find((entry) => entry.id === roleId)
       if (!role) return undefined
       const room = this.rooms[threadId] ?? emptyRoomState()
       const existing = room.participants.find((entry) => entry.roleId === roleId)

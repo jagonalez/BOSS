@@ -261,3 +261,39 @@ test('a job that recorded nothing hands a fresh agent an empty brief, not a brok
   assert.equal(h.manager.briefFor(room.notes), '', 'nothing to say is said as nothing')
   await h.cleanup()
 })
+
+test('BOSS joins any room without being a configured role', async () => {
+  // It is a participant in every room, not something the user sets up. One
+  // session per room, reading that room.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  const joined = await h.manager.join('room-1', 'boss')
+  assert.equal(joined?.roleId, 'boss')
+  assert.equal(joined?.label, 'BOSS')
+  await h.cleanup()
+})
+
+test('BOSS in two rooms gets a session each, so neither can cross the other', async () => {
+  // One shared session meant two rooms raced: their replies crossed and the
+  // first room was left permanently busy.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  const first = await h.manager.join('room-1', 'boss')
+  const second = await h.manager.join('room-2', 'boss')
+  assert.notEqual(first?.threadId, second?.threadId)
+  await h.cleanup()
+})
+
+test('BOSS reads rather than writes, whatever the user named their roles', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  const joined = await h.manager.join('room-1', 'boss')
+  assert.equal(joined?.backendId, 'claude', 'it takes the agent behind a reading role')
+  await h.cleanup()
+})
+
+test('BOSS cannot join before the user has a team', async () => {
+  const h = await harness()
+  assert.equal(await h.manager.join('room-1', 'boss'), undefined)
+  await h.cleanup()
+})

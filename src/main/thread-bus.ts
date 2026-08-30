@@ -652,6 +652,12 @@ export class ThreadBus {
     // backend and one project would leave it unable to do the only job it has.
     // Every other agent stays fenced: a worker has no business steering someone
     // else's work, and the fence is what makes that true rather than hoped for.
+    // A room's participants are driven by their room, never addressed directly.
+    // A message straight to one skips the catch-up and the room's busy
+    // tracking, and lands a reply in a conversation whose composer believes it
+    // is idle. Hiding them from the listing was not enough: an id learned any
+    // other way reached them just the same.
+    if (target.participant) throw new Error('That thread belongs to a room. Message the room instead.')
     if (caller.assistant) return target
     if (target.backendId !== caller.backendId) throw new Error('Agent communication is limited to threads on the same backend.')
     if (target.projectId !== caller.projectId) throw new Error('Agent communication is limited to threads in the same project.')

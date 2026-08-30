@@ -21,6 +21,10 @@ export interface ThreadBusThread {
    *  than checking a title keeps that exemption to exactly one thread the app
    *  itself created. */
   assistant?: boolean
+  /** One agent inside a room, running in a hidden thread its room drives. Not
+   *  addressable on its own: doing so skips the catch-up and the room's busy
+   *  tracking. */
+  participant?: boolean
 }
 
 export interface ThreadBusMessage {

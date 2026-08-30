@@ -148,3 +148,24 @@ test('a room with no branches leaves the stream untouched', () => {
   assert.equal(main.length, 1)
   assert.equal(branches.size, 0)
 })
+
+test('an untimed message appended after the cut-off still reaches the participant', () => {
+  // Parts that arrive before their message are appended with no timestamp at
+  // all. Deciding message by message dropped exactly those, and a participant
+  // then acted on stale context with no sign anything was withheld.
+  const messages = [
+    message('m1', 'user', 'before', { at: 10 }),
+    message('m2', 'assistant', 'orphan part', { author: 'builder' })
+  ]
+  const result = catchUpFor(messages, participant({ lastActiveAt: 20 }), 100)
+  assert.deepEqual(
+    result.missed.map((entry) => entry.info.id),
+    ['m2'],
+    'everything after the last message it certainly saw is what it missed'
+  )
+})
+
+test('a participant that has seen everything catches up on nothing', () => {
+  const messages = [message('m1', 'user', 'old', { at: 10 })]
+  assert.deepEqual(catchUpFor(messages, participant({ lastActiveAt: 50 }), 100).missed, [])
+})

@@ -86,7 +86,11 @@ The user's real pattern is different:
 ### BOSS
 
 15. BOSS is a participant, not a page. It appears in the sidebar as a standing
-    conversation and can be addressed inside any room.
+    conversation, and joins each room as a participant of its own — one session
+    per room, reading that room. A single shared session raced: two rooms
+    addressing it at once crossed their replies and left one permanently unable
+    to accept a message. It holds a map of what exists rather than transcripts,
+    so a copy per room loses nothing.
 16. BOSS **quotes** other agents verbatim and links to the room. It does not
     write its own summary of work it did not see. There is nothing for it to get
     wrong, and its context stays small.
@@ -168,9 +172,17 @@ elsewhere, so without this the room's composer stayed open and a second message
 started a competing run. Both the room and the participant must be free before a
 message routes, because BOSS answers from one conversation shared by every room.
 
-**Where a run's output goes belongs to that run.** It is set before the run
-opens, since opening it reads the destination, and cleared when the run settles.
-Left set, a late event lands in a room the user has left.
+**Nothing shares a session across rooms.** An earlier version gave BOSS one
+session for every room and redirected where its output was recorded. Every race
+that followed came from that: two rooms crossing replies, a room stranded busy,
+a stale destination outliving its run. Removing the sharing removed all of them
+at once. If something must appear in two rooms, give it two sessions.
+
+**Catch-up cuts by position, not by reading each timestamp.** Stored order is
+not time order: a part that arrives before its message is appended at the end
+with no timestamp at all. Deciding message by message dropped exactly those, and
+a dropped message means a participant acting on stale context with no sign
+anything was withheld.
 
 ## Open questions
 

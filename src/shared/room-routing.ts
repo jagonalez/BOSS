@@ -50,21 +50,20 @@ export function catchUpFor(
   // in the past and hand the participant nothing at all. Trusting the earlier
   // of the two costs a little repetition and never hides a message.
   const since = Math.min(participant.lastActiveAt, now)
-  let seen = false
-  const missed = messages.filter((message) => {
+  // Cut by position, not by reading each timestamp in turn.
+  //
+  // The list is in the order messages were stored, which is not the order they
+  // were timed: a part that arrives before its message is appended at the end
+  // with no timestamp at all. Deciding message by message therefore dropped
+  // exactly those, and dropping one silently lets a participant act on stale
+  // context with no sign anything was withheld. Everything after the last
+  // message the participant has certainly seen is what it missed.
+  let lastSeen = -1
+  messages.forEach((message, index) => {
     const at = message.info.time?.created
-    // No timestamp is not the same as old. Locally-authored messages carry
-    // none, and dropping them silently would let a participant act on stale
-    // context with no sign anything was withheld. Once the cut-off is passed,
-    // everything after it belongs to the catch-up.
-    if (at === undefined) return seen
-    if (at > since) {
-      seen = true
-      return true
-    }
-    return false
+    if (at !== undefined && at <= since) lastSeen = index
   })
-  return { missed, first: false }
+  return { missed: messages.slice(lastSeen + 1), first: false }
 }
 
 /** Render caught-up messages for a participant that was not addressed in them.
