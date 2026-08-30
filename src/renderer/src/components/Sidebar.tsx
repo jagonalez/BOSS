@@ -323,6 +323,17 @@ function ResourceRow({ resource }: { resource: OwnedResource }): React.JSX.Eleme
   )
 }
 
+/** The three lists the sidebar can show, one at a time.
+ *
+ *  - `work` — the projects and their threads. Where the user spends the day.
+ *  - `attention` — what is blocked, finished, or still running.
+ *  - `chats` — conversations that belong to no project.
+ *
+ *  They used to be stacked in one column, which read as three unrelated things
+ *  competing for the same space and left the projects unreachable on a short
+ *  screen. */
+type SidebarTab = 'work' | 'attention' | 'chats'
+
 export function Sidebar(): React.JSX.Element {
   const sessions = useStore(appStore, (s) => s.sessions)
   const projects = useStore(appStore, (s) => s.projects)
@@ -418,6 +429,16 @@ export function Sidebar(): React.JSX.Element {
     [reviewBuckets, filter]
   )
 
+  /** How many threads want the user, counted before the filter.
+   *
+   *  A filter narrows what is on screen; it must not make a waiting thread
+   *  look like it has gone away. The badge is how a user in another tab knows
+   *  to switch, which is the whole reason the lists can be separated. */
+  const attentionCount = useMemo(
+    () => reviewBuckets.reduce((total, bucket) => total + bucket.threads.length, 0),
+    [reviewBuckets]
+  )
+
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   /** Where the menu ends up once its height is known.
@@ -442,6 +463,27 @@ export function Sidebar(): React.JSX.Element {
    *  hides the payload until the drop, so the line has nothing else to follow. */
   const [dragProject, setDragProject] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<{ path: string; before: boolean } | null>(null)
+  /** Which list the panel is showing.
+   *
+   *  Stacked, the three lists fought for one column: what needed the user took
+   *  the top, the projects were squeezed into a sliver, and on a short screen
+   *  the projects were off the bottom entirely. One at a time, each gets the
+   *  whole height.
+   *
+   *  Remembered, because the tab a user works in is the one they want back when
+   *  they reopen the app. */
+  const [tab, setTab] = useState<SidebarTab>(() => {
+    try {
+      const saved = localStorage.getItem('boss.sidebarTab')
+      return saved === 'attention' || saved === 'chats' ? saved : 'work'
+    } catch {
+      return 'work'
+    }
+  })
+  const showTab = (next: SidebarTab): void => {
+    setTab(next)
+    try { localStorage.setItem('boss.sidebarTab', next) } catch { /* a forgotten tab is not worth an error */ }
+  }
   const [sidebarHidden, setSidebarHidden] = useState(() => {
     try { return localStorage.getItem('boss.sidebarHidden') === 'true' } catch { return false }
   })
@@ -663,18 +705,51 @@ export function Sidebar(): React.JSX.Element {
       </nav>
       <div className="sidebar-section-rule" />
 
-      {/* No tabs. The user scans for what needs them, then works; a tab hides
-          half of that behind a click. Attention sits above the work below, and
-          projectless chats get a heading rather than a place of their own.
-          The two ways to start something are named: as bare icons in an empty
-          row they said nothing about what they would do. */}
-      <div className="sidebar-tabs">
-        <button className="sidebar-start" onClick={() => void newGlobalChat()}>
-          <ChatIcon size={13} /><span>New chat</span>
+      {/* One list at a time. Stacked, they competed for one column: what needed
+          the user took the top, the projects were squeezed into a sliver, and
+          on a short screen the projects fell off the bottom. A count on the tab
+          is what a stacked list was really for — seeing there is something
+          there without having to look at it. */}
+      <div className="sidebar-tabs" role="tablist" aria-label="Sidebar lists">
+        <button
+          role="tab"
+          aria-selected={tab === 'work'}
+          className={`sidebar-tab ${tab === 'work' ? 'active' : ''}`}
+          onClick={() => showTab('work')}
+        >
+          Work
         </button>
-        <button className="sidebar-start" onClick={() => void openProjectFolder()}>
-          <PlusIcon size={13} /><span>Add project</span>
+        <button
+          role="tab"
+          aria-selected={tab === 'attention'}
+          className={`sidebar-tab ${tab === 'attention' ? 'active' : ''}`}
+          onClick={() => showTab('attention')}
+        >
+          Needs you{attentionCount ? <small>{attentionCount}</small> : null}
         </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'chats'}
+          className={`sidebar-tab ${tab === 'chats' ? 'active' : ''}`}
+          onClick={() => showTab('chats')}
+        >
+          Chats{looseChats.length ? <small>{looseChats.length}</small> : null}
+        </button>
+      </div>
+
+      {/* The two ways to start something, named. As bare icons they said
+          nothing about what they would do. Each starts what its own tab holds:
+          a project under Work, a chat under Chats. */}
+      <div className="sidebar-starts">
+        {tab === 'chats' ? (
+          <button className="sidebar-start" onClick={() => void newGlobalChat()}>
+            <ChatIcon size={13} /><span>New chat</span>
+          </button>
+        ) : (
+          <button className="sidebar-start" onClick={() => void openProjectFolder()}>
+            <PlusIcon size={13} /><span>Add project</span>
+          </button>
+        )}
       </div>
 
       {/* One box for everything below it: projects, their threads, and the
@@ -692,9 +767,13 @@ export function Sidebar(): React.JSX.Element {
         ) : null}
       </div>
 
-      {/* What needs the user, above the work rather than behind a tab. This is
-          how they actually scan: not "which project", but "what is waiting". */}
-      {visibleBuckets.length > 0 ? (
+      {/* Its own tab, with the whole height. Above the work it took the top of
+          the column and pushed the projects out of reach; the count on the tab
+          is what actually told the user something was waiting. */}
+      {tab === 'attention' ? (
+        visibleBuckets.length === 0 ? (
+          <div className="sidebar-empty">{filter ? 'Nothing matches' : 'Nothing needs you'}</div>
+        ) : (
         <div className="sidebar-section attention">
           {visibleBuckets.map((bucket) => (
             <React.Fragment key={bucket.label}>
@@ -718,9 +797,10 @@ export function Sidebar(): React.JSX.Element {
             </React.Fragment>
           ))}
         </div>
+        )
       ) : null}
 
-      <div className="sidebar-section projects">
+      <div className="sidebar-section projects" hidden={tab !== 'work'}>
         <div
           className="list"
           ref={projectsRef}
@@ -833,16 +913,20 @@ export function Sidebar(): React.JSX.Element {
       </div>
       </div>
 
-      {/* Under a heading with everything else. A chat that belongs to no
-          project is not a different kind of thing, and it did not earn a tab. */}
-      {looseChats.length > 0 ? (
-        <div className="sidebar-section chats">
-          <div className="section-label">No project<small>{looseChats.length}</small></div>
-          <div className="list">{looseChats.map(threadRow)}</div>
-        </div>
+      {/* Its own tab. Under a heading beneath the projects it read as a third
+          kind of thing wedged into the same column, and it was the first thing
+          squeezed out when the screen got shorter. */}
+      {tab === 'chats' ? (
+        looseChats.length === 0 ? (
+          <div className="sidebar-empty">{filter ? 'Nothing matches' : 'No chats yet'}</div>
+        ) : (
+          <div className="sidebar-section chats">
+            <div className="list">{looseChats.map(threadRow)}</div>
+          </div>
+        )
       ) : null}
 
-      {archivedSessions.length > 0 && (
+      {tab === 'work' && archivedSessions.length > 0 && (
         <>
           <div className="section-label">Archived</div>
           <div className="list">

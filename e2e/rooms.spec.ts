@@ -151,21 +151,55 @@ test('the assistant page is the conversation, not a control panel', async ({ app
   await expect(appPage.locator('.product-section')).toHaveCount(0)
 })
 
-test('the sidebar shows what needs you above the work, not behind a tab', async ({ appPage }) => {
-  // Three tabs — projects, chats, review — hid half of what the user scans for
-  // behind a click. They open the app to find what is waiting, so it is first.
-  await expect(appPage.locator('.sidebar-tab')).toHaveCount(0)
+test('the sidebar shows one list at a time, so each gets the whole height', async ({ appPage }) => {
+  // Stacked, the three fought for one column: what needed the user took the
+  // top, the projects were squeezed into a sliver, and on a short screen the
+  // projects fell off the bottom entirely.
+  await expect(appPage.locator('.sidebar-tab')).toHaveCount(3)
   await expect(appPage.locator('.sidebar-section.projects')).toBeVisible()
-  // Both ways to start something say what they do. As bare icons in an empty
-  // row they explained nothing.
-  await expect(appPage.locator('.sidebar-start')).toHaveText(['New chat', 'Add project'])
+  await expect(appPage.locator('.sidebar-section.attention')).toHaveCount(0)
+  await expect(appPage.locator('.sidebar-section.chats')).toHaveCount(0)
 })
 
-test('a chat with no project sits under a heading, not in its own place', async ({ appPage }) => {
-  // It is not a different kind of thing, and it did not earn a tab.
-  const loose = appPage.locator('.sidebar-section.chats')
-  if (await loose.count() === 0) return
-  await expect(loose.locator('.section-label')).toContainText('No project')
+test('the projects list fills the panel rather than a share of it', async ({ appPage }) => {
+  // The complaint that started this: on a smaller screen barely one project was
+  // reachable, because two other lists were taking the column above it.
+  const panel = appPage.locator('.sidebar')
+  const projects = appPage.locator('.sidebar-section.projects')
+  const panelBox = await panel.boundingBox()
+  const projectsBox = await projects.boundingBox()
+  expect(projectsBox && panelBox).toBeTruthy()
+  expect(projectsBox!.height).toBeGreaterThan(panelBox!.height * 0.4)
+})
+
+test('switching tab swaps the list', async ({ appPage }) => {
+  await appPage.locator('.sidebar-tab', { hasText: 'Chats' }).click()
+  await expect(appPage.locator('.sidebar-section.projects')).toBeHidden()
+
+  await appPage.locator('.sidebar-tab', { hasText: 'Work' }).click()
+  await expect(appPage.locator('.sidebar-section.projects')).toBeVisible()
+})
+
+test('the start button matches the list it is under', async ({ appPage }) => {
+  // One button, for what this tab holds. Two side by side meant the one that
+  // did nothing for the list on screen was always half of the row.
+  await expect(appPage.locator('.sidebar-start')).toHaveText(['Add project'])
+
+  await appPage.locator('.sidebar-tab', { hasText: 'Chats' }).click()
+  await expect(appPage.locator('.sidebar-start')).toHaveText(['New chat'])
+})
+
+test('an empty list says so rather than showing nothing', async ({ appPage }) => {
+  // A blank panel reads as a bug. It is also the common case for what needs
+  // you, which is the answer the user most wants to be sure of.
+  await appPage.locator('.sidebar-tab', { hasText: 'Needs you' }).click()
+  await expect(appPage.locator('.sidebar-empty')).toBeVisible()
+})
+
+test('the tab a user left in is the one they come back to', async ({ appPage }) => {
+  await appPage.locator('.sidebar-tab', { hasText: 'Chats' }).click()
+  const stored = await appPage.evaluate(() => localStorage.getItem('boss.sidebarTab'))
+  expect(stored).toBe('chats')
 })
 
 test('the team can be changed after setup', async ({ appPage }) => {
@@ -295,4 +329,22 @@ test('a card sets a decision apart from the prose', async ({ appPage }) => {
   // At most two: one way forward and one way out. More is a form.
   const actions = card.first().locator('.room-card-actions button:not(.room-card-link)')
   expect(await actions.count()).toBeLessThanOrEqual(2)
+})
+
+test('the composer names who the message is going to, not which model runs it', async ({ appPage }) => {
+  // It named the backend, so a message aimed at the reviewer invited the user
+  // to "Ask Claude" — the one name in the room that nobody is called.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.recipient-chip').click()
+  await appPage.locator('.recipient-option').filter({ hasText: 'BOSS' }).click()
+
+  await expect(appPage.getByPlaceholder('Ask BOSS…')).toBeVisible()
+})
+
+test('the composer follows the chip when the recipient changes', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.recipient-chip').click()
+  await appPage.locator('.recipient-option').filter({ hasText: 'Everyone' }).click()
+
+  await expect(appPage.getByPlaceholder('Ask Everyone…')).toBeVisible()
 })

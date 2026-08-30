@@ -7,6 +7,8 @@ import { trimToolOutput } from '../../shared/tool-output'
 import { ROOM_EVERYONE, ROOM_THREAD_AGENT } from '../../shared/room'
 import { isBackendId } from '../../shared/backend'
 import { catchUpFor, catchUpPrompt } from '../../shared/room-routing'
+import { briefForRole, HANDOVER_PROMPT } from '../../shared/room-brief'
+import { runCommand } from '../review-provider'
 import type { Backend } from './backend'
 import { threadContextPrompt } from './thread-context'
 import type {
@@ -939,6 +941,10 @@ export class BackendManager {
     roleId: string
     backendId: BackendId
     executionPath: string
+    /** The reach the user chose for this role in setup. Applied to the session
+     *  rather than only stored: a reviewer set to read-only could otherwise
+     *  edit the code it was brought in to check. */
+    mode?: BackendModeId
   }): Promise<string> {
     const room = this.binding(input.roomThreadId)
     const created = await this.sessionCreateInScope(
@@ -953,6 +959,7 @@ export class BackendManager {
     // composer. A participant is driven through its room, never directly.
     binding.parentID = input.roomThreadId
     binding.roleId = input.roleId
+    if (input.mode) binding.mode = input.mode
     this.save()
     return created.id
   }
@@ -1843,6 +1850,59 @@ export class BackendManager {
     return joined?.threadId
   }
 
+  /** What one participant is told about itself, once, when it first speaks.
+   *
+   *  Without this every role was the same agent under a different name: the
+   *  reviewer was never told it reviews, and nobody was told that job notes are
+   *  the only thing that survives them. */
+  private async roleBrief(roleId: string | undefined): Promise<string | undefined> {
+    if (!roleId) return undefined
+    const team = await this.rooms?.currentTeam()
+    const role = team?.roles.find((entry) => entry.id === roleId)
+    // A role the team no longer holds still gets the shared part under its own
+    // id, which is more useful than starting an agent with nothing at all.
+    return briefForRole(role ?? { id: roleId, label: roleId })
+  }
+
+  /** What has changed in the room's checkout, for an agent that just arrived.
+   *
+   *  Read from the working tree rather than from the backend that made the
+   *  changes. Two of the backends report no diff at all, and a reviewer given
+   *  the builder's own account of what it changed is exactly the reviewer the
+   *  user said they do not trust. Every participant shares one checkout, so the
+   *  tree is the honest answer for all of them.
+   *
+   *  Names and line counts only. The agent reads the files itself; a full patch
+   *  would cost more than the whole rest of the brief and go stale the moment
+   *  anything moved. */
+  private async roomDiff(roomThreadId: string): Promise<string | undefined> {
+    const paths = this.rooms ? this.roomPaths(roomThreadId) : undefined
+    const cwd = paths?.executionPath
+    if (!cwd) return undefined
+    const [tracked, untracked] = await Promise.all([
+      runCommand('git', ['diff', '--stat', 'HEAD'], cwd),
+      runCommand('git', ['ls-files', '--others', '--exclude-standard'], cwd)
+    ])
+    // A path that is not a repository, or a git that is not there. Nothing to
+    // report is not a failure worth interrupting a run for.
+    if (tracked.code !== 0) return undefined
+    const changed = tracked.stdout.trim()
+    const added = untracked.code === 0
+      ? untracked.stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+      : []
+    if (!changed && added.length === 0) return undefined
+    const lines = ['[WHAT HAS CHANGED IN THIS CHECKOUT]']
+    if (changed) lines.push(changed)
+    // Capped because an untracked build directory can run to thousands of
+    // files, and the count alone tells the agent to go and look.
+    if (added.length > 0) {
+      lines.push('', 'New files:', ...added.slice(0, 40).map((path) => `  ${path}`))
+      if (added.length > 40) lines.push(`  …and ${added.length - 40} more`)
+    }
+    lines.push('', 'Read the files themselves. This is a list, not the change.')
+    return lines.join('\n')
+  }
+
   /** Run one room message inside a participant's session.
    *
    *  The participant is told what it missed while it was not addressed, so it
@@ -1861,11 +1921,18 @@ export class BackendManager {
     const missed = catchUpFor(this.transcripts?.messages(roomThreadId) ?? [], participant, now())
     const notes = room ? this.rooms?.briefFor(room.notes) : undefined
     const preface: unknown[] = []
-    // A participant that has never seen this room gets what the job agreed and
-    // decided, not the previous participant's transcript. A reviewer holding
-    // only the plan and the diff cannot be misled by the builder's account of
-    // itself, and that is exactly why its verdict is worth something.
-    if (missed.first && notes) preface.push({ type: 'text', text: `[JOB NOTES]\n${notes}` })
+    // A participant that has never seen this room is told who it is, what the
+    // job agreed and decided, and what has changed on disk — not the previous
+    // participant's transcript. A reviewer holding only the plan and the diff
+    // cannot be misled by the builder's account of itself, and that is exactly
+    // why its verdict is worth something.
+    if (missed.first) {
+      const brief = await this.roleBrief(recipient)
+      if (brief) preface.push({ type: 'text', text: brief })
+      if (notes) preface.push({ type: 'text', text: `[JOB NOTES]\n${notes}` })
+      const diff = await this.roomDiff(roomThreadId)
+      if (diff) preface.push({ type: 'text', text: diff })
+    }
     const catchUp = catchUpPrompt(missed.missed, recipient ?? '')
     if (catchUp) preface.push({ type: 'text', text: catchUp })
     if (recipient) await this.rooms?.touch(roomThreadId, recipient, 'working')
@@ -1906,22 +1973,37 @@ export class BackendManager {
     return false
   }
 
-  /** Bring in whoever follows the participant that just finished.
+  /** Bring in whoever follows the participant that just finished, and start it.
    *
    *  They arrive when the work reaches them, not up front: a reviewer with
    *  nothing yet to read would burn a session and go stale before it was
-   *  useful. Best effort — a handover that cannot start must not fail the run
-   *  that just succeeded. */
+   *  useful.
+   *
+   *  Starting it is the point. Joining alone only aimed the composer at the
+   *  next agent and then waited, so the user had to type something to make a
+   *  reviewer read a diff it had already been handed — which is not a shape
+   *  running, it is a shape asking to be driven by hand.
+   *
+   *  Best effort: a handover that cannot start must not fail the run that just
+   *  succeeded. */
   private async handOver(threadId: string): Promise<void> {
     const binding = this.bindings.get(threadId)
     const room = binding?.parentID
     const finished = binding?.roleId
     if (!room || !finished || !this.rooms) return
     try {
+      // Back to reachable. It was set to 'working' when its run began and never
+      // set back, so the room showed every agent that had ever spoken as still
+      // running — and with a shape handing work along, that was all of them.
+      await this.rooms.touch(room, finished, 'active')
       const next = await this.rooms.nextAfter(room, finished)
       if (!next) return
       await this.rooms.join(room, next)
       await this.rooms.setRecipient(room, next)
+      // Sent as if the user had asked, because in choosing the shape they did.
+      // It goes through the room so the arriving agent gets its brief, the job
+      // notes, and the diff on the same path as any other first message.
+      await this.sendMessage(room, [{ type: 'text', text: HANDOVER_PROMPT }], { recipient: next })
     } catch {
       /* The run finished. A handover that will not start is not its failure. */
     }
@@ -1935,12 +2017,15 @@ export class BackendManager {
    *  room permanently unable to accept a message. */
   private settleBusy(threadId: string): boolean {
     const wasBusy = this.busyThreads.delete(threadId)
-    // A participant that just finished hands over to whoever comes next. Without
-    // this the shape stopped after its first agent: a reviewer never arrived
-    // when the builder finished, so "build and review" only ever built.
-    if (wasBusy) void this.handOver(threadId)
     const parent = this.bindings.get(threadId)?.parentID
-    if (!parent || !this.busyThreads.delete(parent)) return wasBusy
+    if (!parent || !this.busyThreads.delete(parent)) {
+      // A participant that just finished hands over to whoever comes next.
+      // Without this the shape stopped after its first agent: a reviewer never
+      // arrived when the builder finished, so "build and review" only ever
+      // built.
+      if (wasBusy) void this.handOver(threadId)
+      return wasBusy
+    }
     const parentBinding = this.bindings.get(parent)
     if (parentBinding) {
       this.emit({
@@ -1949,6 +2034,11 @@ export class BackendManager {
         backendId: parentBinding.backendId
       })
     }
+    // Handed over only once the room's own claim is released. The next
+    // participant is started by sending into the room, and the room refuses a
+    // message while it still believes it is busy — so a handover raised here
+    // any earlier would be refused by the run that caused it.
+    if (wasBusy) void this.handOver(threadId)
     return wasBusy
   }
 

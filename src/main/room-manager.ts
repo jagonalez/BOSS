@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { BackendId } from '../shared/backend'
+import type { BackendId, BackendModeId } from '../shared/backend'
 import type { JobNotes, RoomParticipant, RoomRole, RoomShape, RoomState, RoomTeam } from '../shared/room'
 // @ts-expect-error Node's type-stripping test runner needs the extension.
 import { PARTICIPANT_STALE_AFTER_MS, ROOM_ASSISTANT_ID, emptyRoomState, participantIsStale } from '../shared/room.ts'
@@ -26,6 +26,10 @@ export interface RoomHost {
     roleId: string
     backendId: BackendId
     executionPath: string
+    /** The reach the user chose for this role. Passed through so it is applied
+     *  to the session, not merely stored: a reviewer the user set to read-only
+     *  could otherwise edit the code it was brought in to check. */
+    mode?: BackendModeId
   }): Promise<string>
   /** Drop a participant's hidden thread once it goes stale. */
   disposeParticipantThread(threadId: string): Promise<void>
@@ -274,7 +278,11 @@ export class RoomManager {
         roomThreadId: threadId,
         roleId,
         backendId: runsOn,
-        executionPath: paths.executionPath
+        executionPath: paths.executionPath,
+        // The reach the user chose in setup. Stored on the role and never
+        // applied, it was a promise the app did not keep: a reviewer marked
+        // read-only could edit the code it was brought in to check.
+        ...(role.mode ? { mode: role.mode } : {})
       })
       const now = this.clock()
       const participant: RoomParticipant = {

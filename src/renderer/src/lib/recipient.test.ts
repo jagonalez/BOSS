@@ -149,3 +149,35 @@ test('the chip names the thread agent rather than falling back to BOSS', () => {
   assert.equal(recipientLabel(state, 'agent', 'Codex'), 'Codex')
   assert.equal(recipientKind(state, 'agent', 'Codex'), 'participant')
 })
+
+/** The composer's placeholder is the chip's answer, not the backend's name.
+ *
+ *  It used to name the model, so a message aimed at the reviewer invited the
+ *  user to "Ask Claude" — the one name in the room that nobody is called. */
+function asking(state: RoomState, threadAgent = 'Claude'): string {
+  return recipientLabel(state, splitOverride(state.recipient).roleId, threadAgent)
+}
+
+test('a plain chat invites the user to ask its own agent', () => {
+  assert.equal(asking(room([])), 'Claude')
+})
+
+test('a chat aimed at BOSS invites the user to ask BOSS', () => {
+  assert.equal(asking({ ...room([]), recipient: ROOM_ASSISTANT_ID }), 'BOSS')
+})
+
+test('a room aimed at a role invites the user to ask that role by name', () => {
+  const state = room([participant({ roleId: 'reviewer', label: 'Reviewer' })])
+  assert.equal(asking({ ...state, recipient: 'reviewer' }), 'Reviewer')
+})
+
+test('a broadcast invites the user to ask everyone', () => {
+  assert.equal(asking({ ...room([]), recipient: ROOM_EVERYONE }), 'Everyone')
+})
+
+test('a one-off agent is not repeated in the placeholder', () => {
+  // The chip beside it already names the agent. Repeated here it would make the
+  // placeholder longer than most of the messages typed into it.
+  const state = room([participant({ roleId: 'reviewer', label: 'Reviewer' })])
+  assert.equal(asking({ ...state, recipient: overrideFor('reviewer', 'codex') }), 'Reviewer')
+})

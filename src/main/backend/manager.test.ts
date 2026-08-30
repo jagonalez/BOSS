@@ -317,3 +317,75 @@ test('a cloned thread continues in the source checkout, not the open project', (
     'a clone must inherit a live worktree, and never a reaped one'
   )
 })
+
+test('a handover starts the next agent instead of only aiming the composer at it', () => {
+  // Joining alone left the shape waiting: the reviewer arrived, the chip
+  // pointed at it, and nothing happened until the user typed. A shape that has
+  // to be driven by hand at every step is not a shape running.
+  const start = source.indexOf('private async handOver(threadId: string')
+  assert.ok(start > 0, 'expected a handOver method')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.ok(/this\.rooms\.join\(room, next\)/.test(body), 'the next role must join')
+  assert.ok(
+    /this\.sendMessage\(room, \[\{ type: 'text', text: HANDOVER_PROMPT \}\], \{ recipient: next \}\)/.test(body),
+    'the next role must be sent its first message, through the room'
+  )
+})
+
+test('the handover runs only after the room releases its own claim', () => {
+  // It is started by sending into the room, and a room refuses a message while
+  // it still believes it is busy. Raised any earlier, every handover was
+  // refused by the very run that caused it.
+  const start = source.indexOf('private settleBusy(threadId: string)')
+  assert.ok(start > 0, 'expected a settleBusy method')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  const release = body.indexOf('!this.busyThreads.delete(parent)')
+  assert.ok(release > 0, 'expected the room to be released')
+  // Two calls, and both must sit after the room lets go. The first belongs to
+  // the branch where there is no room to release; the second runs once there
+  // is and it has been released. A third, raised before either, would be
+  // refused by the very run that caused it.
+  const calls = [...body.matchAll(/this\.handOver\(threadId\)/g)].map((match) => match.index ?? -1)
+  assert.equal(calls.length, 2, 'exactly two handover calls: one per branch')
+  assert.ok(calls.every((at) => at > release), 'no handover may run before the room lets go')
+})
+
+test('a joining participant is told who it is, what was agreed, and what changed', () => {
+  // It used to receive the job notes and nothing else. A reviewer was never
+  // told it reviews, and never saw the diff it was brought in to check — so it
+  // read as a second builder agreeing with the first.
+  const start = source.indexOf('private async sendToParticipant(')
+  assert.ok(start > 0, 'expected a sendToParticipant method')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  const first = body.indexOf('if (missed.first)')
+  assert.ok(first > 0, 'the brief is sent once, on the first message only')
+  assert.ok(/this\.roleBrief\(recipient\)/.test(body), 'it must be told which role it is')
+  assert.ok(/\[JOB NOTES\]/.test(body), 'it must be told what the job agreed')
+  assert.ok(/this\.roomDiff\(roomThreadId\)/.test(body), 'it must be told what changed on disk')
+})
+
+test('the diff a joining agent reads comes from the checkout, not from a backend', () => {
+  // Two of the backends report no diff at all, and a reviewer handed the
+  // builder's own account of what it changed is exactly the reviewer the user
+  // said they do not trust. Every participant shares one checkout.
+  const start = source.indexOf('private async roomDiff(')
+  assert.ok(start > 0, 'expected a roomDiff method')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.ok(/runCommand\('git'/.test(body), 'the working tree is the source of truth')
+  assert.ok(!/diffGet/.test(body), 'a backend must not be asked what it changed')
+  assert.ok(/ls-files', '--others'/.test(body), 'a new file is a change too')
+})
+
+test('a participant that finishes stops reading as working', () => {
+  // It was set to 'working' when its run began and never set back, so the room
+  // showed every agent that had ever spoken as still running. With a shape
+  // handing work along, that was all of them at once.
+  const start = source.indexOf('private async handOver(threadId: string')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  const cleared = body.indexOf("touch(room, finished, 'active')")
+  assert.ok(cleared > 0, 'the finished participant must be marked reachable again')
+  assert.ok(
+    cleared < body.indexOf('nextAfter'),
+    'clearing must come first, so a later failure cannot strand it as working'
+  )
+})

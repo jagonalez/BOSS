@@ -640,6 +640,18 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const room = useStore(appStore, (s) => (effectiveSession ? s.rooms[effectiveSession] ?? EMPTY_ROOM : EMPTY_ROOM))
   const branchOf = useStore(appStore, (s) => (effectiveSession ? s.branchDrafts[effectiveSession] : undefined))
   const roomNotes = useMemo(() => briefOf(room.notes), [room.notes])
+  // Who the composer is actually addressed to, which is what the chip already
+  // says. It used to name the backend instead, so a message aimed at the
+  // reviewer invited the user to "Ask Claude" — the one name in the room that
+  // nobody is called.
+  //
+  // The role's own name only. A one-off agent is named on the chip beside it,
+  // and repeating it here would make the placeholder longer than most of the
+  // messages typed into it.
+  const askingLabel = useMemo(
+    () => recipientLabel(room, splitOverride(room.recipient).roleId, backendLabel),
+    [room, backendLabel]
+  )
   // Only offered for a real participant, and only agents other than the one it
   // already uses. Handing BOSS or a broadcast to another agent means nothing.
   const handOverTo = useMemo(() => {
@@ -1254,7 +1266,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
           )}
           <textarea
             ref={textareaRef}
-            placeholder={hasSession ? working ? `Queue a follow-up for ${backendLabel}…` : `Ask ${backendLabel}…` : 'Start a thread'}
+            placeholder={hasSession ? working ? `Queue a follow-up for ${askingLabel}…` : `Ask ${askingLabel}…` : 'Start a thread'}
             value={text}
             onChange={(e) => {
               // A leading @name aims the message and then leaves the text: the

@@ -1778,19 +1778,17 @@ textarea {
   color: var(--text);
 }
 
-/* What needs the user, above the work. Separated by a line rather than a
-   heading: it is not another list to read, it is the reason they opened the
-   app. */
-/* Capped, and scrolls past the cap. Unbounded, seven things waiting took the
-   whole sidebar and left the projects a sliver the user could not scroll — the
-   list of what needs them is important, but it is not the only thing there. */
+/* Its own tab, so it takes the whole column rather than a share of it. The cap
+   and the rule under it existed because three lists were stacked: seven things
+   waiting took the sidebar and left the projects a sliver the user could not
+   scroll. One list at a time needs neither. */
 .sidebar-section.attention {
-  flex: 0 1 auto;
-  max-height: 34%;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding-bottom: 6px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
 }
 
 /* BOSS cannot be removed, so it says so where the other rows have a remove
@@ -5934,13 +5932,21 @@ body.workspace-dragging .workspace-tab-slot {
   min-height: 0;
 }
 
-/* Projects and Chats share the panel, one at a time. Nesting resources under
-   threads made the project tree too tall to stack a second list beneath it. */
+/* One list at a time. Stacked, the three fought for one column and a short
+   screen pushed the projects off the bottom entirely. */
 .sidebar-tabs {
   display: flex;
   align-items: center;
+  gap: 4px;
+  padding: 8px 8px 4px;
+}
+
+/* Under the tabs rather than beside them, so a tab is never mistaken for the
+   button that adds to it. */
+.sidebar-starts {
+  display: flex;
   gap: 6px;
-  padding: 8px 8px 6px;
+  padding: 0 8px 6px;
 }
 
 .sidebar-tab {
@@ -5985,14 +5991,15 @@ body.workspace-dragging .workspace-tab-slot {
   overflow: hidden;
 }
 
-/* Sized by its rows, not stretched to fill what is left. Sharing the rule above
-   made a short list of projectless chats take the whole remaining height, and
-   its rows — which may shrink below their content — were squeezed until the
-   title sat on top of its own detail line. */
+/* Its own tab now, so it takes the column like the others. Its rows may shrink
+   below their content, so the list inside it must not be told to stretch — that
+   is what printed a thread title on top of its own detail line. */
 .sidebar-section.chats {
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   padding-bottom: 6px;
 }
 
@@ -6050,9 +6057,15 @@ body.workspace-dragging .workspace-tab-slot {
   color: var(--text);
 }
 
-.sidebar-section.projects .list,
-.sidebar-section.chats .list {
+.sidebar-section.projects .list {
   flex: 1 1 auto;
+}
+
+/* Sized by its rows; the section above does the scrolling. Told to stretch, its
+   rows were squeezed shorter than the two lines of text inside them and the
+   thread title sat on top of its own detail line. */
+.sidebar-section.chats .list {
+  flex: 0 0 auto;
 }
 
 /* Each bucket is as tall as its rows; the section above does the scrolling. */

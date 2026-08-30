@@ -26,6 +26,9 @@ interface Harness {
   stateFile: string
   host: RoomHost
   created: string[]
+  /** How each participant's session was started, so a test can check the reach
+   *  the user chose actually reached it. */
+  starts: Array<{ roleId: string; mode?: string }>
   disposed: string[]
   now: () => number
   setNow: (value: number) => void
@@ -35,12 +38,14 @@ interface Harness {
 async function harness(): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'boss-room-'))
   const created: string[] = []
+  const starts: Array<{ roleId: string; mode?: string }> = []
   const disposed: string[] = []
   let clock = 1_000
   const host: RoomHost = {
-    async createParticipantThread({ roleId }) {
+    async createParticipantThread({ roleId, mode }) {
       const id = `thread-${roleId}-${created.length}`
       created.push(id)
+      starts.push({ roleId, mode })
       return id
     },
     async disposeParticipantThread(threadId) {
@@ -59,6 +64,7 @@ async function harness(): Promise<Harness> {
     stateFile,
     host,
     created,
+    starts,
     disposed,
     now: () => clock,
     setNow: (value) => {
@@ -83,6 +89,30 @@ test('a participant joins with its own hidden thread on its own backend', async 
   assert.equal(joined?.roleId, 'builder')
   assert.equal(joined?.backendId, 'codex', 'the builder runs on the backend the user chose for it')
   assert.equal(h.created.length, 1, 'exactly one session per participant')
+  await h.cleanup()
+})
+
+test('the reach the user chose is applied to the session, not merely stored', async () => {
+  // It was saved on the role and never passed anywhere. A reviewer the user
+  // marked read-only could edit the code it was brought in to check, and the
+  // setup screen was making a promise the app did not keep.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.join('room-1', 'builder')
+  await h.manager.join('room-1', 'reviewer')
+  assert.equal(h.starts.find((entry) => entry.roleId === 'builder')?.mode, 'auto')
+  assert.equal(h.starts.find((entry) => entry.roleId === 'reviewer')?.mode, 'plan')
+  await h.cleanup()
+})
+
+test('a one-off agent override keeps the role\'s reach', async () => {
+  // The override names a different agent for one job. It says nothing about
+  // what that agent may touch, so borrowing the role's reach is the only
+  // answer that does not quietly widen it.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.join('room-1', 'reviewer', 'codex')
+  assert.equal(h.starts[0]?.mode, 'plan')
   await h.cleanup()
 })
 
