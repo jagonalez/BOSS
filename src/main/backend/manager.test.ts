@@ -32,7 +32,7 @@ test('a backend that refuses because it is still running does not settle the liv
     'a busy refusal must rethrow before the run is settled as an error'
   )
   assert.ok(
-    guard < block.indexOf('busyThreads.delete'),
+    guard < block.indexOf('settleBusy'),
     'a busy refusal must rethrow before the thread is marked idle'
   )
 })
@@ -72,7 +72,7 @@ test('stopping a run delivers the message queued against it', () => {
     'aborting must drain the follow-up queue, or a steered message is stranded'
   )
   assert.ok(
-    body.indexOf('busyThreads.delete') < body.indexOf('deliverNextFollowUp'),
+    body.indexOf('settleBusy') < body.indexOf('deliverNextFollowUp'),
     'the thread must be clear of busy first, or delivery refuses itself'
   )
 })
@@ -88,7 +88,7 @@ test('a send that fails for any reason does not arm the transcript prune', () =>
   const suspend = block.indexOf('pruneSuspended.add')
   assert.ok(suspend > 0, 'a failed send must suspend the prune')
   assert.ok(
-    suspend < block.indexOf('busyThreads.delete'),
+    suspend < block.indexOf('settleBusy'),
     'the prune must be suspended before the thread is marked idle'
   )
 })

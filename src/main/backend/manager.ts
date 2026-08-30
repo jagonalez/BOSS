@@ -1188,7 +1188,7 @@ export class BackendManager {
     for (const threadId of [...this.busyThreads]) {
       const binding = this.bindings.get(threadId)
       if (binding?.backendId !== backendId) continue
-      this.busyThreads.delete(threadId)
+      this.settleBusy(threadId)
       this.intentionalAborts.delete(threadId)
       this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
       this.emit({
@@ -1468,7 +1468,7 @@ export class BackendManager {
           }
         } else {
           this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
-          this.busyThreads.delete(binding.id)
+          this.settleBusy(binding.id)
         }
       } else if (eventType === 'session.idle') {
         // A run whose server died is reported as idle so the thread stops
@@ -1477,7 +1477,7 @@ export class BackendManager {
         const lost = properties.lost === true
         const stopped = properties.stopped === true
         this.transcripts?.finishRun(this.transcriptSource(binding), lost ? 'error' : 'completed')
-        this.busyThreads.delete(binding.id)
+        this.settleBusy(binding.id)
         void this.threadBus?.flush(binding.id)
         void this.deliverNextFollowUp(binding.id)
         this.setThreadAttention(binding, lost ? 'error' : 'completed', lost ? 'The backend server went away mid-run.' : undefined)
@@ -1497,13 +1497,13 @@ export class BackendManager {
           // event that says the stop happened, so deliver it here rather than
           // waiting for an idle the backend may never send.
           this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
-          this.busyThreads.delete(binding.id)
+          this.settleBusy(binding.id)
           void this.threadBus?.flush(binding.id)
           void this.deliverNextFollowUp(binding.id)
           return
         }
         this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
-        this.busyThreads.delete(binding.id)
+        this.settleBusy(binding.id)
         this.setThreadAttention(binding, 'error', this.errorDetail(properties.error))
         // A stop the user asked for is handled above and never reaches here, so
         // this is a real failure and the fallback should answer it.
@@ -1841,6 +1841,15 @@ export class BackendManager {
     // BOSS runs in its own standing conversation but answers into the room the
     // user asked from, so its reply appears where they are looking rather than
     // in a thread they are not.
+    // The room shows the work, so the room is what looks busy. Its own status
+    // is cleared when the participant's run settles, which reaches the room
+    // because the participant records against it.
+    this.busyThreads.add(roomThreadId)
+    this.emit({
+      type: 'session.status',
+      properties: { sessionID: roomThreadId, status: { type: 'busy' } },
+      backendId: this.binding(roomThreadId).backendId
+    })
     await this.sendMessage(participantThreadId, [...preface, ...parts], {
       ...options,
       // Cleared so the participant's own send does not try to route again.
@@ -1851,13 +1860,44 @@ export class BackendManager {
     })
   }
 
+  /** Mark a run finished.
+   *
+   *  A participant's run also finishes its room, because the room is what the
+   *  user sees busy. Kept in one helper rather than repeated at each of the
+   *  places a run can end, where one would eventually be forgotten and leave a
+   *  room permanently unable to accept a message. */
+  private settleBusy(threadId: string): boolean {
+    const wasBusy = this.busyThreads.delete(threadId)
+    const parent = this.bindings.get(threadId)?.parentID ?? this.recordInto.get(threadId)?.threadId
+    if (!parent || !this.busyThreads.delete(parent)) return wasBusy
+    const parentBinding = this.bindings.get(parent)
+    if (parentBinding) {
+      this.emit({
+        type: 'session.status',
+        properties: { sessionID: parent, status: { type: 'idle' } },
+        backendId: parentBinding.backendId
+      })
+    }
+    return wasBusy
+  }
+
   async sendMessage(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
     // A message addressed to a room participant runs in that participant's own
     // hidden session, which is how a reviewer can answer on a different model
     // from the builder without either of them leaving the conversation. The
     // room's own thread stays the visible one; only the run moves.
     const routed = await this.routeToParticipant(threadId, options)
-    if (routed) return this.sendToParticipant(threadId, routed, parts, options)
+    if (routed) {
+      // Checked against the room, not the participant. The user sees one
+      // conversation, so a second message while a participant is answering must
+      // queue exactly as it would in an ordinary thread. Without this the room
+      // never looked busy, the composer stayed open, and the second message
+      // started a competing run whose transcript overwrote the first.
+      if (this.busyThreads.has(threadId) && !this.followUpDeliveries.has(threadId)) {
+        throw new Error(THREAD_BUSY_ERROR)
+      }
+      return this.sendToParticipant(threadId, routed, parts, options)
+    }
     const binding = this.binding(threadId)
     // Stranded, not merely removed. A thread that left its worktree is back in
     // its project and can carry on; one whose worktree was reaped underneath it
@@ -1960,7 +2000,7 @@ export class BackendManager {
       // arming the prune: the thread is idle, but its native history is not
       // authoritative about a message it was never told about.
       this.pruneSuspended.add(threadId)
-      this.busyThreads.delete(threadId)
+      this.settleBusy(threadId)
       this.emit({
         type: 'session.status',
         properties: { sessionID: threadId, status: { type: 'idle' } },
@@ -2332,7 +2372,7 @@ export class BackendManager {
     // stopped. A backend that is interrupted may never send that event, and
     // the thread then stayed "busy" — which quietly diverted the next message
     // the user typed into the follow-up queue instead of sending it.
-    if (this.busyThreads.delete(threadId)) {
+    if (this.settleBusy(threadId)) {
       this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
       this.emit({
         type: 'session.status',
