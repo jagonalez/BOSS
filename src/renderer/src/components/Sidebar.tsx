@@ -737,20 +737,23 @@ export function Sidebar(): React.JSX.Element {
         </button>
       </div>
 
-      {/* The two ways to start something, named. As bare icons they said
-          nothing about what they would do. Each starts what its own tab holds:
-          a project under Work, a chat under Chats. */}
-      <div className="sidebar-starts">
-        {tab === 'chats' ? (
-          <button className="sidebar-start" onClick={() => void newGlobalChat()}>
-            <ChatIcon size={13} /><span>New chat</span>
-          </button>
-        ) : (
-          <button className="sidebar-start" onClick={() => void openProjectFolder()}>
-            <PlusIcon size={13} /><span>Add project</span>
-          </button>
-        )}
-      </div>
+      {/* One button, for what this tab holds: a project under Work, a chat under
+          Chats. Nothing under what needs you — that list is threads that already
+          exist, so a button to make another belongs to neither.
+          As bare icons they said nothing about what they would do. */}
+      {tab === 'work' || tab === 'chats' ? (
+        <div className="sidebar-starts">
+          {tab === 'chats' ? (
+            <button className="sidebar-start" onClick={() => void newGlobalChat()}>
+              <ChatIcon size={13} /><span>New chat</span>
+            </button>
+          ) : (
+            <button className="sidebar-start" onClick={() => void openProjectFolder()}>
+              <PlusIcon size={13} /><span>Add project</span>
+            </button>
+          )}
+        </div>
+      ) : null}
 
       {/* One box for everything below it: projects, their threads, and the
           chats that belong to no project. */}

@@ -187,6 +187,11 @@ test('the start button matches the list it is under', async ({ appPage }) => {
 
   await appPage.locator('.sidebar-tab', { hasText: 'Chats' }).click()
   await expect(appPage.locator('.sidebar-start')).toHaveText(['New chat'])
+
+  // Nothing under what needs you. That list is threads that already exist, so a
+  // button to make another belongs to neither of them.
+  await appPage.locator('.sidebar-tab', { hasText: 'Needs you' }).click()
+  await expect(appPage.locator('.sidebar-start')).toHaveCount(0)
 })
 
 test('an empty list says so rather than showing nothing', async ({ appPage }) => {
