@@ -1190,7 +1190,7 @@ export class BackendManager {
       if (binding?.backendId !== backendId) continue
       this.settleBusy(threadId)
       this.intentionalAborts.delete(threadId)
-      this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
+      this.transcripts?.finishRun(this.ownTranscriptSource(binding), 'error')
       this.emit({
         type: 'session.status',
         properties: { sessionID: threadId, status: { type: 'idle' } },
@@ -1260,6 +1260,21 @@ export class BackendManager {
    *  against the room, because that is where the user took the point aside. */
   private branchFor(binding: ThreadBinding): string | undefined {
     return this.pendingBranch.get(binding.parentID ?? binding.id)
+  }
+
+  /** Where a whole native history belongs.
+   *
+   *  Never redirected. Reconciling replaces a thread's stored messages with
+   *  what the backend reports, and a participant's backend reports only its own
+   *  half of the room. Pointed at the room, it would delete every message the
+   *  other participants and the user wrote. Recording one message redirects;
+   *  reconciling a history must not. */
+  private ownTranscriptSource(binding: ThreadBinding) {
+    return {
+      threadId: binding.id,
+      backendId: binding.backendId,
+      nativeSessionId: binding.nativeSessionId
+    }
   }
 
   private transcriptSource(binding: ThreadBinding) {
@@ -1459,7 +1474,7 @@ export class BackendManager {
         const status = (properties.status as { type?: string } | undefined)?.type
         if (status === 'busy' || status === 'retry') {
           if (!this.busyThreads.has(binding.id)) {
-            this.transcripts?.beginRun(this.transcriptSource(binding))
+            this.transcripts?.beginRun(this.ownTranscriptSource(binding))
           }
           this.busyThreads.add(binding.id)
           if (binding.attention && binding.attention.kind !== 'permission' && binding.attention.kind !== 'question') {
@@ -1467,7 +1482,7 @@ export class BackendManager {
             this.save()
           }
         } else {
-          this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
+          this.transcripts?.finishRun(this.ownTranscriptSource(binding), 'completed')
           this.settleBusy(binding.id)
         }
       } else if (eventType === 'session.idle') {
@@ -1476,7 +1491,7 @@ export class BackendManager {
         // fallback answers it and no reviewer reads unfinished work as done.
         const lost = properties.lost === true
         const stopped = properties.stopped === true
-        this.transcripts?.finishRun(this.transcriptSource(binding), lost ? 'error' : 'completed')
+        this.transcripts?.finishRun(this.ownTranscriptSource(binding), lost ? 'error' : 'completed')
         this.settleBusy(binding.id)
         void this.threadBus?.flush(binding.id)
         void this.deliverNextFollowUp(binding.id)
@@ -1496,13 +1511,13 @@ export class BackendManager {
           // redirect leaves the instruction queued, and this may be the only
           // event that says the stop happened, so deliver it here rather than
           // waiting for an idle the backend may never send.
-          this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
+          this.transcripts?.finishRun(this.ownTranscriptSource(binding), 'completed')
           this.settleBusy(binding.id)
           void this.threadBus?.flush(binding.id)
           void this.deliverNextFollowUp(binding.id)
           return
         }
-        this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
+        this.transcripts?.finishRun(this.ownTranscriptSource(binding), 'error')
         this.settleBusy(binding.id)
         this.setThreadAttention(binding, 'error', this.errorDetail(properties.error))
         // A stop the user asked for is handled above and never reaches here, so
@@ -1767,7 +1782,7 @@ export class BackendManager {
       })
     }))
     if (!this.transcripts) return limit ? normalized.slice(-limit) : normalized
-    this.transcripts.reconcile(this.transcriptSource(binding), normalized, {
+    this.transcripts.reconcile(this.ownTranscriptSource(binding), normalized, {
       // Pruning deletes for real, so it needs two things to be true: the thread
       // is idle, and the backend's history is actually complete. A failed send
       // breaks the second — BOSS recorded a message the backend never received.
@@ -1850,14 +1865,26 @@ export class BackendManager {
       properties: { sessionID: roomThreadId, status: { type: 'busy' } },
       backendId: this.binding(roomThreadId).backendId
     })
-    await this.sendMessage(participantThreadId, [...preface, ...parts], {
-      ...options,
-      // Cleared so the participant's own send does not try to route again.
-      recipient: undefined,
-      ...(recipient === ROOM_ASSISTANT_ID
-        ? { recordInto: { threadId: roomThreadId, author: ROOM_ASSISTANT_ID } }
-        : {})
-    })
+    try {
+      await this.sendMessage(participantThreadId, [...preface, ...parts], {
+        ...options,
+        // Cleared so the participant's own send does not try to route again.
+        recipient: undefined,
+        ...(recipient === ROOM_ASSISTANT_ID
+          ? { recordInto: { threadId: roomThreadId, author: ROOM_ASSISTANT_ID } }
+          : {})
+      })
+    } catch (error) {
+      // The room was marked busy for a run that never started. Left set, its
+      // composer would refuse every later message with no way back.
+      this.settleBusy(roomThreadId)
+      this.emit({
+        type: 'session.status',
+        properties: { sessionID: roomThreadId, status: { type: 'idle' } },
+        backendId: this.binding(roomThreadId).backendId
+      })
+      throw error
+    }
   }
 
   /** Mark a run finished.
@@ -1868,7 +1895,13 @@ export class BackendManager {
    *  room permanently unable to accept a message. */
   private settleBusy(threadId: string): boolean {
     const wasBusy = this.busyThreads.delete(threadId)
+    // Read before it is cleared: it is what says which room this run was
+    // answering into.
     const parent = this.bindings.get(threadId)?.parentID ?? this.recordInto.get(threadId)?.threadId
+    // Where a thread's output goes belongs to one run. Left set, a late event
+    // from a finished run — or the next direct message to the same thread —
+    // would be recorded into a room the user is no longer looking at.
+    this.recordInto.delete(threadId)
     if (!parent || !this.busyThreads.delete(parent)) return wasBusy
     const parentBinding = this.bindings.get(parent)
     if (parentBinding) {
@@ -1888,14 +1921,14 @@ export class BackendManager {
     // room's own thread stays the visible one; only the run moves.
     const routed = await this.routeToParticipant(threadId, options)
     if (routed) {
-      // Checked against the room, not the participant. The user sees one
-      // conversation, so a second message while a participant is answering must
-      // queue exactly as it would in an ordinary thread. Without this the room
-      // never looked busy, the composer stayed open, and the second message
-      // started a competing run whose transcript overwrote the first.
-      if (this.busyThreads.has(threadId) && !this.followUpDeliveries.has(threadId)) {
-        throw new Error(THREAD_BUSY_ERROR)
-      }
+      // Both must be free. The room, because the user sees one conversation and
+      // a second message while someone is answering must queue exactly as it
+      // would in an ordinary thread. The participant too, because BOSS answers
+      // from one standing conversation shared by every room — without this,
+      // asking it from two rooms at once crossed their replies and left the
+      // first room permanently busy.
+      const busy = this.busyThreads.has(threadId) || this.busyThreads.has(routed)
+      if (busy && !this.followUpDeliveries.has(threadId)) throw new Error(THREAD_BUSY_ERROR)
       return this.sendToParticipant(threadId, routed, parts, options)
     }
     const binding = this.binding(threadId)
@@ -1931,19 +1964,20 @@ export class BackendManager {
     if (options?.model) binding.model = boundModel(options.model)
     binding.updatedAt = now()
     this.save()
-    this.transcripts?.beginRun(this.transcriptSource(binding))
-    // Recorded on the binding so the message this run produces knows which
-    // branch it belongs to. The user message and the reply that answers it must
-    // land in the same place, or a point taken aside would answer in the main
-    // stream.
+    // Set before the run opens, because opening it reads where this thread's
+    // messages belong. Left until after, the run row was written against the
+    // previous message's destination.
+    //
+    // The branch keeps a question and its answer together, or a point taken
+    // aside would answer in the main stream. The redirect exists because BOSS
+    // answers from one standing conversation wherever it is called, so a
+    // question asked in a room runs there but belongs in the room the user
+    // asked from. Both are cleared when the run settles.
     if (options?.branchOf) this.pendingBranch.set(threadId, options.branchOf)
     else this.pendingBranch.delete(threadId)
-    // Set and cleared in the same place, for the same run. BOSS answers from
-    // one standing conversation wherever it is called, so a question asked in a
-    // room runs there but is recorded in the room the user asked from. Any
-    // other send to this thread is its own conversation again.
     if (options?.recordInto) this.recordInto.set(threadId, options.recordInto)
     else this.recordInto.delete(threadId)
+    this.transcripts?.beginRun(this.ownTranscriptSource(binding))
 
     // Carried as a message part, not only in the context prompt: opencode and
     // pi have no system-prompt hook and drop that field entirely. A goal is the
@@ -1991,7 +2025,7 @@ export class BackendManager {
       // streaming, and let the next reload prune as if the thread were done.
       // That reload is what deleted the message the user had just sent.
       if (error instanceof Error && error.message.includes(THREAD_BUSY_ERROR)) throw error
-      this.transcripts?.finishRun(this.transcriptSource(binding), 'error')
+      this.transcripts?.finishRun(this.ownTranscriptSource(binding), 'error')
       // The send failed, so whatever the backend has stored is what it had
       // before this message — and clearing busy hands the next reload a licence
       // to prune. Any throw that is not a busy refusal (network, auth,
@@ -2260,6 +2294,11 @@ export class BackendManager {
 
   threadList(projectId: string): ThreadBusThread[] {
     return [...this.bindings.values()]
+      // A room's participants run in hidden threads that only their room
+      // drives. Listing them would let the assistant message one directly,
+      // which skips the catch-up and the room's busy tracking, and lands the
+      // reply in a conversation whose composer thinks it is idle.
+      .filter((binding) => !binding.parentID)
       .filter((binding) => !projectId || binding.projectId === projectId)
       .map((binding) => this.threadBusInfo(binding))
       .sort((a, b) => a.title.localeCompare(b.title))
@@ -2373,7 +2412,7 @@ export class BackendManager {
     // the thread then stayed "busy" — which quietly diverted the next message
     // the user typed into the follow-up queue instead of sending it.
     if (this.settleBusy(threadId)) {
-      this.transcripts?.finishRun(this.transcriptSource(binding), 'completed')
+      this.transcripts?.finishRun(this.ownTranscriptSource(binding), 'completed')
       this.emit({
         type: 'session.status',
         properties: { sessionID: threadId, status: { type: 'idle' } },

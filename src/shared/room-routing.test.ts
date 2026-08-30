@@ -88,10 +88,31 @@ test('a participant catches up only on what it missed, not the whole room again'
   assert.equal(result.first, false)
 })
 
-test('catch-up ignores messages that arrive after the moment of addressing', () => {
-  const messages = [message('m1', 'user', 'now', { at: 50 }), message('m2', 'user', 'later', { at: 500 })]
-  const result = catchUpFor(messages, participant({ lastActiveAt: 10 }), 100)
-  assert.deepEqual(result.missed.map((entry) => entry.info.id), ['m1'])
+test('a message with no timestamp still reaches the participant', () => {
+  // Locally-authored messages carry no time. Dropping them silently would let a
+  // participant act on stale context with no sign anything was withheld.
+  const messages = [
+    message('m1', 'user', 'old', { at: 10 }),
+    message('m2', 'user', 'new', { at: 50 }),
+    message('m3', 'assistant', 'no clock', { author: 'boss' })
+  ]
+  const result = catchUpFor(messages, participant({ lastActiveAt: 20 }), 100)
+  assert.deepEqual(result.missed.map((entry) => entry.info.id), ['m2', 'm3'])
+})
+
+test('a clock that ran fast does not hide messages sent since', () => {
+  // A stored time from a machine whose clock was ahead would otherwise put
+  // every later message in the past and hand the participant nothing at all.
+  const messages = [
+    message('m1', 'user', 'before', { at: 50 }),
+    message('m2', 'user', 'after', { at: 150 })
+  ]
+  const result = catchUpFor(messages, participant({ lastActiveAt: 999_999 }), 100)
+  assert.deepEqual(
+    result.missed.map((entry) => entry.info.id),
+    ['m2'],
+    'the clamp trusts the earlier of the two clocks rather than trusting neither'
+  )
 })
 
 test('a caught-up participant is told to read but not act', () => {

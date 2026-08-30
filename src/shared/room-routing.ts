@@ -46,10 +46,23 @@ export function catchUpFor(
   now: number
 ): CatchUp {
   if (!participant || !participant.lastActiveAt) return { missed: [...messages], first: true }
-  const since = participant.lastActiveAt
+  // A stored time from a machine whose clock ran fast would put every message
+  // in the past and hand the participant nothing at all. Trusting the earlier
+  // of the two costs a little repetition and never hides a message.
+  const since = Math.min(participant.lastActiveAt, now)
+  let seen = false
   const missed = messages.filter((message) => {
     const at = message.info.time?.created
-    return at !== undefined && at > since && at <= now
+    // No timestamp is not the same as old. Locally-authored messages carry
+    // none, and dropping them silently would let a participant act on stale
+    // context with no sign anything was withheld. Once the cut-off is passed,
+    // everything after it belongs to the catch-up.
+    if (at === undefined) return seen
+    if (at > since) {
+      seen = true
+      return true
+    }
+    return false
   })
   return { missed, first: false }
 }
