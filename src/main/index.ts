@@ -193,6 +193,7 @@ const rooms = new RoomManager(join(app.getPath('userData'), 'rooms.json'), {
   roomPaths: (threadId) => backendMgr.roomPaths(threadId)
 })
 backendMgr.attachRooms(rooms)
+threadBus.attachRooms(rooms)
 backendMgr.attachAssistant(labAssistant)
 backendMgr.onEvent((event) => {
   void labAssistant.observeBackendEvent(event)

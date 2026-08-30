@@ -151,11 +151,33 @@ other's messages, because messages are not traces. That is why participants here
 never reply to each other, and why a joining participant gets artifacts rather
 than another agent's chat.
 
+## Implementation notes
+
+Three rules were learned by getting them wrong first, and are easy to undo by
+accident.
+
+**One field cannot say both "this belongs here" and "this thread owns this".**
+Recording one message may redirect it into the room. Reconciling a whole native
+history must not, because a participant's backend reports only its own half of
+the room — pointed at the room, pruning deletes everything the other
+participants and the user wrote. Run bookkeeping must not either: a run belongs
+to the thread that ran it.
+
+**The room is what looks busy.** A message routed to a participant runs
+elsewhere, so without this the room's composer stayed open and a second message
+started a competing run. Both the room and the participant must be free before a
+message routes, because BOSS answers from one conversation shared by every room.
+
+**Where a run's output goes belongs to that run.** It is set before the run
+opens, since opening it reads the destination, and cleared when the run settles.
+Left set, a late event lands in a room the user has left.
+
 ## Open questions
 
 1. Does a settled branch leave one collapsed line in the main stream? Current
    default: yes.
 2. Are job notes readable by the user? Current default: yes, as an expandable
    line.
-3. What is the idle threshold before a participant is replaced?
+3. Is one hour the right idle threshold before a participant is replaced?
 4. Does presence set itself from window focus, or does the user set it by hand?
+5. Who writes the job notes, and when? Nothing writes them yet.

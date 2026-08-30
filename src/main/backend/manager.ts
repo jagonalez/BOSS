@@ -960,6 +960,15 @@ export class BackendManager {
     })
   }
 
+  /** The room a participant thread belongs to, if it is one.
+   *
+   *  A participant records its job notes against its room, because the room is
+   *  the job. Its own hidden thread is where it runs, not what it works on. */
+  roomOf(threadId: string): string | undefined {
+    this.load()
+    return this.bindings.get(threadId)?.parentID
+  }
+
   /** Where a room's work happens, so a joining participant lands in the same
    *  checkout as the rest. */
   roomPaths(roomThreadId: string): { projectPath: string; executionPath: string } | undefined {

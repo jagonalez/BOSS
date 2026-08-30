@@ -15,7 +15,7 @@ import type {
   ThreadBusThread
 } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
-import { QUIET_TOOL_DESCRIPTIONS, REPORT_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { NOTES_TOOL_DESCRIPTIONS, QUIET_TOOL_DESCRIPTIONS, REPORT_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import type { Workflow, WorkflowInput, WorkflowRun, WorkflowTrigger, WorkflowsSnapshot } from '@shared/workflow'
 import { policyOverrides, policySource, resolvePolicy } from '@shared/collaboration-policy'
 import { projectScope } from './project-identity'
@@ -25,6 +25,15 @@ import { MCP_TOOL_PREFIX } from '@shared/mcp'
 import type { McpHub } from './mcp-hub'
 import type { ReviewManager } from './review-manager'
 import type { ReportManager } from './report-manager'
+/** What the bus needs to record a job's notes. Structural, like the handles
+ *  beside it. */
+interface RoomNotesHandle {
+  recordNotes(
+    threadId: string,
+    patch: Partial<Omit<import('@shared/room').JobNotes, 'updatedAt'>>
+  ): Promise<import('@shared/room').JobNotes>
+}
+
 /** What the bus needs to stop and resume interrupting the user. Structural for
  *  the same reason as the engine handle below. */
 interface NotificationHandle {
@@ -73,6 +82,8 @@ export interface ThreadBusHost {
   useWorktree(threadId: string): Promise<{ path: string; branch: string }>
   leaveWorktree(threadId: string): Promise<{ path: string; branch: string }>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
+  /** The room a participant thread belongs to, if it is one. */
+  roomOf(threadId: string): string | undefined
 }
 
 const MAX_MESSAGES = 500
@@ -106,6 +117,15 @@ function numberArg(value: unknown, key: string, fallback: number): number {
   return Number.isFinite(result) ? result : fallback
 }
 
+/** Read a list of plain strings, dropping anything else an agent sends. */
+function stringList(value: unknown, key: string): string[] {
+  if (!value || typeof value !== 'object') return []
+  const raw = (value as Record<string, unknown>)[key]
+  if (!Array.isArray(raw)) return []
+  return raw.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    .map((entry) => entry.trim())
+}
+
 function booleanArg(value: unknown, key: string, fallback: boolean): boolean {
   if (!value || typeof value !== 'object') return fallback
   const result = (value as Record<string, unknown>)[key]
@@ -129,6 +149,7 @@ export class ThreadBus {
   private reports?: ReportManager
   private workflowEngine?: WorkflowEngineHandle
   private notifications?: NotificationHandle
+  private rooms?: RoomNotesHandle
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
@@ -156,6 +177,10 @@ export class ThreadBus {
 
   attachNotifications(notifications: NotificationHandle): void {
     this.notifications = notifications
+  }
+
+  attachRooms(rooms: RoomNotesHandle): void {
+    this.rooms = rooms
   }
 
   qaStatus(threadId: string) {
@@ -357,6 +382,28 @@ export class ThreadBus {
         // user to discover it.
         waiting: held.map((event) => ({ title: event.title, body: event.body }))
       }
+    }
+    // Job notes belong to the caller's own job, so they are not gated by the
+    // collaboration policy either. They are the only thing that carries a job
+    // past the agents working on it: an agent brought in later reads these and
+    // nothing else.
+    if (tool === 'boss_notes_record') {
+      if (!this.rooms) throw new Error('Rooms are not available.')
+      // A participant records against its room, because that is the job. Its
+      // own hidden thread is where it runs, not what it is working on.
+      const roomId = this.host.roomOf(caller.id) ?? caller.id
+      const notes = await this.rooms.recordNotes(roomId, {
+        ...(Array.isArray(args && (args as Record<string, unknown>).agreed)
+          ? { agreed: stringList(args, 'agreed') }
+          : {}),
+        ...(Array.isArray(args && (args as Record<string, unknown>).decided)
+          ? { decided: stringList(args, 'decided').map((text) => ({ text, at: Date.now(), by: caller.title })) }
+          : {}),
+        ...(Array.isArray(args && (args as Record<string, unknown>).changed)
+          ? { changed: stringList(args, 'changed') }
+          : {})
+      })
+      return { recorded: true, updatedAt: notes.updatedAt }
     }
     // Report artifacts are local to BOSS and belong to the calling thread, so
     // creating or refining one does not depend on cross-thread collaboration.
@@ -842,6 +889,19 @@ export class ThreadBus {
             body: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBody },
             baseBranch: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase },
             draft: { type: 'boolean', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft }
+          },
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_notes_record',
+        description: NOTES_TOOL_DESCRIPTIONS.record,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            agreed: { type: 'array', items: { type: 'string' }, description: NOTES_TOOL_DESCRIPTIONS.agreed },
+            decided: { type: 'array', items: { type: 'string' }, description: NOTES_TOOL_DESCRIPTIONS.decided },
+            changed: { type: 'array', items: { type: 'string' }, description: NOTES_TOOL_DESCRIPTIONS.changed }
           },
           additionalProperties: false
         }

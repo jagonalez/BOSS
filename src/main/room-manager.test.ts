@@ -239,3 +239,25 @@ test('a shape skips roles the user deleted from their team', () => {
   const lean: RoomTeam = { ...TEAM, roles: TEAM.roles.filter((role) => role.id !== 'reviewer') }
   assert.deepEqual(rolesForShape('reviewed', lean), ['builder'], 'deleting a role removes that step')
 })
+
+test('recording notes for one field leaves the rest of the job intact', async () => {
+  // An agent records what it knows when it knows it. Replacing the whole set
+  // each time would let a builder wipe what the planner agreed.
+  const h = await harness()
+  await h.manager.recordNotes('room-1', { agreed: ['inline warning, never an empty list'] })
+  await h.manager.recordNotes('room-1', {
+    decided: [{ text: 'index stays in the existing layer', at: 5, by: 'builder' }]
+  })
+
+  const room = await h.manager.room('room-1')
+  assert.deepEqual(room.notes.agreed, ['inline warning, never an empty list'])
+  assert.equal(room.notes.decided.length, 1)
+  await h.cleanup()
+})
+
+test('a job that recorded nothing hands a fresh agent an empty brief, not a broken one', async () => {
+  const h = await harness()
+  const room = await h.manager.room('room-never-used')
+  assert.equal(h.manager.briefFor(room.notes), '', 'nothing to say is said as nothing')
+  await h.cleanup()
+})

@@ -87,6 +87,9 @@ export type ThreadBusAgentTool =
   // Not gated by the collaboration policy: quiet is about the user's own
   // attention, not about reaching another thread.
   | 'boss_quiet_set'
+  // Not gated by the collaboration policy: notes belong to the caller's own
+  // job, and writing them is how that job survives its agents.
+  | 'boss_notes_record'
   | 'boss_reports_create'
   | 'boss_reports_update'
   // Like reports, workflows are local to BOSS and scoped to the caller's own
@@ -131,6 +134,13 @@ export const THREAD_TOOL_DESCRIPTIONS = {
 export const QUIET_TOOL_DESCRIPTIONS = {
   set: 'Stop or resume interrupting the user. Turn it on when they say they are stepping out, going into a meeting, or want quiet; turn it off when they say they are back. While it is on nothing reaches them at all — no desktop notification and no phone push — and work keeps running. Turning it off returns what was held, so tell them what waited rather than letting them find out by accident.',
   quiet: 'true to stop interrupting, false to resume.'
+} as const
+
+export const NOTES_TOOL_DESCRIPTIONS = {
+  record: 'Record what survives you on this job: what was agreed, what was decided and why, and what actually changed. Write it before you finish, and update it whenever a decision is made — an agent brought in later reads these notes and nothing else, so anything missing here is lost. Keep each entry one plain sentence. Do not record what you did step by step; record what someone picking this up would need to know.',
+  agreed: 'What the user and the agents agreed to do. Replaces the current list.',
+  decided: 'Choices made along the way, each a plain sentence saying what and why. Replaces the current list.',
+  changed: 'What actually changed, in plain words. Replaces the current list.'
 } as const
 
 export const REPORT_TOOL_DESCRIPTIONS = {
