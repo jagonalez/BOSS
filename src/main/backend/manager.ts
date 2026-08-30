@@ -2883,6 +2883,7 @@ export class BackendManager {
         await this.rooms?.join(request.threadId, request.roleId)
         return this.rooms?.room(request.threadId)
       }
+      case 'room.assistant.mark': return this.markAssistantThread(request.threadId)
       case 'room.team.get': return this.rooms?.currentTeam()
       case 'room.team.set': return this.rooms?.configureTeam(request.team)
       case 'thread.backend.set': return this.setEmptyThreadBackend(request.threadId, request.backendId)

@@ -84,6 +84,9 @@ export type ThreadBusAgentTool =
   // Not a boss_threads_* tool: it acts on the caller's own checkout rather than reaching another
   // thread, so it is not gated by the collaboration policy either.
   | 'boss_git_create_change_request'
+  // Not gated by the collaboration policy: quiet is about the user's own
+  // attention, not about reaching another thread.
+  | 'boss_quiet_set'
   | 'boss_reports_create'
   | 'boss_reports_update'
   // Like reports, workflows are local to BOSS and scoped to the caller's own
@@ -123,6 +126,11 @@ export const THREAD_TOOL_DESCRIPTIONS = {
   createChangeRequestBody: 'Description for the request, as Markdown. Omit together with title to fill both from the commits.',
   createChangeRequestBase: 'Branch to merge into. Omit to use the repository default.',
   createChangeRequestDraft: 'Open it as a draft.'
+} as const
+
+export const QUIET_TOOL_DESCRIPTIONS = {
+  set: 'Stop or resume interrupting the user. Turn it on when they say they are stepping out, going into a meeting, or want quiet; turn it off when they say they are back. While it is on nothing reaches them at all — no desktop notification and no phone push — and work keeps running. Turning it off returns what was held, so tell them what waited rather than letting them find out by accident.',
+  quiet: 'true to stop interrupting, false to resume.'
 } as const
 
 export const REPORT_TOOL_DESCRIPTIONS = {

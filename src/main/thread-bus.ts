@@ -15,7 +15,7 @@ import type {
   ThreadBusThread
 } from '@shared/thread-bus'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
-import { REPORT_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
+import { QUIET_TOOL_DESCRIPTIONS, REPORT_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import type { Workflow, WorkflowInput, WorkflowRun, WorkflowTrigger, WorkflowsSnapshot } from '@shared/workflow'
 import { policyOverrides, policySource, resolvePolicy } from '@shared/collaboration-policy'
 import { projectScope } from './project-identity'
@@ -25,6 +25,13 @@ import { MCP_TOOL_PREFIX } from '@shared/mcp'
 import type { McpHub } from './mcp-hub'
 import type { ReviewManager } from './review-manager'
 import type { ReportManager } from './report-manager'
+/** What the bus needs to stop and resume interrupting the user. Structural for
+ *  the same reason as the engine handle below. */
+interface NotificationHandle {
+  setQuiet(quiet: boolean): Array<{ title: string; body: string }>
+  isQuiet(): boolean
+}
+
 /** What the bus needs from the workflow engine, kept structural so the bus
  *  has no import-time dependency on the engine class. */
 interface WorkflowEngineHandle {
@@ -121,6 +128,7 @@ export class ThreadBus {
   private reviews?: ReviewManager
   private reports?: ReportManager
   private workflowEngine?: WorkflowEngineHandle
+  private notifications?: NotificationHandle
 
   constructor(private readonly host: ThreadBusHost) {
     this.load()
@@ -144,6 +152,10 @@ export class ThreadBus {
 
   attachWorkflowEngine(engine: WorkflowEngineHandle): void {
     this.workflowEngine = engine
+  }
+
+  attachNotifications(notifications: NotificationHandle): void {
+    this.notifications = notifications
   }
 
   qaStatus(threadId: string) {
@@ -330,6 +342,21 @@ export class ThreadBus {
         ...(baseBranch ? { baseBranch } : {}),
         ...(booleanArg(args, 'draft', false) ? { draft: true } : {})
       })
+    }
+    // Quiet is about the user's own attention rather than reaching another
+    // thread, so it is not gated by the collaboration policy. The user sets it
+    // by saying so — "I'm stepping out" — which is why an agent needs a tool
+    // for it at all.
+    if (tool === 'boss_quiet_set') {
+      if (!this.notifications) throw new Error('Notifications are not available.')
+      const quiet = booleanArg(args, 'quiet', true)
+      const held = this.notifications.setQuiet(quiet)
+      return {
+        quiet,
+        // Named so the assistant can say what waited rather than leaving the
+        // user to discover it.
+        waiting: held.map((event) => ({ title: event.title, body: event.body }))
+      }
     }
     // Report artifacts are local to BOSS and belong to the calling thread, so
     // creating or refining one does not depend on cross-thread collaboration.
@@ -816,6 +843,18 @@ export class ThreadBus {
             baseBranch: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestBase },
             draft: { type: 'boolean', description: THREAD_TOOL_DESCRIPTIONS.createChangeRequestDraft }
           },
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_quiet_set',
+        description: QUIET_TOOL_DESCRIPTIONS.set,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            quiet: { type: 'boolean', description: QUIET_TOOL_DESCRIPTIONS.quiet }
+          },
+          required: ['quiet'],
           additionalProperties: false
         }
       },

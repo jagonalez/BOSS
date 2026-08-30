@@ -157,6 +157,7 @@ export const OpenCode = {
     backendRequest<RoomState>({ type: 'room.recipient.set', threadId: id, recipient }),
   joinRoom: (id: string, roleId: string) =>
     backendRequest<RoomState>({ type: 'room.join', threadId: id, roleId }),
+  markAssistant: (id: string) => backendRequest<void>({ type: 'room.assistant.mark', threadId: id }),
   team: () => backendRequest<RoomTeam | undefined>({ type: 'room.team.get' }),
   setTeam: (team: RoomTeam) => backendRequest<RoomTeam>({ type: 'room.team.set', team }),
   addFollowUp: (id: string, text: string, attachments?: QueuedFollowUpAttachment[], options?: BackendMessageOptions) =>

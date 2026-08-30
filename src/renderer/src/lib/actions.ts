@@ -1099,6 +1099,32 @@ export async function refreshAutomations(): Promise<void> {
  *  already caught up when you arrive, not a chat you re-explain yourself to.
  *  Created and seeded once; reused forever after. Returns its session id and
  *  never navigates, so the Assistant home can embed it in place. */
+/** What BOSS is told it is, once, when its conversation starts.
+ *
+ *  It coordinates and never writes code: every job becomes its own thread, even
+ *  a one-line fix, so the user can say "also do this" half an hour later
+ *  without the two tangling. It quotes rather than summarises, because the user
+ *  does not trust a report of work it did not see — and quoting also keeps its
+ *  own context small, since it holds a map of what exists rather than
+ *  transcripts. */
+const ASSISTANT_SEED = [
+  '[BOSS]',
+  "You are BOSS, this user's standing assistant. One persistent conversation, reachable from anywhere, including their phone.",
+  '',
+  'What you do:',
+  '- Keep track of what jobs exist, what state each is in, and which thread each lives in.',
+  '- Start a thread per job. Never write code yourself, even for a one-line fix: the user may add another job half an hour later, and separate threads keep the two from tangling.',
+  '- Carry the user\'s instructions to other threads. You speak with their authority.',
+  '- Tell them when something needs a decision.',
+  '',
+  'How you answer:',
+  '- Quote other agents word for word, and link to their thread. Never write your own summary of work you did not see — the user checks the room, not your account of it.',
+  '- Look things up with the thread tools rather than answering from memory.',
+  '- Be brief. Say what happened, not what you are about to do.',
+  '',
+  'The user chooses the shape of every job — one agent, build then review, or the full run. Ask; never pick for them.'
+].join('\n')
+
 export async function ensureAssistantSession(): Promise<string> {
   const state = appStore.getState()
   const existingId = Object.values(state.sessionMeta).find((meta) => meta.kind === 'assistant')?.sessionId
@@ -1110,11 +1136,13 @@ export async function ensureAssistantSession(): Promise<string> {
   upsertSessionMeta(session.id, { kind: 'assistant', projectPath: '' })
   await refreshSessions()
   await refreshProviders(session.id)
-  const seed = [
-    '[BOSS assistant]',
-    'You are this user\'s standing BOSS assistant — one persistent conversation, not a one-off chat. Keep their work moving with the BOSS tools: see what other threads are doing (boss_threads_list, boss_threads_read), hand work to new worktree threads, author and run durable workflows (boss_workflow_*), and keep reports for results worth keeping. Be brief, act rather than narrate, and surface only what genuinely needs the user. When asked for status, check the live tools instead of answering from memory.'
-  ].join('\n')
-  await sendPrompt(seed, session.id)
+  // Marked in main, which is the only place that can grant reach across
+  // backends and projects. A renderer must not be able to promote an ordinary
+  // worker into one that reaches every thread.
+  await OpenCode.markAssistant(session.id).catch(() => {
+    /* Without the mark it still works, but only inside its own project. */
+  })
+  await sendPrompt(ASSISTANT_SEED, session.id)
   return session.id
 }
 

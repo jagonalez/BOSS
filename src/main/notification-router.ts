@@ -15,6 +15,10 @@ export interface NotificationSettings {
   webhookOnlyWhenAway: boolean
 }
 
+/** How many held events survive a long quiet spell. Enough for a working day
+ *  of real interruptions; past that the oldest are the least useful. */
+const HELD_CAP = 100
+
 export const NOTIFICATION_DEFAULTS: NotificationSettings = {
   desktop: 'attention',
   webhook: 'off',
@@ -37,6 +41,16 @@ export class NotificationRouter {
   /** Set by the host so a notification can be skipped while the user is
    *  already looking at BOSS. */
   private isForeground: () => boolean = () => false
+  /** Silence, with no exceptions.
+   *
+   *  The user was explicit: do not disturb means nothing gets through, not even
+   *  a failed release. Real paging stays with their monitoring, which already
+   *  works and already wakes them. BOSS is not a pager, and one exception would
+   *  make the setting untrustworthy. */
+  private quiet = false
+  /** What arrived while quiet, so returning does not mean finding out by
+   *  accident that something needed an answer two hours ago. */
+  private held: BossEvent[] = []
 
   configure(settings: Partial<NotificationSettings>): NotificationSettings {
     this.settings = { ...this.settings, ...settings }
@@ -51,8 +65,29 @@ export class NotificationRouter {
     this.isForeground = probe
   }
 
+  /** Turn silence on or off. Returns what was held back, so the caller can tell
+   *  the user what waited rather than leaving them to notice. */
+  setQuiet(quiet: boolean): BossEvent[] {
+    this.quiet = quiet
+    if (quiet) return []
+    const waiting = this.held
+    this.held = []
+    return waiting
+  }
+
+  isQuiet(): boolean {
+    return this.quiet
+  }
+
   /** Deliver an event to every channel that wants it. */
   publish(event: BossEvent): void {
+    if (this.quiet) {
+      // Held rather than dropped. Work keeps running while the user is away;
+      // what needed them is what they came back for.
+      this.held.push(event)
+      if (this.held.length > HELD_CAP) this.held.splice(0, this.held.length - HELD_CAP)
+      return
+    }
     if (shouldNotify(this.settings.desktop, event.type) && !this.isForeground()) {
       this.desktop(event)
     }

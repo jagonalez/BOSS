@@ -266,6 +266,7 @@ export type BackendRequest =
   | { type: 'room.get'; threadId: string }
   | { type: 'room.recipient.set'; threadId: string; recipient: string }
   | { type: 'room.join'; threadId: string; roleId: string }
+  | { type: 'room.assistant.mark'; threadId: string }
   | { type: 'room.team.get' }
   | { type: 'room.team.set'; team: import('./room').RoomTeam }
   | { type: 'thread.followups.add'; threadId: string; text: string; attachments?: QueuedFollowUpAttachment[]; options?: BackendMessageOptions }

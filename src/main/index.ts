@@ -148,6 +148,7 @@ const reports = new ReportManager(
 )
 backendMgr.attachReports(reports)
 threadBus.attachReports(reports)
+threadBus.attachNotifications(notifications)
 const automations = new AutomationManager({
   stateFile: join(app.getPath('userData'), 'automations.json'),
   runsFile: join(app.getPath('userData'), 'automation-runs.json')

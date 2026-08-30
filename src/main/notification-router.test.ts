@@ -50,6 +50,9 @@ function harness(overrides = {}) {
   }) as typeof fetch
   return {
     posted,
+    // Exposed so a test can turn quiet on and off, which is router state rather
+    // than a property of one publish.
+    router,
     publish: (foreground: boolean) => {
       router.onForeground(() => foreground)
       try {
@@ -104,4 +107,59 @@ test('an unconfigured webhook stays silent whatever the focus', () => {
     h.publish(foreground)
     assert.deepEqual(h.posted, [], `no URL should post nothing (foreground: ${foreground})`)
   }
+})
+
+test('do not disturb reaches every channel, with no exceptions', () => {
+  // The user was explicit: nothing gets through, not even a failed release.
+  // Real paging stays with their monitoring, which already wakes them. One
+  // exception would make the setting untrustworthy.
+  const h = harness()
+  h.router.setQuiet(true)
+  h.publish(false)
+  assert.deepEqual(h.posted, [], 'a phone push is silenced along with the desktop')
+})
+
+test('what arrived while quiet is returned when quiet ends', () => {
+  // Held rather than dropped: work keeps running while the user is away, and
+  // what needed them is what they came back for.
+  const h = harness()
+  h.router.setQuiet(true)
+  h.router.publish(EVENT)
+  h.router.publish(EVENT)
+
+  const waiting = h.router.setQuiet(false)
+  assert.equal(waiting.length, 2)
+  assert.equal(waiting[0].title, 'A thread needs you')
+})
+
+test('ending quiet twice does not report the same events again', () => {
+  const h = harness()
+  h.router.setQuiet(true)
+  h.router.publish(EVENT)
+  h.router.setQuiet(false)
+  assert.deepEqual(h.router.setQuiet(false), [], 'they were already reported once')
+})
+
+test('turning quiet on returns nothing, because nothing has waited yet', () => {
+  const h = harness()
+  assert.deepEqual(h.router.setQuiet(true), [])
+})
+
+test('events resume normally once quiet ends', () => {
+  const h = harness()
+  h.router.setQuiet(true)
+  h.router.setQuiet(false)
+  h.publish(false)
+  assert.equal(h.posted.length, 1, 'coming back reconnects the user to their work')
+})
+
+test('a long quiet spell keeps the newest events rather than growing forever', () => {
+  const h = harness()
+  h.router.setQuiet(true)
+  for (let index = 0; index < 150; index += 1) {
+    h.router.publish({ ...EVENT, title: `event ${index}` })
+  }
+  const waiting = h.router.setQuiet(false)
+  assert.equal(waiting.length, 100)
+  assert.equal(waiting.at(-1)?.title, 'event 149', 'the most recent are the ones worth showing')
 })
