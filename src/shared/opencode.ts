@@ -55,6 +55,23 @@ export interface MessageInfo {
   time?: { created?: number; completed?: number }
   tokens?: number
   error?: unknown
+  /** Which participant wrote this, in a room that has more than one.
+   *
+   *  `role` only distinguishes the user from an agent. A room has several
+   *  agents at once, so an assistant message needs to say which one — a builder
+   *  and a reviewer must never merge into one voice. Absent on threads that
+   *  never grew past a single agent, which is why it stays optional. */
+  author?: string
+  /** Which participant a user message was addressed to.
+   *
+   *  Every message in a room names exactly one recipient, so an agent knows
+   *  whether to act. An agent may read a message it was not addressed in and
+   *  must not act on it: the user thinks out loud with BOSS before deciding
+   *  what to tell the builder. */
+  recipient?: string
+  /** The message this one replies under, when the user took a point into a
+   *  branch. Branches keep several review points from tangling in one stream. */
+  branchOf?: string
 }
 
 export type PartType = 'text' | 'tool' | 'reasoning' | 'snapshot' | 'file' | 'step' | 'agent' | 'compaction'

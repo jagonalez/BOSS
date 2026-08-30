@@ -106,6 +106,13 @@ interface ThreadBinding {
    *  and fell back to the global model — a toolbar that disagreed with the
    *  model the thread was actually running on. */
   model?: { providerID: string; modelID: string; variant?: string }
+  /** This thread is the user's standing assistant.
+   *
+   *  It alone may read and message threads on other backends and in other
+   *  projects, because the user asks it what is happening across their work.
+   *  Stored on the binding so a renderer cannot promote an ordinary worker into
+   *  one that reaches everything. */
+  assistant?: boolean
 }
 
 /** The stored form of a thread's model, from a preference or a sent message.
@@ -872,6 +879,55 @@ export class BackendManager {
     worktree?: WorktreeInfo
   ): Promise<SessionInfo> {
     return this.sessionCreateInScope(backendId, scope, title, undefined, worktree)
+  }
+
+  /** Start the hidden thread one room participant runs in.
+   *
+   *  A room's participants each get their own session so a reviewer can run on
+   *  a different model from the builder — which is the whole reason a reviewer
+   *  is believed. The session is marked as a subagent of the room, so it stays
+   *  out of the sidebar: the user sees one conversation, not five. */
+  async createParticipantThread(input: {
+    roomThreadId: string
+    roleId: string
+    backendId: BackendId
+    executionPath: string
+  }): Promise<string> {
+    const room = this.binding(input.roomThreadId)
+    const created = await this.sessionCreateInScope(
+      input.backendId,
+      this.scopeFor(input.executionPath || room.executionPath),
+      `${room.title ?? 'Room'} · ${input.roleId}`,
+      undefined,
+      room.worktree
+    )
+    const binding = this.binding(created.id)
+    // parentID is what already hides a thread from the sidebar and blocks its
+    // composer. A participant is driven through its room, never directly.
+    binding.parentID = input.roomThreadId
+    this.save()
+    return created.id
+  }
+
+  /** Drop a participant's session once it has been idle too long.
+   *
+   *  Deleting rather than keeping it is the point: an old session costs its
+   *  full size on every mention once the provider's discount has expired, and
+   *  a stale planner would speak confidently about code that has since moved.
+   *  Its job notes are what carry forward. */
+  async disposeParticipantThread(threadId: string): Promise<void> {
+    await this.sessionDelete(threadId).catch(() => {
+      /* Already gone, which is the state the caller wanted. */
+    })
+  }
+
+  /** Where a room's work happens, so a joining participant lands in the same
+   *  checkout as the rest. */
+  roomPaths(roomThreadId: string): { projectPath: string; executionPath: string } | undefined {
+    this.load()
+    const binding = this.bindings.get(roomThreadId)
+    if (!binding) return undefined
+    return { projectPath: binding.projectPath, executionPath: binding.executionPath }
   }
 
   attachAutomations(automations: { handle(request: BackendRequest): Promise<unknown> }): void {
@@ -1995,8 +2051,28 @@ export class BackendManager {
       projectId: binding.projectId,
       projectPath: binding.projectPath,
       executionPath: binding.executionPath,
-      busy: this.busyThreads.has(binding.id)
+      busy: this.busyThreads.has(binding.id),
+      ...(binding.assistant ? { assistant: true as const } : {})
     }
+  }
+
+  /** Mark the thread that is the user's standing assistant.
+   *
+   *  Only this thread may reach across backends and projects, so the flag lives
+   *  on the binding in main rather than on a renderer-side label. A renderer
+   *  that lost its local state must not be able to promote an ordinary worker
+   *  into one that can steer every other thread. */
+  markAssistantThread(threadId: string): void {
+    this.load()
+    const binding = this.bindings.get(threadId)
+    if (!binding || binding.assistant) return
+    // Exactly one at a time. Two assistants would mean two agents each able to
+    // reach everything, which is the thing the fence exists to prevent.
+    for (const other of this.bindings.values()) {
+      if (other.assistant && other.id !== threadId) delete other.assistant
+    }
+    binding.assistant = true
+    this.save()
   }
 
   async threadMessages(threadId: string, limit: number): Promise<MessageWithParts[]> {

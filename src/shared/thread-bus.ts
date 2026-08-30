@@ -12,6 +12,15 @@ export interface ThreadBusThread {
   projectPath: string
   executionPath: string
   busy: boolean
+  /** The user's standing assistant.
+   *
+   *  Ordinary agents may only reach threads on their own backend, in their own
+   *  project: a worker has no business steering someone else's work. The
+   *  assistant is the exception by definition — the user asks it what is
+   *  happening everywhere, and it answers by looking. Marking the thread rather
+   *  than checking a title keeps that exemption to exactly one thread the app
+   *  itself created. */
+  assistant?: boolean
 }
 
 export interface ThreadBusMessage {

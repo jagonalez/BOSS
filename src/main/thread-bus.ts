@@ -371,9 +371,18 @@ export class ThreadBus {
 
     switch (tool) {
       case 'boss_threads_list':
-        return this.host.threadList(caller.projectId)
-          .filter((thread) => thread.backendId === caller.backendId)
-          .map((thread) => ({ id: thread.id, title: thread.title, busy: thread.busy, current: thread.id === caller.id }))
+        // The assistant lists everything, because "what is happening?" is the
+        // question it exists to answer. Everyone else sees their own project on
+        // their own backend, which is all they can reach anyway.
+        return this.host.threadList(caller.assistant ? '' : caller.projectId)
+          .filter((thread) => caller.assistant || thread.backendId === caller.backendId)
+          .map((thread) => ({
+            id: thread.id,
+            title: thread.title,
+            busy: thread.busy,
+            current: thread.id === caller.id,
+            ...(caller.assistant ? { backend: thread.backendId, project: thread.projectPath } : {})
+          }))
       case 'boss_threads_read': {
         const targetId = stringArg(args, 'threadId')
         const target = this.requirePeer(caller, targetId)
@@ -564,6 +573,12 @@ export class ThreadBus {
     if (caller.id === targetId) throw new Error('Choose a different thread.')
     const target = this.host.threadInfo(targetId)
     if (!target) throw new Error('Target thread not found.')
+    // The standing assistant reaches every thread. The user asks it what is
+    // happening across their work and expects an answer, so confining it to one
+    // backend and one project would leave it unable to do the only job it has.
+    // Every other agent stays fenced: a worker has no business steering someone
+    // else's work, and the fence is what makes that true rather than hoped for.
+    if (caller.assistant) return target
     if (target.backendId !== caller.backendId) throw new Error('Agent communication is limited to threads on the same backend.')
     if (target.projectId !== caller.projectId) throw new Error('Agent communication is limited to threads in the same project.')
     return target
