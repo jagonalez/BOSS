@@ -50,20 +50,24 @@ export function catchUpFor(
   // in the past and hand the participant nothing at all. Trusting the earlier
   // of the two costs a little repetition and never hides a message.
   const since = Math.min(participant.lastActiveAt, now)
-  // Cut by position, not by reading each timestamp in turn.
+  // Cut at the first message that is new, and keep everything from there.
   //
-  // The list is in the order messages were stored, which is not the order they
-  // were timed: a part that arrives before its message is appended at the end
-  // with no timestamp at all. Deciding message by message therefore dropped
-  // exactly those, and dropping one silently lets a participant act on stale
-  // context with no sign anything was withheld. Everything after the last
-  // message the participant has certainly seen is what it missed.
-  let lastSeen = -1
-  messages.forEach((message, index) => {
-    const at = message.info.time?.created
-    if (at !== undefined && at <= since) lastSeen = index
-  })
-  return { missed: messages.slice(lastSeen + 1), first: false }
+  // Neither order alone is trustworthy. The list is in the order messages were
+  // stored, which is not the order they were timed — a part that arrives before
+  // its message is appended at the end with no timestamp at all — so reading
+  // timestamps one by one drops exactly those. But taking the last old-looking
+  // message as the cut drops a new one stored before an old one. Stopping at
+  // the first new message is safe against both: a participant may see a message
+  // twice, which costs a little repetition, but never misses one.
+  let cut = messages.length
+  for (let index = 0; index < messages.length; index += 1) {
+    const at = messages[index].info.time?.created
+    if (at === undefined || at > since) {
+      cut = index
+      break
+    }
+  }
+  return { missed: messages.slice(cut), first: false }
 }
 
 /** Render caught-up messages for a participant that was not addressed in them.

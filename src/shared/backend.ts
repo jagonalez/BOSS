@@ -180,6 +180,12 @@ export interface BackendMessageOptions {
    *  A branch is the same room with the same participants; only where it is
    *  drawn differs. */
   branchOf?: string
+  /** This send comes from the participant's own room.
+   *
+   *  A participant thread refuses anything else. Reached directly it would skip
+   *  the catch-up and the room's busy tracking, and its reply would land in a
+   *  conversation whose composer believes it is idle. */
+  fromRoom?: boolean
 }
 
 /** Fill a newly-created thread's first turn from the owning backend's saved

@@ -169,3 +169,18 @@ test('a participant that has seen everything catches up on nothing', () => {
   const messages = [message('m1', 'user', 'old', { at: 10 })]
   assert.deepEqual(catchUpFor(messages, participant({ lastActiveAt: 50 }), 100).missed, [])
 })
+
+test('a new message stored before an old one is not dropped', () => {
+  // Stored order is not time order. Taking the last old-looking message as the
+  // cut dropped anything newer that happened to sit before it.
+  const messages = [
+    message('m1', 'user', 'old', { at: 10 }),
+    message('m2', 'user', 'new', { at: 500 }),
+    message('m3', 'user', 'also old', { at: 20 })
+  ]
+  const result = catchUpFor(messages, participant({ lastActiveAt: 30 }), 1000)
+  assert.ok(
+    result.missed.some((entry) => entry.info.id === 'm2'),
+    'seeing a message twice costs repetition; missing one costs the answer'
+  )
+})

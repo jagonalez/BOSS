@@ -1186,14 +1186,18 @@ export class BackendManager {
    *  busy shows Working for ever, and — since main refuses a second run on a
    *  busy thread — cannot be written to again either. */
   private settleRunsOn(backendId: BackendId): void {
-    for (const threadId of [...this.busyThreads]) {
+    // Snapshotted once. Settling a participant also settles its room, so
+    // reading the live set afterwards would let a room whose participant went
+    // first look idle and skip its own error settlement.
+    const wasBusy = [...this.busyThreads]
+    for (const threadId of wasBusy) {
       const binding = this.bindings.get(threadId)
       if (!binding) continue
       // A room runs on one backend while its participants run on others, which
       // is the point. So a room left busy by a participant on the dead backend
       // has to settle too, or its composer refuses every later message with no
       // way back.
-      if (binding.backendId !== backendId && !this.hasBusyParticipantOn(threadId, backendId)) continue
+      if (binding.backendId !== backendId && !this.hadBusyParticipantOn(wasBusy, threadId, backendId)) continue
       this.settleBusy(threadId)
       this.intentionalAborts.delete(threadId)
       this.transcripts?.finishRun(this.ownTranscriptSource(binding), 'error')
@@ -1692,7 +1696,7 @@ export class BackendManager {
     // room without them would leave sessions running for a conversation that no
     // longer exists, which the user has no way to see or stop.
     // Collected first: sessionDelete removes from the same map this iterates.
-    const participants = [...this.bindings.values()].filter((entry) => entry.parentID === threadId)
+    const participants = [...this.bindings.values()].filter((entry) => entry.parentID === threadId && entry.roleId)
     for (const participant of participants) {
       await this.sessionDelete(participant.id).catch(() => {
         /* One participant that will not go must not block deleting the room. */
@@ -1839,13 +1843,8 @@ export class BackendManager {
     const catchUp = catchUpPrompt(missed.missed, recipient ?? '')
     if (catchUp) preface.push({ type: 'text', text: catchUp })
     if (recipient) await this.rooms?.touch(roomThreadId, recipient, 'working')
-    // BOSS runs in its own standing conversation but answers into the room the
-    // user asked from, so its reply appears where they are looking rather than
-    // in a thread they are not.
-    // The room shows the work, so the room is what looks busy. Its own status
-    // is cleared when the participant's run settles, which reaches the room
-    // because the participant records against it.
-    this.busyThreads.add(roomThreadId)
+    // Claimed by the caller before it routed, so two quick messages cannot both
+    // find the room idle. Announced here, once the run is really starting.
     this.emit({
       type: 'session.status',
       properties: { sessionID: roomThreadId, status: { type: 'busy' } },
@@ -1855,7 +1854,9 @@ export class BackendManager {
       await this.sendMessage(participantThreadId, [...preface, ...parts], {
         ...options,
         // Cleared so the participant's own send does not try to route again.
-        recipient: undefined
+        recipient: undefined,
+        // Says this came from the room rather than around it.
+        fromRoom: true
       })
     } catch (error) {
       // The room was marked busy for a run that never started. Left set, its
@@ -1870,21 +1871,21 @@ export class BackendManager {
     }
   }
 
-  /** Mark a run finished.
-   *
-   *  A participant's run also finishes its room, because the room is what the
-   *  user sees busy. Kept in one helper rather than repeated at each of the
-   *  places a run can end, where one would eventually be forgotten and leave a
-   *  room permanently unable to accept a message. */
-  /** Whether a room has a participant running on a backend that just died. */
-  private hasBusyParticipantOn(roomThreadId: string, backendId: BackendId): boolean {
-    for (const candidate of this.busyThreads) {
+  /** Whether a room had a participant running on a backend that just died. */
+  private hadBusyParticipantOn(wasBusy: readonly string[], roomThreadId: string, backendId: BackendId): boolean {
+    for (const candidate of wasBusy) {
       const binding = this.bindings.get(candidate)
       if (binding?.parentID === roomThreadId && binding.backendId === backendId) return true
     }
     return false
   }
 
+  /** Mark a run finished.
+   *
+   *  A participant's run also finishes its room, because the room is what the
+   *  user sees busy. Kept in one helper rather than repeated at each of the
+   *  places a run can end, where one would eventually be forgotten and leave a
+   *  room permanently unable to accept a message. */
   private settleBusy(threadId: string): boolean {
     const wasBusy = this.busyThreads.delete(threadId)
     const parent = this.bindings.get(threadId)?.parentID
@@ -1901,22 +1902,47 @@ export class BackendManager {
   }
 
   async sendMessage(threadId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
+    // A room's participants are driven by their room. Reached directly — from
+    // the mobile surface, the relay, or a tool call — the message skips the
+    // catch-up and the room's busy tracking, and its reply lands in a
+    // conversation whose composer believes it is idle. Checked here because
+    // this is the one place every surface passes through.
+    if (this.bindings.get(threadId)?.roleId && !options?.fromRoom) {
+      throw new Error('That thread belongs to a room. Message the room instead.')
+    }
     // A message addressed to a room participant runs in that participant's own
     // hidden session, which is how a reviewer can answer on a different model
     // from the builder without either of them leaving the conversation. The
     // room's own thread stays the visible one; only the run moves.
-    const routed = await this.routeToParticipant(threadId, options)
-    if (routed) {
-      // Checked against the room, because the user sees one conversation: a
-      // second message while someone is answering must queue exactly as it
-      // would in an ordinary thread. The participant needs no separate check —
-      // every participant belongs to exactly one room, so a busy room already
-      // means a busy participant.
+    // Claimed before anything is awaited. Routing has to read the room from
+    // disk, and two quick messages both reached that await and both found the
+    // room idle — the very race the one-run-per-thread rule exists to stop,
+    // walked around by a path that checked afterwards.
+    const routes = Boolean(options?.recipient) && options?.recipient !== ROOM_EVERYONE && Boolean(this.rooms)
+    if (routes) {
       if (this.busyThreads.has(threadId) && !this.followUpDeliveries.has(threadId)) {
+        throw new Error(THREAD_BUSY_ERROR)
+      }
+      this.busyThreads.add(threadId)
+    }
+    const routed = await this.routeToParticipant(threadId, options).catch((error: unknown) => {
+      // The claim has to come back, or a room whose participant could not be
+      // started refuses every later message with no way out.
+      if (routes) this.settleBusy(threadId)
+      throw error
+    })
+    if (routed) {
+      // A busy room implies a busy participant, but not the reverse: a
+      // participant's own backend marks it busy directly, and that must still
+      // refuse a second run.
+      if (this.busyThreads.has(routed)) {
+        this.settleBusy(threadId)
         throw new Error(THREAD_BUSY_ERROR)
       }
       return this.sendToParticipant(threadId, routed, parts, options)
     }
+    // Routing found nobody, so the claim has to come back.
+    if (routes) this.settleBusy(threadId)
     const binding = this.binding(threadId)
     // Stranded, not merely removed. A thread that left its worktree is back in
     // its project and can carry on; one whose worktree was reaped underneath it
@@ -2292,7 +2318,9 @@ export class BackendManager {
       executionPath: binding.executionPath,
       busy: this.busyThreads.has(binding.id),
       ...(binding.assistant ? { assistant: true as const } : {}),
-      ...(binding.parentID ? { participant: true as const } : {})
+      // Tested on the role, not the parent: a forked thread also has a parent
+      // and stays addressable. Only a room participant has a role.
+      ...(binding.roleId ? { participant: true as const } : {})
     }
   }
 

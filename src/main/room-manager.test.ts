@@ -297,3 +297,24 @@ test('BOSS cannot join before the user has a team', async () => {
   assert.equal(await h.manager.join('room-1', 'boss'), undefined)
   await h.cleanup()
 })
+
+test('a joining participant has read nothing, so its brief still reaches it', async () => {
+  // Stamping the arrival time made a fresh reviewer look caught up, and the job
+  // notes and the diff never reached it. A reviewer with no brief is exactly
+  // the thing the user does not trust.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  const joined = await h.manager.join('room-1', 'reviewer')
+  assert.equal(joined?.lastActiveAt, undefined, 'joining is not the same as having read the room')
+})
+
+test('speaking marks a participant as caught up', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.join('room-1', 'builder')
+  await h.manager.touch('room-1', 'builder')
+
+  const room = await h.manager.room('room-1')
+  assert.equal(room.participants[0].lastActiveAt, h.now())
+  await h.cleanup()
+})

@@ -98,8 +98,11 @@ export const PARTICIPANT_STALE_AFTER_MS = 60 * 60 * 1000
 
 export function participantIsStale(participant: RoomParticipant, now: number): boolean {
   if (participant.state === 'done') return false
-  if (!participant.lastActiveAt) return false
-  return now - participant.lastActiveAt > PARTICIPANT_STALE_AFTER_MS
+  // Falls back to when it joined. One that arrived and was never spoken to
+  // still holds a session, and leaving it open forever costs the same as one
+  // that spoke once and went quiet.
+  const since = participant.lastActiveAt ?? participant.joinedAt
+  return now - since > PARTICIPANT_STALE_AFTER_MS
 }
 
 /** What survives a participant's session.

@@ -78,9 +78,14 @@ test('a participant goes stale after an hour idle, so its old context is never r
   assert.equal(participantIsStale(old, now), true)
 })
 
-test('a participant that never spoke is not stale, because it has no context to drop', () => {
+test('a participant that joined and was never spoken to still goes stale', () => {
+  // It holds a session either way. Leaving one open forever costs the same as
+  // leaving open one that spoke once and went quiet.
   const now = 10_000_000
-  assert.equal(participantIsStale(participant({ state: 'active' }), now), false)
+  const fresh = participant({ joinedAt: now - 1000 })
+  const forgotten = participant({ joinedAt: now - PARTICIPANT_STALE_AFTER_MS - 1 })
+  assert.equal(participantIsStale(fresh, now), false)
+  assert.equal(participantIsStale(forgotten, now), true)
 })
 
 test('a finished participant never goes stale, because it already left', () => {

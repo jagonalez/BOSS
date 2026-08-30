@@ -167,10 +167,12 @@ the room — pointed at the room, pruning deletes everything the other
 participants and the user wrote. Run bookkeeping must not either: a run belongs
 to the thread that ran it.
 
-**The room is what looks busy.** A message routed to a participant runs
-elsewhere, so without this the room's composer stayed open and a second message
-started a competing run. Both the room and the participant must be free before a
-message routes, because BOSS answers from one conversation shared by every room.
+**The room is what looks busy, and it is claimed before anything is awaited.**
+A message routed to a participant runs elsewhere, so without this the room's
+composer stayed open and a second message started a competing run. Routing has
+to read the room from disk, so checking after that await let two quick messages
+both find the room idle — the same race, walked around by a path that checked
+afterwards.
 
 **Nothing shares a session across rooms.** An earlier version gave BOSS one
 session for every room and redirected where its output was recorded. Every race

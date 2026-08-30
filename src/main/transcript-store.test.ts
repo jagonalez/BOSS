@@ -603,3 +603,26 @@ test('the assistant answers into the room it was asked from', () => {
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a participant speaking does not rewrite whose thread the room is', () => {
+  // The room runs on one engine while its participants run on others. Letting
+  // a participant overwrite the room's identity left whichever spoke last
+  // claiming to be the thread.
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    const room = { threadId: 'room-1', backendId: 'claude' as const, nativeSessionId: 'native-room' }
+    const participant = { threadId: 'room-1', backendId: 'codex' as const, nativeSessionId: 'native-builder', author: 'builder' }
+
+    store.recordMessage(room, { id: 'm1', sessionID: 'native-room', role: 'user', time: { created: 1 } })
+    store.recordMessage(participant, { id: 'm2', sessionID: 'native-builder', role: 'assistant', time: { created: 2 } })
+    store.flush()
+
+    const messages = store.messages('room-1')
+    assert.equal(messages.length, 2, 'both still land in the one conversation')
+    assert.equal(messages[1].info.author, 'builder')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

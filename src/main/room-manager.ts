@@ -199,7 +199,11 @@ export class RoomManager {
         backendId: role.backendId,
         threadId: participantThreadId,
         state: 'active',
-        lastActiveAt: now,
+        // Deliberately not stamped. Joining is not the same as having read the
+        // room: a reviewer that arrives when the builder finishes has seen
+        // nothing, and stamping it here made it look caught up so the job notes
+        // and the diff never reached it. It is stamped the first time it
+        // actually speaks or is spoken to.
         joinedAt: now
       }
       this.rooms[threadId] = {

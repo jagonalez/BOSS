@@ -638,6 +638,19 @@ export class TranscriptStore {
   }
 
   private upsertThread(source: TranscriptSource): void {
+    // A participant writes into its room but is not the room. Overwriting the
+    // room's engine and native session with a participant's would rewrite the
+    // room's identity every time a different agent spoke, and leave whichever
+    // spoke last claiming to be the thread. Only its own thread may say what a
+    // thread is; a participant just touches the timestamp.
+    if (source.author) {
+      this.database.prepare(`
+        INSERT INTO transcript_threads(thread_id, backend_id, native_session_id, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(thread_id) DO UPDATE SET updated_at = excluded.updated_at
+      `).run(source.threadId, source.backendId, source.nativeSessionId, Date.now())
+      return
+    }
     this.database.prepare(`
       INSERT INTO transcript_threads(thread_id, backend_id, native_session_id, updated_at)
       VALUES (?, ?, ?, ?)
