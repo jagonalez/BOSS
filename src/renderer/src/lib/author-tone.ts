@@ -19,3 +19,17 @@ export function authorTone(author: string): AuthorTone {
   // BOSS holds the first tone, so everyone else draws from the rest.
   return TONES[1 + (sum % (TONES.length - 1))]
 }
+
+/** What a speaker is called, in the words the user gave it.
+ *
+ *  The transcript stores a role's id, which is how the app refers to it
+ *  internally. Shown raw, an agent the user named "Reviewer" was labelled
+ *  "reviewer", and BOSS came out in lower case.
+ *
+ *  Falls back to the id, because a role the user has since deleted still spoke:
+ *  a message with no name at all would be worse than one named oddly. */
+export function authorName(author: string, roles?: ReadonlyArray<{ id: string; label: string }>): string {
+  const own = roles?.find((role) => role.id === author)?.label
+  if (own) return own
+  return author.toLowerCase() === 'boss' ? 'BOSS' : author
+}

@@ -29,7 +29,7 @@ import { splitBranches } from '@shared/room-routing'
 import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
 import { overrideFor, recipientKind, recipientLabel, recipientOptions, retarget, splitOverride } from '../lib/recipient'
 import { briefOf } from '@shared/job-notes'
-import { authorTone } from '../lib/author-tone'
+import { authorName, authorTone } from '../lib/author-tone'
 import { splitCards } from '@shared/room-cards'
 import { RoomCard } from './RoomCard'
 import { emptyRoomState } from '@shared/room'
@@ -404,7 +404,7 @@ function MessageView({
       ) : null}
       <div className="msg-role">
         {isUser ? <span>You</span> : item.info.author
-          ? <span className={`msg-who ${authorTone(item.info.author)}`}>{item.info.author}</span>
+          ? <span className={`msg-who ${authorTone(item.info.author)}`}>{authorName(item.info.author, appStore.getState().team?.roles)}</span>
           : <span>Agent</span>}
         {isUser && item.info.recipient ? <span className="to">to {item.info.recipient}</span> : null}
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
@@ -1572,7 +1572,7 @@ function TurnView({
               </div>
               <div className="msg-role">
                 <span className={`msg-who ${authorTone(turn.assistants[0].info.author)}`}>
-                  {turn.assistants[0].info.author}
+                  {authorName(turn.assistants[0].info.author, appStore.getState().team?.roles)}
                 </span>
               </div>
             </>

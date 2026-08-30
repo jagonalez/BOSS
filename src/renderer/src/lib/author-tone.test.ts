@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { authorTone } from './author-tone.ts'
+import { authorName, authorTone  } from './author-tone.ts'
 
 test('the same name always draws the same colour', () => {
   // Nothing is stored, so an agent has to look the same in every session and
@@ -27,4 +27,22 @@ test('another agent never takes the colour BOSS holds', () => {
 test('a role the user renamed still gets a colour', () => {
   // Names are the user's own, so there is no fixed list to colour by hand.
   assert.ok(['two', 'three', 'four'].includes(authorTone('Codey McCodeface')))
+})
+
+test('a speaker is named in the words the user gave it', () => {
+  // The transcript stores a role's id. Shown raw, an agent the user named
+  // "Reviewer" was labelled "reviewer".
+  const roles = [{ id: 'reviewer', label: 'Second pair of eyes' }]
+  assert.equal(authorName('reviewer', roles), 'Second pair of eyes')
+})
+
+test('BOSS keeps its capitals even with no team to read', () => {
+  assert.equal(authorName('boss'), 'BOSS')
+  assert.equal(authorName('boss', []), 'BOSS')
+})
+
+test('a role the user deleted is still named, by its id', () => {
+  // It spoke. A message with no name at all would be worse than one named
+  // oddly.
+  assert.equal(authorName('releaser', [{ id: 'builder', label: 'Builder' }]), 'releaser')
 })

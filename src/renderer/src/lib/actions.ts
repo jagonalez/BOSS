@@ -1160,7 +1160,12 @@ async function startAssistantSession(): Promise<string> {
   const loaded = appStore.getState()
   const known = existingId ? loaded.sessions.find((session) => session.id === existingId) : undefined
   if (known) return known.id
-  const backendId = loaded.engine
+  // The agent the user chose for BOSS in setup, not whichever agent the app
+  // happens to be pointed at. BOSS has a row in the team saying which agent it
+  // runs on, and this ignored it — so the row was a setting that decided
+  // nothing, and the standing conversation ran on whatever was last selected.
+  const team = await OpenCode.team().catch(() => undefined)
+  const backendId = team?.roles.find((role) => role.id === ROOM_ASSISTANT_ID)?.backendId ?? loaded.engine
   const session = await OpenCode.createSession('Assistant', backendId, 'global')
   applyBackendDefaults(session.id, backendId)
   upsertSessionMeta(session.id, { kind: 'assistant', projectPath: '' })
