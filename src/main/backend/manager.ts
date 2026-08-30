@@ -972,9 +972,17 @@ export class BackendManager {
     mode?: BackendModeId
   }): Promise<string> {
     const room = this.binding(input.roomThreadId)
+    // The room's own scope, inherited rather than rebuilt from a path. Built
+    // from the folder, a room with no project — an ordinary chat — turned the
+    // folder its chats happen to run in into a project, which then appeared in
+    // the sidebar as a project called "chats" that was always empty.
     const created = await this.sessionCreateInScope(
       input.backendId,
-      this.scopeFor(input.executionPath || room.executionPath),
+      {
+        projectId: room.projectId,
+        projectPath: room.projectPath,
+        executionPath: input.executionPath || room.executionPath
+      },
       `${room.title ?? 'Room'} · ${input.roleId}`,
       undefined,
       room.worktree
@@ -1319,6 +1327,20 @@ export class BackendManager {
    *  against the room, because that is where the user took the point aside. */
   private branchFor(binding: ThreadBinding): string | undefined {
     return this.pendingBranch.get(binding.parentID ?? binding.id)
+  }
+
+  /** Whether this thread is a room: something with agents running inside it.
+   *
+   *  Checked against the bindings rather than the room state, because it has to
+   *  answer without waiting: reading messages is on the path that draws the
+   *  conversation, and a room that answered "not yet" for one frame would come
+   *  up empty. */
+  private hasParticipants(threadId: string): boolean {
+    this.load()
+    for (const entry of this.bindings.values()) {
+      if (entry.parentID === threadId && entry.roleId) return true
+    }
+    return false
   }
 
   /** Where a whole native history belongs.
@@ -1804,6 +1826,18 @@ export class BackendManager {
 
   async messagesList(threadId: string, limit?: number): Promise<MessageWithParts[]> {
     const binding = this.binding(threadId)
+    // A room holds what several agents said, and no single backend knows all of
+    // it — each one reports only its own half. Asking a backend and reconciling
+    // would delete everything the others and the user wrote, so the room's own
+    // stored list is the whole truth and the only place to read it from.
+    //
+    // A room is a thread whose agents run elsewhere. Its own native session is
+    // never the conversation: opening one returned the agent's history and
+    // wrote it into that agent's hidden thread, so the room itself came up
+    // empty however many messages it held.
+    if (this.transcripts && this.hasParticipants(threadId)) {
+      return this.transcripts.messages(threadId, limit)
+    }
     const hasStoredMessages = this.transcripts?.hasMessages(threadId) ?? false
     if (this.transcripts
       && binding.backendId === 'codex'

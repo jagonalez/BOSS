@@ -1,5 +1,27 @@
 import type { MessageWithParts, Part } from '../../../shared/opencode'
 
+/** Where a message belongs among the ones already on screen.
+ *
+ *  By the time it was created, not by the order it arrived. A backend can
+ *  report its own reply before BOSS has recorded the message that caused it,
+ *  and appending put the answer above the question — permanently, because
+ *  nothing reordered it afterwards.
+ *
+ *  Searched from the end, because a message almost always belongs last: the one
+ *  that does not is the exception this exists for. A message with no time is
+ *  appended, which is the same answer as before for anything that cannot be
+ *  placed. */
+export function insertionPoint(list: MessageWithParts[], created: number | undefined): number {
+  if (created === undefined) return list.length
+  let at = list.length
+  while (at > 0) {
+    const previous = list[at - 1].info.time?.created
+    if (previous === undefined || previous <= created) break
+    at -= 1
+  }
+  return at
+}
+
 export interface TranscriptTurn {
   key: string
   user?: MessageWithParts

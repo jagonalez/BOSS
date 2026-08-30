@@ -502,3 +502,27 @@ test('waiting on a run cannot hang for ever', () => {
   assert.ok(/BROADCAST_TURN_LIMIT_MS/.test(body), 'the wait must be capped')
   assert.ok(/clearTimeout\(limit\)/.test(body), 'a run that ends normally must not leave a timer')
 })
+
+test('a room\'s agent inherits its room\'s project rather than inventing one', () => {
+  // Built from a path, a room with no project — an ordinary chat — turned the
+  // folder its chats happen to run in into a project. It then appeared in the
+  // sidebar as a project called "chats" that was always empty, because every
+  // chat in it was also listed under Chats.
+  const start = source.indexOf('async createParticipantThread(')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.ok(/projectId: room\.projectId/.test(body), 'the room says which project this is')
+  assert.ok(!/this\.scopeFor\(/.test(body), 'a scope must not be rebuilt from a folder path')
+})
+
+test('a room reads its own messages rather than asking a backend', () => {
+  // A room holds what several agents said, and no single backend knows all of
+  // it — each reports only its own half. Reading one returned its agent's
+  // history and wrote that into the agent's hidden thread, so the room itself
+  // came up empty however many messages it held.
+  const start = source.indexOf('async messagesList(threadId: string')
+  const body = source.slice(start, source.indexOf('\n  async ', start + 10))
+  const guard = body.indexOf('this.hasParticipants(threadId)')
+  assert.ok(guard > 0, 'a room must be recognised before any backend is asked')
+  assert.ok(guard < body.indexOf('ensureStarted'), 'and before its history is fetched')
+  assert.ok(guard < body.indexOf('reconcile'), 'and before anything is reconciled over it')
+})

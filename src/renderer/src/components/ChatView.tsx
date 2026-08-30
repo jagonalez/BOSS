@@ -1197,8 +1197,12 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
               The chosen one stays marked and the row stays put, so the choice
               can be changed right up until the first message. It used to start
               an agent on the spot and then vanish, which left the user with a
-              decision made by accident that nothing could undo. */}
-          {hasSession && room.participants.length === 0 && !branchOf && asksShape ? (
+              decision made by accident that nothing could undo.
+
+              Not offered in the standing conversation: BOSS never does the work
+              itself, so choosing a shape there would set up a job in the one
+              place a job never runs. */}
+          {hasSession && !isAssistant && room.participants.length === 0 && !branchOf && asksShape ? (
             <div className="composer-shape" role="radiogroup" aria-label="How this job runs">
               <span>Run this as</span>
               {SHAPES.map((shape) => (

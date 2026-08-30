@@ -528,7 +528,12 @@ export function Sidebar(): React.JSX.Element {
   const sessionsByPath = new Map<string, SessionInfo[]>()
   for (const session of visibleSessions) {
     const raw = session.projectPath ?? session.directory ?? session.path ?? ''
-    const key = raw === '/' ? '' : raw
+    // A chat that belongs to no project still runs somewhere on disk, in a
+    // folder of its own. Grouped by that folder it became a project named
+    // "chats" — one that always said it was empty, because every chat in it was
+    // also listed under Chats. The project a thread belongs to is what main
+    // says it is, not where it happens to run.
+    const key = session.projectId === 'global' || raw === '/' ? '' : raw
     const list = sessionsByPath.get(key) ?? []
     list.push(session)
     sessionsByPath.set(key, list)

@@ -14,6 +14,7 @@ import type {
   SessionMeta,
   Todo
 } from '@shared/opencode'
+import { insertionPoint } from '../lib/transcript'
 import type { BackendAuthStatus, BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendSubscriptionUsage, QueuedFollowUp } from '@shared/backend'
 import type { Annotation } from '@shared/annotations'
 import type { RoomState, RoomTeam } from '@shared/room'
@@ -325,7 +326,7 @@ function upsertMessage(messages: Record<string, MessageWithParts[]>, message: Me
   if (idx >= 0) {
     list[idx] = { ...list[idx], info: message }
   } else {
-    list.push({ info: message, parts: [] })
+    list.splice(insertionPoint(list, message.time?.created), 0, { info: message, parts: [] })
   }
   return { ...messages, [message.sessionID]: list }
 }

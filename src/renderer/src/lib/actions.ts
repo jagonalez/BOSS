@@ -1132,12 +1132,35 @@ const ASSISTANT_SEED = [
   CARD_INSTRUCTIONS
 ].join('\n')
 
+/** The start already in flight, so two callers cannot each make one.
+ *
+ *  The BOSS page starts a conversation whenever it cannot find one, and it
+ *  cannot find one until the session list has loaded. Every launch that took a
+ *  moment to load therefore made another, and they piled up in the sidebar —
+ *  four "Assistant" chats, none of them wrong, none of them the one. */
+let assistantStarting: Promise<string> | undefined
+
 export async function ensureAssistantSession(): Promise<string> {
+  if (assistantStarting) return assistantStarting
+  assistantStarting = startAssistantSession().finally(() => {
+    assistantStarting = undefined
+  })
+  return assistantStarting
+}
+
+async function startAssistantSession(): Promise<string> {
   const state = appStore.getState()
   const existingId = Object.values(state.sessionMeta).find((meta) => meta.kind === 'assistant')?.sessionId
   const existing = existingId ? state.sessions.find((session) => session.id === existingId) : undefined
   if (existing) return existing.id
-  const backendId = state.engine
+  // The list may not have arrived yet, and a conversation that exists on disk
+  // must not be duplicated because the app had not read it. Asked for once,
+  // rather than trusted from a state that may be empty for a different reason.
+  await refreshSessions()
+  const loaded = appStore.getState()
+  const known = existingId ? loaded.sessions.find((session) => session.id === existingId) : undefined
+  if (known) return known.id
+  const backendId = loaded.engine
   const session = await OpenCode.createSession('Assistant', backendId, 'global')
   applyBackendDefaults(session.id, backendId)
   upsertSessionMeta(session.id, { kind: 'assistant', projectPath: '' })

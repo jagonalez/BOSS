@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { groupTranscriptTurns, rehomeLegacyToolImages, searchTranscript } from './transcript.ts'
+import { groupTranscriptTurns, rehomeLegacyToolImages, searchTranscript, insertionPoint } from './transcript.ts'
 import type { MessageWithParts } from '../../../shared/opencode.ts'
 
 function message(id: string, role: 'user' | 'assistant', text: string): MessageWithParts {
@@ -157,4 +157,44 @@ test('split turns keep distinct keys, so the virtual list can tell them apart', 
   ])
 
   assert.notEqual(turns[0].key, turns[1].key)
+})
+
+/** Messages are placed by when they were made, not by when they arrived.
+ *
+ *  A backend can report its own reply before BOSS has recorded the message that
+ *  caused it. Appending put the answer above the question, and nothing
+ *  reordered it afterwards — so the conversation read backwards for good. */
+function at(created?: number): MessageWithParts {
+  return { info: { id: String(created ?? 'none'), sessionID: 's', role: 'user', ...(created === undefined ? {} : { time: { created } }) }, parts: [] }
+}
+
+test('a message made later goes last', () => {
+  assert.equal(insertionPoint([at(1), at(2)], 3), 2)
+})
+
+test('a message made earlier goes before the one that overtook it', () => {
+  // The fault seen in the app: the reply arrived first and the question landed
+  // under it.
+  assert.equal(insertionPoint([at(5)], 2), 0)
+})
+
+test('a message with no time is appended, because it cannot be placed', () => {
+  // A part arriving before its message makes one of these. Guessing a position
+  // would be worse than the order it came in.
+  assert.equal(insertionPoint([at(1), at(2)], undefined), 2)
+})
+
+test('an existing message with no time stops the search', () => {
+  // Nothing before it can be compared, so walking past it would be a guess.
+  assert.equal(insertionPoint([at(9), at(undefined)], 1), 2)
+})
+
+test('an empty list takes the first message', () => {
+  assert.equal(insertionPoint([], 7), 0)
+})
+
+test('equal times keep the order they arrived in', () => {
+  // Two messages in the same millisecond are ordered by arrival, which is the
+  // only information left.
+  assert.equal(insertionPoint([at(4)], 4), 1)
 })
