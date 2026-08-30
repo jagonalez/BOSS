@@ -175,6 +175,23 @@ export function HomePage(): React.JSX.Element {
     setCardMenu({ x: event.clientX, y: event.clientY, thread })
   }, [])
 
+  // A first launch has nothing to continue, nothing to search, and no summary
+  // worth a panel. Showing all three anyway is what made an empty app look like
+  // a control panel. One input is enough until there is work to show.
+  if (recent.length === 0 && query.trim().length === 0) {
+    return (
+      <div className="product-page home-page home-blank">
+        <div className="home-blank-inner">
+          <h1>What are we building?</h1>
+          <div className="home-blank-actions">
+            <button className="home-blank-start" onClick={() => void newGlobalChat()}>Start a conversation</button>
+            <button className="home-blank-open" onClick={() => void openProjectFolder()}>Open a project</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="product-page home-page">
       <header className="product-header">

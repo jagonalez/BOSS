@@ -4,6 +4,8 @@ import { Sidebar } from './components/Sidebar'
 import { Toolbar } from './components/Toolbar'
 import { Workspace } from './components/Workspace'
 import { HomePage } from './components/HomePage'
+import { TeamSetup } from './components/TeamSetup'
+import { OpenCode } from './lib/opencode'
 import { LabAssistantPage } from './components/LabAssistantPage'
 import { SitesPage } from './components/SitesPage'
 import { AutomationsPage } from './components/AutomationsPage'
@@ -80,9 +82,17 @@ async function refreshAll(): Promise<void> {
 
 export function App(): React.JSX.Element {
   const activePage = useStore(appStore, (s) => s.activePage)
+  // Undefined until the first read finishes, so the setup screen does not flash
+  // in front of a user who already has a team.
+  const [team, setTeam] = React.useState<import('@shared/room').RoomTeam | null | undefined>(undefined)
+  const [setupDone, setSetupDone] = React.useState(false)
   const projectPath = useStore(appStore, (s) => s.projectPath)
   const sessions = useStore(appStore, (s) => s.sessions)
   const modalOpen = useStore(appStore, (s) => Boolean(s.settingsOpen || s.confirm || s.modelSwitch || s.commitPath || s.renameTarget || s.delegateTarget || s.policyTarget || s.paletteOpen))
+
+  useEffect(() => {
+    void OpenCode.team().then((current) => setTeam(current ?? null)).catch(() => setTeam(null))
+  }, [])
 
   useEffect(() => {
     loadArchived()
@@ -424,6 +434,10 @@ export function App(): React.JSX.Element {
   // terminal in it whenever you looked at Home, Lab Assistant, Automations,
   // Reports or Sites, and started them again on the way back.
   const overlay = (() => {
+    // Setup comes before everything, once. The user was explicit that setup
+    // burden is what stops people using a tool, so it arrives already answered
+    // and is never shown again.
+    if (team === null && !setupDone) return <TeamSetup onDone={() => setSetupDone(true)} />
     if (activePage === 'home') return <HomePage />
     if (activePage === 'lab-assistant') return <LabAssistantPage />
     if (activePage === 'automations') return <AutomationsPage />

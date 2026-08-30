@@ -35,7 +35,7 @@ import {
   togglePin,
   exportSessionMarkdown
 } from '../lib/actions'
-import { BACKEND_MARKS, BranchIcon, ChatIcon, ChevronIcon, ExternalIcon, FileIcon, FilesIcon, FolderIcon, ForkIcon, GearIcon, GlobeIcon, LabMark, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
+import { BACKEND_MARKS, ChatIcon, ChevronIcon, ExternalIcon, FileIcon, FilesIcon, FolderIcon, ForkIcon, GearIcon, GlobeIcon, LabMark, PanelIcon, PlusIcon, ReviewIcon, StarIcon, TerminalIcon } from './icons'
 import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
 import { IconButton } from './ui'
 
@@ -638,24 +638,18 @@ export function Sidebar(): React.JSX.Element {
           <PanelIcon size={14} />
         </IconButton>
       </div>
+      {/* BOSS sits alone at the top because it is a participant, not a page.
+          It is the one thing reachable from everywhere, and the only thing the
+          user talks to when they are away from their desk. */}
       <nav className="sidebar-primary" aria-label="Primary navigation">
+        <button
+          className={`sidebar-boss ${activePage === 'lab-assistant' ? 'active' : ''}`}
+          onClick={() => showPage('lab-assistant')}
+        >
+          <LabMark size={15} /><span>@BOSS</span>
+        </button>
         <button className={`sidebar-primary-item ${activePage === 'home' ? 'active' : ''}`} onClick={() => showPage('home')}>
           <PanelIcon size={15} /><span>Home</span>
-        </button>
-        <button className={`sidebar-primary-item ${activePage === 'lab-assistant' ? 'active' : ''}`} onClick={() => showPage('lab-assistant')}>
-          <LabMark size={15} /><span>Assistant</span>
-        </button>
-        <button className={`sidebar-primary-item ${activePage === 'automations' ? 'active' : ''}`} onClick={() => showPage('automations')}>
-          <ReviewIcon size={15} /><span>Automations</span>
-        </button>
-        <button className={`sidebar-primary-item ${activePage === 'workflows' ? 'active' : ''}`} onClick={() => showPage('workflows')}>
-          <BranchIcon size={15} /><span>Workflows</span>
-        </button>
-        <button className={`sidebar-primary-item ${activePage === 'reports' ? 'active' : ''}`} onClick={() => showPage('reports')}>
-          <FileIcon size={15} /><span>Reports</span>{unreadReports ? <small>{unreadReports}</small> : null}
-        </button>
-        <button className={`sidebar-primary-item ${activePage === 'sites' ? 'active' : ''}`} onClick={() => showPage('sites')}>
-          <GlobeIcon size={15} /><span>Sites</span>
         </button>
       </nav>
       <div className="sidebar-section-rule" />
@@ -876,6 +870,22 @@ export function Sidebar(): React.JSX.Element {
           </div>
         </>
       )}
+
+      {/* Below the work, not beside it. Automations, reports, and sites are real
+          but rare; putting them level with the conversation is what made the
+          app read as a control panel rather than a place to work. */}
+      <nav className="sidebar-secondary" aria-label="Other pages">
+        <div className="section-label">Also</div>
+        <button className={`sidebar-primary-item ${activePage === 'automations' ? 'active' : ''}`} onClick={() => showPage('automations')}>
+          <ReviewIcon size={15} /><span>Automations</span>
+        </button>
+        <button className={`sidebar-primary-item ${activePage === 'reports' ? 'active' : ''}`} onClick={() => showPage('reports')}>
+          <FileIcon size={15} /><span>Reports</span>{unreadReports ? <small>{unreadReports}</small> : null}
+        </button>
+        <button className={`sidebar-primary-item ${activePage === 'sites' ? 'active' : ''}`} onClick={() => showPage('sites')}>
+          <GlobeIcon size={15} /><span>Sites</span>
+        </button>
+      </nav>
 
       <div className="footer">
         <span className="right" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>

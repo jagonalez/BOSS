@@ -13,6 +13,7 @@ import type {
 } from '../shared/backend'
 import { isAbortError, THREAD_BUSY_ERROR } from '../shared/backend'
 import type { MessageWithParts, SessionInfo } from '../shared/opencode'
+import type { RoomState, RoomTeam } from '../shared/room'
 import { contextHandoffPacket, delegatedContextInstruction } from '../shared/context-handoff'
 import { titleFromFirstPrompt } from '../shared/thread-title'
 import type { LabAssistantSnapshot } from '../shared/lab-assistant'
@@ -562,6 +563,22 @@ export function installE2EApi(boss: BossApi): void {
     finishedAt: Date.now() - 600_000
   }]
   let nextWorkflow = 1
+  // A team ships pre-seeded so the recipient chip has real participants to
+  // offer, and so setup does not stand in front of every other scenario. Its
+  // reviewer runs on a different agent from its builder on purpose: that
+  // difference is what a room exists to make possible.
+  let roomTeam: RoomTeam | undefined = {
+    version: 1,
+    askShape: true,
+    defaultShape: 'reviewed',
+    roles: [
+      { id: 'builder', label: 'Builder', backendId: 'codex', mode: 'auto' },
+      { id: 'reviewer', label: 'Reviewer', backendId: 'claude', mode: 'plan' }
+    ]
+  }
+  const emptyRoom: RoomState = { version: 1, participants: [], notes: { agreed: [], decided: [], changed: [], updatedAt: 0 }, recipient: 'boss' }
+  const rooms: Record<string, RoomState> = {}
+
   let workflowApprovalMode = 'ask'
   // One agent-authored workflow ships pre-seeded, disabled, with a run parked
   // on a pending ask() — the states the Workflows page must make legible.
@@ -1014,6 +1031,41 @@ export function installE2EApi(boss: BossApi): void {
       // Main stops the server and returns the descriptors; nothing about a
       // backend's advertised capabilities changes because it was restarted.
       case 'backend.restart': return backends
+      // Rooms: a team is pre-seeded so the recipient chip has participants to
+      // offer, and the setup screen does not stand in front of every scenario.
+      case 'room.team.get': return roomTeam
+      case 'room.team.set': {
+        roomTeam = request.team
+        return roomTeam
+      }
+      case 'room.get': return rooms[request.threadId] ?? { ...emptyRoom }
+      case 'room.recipient.set': {
+        const current = rooms[request.threadId] ?? { ...emptyRoom }
+        rooms[request.threadId] = { ...current, recipient: request.recipient }
+        return rooms[request.threadId]
+      }
+      case 'room.join': {
+        const current = rooms[request.threadId] ?? { ...emptyRoom }
+        const role = roomTeam?.roles.find((entry) => entry.id === request.roleId)
+        if (role && !current.participants.some((entry) => entry.roleId === role.id)) {
+          rooms[request.threadId] = {
+            ...current,
+            participants: [
+              ...current.participants,
+              {
+                roleId: role.id,
+                label: role.label,
+                backendId: role.backendId,
+                threadId: `participant-${role.id}`,
+                state: 'active',
+                joinedAt: 0,
+                lastActiveAt: 0
+              }
+            ]
+          }
+        }
+        return rooms[request.threadId] ?? current
+      }
       case 'thread.list': return sessions
       case 'thread.create': return createThread(request.backendId, request.title, request.scope === 'global' ? '' : PROJECT)
       case 'thread.get': return sessions.find((session) => session.id === request.threadId)

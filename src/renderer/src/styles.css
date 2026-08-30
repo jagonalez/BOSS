@@ -1630,6 +1630,286 @@ textarea {
   padding: 0 8px;
 }
 
+/* One-time team setup. Three screens, each arriving already answered: a form
+   the user must complete before starting is what this screen exists to avoid. */
+.team-setup {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: 40px 24px;
+  overflow-y: auto;
+}
+
+.team-setup-card {
+  width: 100%;
+  max-width: 470px;
+}
+
+.team-setup-card h2 {
+  margin: 0 0 6px;
+  font-size: var(--type-title, 20px);
+  font-weight: 600;
+}
+
+.team-setup-sub {
+  margin: 0 0 22px;
+  color: var(--text-muted);
+}
+
+.team-setup-note {
+  margin-top: 12px;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+.team-setup-steps {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 22px;
+}
+
+.team-setup-steps i {
+  display: block;
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.team-setup-steps i.on {
+  background: var(--text);
+}
+
+.team-setup-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.team-setup-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.team-setup-row:last-child {
+  border-bottom: 0;
+}
+
+.team-setup-row.choice {
+  cursor: pointer;
+}
+
+.team-setup-row.choice:hover {
+  background: var(--surface-hover);
+}
+
+.team-setup-row .name {
+  font-weight: 500;
+}
+
+.team-setup-row .reach,
+.team-setup-row .state {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+.team-setup-row .state:not(.off) {
+  color: var(--green, var(--accent));
+}
+
+.team-setup-row .role-name {
+  width: 110px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+}
+
+.team-setup-row .role-name:hover,
+.team-setup-row .role-name:focus {
+  border-color: var(--border);
+  outline: none;
+}
+
+.team-setup-row .role-agent {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--type-meta);
+}
+
+.team-setup-row .role-remove {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.team-setup-row .role-remove:hover {
+  color: var(--text);
+}
+
+.team-setup-row .radio {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 50%;
+  position: relative;
+}
+
+.team-setup-row .radio.on {
+  border-color: var(--text);
+}
+
+.team-setup-row .radio.on::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.team-setup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.team-setup-actions button {
+  padding: 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.team-setup-actions button.primary {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--surface);
+  font-weight: 500;
+}
+
+.team-setup-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A first launch, before there is anything to continue. One question and two
+   ways to answer it; the search field, the cards, and the summary panel all
+   arrive once there is work for them to describe. */
+.home-blank {
+  display: grid;
+  place-items: center;
+  min-height: 60vh;
+}
+
+.home-blank-inner {
+  width: 100%;
+  max-width: 460px;
+  text-align: center;
+}
+
+.home-blank-inner h1 {
+  margin: 0 0 22px;
+  font-size: var(--type-display, 24px);
+  font-weight: 600;
+}
+
+.home-blank-actions {
+  display: flex;
+  gap: 9px;
+  justify-content: center;
+}
+
+.home-blank-start,
+.home-blank-open {
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.home-blank-start {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--surface);
+  font-weight: 500;
+}
+
+.home-blank-open:hover {
+  border-color: var(--text-faint);
+}
+
+/* The assistant, given its own weight because it is the one thing the user
+   talks to. Everything else in the sidebar is a place; this is a participant. */
+.sidebar-boss {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: var(--primary-nav-row-pad-y) 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--type-control);
+  font-weight: 600;
+}
+
+.sidebar-boss:hover,
+.sidebar-boss.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* Real but rare. Kept below the work so the sidebar reads as somewhere to
+   work rather than a list of subsystems. */
+.sidebar-secondary {
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.sidebar-secondary .sidebar-primary-item {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.sidebar-secondary .sidebar-primary-item:hover,
+.sidebar-secondary .sidebar-primary-item.active {
+  color: var(--text);
+}
+
 .sidebar-primary-item {
   display: flex;
   align-items: center;

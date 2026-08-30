@@ -1,0 +1,206 @@
+import React, { useEffect, useState } from 'react'
+import type { BackendId } from '@shared/backend'
+import type { RoomRole, RoomShape, RoomTeam } from '@shared/room'
+import { appStore, useStore } from '../state/AppState'
+import { OpenCode } from '../lib/opencode'
+import { BACKEND_SHORT_LABELS } from '../lib/backend-labels'
+
+/** Roles BOSS proposes from the agents the user has already connected.
+ *
+ *  Mirrors what main suggests, so the screen can render before any round trip.
+ *  These are defaults the user renames or deletes; nothing downstream may
+ *  assume these ids exist. */
+function suggested(available: BackendId[]): RoomRole[] {
+  if (available.length === 0) return []
+  const strongest = available.includes('claude') ? 'claude' : available[0]
+  const builder = available.includes('codex') ? 'codex' : strongest
+  // A second opinion from the same model is not a second opinion, so the
+  // reviewer differs from the builder whenever there is a choice.
+  const reviewer = available.find((id) => id !== builder) ?? builder
+  return [
+    { id: 'researcher', label: 'Researcher', backendId: strongest, mode: 'plan' },
+    { id: 'planner', label: 'Planner', backendId: strongest, mode: 'plan' },
+    { id: 'builder', label: 'Builder', backendId: builder, mode: 'auto' },
+    { id: 'reviewer', label: 'Reviewer', backendId: reviewer, mode: 'plan' },
+    { id: 'releaser', label: 'Releaser', backendId: builder, mode: 'ask' }
+  ]
+}
+
+/** What each role may touch, said in plain words.
+ *
+ *  Deliberately never the name of a permission mode. The user answers "when
+ *  should it stop and ask", not "which policy applies". */
+function reach(role: RoomRole): string {
+  if (role.mode === 'auto') return 'its own copy of the code'
+  if (role.mode === 'ask') return 'asks before shipping'
+  return 'reads only'
+}
+
+const ASK_OPTIONS: Array<{ shape: RoomShape | 'ask'; label: string; detail: string }> = [
+  { shape: 'ask', label: 'Ask me each time', detail: 'recommended' },
+  { shape: 'direct', label: 'Just do it', detail: 'one agent, no review' },
+  { shape: 'reviewed', label: 'Build and review', detail: 'a fresh agent checks the work' },
+  { shape: 'full', label: 'Research, plan, build, review', detail: 'the full run' }
+]
+
+/** The one-time team setup.
+ *
+ *  Three screens, and the middle one is usually a single click. The user was
+ *  explicit that setup burden is what stops people using a tool, so every
+ *  screen arrives already answered. */
+export function TeamSetup({ onDone }: { onDone: () => void }): React.JSX.Element {
+  const backends = useStore(appStore, (state) => state.backends)
+  const available = backends.filter((backend) => backend.available).map((backend) => backend.id)
+  const [step, setStep] = useState<1 | 2 | 3>(1)
+  const [roles, setRoles] = useState<RoomRole[]>([])
+  const [askShape, setAskShape] = useState(true)
+  const [defaultShape, setDefaultShape] = useState<RoomShape>('reviewed')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    // Filled from what is connected rather than left blank. A form the user has
+    // to complete before they can start is the thing this screen exists to
+    // avoid.
+    if (roles.length === 0 && available.length > 0) setRoles(suggested(available))
+  }, [available, roles.length])
+
+  const save = async (): Promise<void> => {
+    setSaving(true)
+    const team: RoomTeam = { version: 1, roles, askShape, defaultShape }
+    await OpenCode.setTeam(team).catch(() => {
+      /* A team that will not save must not trap the user on this screen. They
+       * can set it again from settings, and BOSS still works without one. */
+    })
+    setSaving(false)
+    onDone()
+  }
+
+  return (
+    <div className="team-setup">
+      <div className="team-setup-card">
+        <div className="team-setup-steps">
+          <i className={step >= 1 ? 'on' : ''} />
+          <i className={step >= 2 ? 'on' : ''} />
+          <i className={step >= 3 ? 'on' : ''} />
+        </div>
+
+        {step === 1 && (
+          <>
+            <h2>Which agents can BOSS use?</h2>
+            <p className="team-setup-sub">These are the ones already installed on this machine.</p>
+            <div className="team-setup-rows">
+              {backends.map((backend) => (
+                <div className="team-setup-row" key={backend.id}>
+                  <span className="name">{BACKEND_SHORT_LABELS[backend.id]}</span>
+                  <span className={`state ${backend.available ? '' : 'off'}`}>
+                    {backend.available ? 'ready' : backend.unavailableReason ?? 'not connected'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="team-setup-actions">
+              <button className="primary" onClick={() => setStep(2)} disabled={available.length === 0}>
+                Continue
+              </button>
+            </div>
+            {available.length === 0 ? (
+              <p className="team-setup-note">Connect at least one agent before setting up a team.</p>
+            ) : null}
+          </>
+        )}
+
+        {step === 2 && (
+          <>
+            <h2>Your team</h2>
+            <p className="team-setup-sub">BOSS filled this in from what you connected. Keep it, or change a row.</p>
+            <div className="team-setup-rows">
+              {roles.map((role) => (
+                <div className="team-setup-row" key={role.id}>
+                  <input
+                    className="role-name"
+                    value={role.label}
+                    aria-label={`Name for the ${role.id} role`}
+                    onChange={(event) =>
+                      setRoles((current) =>
+                        current.map((entry) =>
+                          entry.id === role.id ? { ...entry, label: event.target.value } : entry
+                        )
+                      )
+                    }
+                  />
+                  <select
+                    className="role-agent"
+                    value={role.backendId}
+                    aria-label={`Agent for ${role.label}`}
+                    onChange={(event) =>
+                      setRoles((current) =>
+                        current.map((entry) =>
+                          entry.id === role.id ? { ...entry, backendId: event.target.value as BackendId } : entry
+                        )
+                      )
+                    }
+                  >
+                    {available.map((id) => (
+                      <option key={id} value={id}>{BACKEND_SHORT_LABELS[id]}</option>
+                    ))}
+                  </select>
+                  <span className="reach">{reach(role)}</span>
+                  <button
+                    className="role-remove"
+                    aria-label={`Remove ${role.label}`}
+                    title="Remove this role"
+                    onClick={() => setRoles((current) => current.filter((entry) => entry.id !== role.id))}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="team-setup-actions">
+              <button onClick={() => setStep(1)}>Back</button>
+              <button className="primary" onClick={() => setStep(3)} disabled={roles.length === 0}>
+                Keep this team
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === 3 && (
+          <>
+            <h2>How should work run?</h2>
+            <p className="team-setup-sub">You choose the shape of every job. BOSS never picks it for you.</p>
+            <div className="team-setup-rows">
+              {ASK_OPTIONS.map((option) => {
+                const chosen = option.shape === 'ask' ? askShape : !askShape && defaultShape === option.shape
+                return (
+                  <button
+                    className={`team-setup-row choice ${chosen ? 'on' : ''}`}
+                    key={option.shape}
+                    onClick={() => {
+                      if (option.shape === 'ask') {
+                        setAskShape(true)
+                        return
+                      }
+                      setAskShape(false)
+                      setDefaultShape(option.shape)
+                    }}
+                  >
+                    <span className={`radio ${chosen ? 'on' : ''}`} />
+                    <span className="name">{option.label}</span>
+                    <span className="reach">{option.detail}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="team-setup-actions">
+              <button onClick={() => setStep(2)}>Back</button>
+              <button className="primary" onClick={() => void save()} disabled={saving}>
+                {saving ? 'Saving…' : 'Start'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
