@@ -1160,6 +1160,12 @@ async function startAssistantSession(): Promise<string> {
   const loaded = appStore.getState()
   const known = existingId ? loaded.sessions.find((session) => session.id === existingId) : undefined
   if (known) return known.id
+  // The note saying which thread is the assistant outlives the thread itself.
+  // Deleted from the sidebar, or gone from the app's records for any other
+  // reason, it leaves a note pointing at nothing — and the page then waits for
+  // a conversation that will never arrive. Forgotten only after the list is
+  // known to be loaded, so a slow start does not throw away a good note.
+  if (existingId) upsertSessionMeta(existingId, { kind: 'main' })
   // The agent the user chose for BOSS in setup, not whichever agent the app
   // happens to be pointed at. BOSS has a row in the team saying which agent it
   // runs on, and this ignored it — so the row was a setting that decided
@@ -1181,7 +1187,7 @@ async function startAssistantSession(): Promise<string> {
   // fell back to naming the model, and the standing BOSS chat invited the user
   // to "Ask Claude" — the one name in it that nobody is called.
   setRoomRecipient(session.id, ROOM_ASSISTANT_ID)
-  await sendPrompt(ASSISTANT_SEED, session.id)
+  await sendPrompt(ASSISTANT_SEED, session.id, undefined, 'BOSS joined')
   return session.id
 }
 
@@ -2680,7 +2686,12 @@ export function clearFailedSend(sessionID: string): void {
 /** Returns true when the message reached the backend or was queued as a
  *  follow-up, false when it failed and is being held for retry. The caller
  *  must not clear the composer on false, or the text is gone for good. */
-export async function sendPrompt(text: string, sessionId?: string, attachments?: Attachment[]): Promise<boolean> {
+/** `setupTitle` marks this message as set-up rather than something anyone said.
+ *
+ *  The agent reads every word. The user did not write it, cannot change it, and
+ *  cannot answer it, so the transcript folds it to one line carrying that
+ *  title. */
+export async function sendPrompt(text: string, sessionId?: string, attachments?: Attachment[], setupTitle?: string): Promise<boolean> {
   const cur = appStore.getState()
   const sessionID = sessionId ?? cur.activeSessionId
   if (!sessionID) return false
@@ -2695,7 +2706,7 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   for (const a of attachments ?? []) {
     parts.push({ type: 'file', mime: a.mime, filename: a.name, url: a.dataUrl })
   }
-  if (body.trim()) parts.push({ type: 'text', text: body })
+  if (body.trim()) parts.push({ type: 'text', text: body, ...(setupTitle ? { setup: true, setupTitle } : {}) })
   const model = modelForSession(sessionID)
   const mode = modeForSession(sessionID)
   const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
@@ -2712,7 +2723,11 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     agent,
     mode,
     ...(recipient ? { recipient } : {}),
-    ...(branchOf ? { branchOf } : {})
+    ...(branchOf ? { branchOf } : {}),
+    // Also on the options, so a message queued behind a busy thread still
+    // arrives marked as set-up. A queued message carries text and options, not
+    // parts.
+    ...(setupTitle ? { setupTitle } : {})
   }
   const queue = async (): Promise<boolean> => {
     try {

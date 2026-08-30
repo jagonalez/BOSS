@@ -322,6 +322,12 @@ export class BackendManager {
    *  advance the work, because the builder's answer looks exactly like the
    *  builder finishing its build. */
   private readonly broadcasting = new Set<string>()
+  /** Threads whose set-up we have already recorded ourselves.
+   *
+   *  The engine will hand back its own merged copy of the same text. Ours is
+   *  the one that keeps the pieces apart, so the returning copy is dropped
+   *  rather than stored twice. */
+  private readonly setupSent = new Map<string, Set<string>>()
   /** Who is waiting for a given thread's run to finish.
    *
    *  A backend's send resolves when the turn is dispatched, not when the agent
@@ -1519,6 +1525,14 @@ export class BackendManager {
       if (properties.sessionID) properties.sessionID = binding.id
       if (part) properties.part = { ...part, sessionID: binding.id }
       if (messageInfo?.sessionID) properties.info = { ...messageInfo, sessionID: binding.id }
+      // The engine's own copy of what we just sent back to us. It has glued the
+      // set-up and the user's words into one lump, so it cannot say where one
+      // ended and the other began — and we already recorded the pieces
+      // separately. Stored, it would be the same text a second time, unmarked.
+      //
+      // Only the echo is dropped. The agent's answer, and everything after it,
+      // is exactly what we do want.
+      if (this.droppedSetupEcho(binding, eventType, properties)) return
       if (eventType === 'message.updated' && properties.info) {
         this.transcripts?.recordMessage(
           this.transcriptSource(binding),
@@ -2013,15 +2027,40 @@ export class BackendManager {
     // participant's transcript. A reviewer holding only the plan and the diff
     // cannot be misled by the builder's account of itself, and that is exactly
     // why its verdict is worth something.
+    // Marked as set-up, not speech. The agent still reads every word; the user
+    // sees one folded line per piece. They did not write any of it, cannot
+    // change it, and cannot answer it — printed as prose it was a wall of text
+    // in the middle of their conversation.
+    const who = participant?.label ?? recipient ?? 'An agent'
+    const setup: Array<{ text: string; title: string }> = []
     if (missed.first) {
       const brief = await this.roleBrief(recipient)
-      if (brief) preface.push({ type: 'text', text: brief })
-      if (notes) preface.push({ type: 'text', text: `[JOB NOTES]\n${notes}` })
+      if (brief) setup.push({ title: `${who} joined`, text: brief })
+      if (notes) setup.push({ title: 'What this job agreed', text: `[JOB NOTES]\n${notes}` })
       const diff = await this.roomDiff(roomThreadId)
-      if (diff) preface.push({ type: 'text', text: diff })
+      if (diff) setup.push({ title: 'What has changed so far', text: diff })
     }
     const catchUp = catchUpPrompt(missed.missed, recipient ?? '')
-    if (catchUp) preface.push({ type: 'text', text: catchUp })
+    if (catchUp) {
+      const count = missed.missed.length
+      setup.push({ title: `Caught up on ${count} message${count === 1 ? '' : 's'}`, text: catchUp })
+    }
+    // Recorded as our own copy, one line each, before it goes. What the engine
+    // hands back is every piece glued together, so it can say nothing about
+    // where the set-up ended and the user's words began.
+    if (setup.length > 0) {
+      this.recordSetup(this.binding(roomThreadId), setup)
+      // Marked against the participant's own thread, because that is where the
+      // engine's merged copy comes back — even though what it says is recorded
+      // into the room.
+      this.setupSent.set(participantThreadId, new Set())
+      for (const piece of setup) preface.push({ type: 'text', text: piece.text })
+      // The user's own message travels in the same lump and would be dropped
+      // with the echo, so it is recorded here as itself. Without this, sending
+      // to an agent that has just joined would lose what you actually said.
+      const said = textFromParts(parts)
+      if (said.trim()) this.echoUserMessage(this.binding(roomThreadId), said, options)
+    }
     if (recipient) await this.rooms?.touch(roomThreadId, recipient, 'working')
     // Claimed by the caller before it routed, so two quick messages cannot both
     // find the room idle. Announced here, once the run is really starting.
@@ -2246,6 +2285,16 @@ export class BackendManager {
     if (this.bindings.get(threadId)?.roleId && !options?.fromRoom) {
       throw new Error('That thread belongs to a room. Message the room instead.')
     }
+    // Recorded as our own copy before it goes. Every engine glues the pieces of
+    // a message into one lump and hands that lump back, so the returning copy
+    // cannot say where the set-up ended and the user's words began.
+    if (options?.setupTitle) {
+      this.recordSetup(this.binding(threadId), [{ title: options.setupTitle, text: textFromParts(parts) }])
+      this.setupSent.set(threadId, new Set())
+    }
+    // A room's set-up is recorded by the room path, which marks the
+    // participant's thread so the engine's merged copy is dropped there.
+    
     // A message addressed to a room participant runs in that participant's own
     // hidden session, which is how a reviewer can answer on a different model
     // from the builder without either of them leaving the conversation. The
@@ -2402,6 +2451,102 @@ export class BackendManager {
    *  A backend that steers folds the text into the run it is already doing,
    *  and reports it only when that run ends — so without this the message the
    *  user just sent left the queue and appeared nowhere until the reply came. */
+  /** Whether this event is the engine repeating set-up we already recorded.
+   *
+   *  An engine glues every piece of a message into one lump and sends that lump
+   *  back as the user's message. We recorded the pieces ourselves, keeping them
+   *  apart, so its version is the same words again with the seams lost.
+   *
+   *  Only the first user message after a set-up send is dropped, and the mark is
+   *  cleared once it has been. Anything the agent says afterwards, and anything
+   *  the user types next, is untouched. */
+  private droppedSetupEcho(
+    binding: ThreadBinding,
+    eventType: string,
+    properties: Record<string, unknown>
+  ): boolean {
+    const echoed = this.setupSent.get(binding.id)
+    if (!echoed) return false
+    if (eventType === 'message.updated') {
+      const info = properties.info as { id?: string; role?: string } | undefined
+      if (info?.role === 'user') {
+        // Remembered by id, so its parts can be recognised however they arrive
+        // — a part can reach us before the message it belongs to.
+        echoed.add(String(info.id))
+        return true
+      }
+      // The agent has started answering. Nothing after this is an echo.
+      this.setupSent.delete(binding.id)
+      return false
+    }
+    const part = properties.part as { messageID?: string } | undefined
+    return Boolean(part?.messageID && echoed.has(part.messageID))
+  }
+
+  /** Record the user's own message when it travels alongside set-up.
+   *
+   *  Set-up and the user's words are sent as one message, and the engine's
+   *  merged copy of that message is dropped. Without recording it here, the
+   *  first thing said to a newly-arrived agent would vanish. */
+  private echoUserMessage(binding: ThreadBinding, text: string, options?: BackendMessageOptions): void {
+    const messageId = `said-${now()}`
+    const info = {
+      id: messageId,
+      sessionID: binding.id,
+      role: 'user' as const,
+      time: { created: now() },
+      ...(options?.recipient ? { recipient: options.recipient } : {})
+    }
+    this.transcripts?.recordMessage(this.transcriptSource(binding), info)
+    this.emit({ type: 'message.updated', properties: { info }, backendId: binding.backendId })
+    const part = {
+      id: `${messageId}-text`,
+      type: 'text' as const,
+      sessionID: binding.id,
+      messageID: messageId,
+      text
+    }
+    this.transcripts?.recordPart(this.transcriptSource(binding), part)
+    this.emit({ type: 'message.part.updated', properties: { part }, backendId: binding.backendId })
+  }
+
+  /** Record what was handed to an agent as set-up, before it is sent.
+   *
+   *  Every engine glues the pieces of a message into one lump and hands that
+   *  lump back, so what returns cannot say where the set-up ended and the
+   *  user's own words began. Recording our own copy is the only account that
+   *  keeps them apart, and it is the same on every engine.
+   *
+   *  Each piece keeps its own line, because each is a different thing the user
+   *  may want to look at: what the agent was told it is, what it missed, what
+   *  changed on disk. */
+  private recordSetup(binding: ThreadBinding, pieces: ReadonlyArray<{ text: string; title: string }>): void {
+    if (pieces.length === 0) return
+    const stamp = now()
+    for (const [index, piece] of pieces.entries()) {
+      const messageId = `setup-${stamp}-${index}`
+      const info = {
+        id: messageId,
+        sessionID: binding.id,
+        role: 'user' as const,
+        time: { created: stamp + index }
+      }
+      this.transcripts?.recordMessage(this.transcriptSource(binding), info)
+      this.emit({ type: 'message.updated', properties: { info }, backendId: binding.backendId })
+      const part = {
+        id: `${messageId}-text`,
+        type: 'text' as const,
+        sessionID: binding.id,
+        messageID: messageId,
+        text: piece.text,
+        setup: true,
+        setupTitle: piece.title
+      }
+      this.transcripts?.recordPart(this.transcriptSource(binding), part)
+      this.emit({ type: 'message.part.updated', properties: { part }, backendId: binding.backendId })
+    }
+  }
+
   private echoSteeredMessage(binding: ThreadBinding, item: QueuedFollowUp): void {
     const messageId = `steer-${item.id}`
     const info = {
