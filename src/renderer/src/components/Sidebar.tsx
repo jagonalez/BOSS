@@ -399,6 +399,25 @@ export function Sidebar(): React.JSX.Element {
     ].filter((bucket) => bucket.threads.length > 0)
   }, [supervision])
 
+  /** The same list, narrowed by the filter box above it.
+   *
+   *  It used to live on its own tab, where the filter was hidden. Under a
+   *  filter that now applies to everything else on screen, an unfiltered list
+   *  reads as a filter that does not work. */
+  const visibleBuckets = useMemo(
+    () =>
+      reviewBuckets
+        .map((bucket) => ({
+          ...bucket,
+          threads: bucket.threads.filter((entry) => {
+            const needle = filter.trim().toLowerCase()
+            return !needle || (entry.thread.title ?? '').toLowerCase().includes(needle)
+          })
+        }))
+        .filter((bucket) => bucket.threads.length > 0),
+    [reviewBuckets, filter]
+  )
+
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   /** Where the menu ends up once its height is known.
@@ -673,9 +692,9 @@ export function Sidebar(): React.JSX.Element {
 
       {/* What needs the user, above the work rather than behind a tab. This is
           how they actually scan: not "which project", but "what is waiting". */}
-      {reviewBuckets.length > 0 ? (
+      {visibleBuckets.length > 0 ? (
         <div className="sidebar-section attention">
-          {reviewBuckets.map((bucket) => (
+          {visibleBuckets.map((bucket) => (
             <React.Fragment key={bucket.label}>
               <div className="section-label">{bucket.label}<small>{bucket.threads.length}</small></div>
               <div className="list">

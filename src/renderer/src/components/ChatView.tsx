@@ -27,8 +27,9 @@ import { anchorFromSelection } from '../lib/annotation-anchor'
 import { groupTranscriptTurns, searchTranscript, type TranscriptTurn } from '../lib/transcript'
 import { splitBranches } from '@shared/room-routing'
 import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
-import { recipientKind, recipientLabel, recipientOptions, retarget } from '../lib/recipient'
+import { overrideFor, recipientKind, recipientLabel, recipientOptions, retarget, splitOverride } from '../lib/recipient'
 import { briefOf } from '@shared/job-notes'
+import { authorTone } from '../lib/author-tone'
 import { emptyRoomState } from '@shared/room'
 
 function partText(part: Part): string {
@@ -373,7 +374,9 @@ function MessageView({
         {/* A room holds several agents, so an assistant message says which one
             spoke. Threads that never grew past a single agent have no author
             and read exactly as they always did. */}
-        <span>{isUser ? 'You' : item.info.author ?? 'Agent'}</span>
+        {isUser ? <span>You</span> : item.info.author
+          ? <span className={`msg-who ${authorTone(item.info.author)}`}>{item.info.author}</span>
+          : <span>Agent</span>}
         {isUser && item.info.recipient ? <span className="to">to {item.info.recipient}</span> : null}
         {item.info.model?.id ? <span className="model">{item.info.model.id}</span> : null}
       </div>
@@ -601,6 +604,15 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const room = useStore(appStore, (s) => (effectiveSession ? s.rooms[effectiveSession] ?? EMPTY_ROOM : EMPTY_ROOM))
   const branchOf = useStore(appStore, (s) => (effectiveSession ? s.branchDrafts[effectiveSession] : undefined))
   const roomNotes = useMemo(() => briefOf(room.notes), [room.notes])
+  // Only offered for a real participant, and only agents other than the one it
+  // already uses. Handing BOSS or a broadcast to another agent means nothing.
+  const handOverTo = useMemo(() => {
+    const { roleId, backendId } = splitOverride(room.recipient)
+    const participant = room.participants.find((entry) => entry.roleId === roleId)
+    if (!participant) return []
+    const running = backendId ?? participant.backendId
+    return backends.filter((backend) => backend.available && backend.id !== running)
+  }, [room, backends])
   const [text, setText] = useState('')
   const [recipientOpen, setRecipientOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1126,6 +1138,29 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
                       {option.detail ? <span className="detail">{option.detail}</span> : null}
                     </button>
                   ))}
+                  {/* Hand this one job to a different agent, without editing the
+                      team. A reviewer doing badly on one job should not mean
+                      changing the team and remembering to put it back. */}
+                  {handOverTo.length > 0 ? (
+                    <>
+                      <div className="recipient-head">Just this one, using</div>
+                      {handOverTo.map((backend) => (
+                        <button
+                          key={backend.id}
+                          className="recipient-option"
+                          onClick={() => {
+                            if (effectiveSession) {
+                              setRoomRecipient(effectiveSession, overrideFor(splitOverride(room.recipient).roleId, backend.id))
+                            }
+                            setRecipientOpen(false)
+                            textareaRef.current?.focus()
+                          }}
+                        >
+                          <span className="name">{BACKEND_SHORT_LABELS[backend.id]}</span>
+                        </button>
+                      ))}
+                    </>
+                  ) : null}
                 </div>
               )}
               <button
@@ -1418,7 +1453,9 @@ function TurnView({
               one name covers the whole bubble; two agents can never share one. */}
           {turn.assistants[0]?.info.author ? (
             <div className="msg-role">
-              <span>{turn.assistants[0].info.author}</span>
+              <span className={`msg-who ${authorTone(turn.assistants[0].info.author)}`}>
+                {turn.assistants[0].info.author}
+              </span>
             </div>
           ) : null}
           <MessageError messageId={lastAssistant.info.id} error={lastAssistant.info.error} />

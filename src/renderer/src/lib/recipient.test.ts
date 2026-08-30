@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { recipientKind, recipientLabel, recipientOptions, recipientProblem, retarget } from './recipient.ts'
+import { overrideFor, recipientKind, recipientLabel, recipientOptions, recipientProblem, retarget, splitOverride } from './recipient.ts'
 // @ts-expect-error Application code uses bundler resolution.
 import { ROOM_ASSISTANT_ID, ROOM_EVERYONE, emptyRoomState } from '../../../shared/room.ts'
 import type { RoomParticipant, RoomState } from '../../../shared/room.ts'
@@ -105,4 +105,27 @@ test('a working participant, BOSS, and a broadcast are all sendable', () => {
 test('addressing a stale participant is allowed, because it starts a fresh one', () => {
   const state = room([participant({ roleId: 'planner', state: 'stale' })])
   assert.equal(recipientProblem(state, 'planner'), undefined)
+})
+
+test('a message can name a different agent without changing the team', () => {
+  // A reviewer doing badly on one job should not mean editing the team and
+  // remembering to put it back.
+  assert.equal(overrideFor('reviewer', 'codex'), 'reviewer@codex')
+  assert.deepEqual(splitOverride('reviewer@codex'), { roleId: 'reviewer', backendId: 'codex' })
+})
+
+test('an ordinary recipient has no agent attached', () => {
+  assert.deepEqual(splitOverride('reviewer'), { roleId: 'reviewer' })
+  assert.deepEqual(splitOverride('boss'), { roleId: 'boss' })
+})
+
+test('the chip names the agent only when it is not the usual one', () => {
+  const state = room([participant({ roleId: 'reviewer', label: 'Reviewer' })])
+  assert.equal(recipientLabel(state, 'reviewer'), 'Reviewer', 'an ordinary message stays one word')
+  assert.equal(recipientLabel(state, 'reviewer@codex'), 'Reviewer · codex')
+})
+
+test('a one-off agent does not change what kind of recipient it is', () => {
+  const state = room([participant({ roleId: 'reviewer' })])
+  assert.equal(recipientKind(state, 'reviewer@codex'), 'participant')
 })

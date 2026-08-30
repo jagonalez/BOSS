@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { BackendId } from '../shared/backend'
 import type { JobNotes, RoomParticipant, RoomRole, RoomShape, RoomState, RoomTeam } from '../shared/room'
@@ -98,15 +98,29 @@ export class RoomManager {
       if (parsed.version !== 1) return
       if (parsed.rooms && typeof parsed.rooms === 'object') this.rooms = parsed.rooms
       if (parsed.team) this.team = parsed.team
-    } catch {
-      /* First launch or a corrupt optional state file starts empty. */
+    } catch (error) {
+      // A missing file is a first launch. A file that exists but will not parse
+      // is damage, and starting empty would quietly discard every room. Refuse
+      // to load rather than overwrite it: the next save would make the loss
+      // permanent.
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        this.loaded = false
+        throw error
+      }
     }
   }
 
   private async save(): Promise<void> {
     await mkdir(dirname(this.stateFile), { recursive: true })
     const state: StoredRoomState = { version: 1, rooms: this.rooms, ...(this.team ? { team: this.team } : {}) }
-    await writeFile(this.stateFile, JSON.stringify(state, null, 2))
+    // Written beside the real file and renamed over it. A rename is atomic, so
+    // a crash leaves either the old file or the new one — never half of one.
+    // Written in place, a crash mid-write truncates it, and loading treats a
+    // file it cannot parse as a first launch: every room's participants and
+    // every job note gone, silently.
+    const temporary = `${this.stateFile}.writing`
+    await writeFile(temporary, JSON.stringify(state, null, 2))
+    await rename(temporary, this.stateFile)
   }
 
   private mutate<T>(operation: () => Promise<T>): Promise<T> {
@@ -169,7 +183,9 @@ export class RoomManager {
    *  Participants join when the work reaches them: a reviewer appears once the
    *  builder finishes, not before. Joining twice is a no-op so a repeated
    *  mention cannot spawn a second session. */
-  async join(threadId: string, roleId: string): Promise<RoomParticipant | undefined> {
+  /** `backendId` runs this one job on a different agent than the role usually
+   *  uses. The role keeps its own agent for everything else. */
+  async join(threadId: string, roleId: string, backendId?: BackendId): Promise<RoomParticipant | undefined> {
     return this.mutate(async () => {
       await this.load()
       const team = this.team
@@ -188,17 +204,18 @@ export class RoomManager {
 
       const paths = this.host.roomPaths(threadId)
       if (!paths) return undefined
+      const runsOn = backendId ?? role.backendId
       const participantThreadId = await this.host.createParticipantThread({
         roomThreadId: threadId,
         roleId,
-        backendId: role.backendId,
+        backendId: runsOn,
         executionPath: paths.executionPath
       })
       const now = this.clock()
       const participant: RoomParticipant = {
         roleId,
         label: role.label,
-        backendId: role.backendId,
+        backendId: runsOn,
         threadId: participantThreadId,
         state: 'active',
         // Deliberately not stamped. Joining is not the same as having read the

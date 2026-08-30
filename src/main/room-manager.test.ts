@@ -318,3 +318,30 @@ test('speaking marks a participant as caught up', async () => {
   assert.equal(room.participants[0].lastActiveAt, h.now())
   await h.cleanup()
 })
+
+test('a job can be handed to a different agent without changing the team', async () => {
+  // A reviewer doing badly on one job should not mean editing the team and
+  // remembering to put it back.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  const usual = await h.manager.join('room-1', 'reviewer')
+  assert.equal(usual?.backendId, 'claude')
+
+  const handed = await h.manager.join('room-2', 'reviewer', 'codex')
+  assert.equal(handed?.backendId, 'codex')
+  await h.cleanup()
+})
+
+test('handing a job over leaves the team alone', async () => {
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+  await h.manager.join('room-1', 'reviewer', 'codex')
+
+  const team = await h.manager.currentTeam()
+  assert.equal(
+    team?.roles.find((role) => role.id === 'reviewer')?.backendId,
+    'claude',
+    'the role keeps its own agent for every other job'
+  )
+  await h.cleanup()
+})

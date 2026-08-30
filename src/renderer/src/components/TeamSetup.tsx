@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import type { BackendId } from '@shared/backend'
 import type { RoomRole, RoomShape, RoomTeam } from '@shared/room'
 import { appStore, useStore } from '../state/AppState'
@@ -48,12 +48,15 @@ export function TeamSetup({ onDone }: { onDone: () => void }): React.JSX.Element
   const [defaultShape, setDefaultShape] = useState<RoomShape>('reviewed')
   const [saving, setSaving] = useState(false)
 
+  // Filled once, from what is connected. Refilling whenever the list is empty
+  // meant deleting the last role silently brought all five back and threw away
+  // the four deletions before it.
+  const filled = useRef(false)
   useEffect(() => {
-    // Filled from what is connected rather than left blank. A form the user has
-    // to complete before they can start is the thing this screen exists to
-    // avoid.
-    if (roles.length === 0 && available.length > 0) setRoles(suggested(available))
-  }, [available, roles.length])
+    if (filled.current || available.length === 0) return
+    filled.current = true
+    setRoles(suggested(available))
+  }, [available])
 
   const save = async (): Promise<void> => {
     setSaving(true)

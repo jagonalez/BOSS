@@ -6872,6 +6872,48 @@ body.workspace-dragging .workspace-tab-slot {
   gap: 8px;
 }
 
+/* Names the group of one-off agents in the recipient menu. */
+.recipient-head {
+  padding: 7px 9px 3px;
+  color: var(--text-faint);
+  font-size: var(--type-label);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+/* Who spoke, when a room holds more than one agent. A name in plain text was
+   easy to read past, and telling the builder from the reviewer at a glance is
+   the whole reason the name is there. */
+.msg-who {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--type-label);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* The name picks its own colour, so the same agent looks the same everywhere
+   without anything being stored. BOSS always holds the first. */
+.msg-who.one {
+  color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 14%, transparent);
+}
+
+.msg-who.two {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.msg-who.three {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+
+.msg-who.four {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
+}
+
 .msg-role .model {
   font-weight: 500;
   color: var(--text-faint);

@@ -42,12 +42,35 @@ export function recipientOptions(room: RoomState): RecipientOption[] {
   ]
 }
 
+/** Send this one message to a different agent, without changing the team.
+ *
+ *  A reviewer that is doing badly on one job should not mean editing the team
+ *  and remembering to put it back. The override lasts for the message, and the
+ *  role keeps its own agent for everything else.
+ *
+ *  Returned as `role@agent` so it survives as one value through the composer
+ *  and the send, rather than needing a second field everywhere. */
+export function overrideFor(recipient: string, backendId: string): string {
+  return `${recipient}@${backendId}`
+}
+
+export function splitOverride(recipient: string): { roleId: string; backendId?: string } {
+  const at = recipient.lastIndexOf('@')
+  if (at <= 0) return { roleId: recipient }
+  return { roleId: recipient.slice(0, at), backendId: recipient.slice(at + 1) }
+}
+
 export function recipientLabel(room: RoomState, id: string): string {
-  return recipientOptions(room).find((option) => option.id === id)?.label ?? 'BOSS'
+  const { roleId, backendId } = splitOverride(id)
+  const label = recipientOptions(room).find((option) => option.id === roleId)?.label ?? 'BOSS'
+  // The agent is named only when it is not the one the role normally uses, so
+  // an ordinary message stays one word.
+  return backendId ? `${label} · ${backendId}` : label
 }
 
 export function recipientKind(room: RoomState, id: string): RecipientOption['kind'] {
-  return recipientOptions(room).find((option) => option.id === id)?.kind ?? 'assistant'
+  const { roleId } = splitOverride(id)
+  return recipientOptions(room).find((option) => option.id === roleId)?.kind ?? 'assistant'
 }
 
 /** What typing in the composer should do to the chip.

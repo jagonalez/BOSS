@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { trimToolOutput } from '../../shared/tool-output'
 import { ROOM_EVERYONE } from '../../shared/room'
+import { isBackendId } from '../../shared/backend'
 import { catchUpFor, catchUpPrompt } from '../../shared/room-routing'
 import type { Backend } from './backend'
 import { threadContextPrompt } from './thread-context'
@@ -129,12 +130,26 @@ interface ThreadBinding {
 interface RoomManagerHandle {
   room(threadId: string): Promise<import('@shared/room').RoomState>
   setRecipient(threadId: string, recipient: string): Promise<import('@shared/room').RoomState>
-  join(threadId: string, roleId: string): Promise<import('@shared/room').RoomParticipant | undefined>
+  join(threadId: string, roleId: string, backendId?: BackendId): Promise<import('@shared/room').RoomParticipant | undefined>
   touch(threadId: string, roleId: string, state?: import('@shared/room').ParticipantState): Promise<void>
   briefFor(notes: import('@shared/room').JobNotes): string
   currentTeam(): Promise<import('@shared/room').RoomTeam | undefined>
   configureTeam(team: import('@shared/room').RoomTeam): Promise<import('@shared/room').RoomTeam>
   forget(threadId: string): Promise<void>
+}
+
+/** Split a recipient that names a one-off agent, as "reviewer@codex".
+ *
+ *  Shared by routing and sending so the two cannot read the same value
+ *  differently, which would send to one participant and record against
+ *  another. */
+function splitRecipient(recipient: string | undefined): { roleId?: string; backendId?: BackendId } {
+  if (!recipient) return {}
+  const at = recipient.lastIndexOf('@')
+  if (at <= 0) return { roleId: recipient }
+  const backendId = recipient.slice(at + 1)
+  if (!isBackendId(backendId)) return { roleId: recipient }
+  return { roleId: recipient.slice(0, at), backendId }
 }
 
 /** The stored form of a thread's model, from a preference or a sent message.
@@ -1802,7 +1817,10 @@ export class BackendManager {
     threadId: string,
     options?: BackendMessageOptions
   ): Promise<string | undefined> {
-    const recipient = options?.recipient
+    // A message may name a different agent for this one job: "reviewer@codex".
+    // The role keeps its own agent for everything else, so a reviewer doing
+    // badly once does not mean editing the team and remembering to put it back.
+    const { roleId: recipient, backendId: override } = splitRecipient(options?.recipient)
     if (!recipient || !this.rooms) return undefined
     // A broadcast is answered by each participant in turn, which the room's own
     // thread drives; there is no single session to route to.
@@ -1812,8 +1830,10 @@ export class BackendManager {
     // A stale participant has no session left: its old context was dropped
     // rather than resent, so addressing it starts a fresh one that reads the
     // job notes instead of a two-week-old transcript.
-    if (existing?.threadId && existing.state !== 'stale') return existing.threadId
-    const joined = await this.rooms.join(threadId, recipient)
+    // An override always starts a fresh session: the point is a different
+    // agent, and the existing one is bound to the agent it was created with.
+    if (!override && existing?.threadId && existing.state !== 'stale') return existing.threadId
+    const joined = await this.rooms.join(threadId, recipient, override)
     return joined?.threadId
   }
 
@@ -1829,7 +1849,7 @@ export class BackendManager {
     parts: unknown[],
     options?: BackendMessageOptions
   ): Promise<void> {
-    const recipient = options?.recipient
+    const { roleId: recipient } = splitRecipient(options?.recipient)
     const room = await this.rooms?.room(roomThreadId)
     const participant = room?.participants.find((entry) => entry.roleId === recipient)
     const missed = catchUpFor(this.transcripts?.messages(roomThreadId) ?? [], participant, now())
@@ -2904,6 +2924,12 @@ export class BackendManager {
 
   supervisionSnapshot(): SupervisionSnapshot {
     this.load()
+    // Flushed once for the whole snapshot rather than once per thread. Reading
+    // a thread's usage commits any pending writes first, so asking sixty
+    // threads meant sixty commits — and each one cancels the timer that exists
+    // to batch streaming writes. The sidebar polls this every five seconds now
+    // that it is always on screen, so the cost is paid forever.
+    this.transcripts?.flush()
     const threads = [...this.bindings.values()].map((binding) => {
       const usage = this.transcripts?.usage(binding.id) ?? {
         totals: { runs: 0, durationMs: 0, tokenRuns: 0, toolCalls: 0 }
