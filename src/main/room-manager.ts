@@ -79,7 +79,8 @@ export class RoomManager {
   private readonly stateFile: string
   private readonly host: RoomHost
   private readonly clock: () => number
-  private loaded = false
+  /** The in-flight read, so callers wait for it instead of racing past it. */
+  private loading?: Promise<void>
   private rooms: Record<string, RoomState> = {}
   private team?: RoomTeam
   private pendingMutation: Promise<void> = Promise.resolve()
@@ -91,8 +92,16 @@ export class RoomManager {
   }
 
   private async load(): Promise<void> {
-    if (this.loaded) return
-    this.loaded = true
+    // Held as the read itself, not as a flag set before it. Two callers arriving
+    // together both saw "not loaded", both set the flag, and the second returned
+    // while the file was still being read — so the team looked missing and the
+    // one-time setup appeared in front of a user who already had one.
+    if (this.loading) return this.loading
+    this.loading = this.read()
+    return this.loading
+  }
+
+  private async read(): Promise<void> {
     try {
       const parsed = JSON.parse(await readFile(this.stateFile, 'utf8')) as Partial<StoredRoomState>
       if (parsed.version !== 1) return
@@ -104,7 +113,9 @@ export class RoomManager {
       // to load rather than overwrite it: the next save would make the loss
       // permanent.
       if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
-        this.loaded = false
+        // A damaged file must not be treated as a first launch, and the next
+        // caller has to be able to try again rather than inherit the failure.
+        this.loading = undefined
         throw error
       }
     }

@@ -23,6 +23,8 @@ const TEAM: RoomTeam = {
 
 interface Harness {
   manager: RoomManager
+  stateFile: string
+  host: RoomHost
   created: string[]
   disposed: string[]
   now: () => number
@@ -48,9 +50,14 @@ async function harness(): Promise<Harness> {
       return { projectPath: '/hyper', executionPath: '/hyper' }
     }
   }
-  const manager = new RoomManager(join(dir, 'rooms.json'), host, () => clock)
+  const stateFile = join(dir, 'rooms.json')
+  const manager = new RoomManager(stateFile, host, () => clock)
   return {
     manager,
+    // Exposed so a test can open a second manager on the same file, which is
+    // what reopening the app does.
+    stateFile,
+    host,
     created,
     disposed,
     now: () => clock,
@@ -343,5 +350,21 @@ test('handing a job over leaves the team alone', async () => {
     'claude',
     'the role keeps its own agent for every other job'
   )
+  await h.cleanup()
+})
+
+test('two reads at once both wait for the file, so a saved team is never missed', async () => {
+  // The flag was set before the read, not after. Two callers arriving together
+  // both saw "not loaded", and the second returned while the file was still
+  // being read — so the team looked missing and the one-time setup appeared in
+  // front of a user who already had one.
+  const h = await harness()
+  await h.manager.configureTeam(TEAM)
+
+  const reopened = new RoomManager(h.stateFile, h.host, () => h.now())
+  const [first, second] = await Promise.all([reopened.currentTeam(), reopened.currentTeam()])
+
+  assert.equal(first?.roles.length, TEAM.roles.length)
+  assert.equal(second?.roles.length, TEAM.roles.length, 'the second caller must not race past the read')
   await h.cleanup()
 })
