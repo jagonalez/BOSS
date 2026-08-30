@@ -176,6 +176,10 @@ export interface BackendMessageOptions {
    *  which is how a reviewer can run on a different model from the builder in
    *  one conversation. Absent on threads that never grew past a single agent. */
   recipient?: string
+  /** The message this reply hangs under, when the user took a point aside.
+   *  A branch is the same room with the same participants; only where it is
+   *  drawn differs. */
+  branchOf?: string
 }
 
 /** Fill a newly-created thread's first turn from the owning backend's saved

@@ -4,7 +4,7 @@ import { useStore, appStore, type Attachment } from '../state/AppState'
 import type { MessageWithParts, Part, Command, PermissionRequest, QuestionRequest } from '@shared/opencode'
 import type { BackendId, QueuedFollowUp } from '@shared/backend'
 import { composerRecovery, retryPayload } from '../lib/send-recovery'
-import { abortRun, addAnnotation, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setRoomRecipient, setVariant, speakText, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
+import { abortRun, addAnnotation, endBranch, clearFailedSend, compactSession, forkFromMessage, moveFollowUp, newChatWithPrompt, onAsrText, openProject, openProjectFolder, pushHistory, refreshFollowUps, rejectQuestion, removeAnnotation, removeFollowUp, respondQuestion, revertMessage, runCommand, selectSession, sendPrompt, setAgent, setLauncherProject, setMode, setModel, setQaPolicy, setRoomRecipient, setVariant, speakText, startBranch, startSideChat, steerFollowUp, stopSpeaking, toggleAsr, unrevertSession, updateAnnotationNote, updateFollowUp } from '../lib/actions'
 import { errorSummary, errorDetails } from '../lib/errors'
 import { OpenCode, providerModels } from '../lib/opencode'
 import { MessageText } from '../lib/text'
@@ -25,6 +25,7 @@ import { AnnotationRow } from './AnnotationRow'
 import { createAnnotation, type Annotation, type AnnotationAnchor } from '@shared/annotations'
 import { anchorFromSelection } from '../lib/annotation-anchor'
 import { groupTranscriptTurns, searchTranscript, type TranscriptTurn } from '../lib/transcript'
+import { splitBranches } from '@shared/room-routing'
 import { usePersistentDisclosure } from '../lib/use-persistent-disclosure'
 import { recipientKind, recipientLabel, recipientOptions, retarget } from '../lib/recipient'
 import { emptyRoomState } from '@shared/room'
@@ -574,6 +575,8 @@ const EMPTY_ANNOTATIONS: Annotation[] = []
 const EMPTY_ATTACHMENTS: Attachment[] = []
 const EMPTY_HISTORY: string[] = []
 const EMPTY_FOLLOW_UPS: QueuedFollowUp[] = []
+/** Stable empty list: a fresh [] would defeat the turn's memo on every render. */
+const EMPTY_BRANCH: MessageWithParts[] = []
 /** A thread that has never grown past one agent still addresses BOSS, so the
  *  composer always has a recipient and can never send into nowhere. */
 const EMPTY_ROOM = emptyRoomState()
@@ -595,6 +598,7 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
   const attachments = useStore(appStore, (s) => (effectiveSession ? s.attachments[effectiveSession] ?? EMPTY_ATTACHMENTS : EMPTY_ATTACHMENTS))
   const annotations = useStore(appStore, (s) => (effectiveSession ? s.annotations[effectiveSession] ?? EMPTY_ANNOTATIONS : EMPTY_ANNOTATIONS))
   const room = useStore(appStore, (s) => (effectiveSession ? s.rooms[effectiveSession] ?? EMPTY_ROOM : EMPTY_ROOM))
+  const branchOf = useStore(appStore, (s) => (effectiveSession ? s.branchDrafts[effectiveSession] : undefined))
   const [text, setText] = useState('')
   const [recipientOpen, setRecipientOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -1087,6 +1091,12 @@ function Composer({ sessionId }: { sessionId?: string }): React.JSX.Element {
           />
         ) : null}
         <div className="composer-input">
+          {hasSession && branchOf ? (
+            <div className="composer-branch">
+              <span>Replying under one point</span>
+              <button onClick={() => effectiveSession && endBranch(effectiveSession)}>Back to the thread</button>
+            </div>
+          ) : null}
           {hasSession && (
             <div className="composer-to">
               {recipientOpen && (
@@ -1270,7 +1280,8 @@ function TurnView({
   working,
   speakingKey,
   searchMatchIds,
-  currentSearchMessageId
+  currentSearchMessageId,
+  branches
 }: {
   turn: TranscriptTurn
   modelChanged?: boolean
@@ -1280,6 +1291,10 @@ function TurnView({
   speakingKey?: string | null
   searchMatchIds?: ReadonlySet<string>
   currentSearchMessageId?: string
+  /** Replies taken into a branch under one of this turn's messages, keyed by
+   *  the message they hang from. Passed down rather than looked up so the turn
+   *  stays a pure render of what it was given. */
+  branches?: ReadonlyMap<string, MessageWithParts[]>
 }): React.JSX.Element {
   const model = turn.assistants[0]?.info.model?.id
   const combined = combineAssistants(turn.assistants)
@@ -1291,6 +1306,13 @@ function TurnView({
     .filter(Boolean)
     .join('\n')
   const lastAssistant = turn.assistants[turn.assistants.length - 1]
+  // A branch hangs from whichever of this turn's messages the user replied
+  // under — the reviewer's findings, usually, rather than their own question.
+  const branchMessages = useMemo(() => {
+    if (!branches || branches.size === 0) return EMPTY_BRANCH
+    const owners = [turn.user, ...turn.assistants].filter(Boolean) as MessageWithParts[]
+    return owners.flatMap((message) => branches.get(message.info.id) ?? [])
+  }, [branches, turn])
   // Playback state lives in the store, not local state: the auto-speak effect
   // starts audio outside this component, and its key is what names the turn
   // whose button becomes the stop control.
@@ -1381,6 +1403,15 @@ function TurnView({
           </div>
         </div>
       ) : null}
+      {/* One point at a time, under the message that raised it. Going through
+          five review findings in one stream is what tangles them. */}
+      {branchMessages.length > 0 ? (
+        <div className="msg-branch">
+          {branchMessages.map((message) => (
+            <MessageView key={message.info.id} item={message} onCtx={onCtx} />
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1442,11 +1473,17 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
   const [searchQuery, setSearchQuery] = useState('')
   const [activeSearchMatch, setActiveSearchMatch] = useState(0)
   const previousTurnsRef = useRef<TranscriptTurn[]>([])
+  // Branch replies leave the flat list and render under the message they hang
+  // from. The list is virtualised and keyed by turn, so nesting the list itself
+  // would break its measurement and the scroll bookmarks that depend on stable
+  // keys. A branch is the same room with the same participants; only where it
+  // is drawn differs.
+  const split = useMemo(() => splitBranches(messages), [messages])
   const turns = useMemo(() => {
-    const next = groupTranscriptTurns(messages, previousTurnsRef.current)
+    const next = groupTranscriptTurns(split.main, previousTurnsRef.current)
     previousTurnsRef.current = next
     return next
-  }, [messages])
+  }, [split])
   const virtualizer = useVirtualizer({
     count: turns.length,
     getScrollElement: () => scrollRef.current,
@@ -1903,6 +1940,7 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
                       speakingKey={speakingKey}
                       searchMatchIds={searchMatchesByTurn.get(turn.key)}
                       currentSearchMessageId={currentSearchHit?.turnKey === turn.key ? currentSearchHit.messageId : undefined}
+                      branches={split.branches}
                     />
                   </div>
                 )
@@ -1927,6 +1965,20 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
       </div>
       {msgCtx && (
         <div ref={msgCtxRef} className="ctx-menu" style={{ left: Math.min(msgCtx.x, window.innerWidth - 220), top: msgCtx.y }}>
+          {/* Distinct from "Branch from here", which forks a whole new thread.
+              This keeps the same room and the same participants, and only takes
+              one point aside so five review findings do not tangle. */}
+          {msgCtx.message.info.role === 'assistant' ? (
+            <button
+              className="ctx-item"
+              onClick={() => {
+                if (effectiveId) startBranch(effectiveId, msgCtx.message.info.id)
+                setMsgCtx(null)
+              }}
+            >
+              Take this point aside
+            </button>
+          ) : null}
           {msgCtx.message.info.role === 'user' ? (
             <button
               className="ctx-item"

@@ -80,3 +80,46 @@ test('the sidebar leads with the assistant, not with a list of subsystems', asyn
   await expect(appPage.locator('.sidebar-secondary .sidebar-primary-item')).toHaveCount(3)
   await expect(appPage.locator('nav', { hasText: 'Workflows' })).toHaveCount(0)
 })
+
+test('a point can be taken aside without leaving the thread', async ({ appPage }) => {
+  // Distinct from forking a whole new thread. The same room, the same
+  // participants, the same addressing — going through five review findings in
+  // one stream is what tangles them.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.msg.assistant').first().click({ button: 'right' })
+  await appPage.locator('.ctx-item').filter({ hasText: 'Take this point aside' }).click()
+
+  await expect(appPage.locator('.composer-branch')).toContainText('Replying under one point')
+})
+
+test('leaving a branch returns the composer to the main stream', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.msg.assistant').first().click({ button: 'right' })
+  await appPage.locator('.ctx-item').filter({ hasText: 'Take this point aside' }).click()
+  await appPage.locator('.composer-branch button').click()
+
+  await expect(appPage.locator('.composer-branch')).toHaveCount(0)
+})
+
+test('a reply sent inside a branch says which point it answers', async ({ appPage }) => {
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  await appPage.locator('.msg.assistant').first().click({ button: 'right' })
+  await appPage.locator('.ctx-item').filter({ hasText: 'Take this point aside' }).click()
+
+  const composer = appPage.getByPlaceholder(/^Ask /)
+  await composer.fill('Why did you touch storage?')
+  await composer.press('Enter')
+
+  const send = (await backendCalls(appPage, 'thread.send')).at(-1)
+  expect(send?.request).toMatchObject({ options: { branchOf: expect.any(String) } })
+})
+
+test('a user message shows who it was addressed to', async ({ appPage }) => {
+  // Visible later, so a reader can see why an agent did or did not act on it.
+  await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
+  const composer = appPage.getByPlaceholder(/^Ask /)
+  await composer.fill('Status please.')
+  await composer.press('Enter')
+
+  await expect(appPage.locator('.msg.user .msg-role .to').last()).toContainText('boss')
+})

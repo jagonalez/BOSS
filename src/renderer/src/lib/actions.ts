@@ -2406,6 +2406,28 @@ export function updateAnnotationNote(sessionID: string, id: string, note: string
  *  should not need the name retyped, and an unaddressed message is never
  *  allowed. Written locally first so the chip moves at once, then persisted, so
  *  a restart reopens the thread aimed where it was left. */
+/** Take one point aside, under the message that raised it.
+ *
+ *  Not a fork: the same room, the same participants, the same addressing rules.
+ *  Going through five review findings in one stream is what tangles them, and
+ *  the user asked to work through them one at a time. */
+export function startBranch(sessionID: string, messageId: string): void {
+  appStore.setState((s) => ({
+    branchDrafts: { ...s.branchDrafts, [sessionID]: messageId },
+    // Forces the composer to re-read, so the branch hint appears at once.
+    composerEpoch: s.composerEpoch + 1
+  }))
+}
+
+/** Leave a branch and return to the main stream. */
+export function endBranch(sessionID: string): void {
+  appStore.setState((s) => {
+    const next = { ...s.branchDrafts }
+    delete next[sessionID]
+    return { branchDrafts: next, composerEpoch: s.composerEpoch + 1 }
+  })
+}
+
 export function setRoomRecipient(sessionID: string, recipient: string): void {
   appStore.setState((s) => {
     const room = s.rooms[sessionID] ?? emptyRoomState()
@@ -2614,7 +2636,16 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   // so the stored message says who it was for. A thread that never grew past
   // one agent has no room state and sends exactly as it always did.
   const recipient = cur.rooms[sessionID]?.recipient
-  const options = { model: modelKey, agent, mode, ...(recipient ? { recipient } : {}) }
+  // A branch reply hangs under the message that raised the point, so five
+  // review findings do not tangle in one stream.
+  const branchOf = cur.branchDrafts[sessionID]
+  const options = {
+    model: modelKey,
+    agent,
+    mode,
+    ...(recipient ? { recipient } : {}),
+    ...(branchOf ? { branchOf } : {})
+  }
   const queue = async (): Promise<boolean> => {
     try {
       const followUps = await OpenCode.addFollowUp(sessionID, body, attachments, options)

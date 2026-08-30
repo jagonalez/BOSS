@@ -561,3 +561,25 @@ test('a user message in a room is never stamped with a participant name', () => 
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a point taken aside keeps its reply out of the main stream', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'boss-transcripts-'))
+  const path = join(directory, 'transcripts.sqlite')
+  try {
+    const store = new TranscriptStore(path)
+    const main = { threadId: 'room-1', backendId: 'codex' as const, nativeSessionId: 'native' }
+    const branch = { ...main, branchOf: 'review-1' }
+
+    store.recordMessage(main, { id: 'm1', sessionID: 'native', role: 'user', time: { created: 1 } })
+    store.recordMessage(branch, { id: 'm2', sessionID: 'native', role: 'user', time: { created: 2 } })
+    store.recordMessage(branch, { id: 'm3', sessionID: 'native', role: 'assistant', time: { created: 3 } })
+    store.flush()
+
+    const messages = store.messages('room-1')
+    assert.equal(messages[0].info.branchOf, undefined, 'the main stream is untouched')
+    assert.equal(messages[1].info.branchOf, 'review-1')
+    assert.equal(messages[2].info.branchOf, 'review-1', 'the answer stays with the question that raised it')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

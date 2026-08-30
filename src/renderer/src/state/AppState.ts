@@ -157,6 +157,9 @@ export interface AppState {
    *  recipient into the other. Main owns the durable copy; this mirrors it so
    *  the composer can render without waiting on a round trip. */
   rooms: Record<string, RoomState>
+  /** The message each thread's composer is currently replying under, when the
+   *  user took a point aside. Session-scoped like the drafts beside it. */
+  branchDrafts: Record<string, string>
   followUps: Record<string, QueuedFollowUp[]>
   history: Record<string, string[]>
   archived: string[]
@@ -278,6 +281,7 @@ export const initialState: AppState = {
   attachments: {},
   annotations: {},
   rooms: {},
+  branchDrafts: {},
   followUps: {},
   history: {},
   archived: [],

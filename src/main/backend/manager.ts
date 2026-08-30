@@ -305,6 +305,13 @@ export class BackendManager {
   private notifications?: NotificationRouter
   private readonly eventCbs = new Set<(event: Record<string, unknown>) => void>()
   private rooms?: RoomManagerHandle
+  /** Which branch each thread's current run belongs to, if any.
+   *
+   *  Per thread rather than one shared value: two threads run at once, and a
+   *  point taken aside in one must not stamp the other's messages. Cleared when
+   *  a send arrives without a branch, so leaving a branch takes effect on the
+   *  very next message. */
+  private readonly pendingBranch = new Map<string, string>()
   private automations?: { handle(request: BackendRequest): Promise<unknown> }
   private workflows?: { handle(request: BackendRequest): Promise<unknown> }
   private reports?: { handle(request: BackendRequest): Promise<unknown> }
@@ -1241,6 +1248,12 @@ export class BackendManager {
     )
   }
 
+  /** The branch a thread's current run belongs to. A participant's run is read
+   *  against the room, because that is where the user took the point aside. */
+  private branchFor(binding: ThreadBinding): string | undefined {
+    return this.pendingBranch.get(binding.parentID ?? binding.id)
+  }
+
   private transcriptSource(binding: ThreadBinding) {
     // A participant's messages are recorded against the room, not its own
     // hidden thread. The user sees one conversation; the separate sessions
@@ -1253,13 +1266,15 @@ export class BackendManager {
         threadId: binding.parentID as string,
         backendId: binding.backendId,
         nativeSessionId: binding.nativeSessionId,
-        author: participant
+        author: participant,
+        ...(this.branchFor(binding) ? { branchOf: this.branchFor(binding) as string } : {})
       }
     }
     return {
       threadId: binding.id,
       backendId: binding.backendId,
-      nativeSessionId: binding.nativeSessionId
+      nativeSessionId: binding.nativeSessionId,
+      ...(this.branchFor(binding) ? { branchOf: this.branchFor(binding) as string } : {})
     }
   }
 
@@ -1654,6 +1669,7 @@ export class BackendManager {
         /* One participant that will not go must not block deleting the room. */
       })
     }
+    this.pendingBranch.delete(threadId)
     void this.rooms?.forget(threadId)
     this.transcripts?.deleteThread(threadId)
     // The images belonged to the transcript, so they go with it rather than
@@ -1839,6 +1855,12 @@ export class BackendManager {
     binding.updatedAt = now()
     this.save()
     this.transcripts?.beginRun(this.transcriptSource(binding))
+    // Recorded on the binding so the message this run produces knows which
+    // branch it belongs to. The user message and the reply that answers it must
+    // land in the same place, or a point taken aside would answer in the main
+    // stream.
+    if (options?.branchOf) this.pendingBranch.set(threadId, options.branchOf)
+    else this.pendingBranch.delete(threadId)
     // Carried as a message part, not only in the context prompt: opencode and
     // pi have no system-prompt hook and drop that field entirely. A goal is the
     // task itself rather than a fact about the checkout, so it has to reach

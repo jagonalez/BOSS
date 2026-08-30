@@ -14,6 +14,10 @@ interface TranscriptSource {
    *  in a room. Stamped on every message it records so the builder and the
    *  reviewer stay distinguishable in the one list the user reads. */
   author?: string
+  /** The message this run's messages hang under, when the user took a point
+   *  aside. Both the question and its answer carry it, so a branch keeps its
+   *  reply instead of answering in the main stream. */
+  branchOf?: string
 }
 
 interface StoredMessageRow {
@@ -261,7 +265,8 @@ export class TranscriptStore {
         sessionID: source.threadId,
         // Only assistant messages carry an author. A user message already knows
         // it is the user, and stamping one would claim a participant wrote it.
-        ...(source.author && info.role === 'assistant' ? { author: source.author } : {})
+        ...(source.author && info.role === 'assistant' ? { author: source.author } : {}),
+        ...(source.branchOf ? { branchOf: source.branchOf } : {})
       })
     })
     this.scheduleFlush()

@@ -1630,6 +1630,42 @@ textarea {
   padding: 0 8px;
 }
 
+/* Says the next message will land inside a branch, and offers the way out.
+   Without it a reply would quietly go somewhere the user did not expect. */
+.composer-branch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px;
+  color: var(--text-faint);
+  font-size: var(--type-meta);
+}
+
+.composer-branch button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--type-meta);
+  cursor: pointer;
+  padding: 0;
+}
+
+/* A branch: one review point taken on its own, under the message that raised
+   it. Same room, same participants — only where it is drawn differs. */
+.msg-branch {
+  margin: 8px 0 0 33px;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg-branch .msg {
+  margin: 0;
+}
+
 /* One-time team setup. Three screens, each arriving already answered: a form
    the user must complete before starting is what this screen exists to avoid. */
 .team-setup {
