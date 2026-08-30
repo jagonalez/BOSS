@@ -31,7 +31,16 @@ export class OpenCodeBackend implements Backend {
   private readonly api: ApiClient
   private readonly events: EventStream
   private eventCb?: (ev: EventMessage) => void
+  /** Where each session's records live, as OpenCode itself keyed it. Reads —
+   *  the status map, the todo list, messages — are scoped to this, so it has
+   *  to be the directory the session was created under, not wherever the run
+   *  later executes. */
   private sessionDirectories = new Map<string, string>()
+  /** Where each session's runs execute. A thread can be re-pointed into a
+   *  worktree after its session was created in the project root; the prompt
+   *  must carry the worktree while every read still carries the root, or the
+   *  server answers as if the session did not exist. */
+  private executionDirectories = new Map<string, string>()
   private observedStatuses = new Map<string, 'busy' | 'retry'>()
   private submittedAt = new Map<string, number>()
   private statusTimer?: NodeJS.Timeout
@@ -82,7 +91,7 @@ export class OpenCodeBackend implements Backend {
     return this.client
   }
 
-  /** Per-request directory, matching what ApiClient sent as x-opencode-directory.
+  /** Per-request directory for reads, matching what ApiClient sent as x-opencode-directory.
    *
    *  Falls back to the server's current project for the same reason ApiClient
    *  does: switching project no longer respawns the server, so a call with no
@@ -91,6 +100,13 @@ export class OpenCodeBackend implements Backend {
   private directoryFor(sessionId?: string): string | undefined {
     const known = sessionId ? this.sessionDirectories.get(sessionId) : undefined
     return known || this.server.projectPath || undefined
+  }
+
+  /** Per-request directory for runs. Prompt and command run the agent in the
+   *  thread's checkout, which setSessionDirectory re-points independently of
+   *  where the session's records are kept. */
+  private executionFor(sessionId: string): string | undefined {
+    return this.executionDirectories.get(sessionId) || this.directoryFor(sessionId)
   }
 
   async start(): Promise<void> {
@@ -111,8 +127,9 @@ export class OpenCodeBackend implements Backend {
     this.events.stop()
     // What the server was running, which after this is nothing. Keeping these
     // left sessions marked busy against a server that had never heard of them.
-    // sessionDirectories stays: which checkout a session belongs to is BOSS's
-    // own knowledge, and a restarted server still needs telling.
+    // Both directory maps stay: which checkout a session runs in and where its
+    // records live are BOSS's own knowledge, and a restarted server needs
+    // both told again.
     this.observedStatuses.clear()
     this.submittedAt.clear()
     this.client = undefined
@@ -167,12 +184,18 @@ export class OpenCodeBackend implements Backend {
       query: { directory: directory || this.directoryFor() }
     })
     const session = unwrap(res, 'session create') as unknown as SessionInfo
-    if (directory || session.directory) this.setSessionDirectory(session.id, directory ?? session.directory!)
+    // The server's own record is the authority on where the session is stored;
+    // reads key off it. Runs go where the caller asked.
+    const stored = session.directory || directory
+    if (stored) this.sessionDirectories.set(session.id, stored)
+    const executed = directory || session.directory
+    if (executed) this.executionDirectories.set(session.id, executed)
     return session
   }
 
   setSessionDirectory(id: string, directory: string): void {
-    this.sessionDirectories.set(id, directory)
+    if (!directory) return
+    this.executionDirectories.set(id, directory)
   }
 
   async sessionDelete(id: string): Promise<void> {
@@ -200,7 +223,13 @@ export class OpenCodeBackend implements Backend {
       path: { id },
       query: { directory: this.directoryFor(id) }
     })
-    return unwrap(res, 'session get') as unknown as SessionInfo
+    const session = unwrap(res, 'session get') as unknown as SessionInfo
+    // The record names the scope the session actually lives under. A restart
+    // forgets this map, and the first read of a thread answers with the
+    // server's current project — which may not be the session's — so heal the
+    // key here rather than re-registering every binding on boot.
+    if (session.directory) this.sessionDirectories.set(id, session.directory)
+    return session
   }
 
   /** OpenCode starts its hidden small-model title agent on the first prompt.
@@ -235,7 +264,7 @@ export class OpenCodeBackend implements Backend {
     const res = await this.sdk().session.promptAsync({
       path: { id: sessionId },
       body: { parts: parts as never, ...rest },
-      query: { directory: this.directoryFor(sessionId) }
+      query: { directory: this.executionFor(sessionId) }
     })
     unwrap(res, 'prompt')
     // The manager already exposes an optimistic busy state. Mirroring it here
@@ -418,7 +447,7 @@ export class OpenCodeBackend implements Backend {
     const res = await this.sdk().session.command({
       path: { id: sessionId },
       body: { command, arguments: args, agent: opts?.agent, model },
-      query: { directory: this.directoryFor(sessionId) }
+      query: { directory: this.executionFor(sessionId) }
     })
     return unwrap(res, 'command') as unknown as MessageWithParts
   }
