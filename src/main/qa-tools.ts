@@ -35,7 +35,11 @@ function booleanArg(value: unknown, key: string): boolean {
 
 export class QaTools {
   private readonly policies: Record<string, QaPolicy> = {}
-  private defaultPolicy: QaPolicy = 'suggest'
+  // Automatic by default. An agent that can look at what it built catches its
+  // own mistakes, and every one it does not catch reaches the user instead. The
+  // switch that held this at "suggest" is gone: it was a choice nobody made on
+  // purpose, and the cautious answer was the expensive one.
+  private defaultPolicy: QaPolicy = 'automatic'
 
   constructor(
     private readonly getBrowser: () => BrowseManager | null,
@@ -46,7 +50,7 @@ export class QaTools {
       if (stored.policies) Object.assign(this.policies, stored.policies)
       if (stored.version === 2) this.defaultPolicy = stored.defaultPolicy
     } catch {
-      /* New installs start in Suggest mode. */
+      /* A new install starts automatic. */
     }
   }
 

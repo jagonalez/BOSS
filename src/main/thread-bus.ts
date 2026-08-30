@@ -137,7 +137,12 @@ export class ThreadBus {
   /** Last known path per overridden project, so settings can name a project
    *  the user has not opened in this session. */
   private readonly projectPaths: Record<string, string> = {}
-  private defaultPolicy: CollaborationPolicy = 'off'
+  // A room's participants read and message each other's threads to work at
+  // all, so a default of 'off' meant rooms silently did nothing on a fresh
+  // install until the user found a switch nobody told them about. The fence
+  // that matters is elsewhere: an agent still cannot reach another project or
+  // another backend, and a room's participants refuse direct messages.
+  private defaultPolicy: CollaborationPolicy = 'collaborate'
   private messages: ThreadBusMessage[] = []
   private server: Server | null = null
   private token = ''
@@ -207,7 +212,7 @@ export class ThreadBus {
     try {
       const state = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredThreadBusState | LegacyProjectPolicyState | LegacyThreadBusState
       if (state.version === 3) {
-        this.defaultPolicy = state.defaultPolicy ?? 'off'
+        this.defaultPolicy = state.defaultPolicy ?? 'collaborate'
         Object.assign(this.policies, state.policies)
         Object.assign(this.projectPaths, state.projectPaths)
         this.messages = Array.isArray(state.messages) ? state.messages.slice(-MAX_MESSAGES) : []

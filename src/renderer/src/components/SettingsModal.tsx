@@ -6,15 +6,11 @@ import { searchSettings, type SettingsMatch } from '../lib/settings-index'
 import { SearchIcon } from './icons'
 import { MONO_FONTS, READING_SIZE, TERMINAL_SIZE, UI_FONTS } from '@shared/typography'
 import { KOKORO_VOICES } from '@shared/speech'
-import type { ViewMode } from '@shared/workspace'
-import { clearThreadBusFailures, loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setQaDefault, setSpeakAloud, setTerminalStartLocation, setUiDensity, setUiFontSize, setViewMode, setThreadBusDefaultPolicy, setThreadBusPolicy, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
-import { projectName } from '../lib/project-name'
+import { loadEngine, openBackendLogin, refreshBackendAuth, refreshBackendModels, refreshComputerUsePermissions, refreshQaDefault, refreshSubscriptionUsage, restartBackend, setBackendDefault, setDefaultModel, setEngine, setSpeakAloud, setTerminalStartLocation, setUiDensity, setUiFontSize, setTtsVoice, speakText, toggleComputerUse } from '../lib/actions'
 import { BackendBadge } from './BackendControls'
 import { OpenCode } from '../lib/opencode'
-import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendSubscriptionUsage, LabConnection, LabConnectionsSettings, SandboxSettings, ThreadTitleSettings } from '@shared/backend'
+import type { BackendDescriptor, BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, BackendSubscriptionUsage, LabConnection, LabConnectionsSettings, ThreadTitleSettings } from '@shared/backend'
 import type { WorktreeLocation, WorktreeSettings } from '@shared/worktree'
-import type { QaPolicy } from '@shared/qa'
-import type { CollaborationPolicy } from '@shared/thread-bus'
 import type { CliStatus, UpdateChannel, UpdateStatus } from '@shared/ipc'
 import { Button, Select, SettingsRow, StatusBadge } from './ui'
 import { McpSettings } from './McpSettings'
@@ -23,7 +19,7 @@ import { MobileSettings } from './MobileSettings'
 import { TelegramSettings } from './TelegramSettings'
 import { ModelSelect, modelIsLocal } from './ModelSelect'
 
-type SettingsSection = 'team' | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram' | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
+type SettingsSection = 'team' | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
 const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection; label: string }> }> = [
   {
@@ -41,7 +37,6 @@ const SETTINGS_GROUPS: Array<{ label: string; items: Array<{ id: SettingsSection
   {
     label: 'Projects',
     items: [
-      { id: 'collaboration', label: 'Collaboration' },
       { id: 'worktrees', label: 'Git worktrees' }
     ]
   },
@@ -99,42 +94,6 @@ function SubscriptionUsage({ usage }: { usage?: BackendSubscriptionUsage }): Rea
 
 /** The layout choices, each drawn rather than described. A silhouette says
  *  what changes faster than a sentence does. */
-const VIEW_MODES: Array<{
-  id: ViewMode
-  label: string
-  description: string
-  silhouette: React.JSX.Element
-}> = [
-  {
-    id: 'multi',
-    label: 'Multi-thread',
-    description: 'Several threads at once, split however you arrange them.',
-    silhouette: (
-      <svg viewBox="0 0 64 44" aria-hidden="true">
-        <rect x="1" y="1" width="62" height="42" rx="4" className="viewmode-frame" />
-        <rect x="5" y="9" width="26" height="30" rx="2" className="viewmode-pane" />
-        <rect x="35" y="9" width="24" height="14" rx="2" className="viewmode-pane" />
-        <rect x="35" y="25" width="24" height="14" rx="2" className="viewmode-pane" />
-        <rect x="5" y="4" width="12" height="3" rx="1.5" className="viewmode-tab" />
-        <rect x="35" y="4" width="10" height="3" rx="1.5" className="viewmode-tab" />
-      </svg>
-    )
-  },
-  {
-    id: 'single',
-    label: 'Single-thread',
-    description: 'One thread filling the window, with its own tabs. No splits.',
-    silhouette: (
-      <svg viewBox="0 0 64 44" aria-hidden="true">
-        <rect x="1" y="1" width="62" height="42" rx="4" className="viewmode-frame" />
-        <rect x="5" y="9" width="54" height="30" rx="2" className="viewmode-pane" />
-        <rect x="5" y="4" width="12" height="3" rx="1.5" className="viewmode-tab active" />
-        <rect x="19" y="4" width="10" height="3" rx="1.5" className="viewmode-tab" />
-        <rect x="31" y="4" width="10" height="3" rx="1.5" className="viewmode-tab" />
-      </svg>
-    )
-  }
-]
 
 const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: string }> = {
   team: {
@@ -164,10 +123,6 @@ const SETTINGS_HEADINGS: Record<SettingsSection, { title: string; description: s
   telegram: {
     title: 'Telegram',
     description: 'Send messages to your own bot and have them delivered into a thread of your choice.'
-  },
-  collaboration: {
-    title: 'Collaboration',
-    description: 'Control how threads in the same project can discover and communicate with one another.'
   },
   worktrees: {
     title: 'Git worktrees',
@@ -670,17 +625,14 @@ export function SettingsModal(): React.JSX.Element | null {
   const tts = useStore(appStore, (s) => s.tts)
   const backends = useStore(appStore, (s) => s.backends)
   const defaultBackend = useStore(appStore, (s) => s.engine)
-  const threadBus = useStore(appStore, (s) => s.threadBus)
   const backendAuth = useStore(appStore, (s) => s.backendAuth)
   const subscriptionUsage = useStore(appStore, (s) => s.subscriptionUsage)
   const backendModels = useStore(appStore, (s) => s.backendModels ?? {})
   const backendModelsLoading = useStore(appStore, (s) => s.backendModelsLoading ?? false)
   const defaultModels = useStore(appStore, (s) => s.defaultModels ?? {})
-  const qaDefault = useStore(appStore, (s) => s.qaDefault)
   const computerUse = useStore(appStore, (s) => s.computerUse)
   const computerUsePerms = useStore(appStore, (s) => s.computerUsePerms)
   const terminalStartLocation = useStore(appStore, (s) => s.terminalStartLocation)
-  const viewMode = useStore(appStore, (s) => s.viewMode)
   const uiFontSize = useStore(appStore, (s) => s.uiFontSize)
   const uiDensity = useStore(appStore, (s) => s.uiDensity)
   const [section, setSection] = useState<SettingsSection>('connections')
@@ -691,14 +643,12 @@ export function SettingsModal(): React.JSX.Element | null {
   const matches = useMemo(() => searchSettings(query), [query])
   const [worktreeSettings, setWorktreeSettings] = useState<WorktreeSettings | null>(null)
   const [threadTitleSettings, setThreadTitleSettings] = useState<ThreadTitleSettings | null>(null)
-  const [sandboxSettings, setSandboxSettings] = useState<SandboxSettings | null>(null)
   const [backendBins, setBackendBins] = useState<Partial<Record<BackendId, string>>>({})
 
   useEffect(() => {
     if (!open) return
     void OpenCode.worktreeSettings().then(setWorktreeSettings).catch(() => {})
     void OpenCode.threadTitleSettings().then(setThreadTitleSettings).catch(() => {})
-    void OpenCode.sandboxSettings().then(setSandboxSettings).catch(() => {})
     void OpenCode.backendBinaries().then(setBackendBins).catch(() => {})
     void refreshBackendAuth()
     void refreshSubscriptionUsage()
@@ -863,36 +813,6 @@ export function SettingsModal(): React.JSX.Element | null {
                       />
                       <span>{threadTitleSettings?.autoNameFromFirstPrompt ? 'On' : 'Off'}</span>
                     </label>
-                  </SettingsRow>
-                  <SettingsRow
-                    title="Agent network access"
-                    description="Let a sandboxed agent reach the network. Off blocks gh, npm, and curl, so an agent cannot open a pull request. Plan mode stays offline either way. This applies to Codex, the only backend that sandboxes today."
-                  >
-                    <label className="settings-computer-toggle">
-                      <input
-                        type="checkbox"
-                        aria-label="Agent network access"
-                        checked={sandboxSettings?.networkAccess ?? true}
-                        onChange={(event) => {
-                          const networkAccess = event.target.checked
-                          setSandboxSettings({ networkAccess })
-                          void OpenCode.setSandboxSettings(networkAccess)
-                            .then(setSandboxSettings)
-                            .catch(() => setSandboxSettings((current) => current ? { ...current, networkAccess: !networkAccess } : current))
-                        }}
-                      />
-                      <span>{sandboxSettings?.networkAccess ?? true ? 'On' : 'Off'}</span>
-                    </label>
-                  </SettingsRow>
-                  <SettingsRow
-                    title="Agent QA"
-                    description="Default for threads without an override. Suggest allows browser inspection; native inspection also uses the Computer use switch. Use /qa auto, /qa suggest, /qa off, or /qa default inside a thread to change only that thread."
-                  >
-                    <Select value={qaDefault} onChange={(event) => void setQaDefault(event.target.value as QaPolicy)}>
-                      <option value="suggest">Suggest — inspect only</option>
-                      <option value="automatic">Automatic — allow scoped actions</option>
-                      <option value="off">Off</option>
-                    </Select>
                   </SettingsRow>
                   <SettingsRow
                     title="Computer use"
@@ -1061,78 +981,6 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {section === 'telegram' ? <TelegramSettings /> : null}
 
-            {section === 'collaboration' ? (
-              <div className="settings-group-stack">
-                <section className="settings-card settings-card-list">
-                  <SettingsRow title="Agent access" description="Applies to every project without its own setting below. OpenCode, Pi, Codex CLI, and Claude Code threads can use the thread tools.">
-                  <Select
-                    value={threadBus?.defaultPolicy ?? 'off'}
-                    onChange={(event) => void setThreadBusDefaultPolicy(event.target.value as CollaborationPolicy)}
-                  >
-                    <option value="off">Off</option>
-                    <option value="read">Read-only</option>
-                    <option value="collaborate">Read and send</option>
-                  </Select>
-                  </SettingsRow>
-                  {threadBus?.projectId && threadBus.projectId !== 'global' ? (
-                    <SettingsRow
-                      title={`This project: ${projectName(threadBus.projectPath)}`}
-                      description={threadBus.source === 'default' ? 'Following the setting above.' : 'Set for this project only.'}
-                    >
-                    <Select
-                      value={threadBus.source === 'default' ? 'default' : threadBus.policy}
-                      onChange={(event) => void setThreadBusPolicy(
-                        event.target.value === 'default' ? null : event.target.value as CollaborationPolicy,
-                        threadBus.projectId
-                      )}
-                    >
-                      <option value="default">Use default</option>
-                      <option value="off">Off</option>
-                      <option value="read">Read-only</option>
-                      <option value="collaborate">Read and send</option>
-                    </Select>
-                    </SettingsRow>
-                  ) : null}
-                  <SettingsRow title="Recent agent messages" description={
-                    <>
-                      {threadBus?.messages.length
-                        ? `${threadBus.messages.filter((message) => message.status === 'queued').length} queued · ${threadBus.messages.filter((message) => message.status === 'failed').length} failed · ${threadBus.messages.length} recent`
-                        : 'No agent-to-agent messages in this project yet.'}
-                    </>
-                  }>
-                  {threadBus?.messages.some((message) => message.status === 'failed') ? (
-                    <Button size="small" onClick={() => void clearThreadBusFailures()}>Clear failures</Button>
-                  ) : null}
-                  </SettingsRow>
-                </section>
-                {threadBus?.overrides.length ? (
-                  <section className="settings-card settings-card-list">
-                    <div className="settings-section-title">Projects with their own setting</div>
-                    {threadBus.overrides.map((override) => (
-                      <SettingsRow
-                        key={override.projectId}
-                        title={projectName(override.projectPath)}
-                        description={override.projectPath || 'Path not known until this project is opened again.'}
-                      >
-                      <Select
-                        value={override.policy}
-                        onChange={(event) => void setThreadBusPolicy(
-                          event.target.value === 'default' ? null : event.target.value as CollaborationPolicy,
-                          override.projectId
-                        )}
-                      >
-                        <option value="default">Use default</option>
-                        <option value="off">Off</option>
-                        <option value="read">Read-only</option>
-                        <option value="collaborate">Read and send</option>
-                      </Select>
-                      </SettingsRow>
-                    ))}
-                  </section>
-                ) : null}
-              </div>
-            ) : null}
-
             {section === 'worktrees' ? (
               <div className="settings-group-stack">
                 <section className="settings-card settings-card-list">
@@ -1208,31 +1056,6 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {section === 'appearance' ? (
               <>
-              <section className="settings-card">
-                <div className="settings-card-heading">
-                  <div>
-                    <h2>Workspace layout</h2>
-                    <p>How threads are shown. Your panes are kept either way, so switching back restores the layout you arranged.</p>
-                  </div>
-                </div>
-                <div className="viewmode-grid" role="radiogroup" aria-label="Workspace layout">
-                  {VIEW_MODES.map((mode) => (
-                    <button
-                      key={mode.id}
-                      role="radio"
-                      aria-checked={viewMode === mode.id}
-                      className={`viewmode-option ${viewMode === mode.id ? 'active' : ''}`}
-                      onClick={() => setViewMode(mode.id)}
-                    >
-                      <span className="viewmode-preview">{mode.silhouette}</span>
-                      <span className="viewmode-copy">
-                        <strong>{mode.label}</strong>
-                        <small>{mode.description}</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
               <section className="settings-card">
                 <div className="settings-card-heading">
                   <div>

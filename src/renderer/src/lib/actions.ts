@@ -61,14 +61,17 @@ import {
 
 export function initializeWorkspaceState(): void {
   let terminalStartLocation: TerminalStartLocation = 'focused-checkout'
-  let viewMode: ViewMode = 'multi'
   try {
     if (localStorage.getItem('boss.terminalStartLocation') === 'project-root') terminalStartLocation = 'project-root'
-    if (localStorage.getItem('boss.viewMode') === 'single') viewMode = 'single'
   } catch {
-    /* Retain the focused-checkout and tiling defaults. */
+    /* Retain the focused-checkout default. */
   }
-  appStore.setState({ layouts: loadLayouts(), terminalStartLocation, viewMode })
+  // One thread at a time, always. Tiling several threads side by side made the
+  // window a place to watch rather than a place to work, and the choice between
+  // the two was a setting nobody wanted to make. Panes within one thread stay:
+  // files, review, and a terminal beside the conversation are what the user
+  // actually reaches for.
+  appStore.setState({ layouts: loadLayouts(), terminalStartLocation, viewMode: 'single' })
 }
 
 function singleWorkspaceFrom(workspace: WorkspaceState): WorkspaceState {

@@ -13,8 +13,7 @@
 
 export type SettingsSectionId =
   | 'team'
-  | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram'
-  | 'collaboration' | 'worktrees' | 'appearance' | 'voice' | 'updates'
+  | 'agents' | 'connections' | 'usage' | 'mcp' | 'mobile' | 'telegram' | 'worktrees' | 'appearance' | 'voice' | 'updates'
 
 export interface SettingsEntry {
   /** What the setting is called where it lives. */
@@ -66,7 +65,6 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { label: 'Allowed chats', section: 'telegram', keywords: ['telegram', 'chat id', 'allowlist', 'who can write', 'pair'] },
 
   // Collaboration
-  { label: 'Thread collaboration', section: 'collaboration', keywords: ['thread bus', 'message', 'discover', 'agents talking'] },
 
   // Worktrees
   { label: 'Git worktrees', section: 'worktrees', keywords: ['branch', 'isolated', 'checkout'] },
