@@ -5913,13 +5913,23 @@ body.workspace-dragging .workspace-tab-slot {
 }
 
 .sidebar-section.projects,
-.sidebar-section.chats,
 .sidebar-section.review {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Sized by its rows, not stretched to fill what is left. Sharing the rule above
+   made a short list of projectless chats take the whole remaining height, and
+   its rows — which may shrink below their content — were squeezed until the
+   title sat on top of its own detail line. */
+.sidebar-section.chats {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  padding-bottom: 6px;
 }
 
 /* Review stacks one list per bucket, so the section itself does the scrolling
@@ -6145,11 +6155,14 @@ body.workspace-dragging .workspace-tab-slot {
 
    Written as .item.sub.session-row because .item.sub alone is two classes and
    outranks a bare .session-row, which silently kept the old 29px inset. */
+/* A row holds a title above a detail line, so it must never be squeezed
+   shorter than the two of them. `min-height: 0` let a stretched list crush one
+   into the other. */
 .item.sub.session-row {
   align-items: flex-start;
   gap: 9px;
   padding-left: 20px;
-  min-height: 0;
+  flex: 0 0 auto;
 }
 
 .project-caret {

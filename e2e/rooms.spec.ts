@@ -214,3 +214,14 @@ test('an empty pane does not offer to split itself', async ({ appPage }) => {
 
   await expect(empty.first().locator('.workspace-group-actions button[title*="Split"]')).toHaveCount(0)
 })
+
+test('a chat with no project is not squeezed thinner than its own text', async ({ appPage }) => {
+  // Sharing the projects list's rule made a short list stretch to fill the
+  // sidebar, and its rows — which could shrink below their content — were
+  // crushed until the title sat on top of its own detail line.
+  const rows = appPage.locator('.sidebar-section.chats .session-row')
+  if (await rows.count() === 0) return
+
+  const height = await rows.first().evaluate((node) => node.getBoundingClientRect().height)
+  expect(height).toBeGreaterThan(28)
+})
