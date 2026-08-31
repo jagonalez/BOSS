@@ -2045,13 +2045,17 @@ export class BackendManager {
     // The app already builds such text for other reasons and hands it over the
     // same way, so this is that path carrying more.
     const standing: string[] = []
-    if (missed.first) {
-      const brief = await this.roleBrief(recipient)
-      if (brief) standing.push(brief)
-      if (notes) standing.push(`[JOB NOTES]\n${notes}`)
-      const diff = await this.roomDiff(roomThreadId)
-      if (diff) standing.push(diff)
-    }
+    // Who it is, and what has changed, go every time. Sent once they were a
+    // message, and a message is said once — instructions are what an agent is
+    // working under, and they have to be true for the message they arrive with.
+    // Told only on arrival, an agent forgot its own role by its second answer.
+    const brief = await this.roleBrief(recipient)
+    if (brief) standing.push(brief)
+    if (notes) standing.push(`[JOB NOTES]\n${notes}`)
+    const diff = await this.roomDiff(roomThreadId)
+    if (diff) standing.push(diff)
+    // The catch-up is the exception: it says what happened while this agent was
+    // not being addressed, so it is true once and misleading afterwards.
     const catchUp = catchUpPrompt(missed.missed, recipient ?? '')
     if (catchUp) standing.push(catchUp)
     if (recipient) await this.rooms?.touch(roomThreadId, recipient, 'working')

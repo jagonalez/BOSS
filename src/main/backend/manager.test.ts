@@ -349,19 +349,23 @@ test('the handover runs only after the room releases its own claim', () => {
   assert.equal(calls.length, 2, 'exactly two handover calls: one per branch')
   assert.ok(calls.every((at) => at > release), 'no handover may run before the room lets go')
 })
-
-test('a joining participant is told who it is, what was agreed, and what changed', () => {
-  // It used to receive the job notes and nothing else. A reviewer was never
-  // told it reviews, and never saw the diff it was brought in to check — so it
-  // read as a second builder agreeing with the first.
+test('an agent is told who it is on every message, not only its first', () => {
+  // Instructions are what an agent is working under, so they have to be true
+  // for the message they arrive with. Told once, an agent forgot its own role
+  // by its second answer — and its first answer was "I am Claude".
   const start = source.indexOf('private async sendToParticipant(')
-  assert.ok(start > 0, 'expected a sendToParticipant method')
   const body = source.slice(start, source.indexOf('\n  }\n', start))
-  const first = body.indexOf('if (missed.first)')
-  assert.ok(first > 0, 'the brief is sent once, on the first message only')
-  assert.ok(/this\.roleBrief\(recipient\)/.test(body), 'it must be told which role it is')
-  assert.ok(/\[JOB NOTES\]/.test(body), 'it must be told what the job agreed')
-  assert.ok(/this\.roomDiff\(roomThreadId\)/.test(body), 'it must be told what changed on disk')
+  const brief = body.indexOf('this.roleBrief(recipient)')
+  assert.ok(brief > 0, 'the role brief must be built')
+  assert.ok(!/if \(missed\.first\)/.test(body), 'nothing here is first-message only')
+})
+
+test('the catch-up is the one thing said only once', () => {
+  // It says what happened while this agent was not being addressed. True the
+  // moment it arrives, misleading every time after.
+  const start = source.indexOf('private async sendToParticipant(')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.match(body, /catchUpPrompt\(missed\.missed/, 'built from what was missed')
 })
 
 test('the diff a joining agent reads comes from the checkout, not from a backend', () => {
