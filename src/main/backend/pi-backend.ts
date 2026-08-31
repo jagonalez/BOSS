@@ -466,6 +466,21 @@ export default function (pi: ExtensionAPI) {
     execute: (_id, args, signal) => call("boss_threads_reply", args, signal)
   })
   pi.registerTool({
+    name: "boss_rooms_open",
+    label: "Start a room",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.openRoom)},
+    parameters: Type.Object({
+      instruction: Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.openRoomInstruction)} }),
+      shape: Type.Union([
+        Type.Literal("direct"),
+        Type.Literal("reviewed"),
+        Type.Literal("full")
+      ], { description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.openRoomShape)} }),
+      project: Type.Optional(Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.openRoomProject)} }))
+    }),
+    execute: (_id, args, signal) => call("boss_rooms_open", args, signal)
+  })
+  pi.registerTool({
     name: "boss_threads_spawn_worktree",
     label: "Spawn BOSS worktree thread",
     description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktree)},

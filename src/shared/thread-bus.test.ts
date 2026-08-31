@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 // @ts-expect-error Application code uses bundler resolution.
 import * as bus from './thread-bus.ts'
 
@@ -17,5 +19,24 @@ test('no tool description names the app', () => {
       if (typeof text !== 'string') continue
       assert.doesNotMatch(text, /\bBOSS\b/, `${group}.${key} names the app`)
     }
+  }
+})
+
+test('every backend offers the tool that starts a room', () => {
+  // Five backends declare their tools by hand, and BOSS runs on any of them.
+  // A tool added to one and forgotten on another means the assistant can offer
+  // a room on Claude and not on Codex — the same conversation, a different
+  // answer, for a reason the user cannot see.
+  const files = [
+    'src/main/thread-bus.ts',
+    'src/main/backend/claude-backend.ts',
+    'src/main/backend/codex-backend.ts',
+    'src/main/backend/lab-thread-tools.ts',
+    'src/main/backend/pi-backend.ts',
+    'src/main/opencode-server.ts'
+  ]
+  for (const file of files) {
+    const source = readFileSync(join(process.cwd(), file), 'utf8')
+    assert.match(source, /boss_rooms_open/, `${file} offers the room tool`)
   }
 })

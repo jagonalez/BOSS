@@ -2,6 +2,8 @@
 // type-stripping test runner, which cannot resolve the @shared bundler alias.
 // @ts-expect-error Application builds use bundler resolution.
 import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '../../shared/thread-bus.ts'
+// @ts-expect-error Application builds use bundler resolution.
+import { ROOM_SHAPES } from '../../shared/room.ts'
 import type { LabToolFunction } from './lab-tools'
 
 /** Lab's view of BOSS host tools.
@@ -66,6 +68,22 @@ export const THREAD_TOOL_DEFINITIONS: LabToolFunction[] = [
           message: { type: 'string', description: 'Reply for the sending thread.' }
         },
         required: ['messageId', 'message']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'boss_rooms_open',
+      description: THREAD_TOOL_DESCRIPTIONS.openRoom,
+      parameters: {
+        type: 'object',
+        properties: {
+          instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.openRoomInstruction },
+          shape: { type: 'string', enum: [...ROOM_SHAPES], description: THREAD_TOOL_DESCRIPTIONS.openRoomShape },
+          project: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.openRoomProject }
+        },
+        required: ['instruction', 'shape']
       }
     }
   },

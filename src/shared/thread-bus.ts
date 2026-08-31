@@ -83,6 +83,7 @@ export type ThreadBusAgentTool =
   | 'boss_threads_send'
   | 'boss_threads_reply'
   | 'boss_threads_spawn_worktree'
+  | 'boss_rooms_open'
   | 'boss_threads_use_worktree'
   | 'boss_threads_leave_worktree'
   // Not a boss_threads_* tool: it acts on the caller's own checkout rather than reaching another
@@ -123,6 +124,10 @@ export const THREAD_TOOL_DESCRIPTIONS = {
    *  conversation", which reads as one new thread, so a request to take on
    *  several items produced one thread instead of several. */
   spawnWorktree: 'Hand a piece of work to a new thread with its own Git worktree, in this project or another project already open here, so it proceeds independently of this one. Call it once per piece of work: asked to take on several items, spawn a thread for each rather than one thread for all of them. Omit project to use this thread\'s project; otherwise pass the target project\'s absolute path or unique folder name. Omit agent to reuse this thread\'s agent; set it only when the task should run on a different configured agent. Each new thread starts from the instruction alone, so say what to do and why, not "the second item above".',
+  openRoom: 'Start a room: a thread that runs a job with the agents the user chose. Use this whenever the user agrees to have work done, rather than doing it yourself. The shape says which agents the job gets: "direct" is one agent that builds; "reviewed" is a builder and then a fresh reviewer; "full" researches and plans first. Ask the user which shape before calling; never choose for them. The first agent starts working immediately, so state the whole job — it cannot see this conversation.',
+  openRoomInstruction: 'The job, stated in full. The agents cannot see this conversation, so say what to do and why, not "the thing we discussed".',
+  openRoomShape: 'Which agents the job gets. "direct" builds; "reviewed" builds then reviews; "full" researches, plans, builds, then reviews. The user chooses this.',
+  openRoomProject: 'Project for the job, as an absolute path or unique folder name. Omit to use the current project.',
   spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.',
   spawnWorktreeAgent: 'Agent backend for the child thread. Omit to reuse the current thread\'s agent.',
   spawnWorktreeProject: 'Target project already open here, as an absolute path or unique folder name. Omit to use the current project.',

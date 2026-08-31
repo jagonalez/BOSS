@@ -6,6 +6,7 @@ import { BACKEND_IDS, type BackendMessageOptions, type BackendModeId } from '@sh
 import type { ThreadBusAgentTool, ThreadBusToolCall } from '@shared/thread-bus'
 import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult } from '@shared/qa'
+import { ROOM_SHAPES } from '@shared/room'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from '@shared/sandbox'
@@ -124,6 +125,25 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
         expectsReply: { type: 'boolean', description: 'Whether another response is useful.' }
       },
       required: ['messageId', 'message'],
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
+    name: 'boss_rooms_open',
+    description: THREAD_TOOL_DESCRIPTIONS.openRoom,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.openRoomInstruction },
+        shape: {
+          type: 'string',
+          enum: [...ROOM_SHAPES],
+          description: THREAD_TOOL_DESCRIPTIONS.openRoomShape
+        },
+        project: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.openRoomProject }
+      },
+      required: ['instruction', 'shape'],
       additionalProperties: false
     }
   },

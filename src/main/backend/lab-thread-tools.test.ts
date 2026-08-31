@@ -12,6 +12,7 @@ test('the host tools cover collaboration and publishing completed work', () => {
     'boss_threads_read',
     'boss_threads_send',
     'boss_threads_reply',
+    'boss_rooms_open',
     'boss_threads_spawn_worktree',
     'boss_git_create_change_request',
     'boss_reports_create',

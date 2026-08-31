@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { trimToolOutput } from '../../shared/tool-output'
-import { ROOM_ASSISTANT_ID, ROOM_EVERYONE, ROOM_THREAD_AGENT } from '../../shared/room'
+import { ROOM_ASSISTANT_ID, ROOM_EVERYONE, ROOM_THREAD_AGENT, type RoomShape } from '../../shared/room'
 import { isBackendId } from '../../shared/backend'
 import { catchUpFor, catchUpPrompt, deliveryFor } from '../../shared/room-routing'
 import { assistantBrief, briefForRole, HANDOVER_PROMPT } from '../../shared/room-brief'
@@ -2808,6 +2808,32 @@ export class BackendManager {
     const created = await this.forkIntoWorktree(threadId, instruction, undefined, agent, project)
     const info = this.threadInfo(created.id)
     if (!info) throw new Error('The worktree thread was created but could not be registered.')
+    return info
+  }
+
+  /** Start a room: a thread with a shape, and the first agent already working.
+   *
+   *  The assistant could already start a thread, but not say which agents the
+   *  job gets — so the user's answer to "build and review?" had nowhere to go,
+   *  and every job silently became one agent.
+   *
+   *  The shape is recorded before the instruction is sent, because the opening
+   *  role is decided when the first message arrives. Sent first, the message
+   *  would find a room with no shape and go to whoever was there. */
+  async openRoomThread(
+    threadId: string,
+    instruction: string,
+    shape: RoomShape,
+    project?: string
+  ): Promise<ThreadBusThread> {
+    const created = await this.forkIntoWorktree(threadId, undefined, undefined, undefined, project)
+    const info = this.threadInfo(created.id)
+    if (!info) throw new Error('The room was created but could not be registered.')
+    await this.rooms?.chooseShape(created.id, shape)
+    // Sent as the user, because it is the user's job. Routing picks the
+    // opening role from the shape, which is the whole reason the shape is
+    // recorded first.
+    await this.sendMessage(created.id, [{ type: 'text', text: instruction }])
     return info
   }
 

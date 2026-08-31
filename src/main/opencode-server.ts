@@ -189,6 +189,17 @@ export const reply = tool({
   execute(args, context) { return call("boss_threads_reply", args, context) }
 })
 
+export const rooms_open = tool({
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.openRoom)},
+  args: {
+    instruction: tool.schema.string().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.openRoomInstruction)}),
+    shape: tool.schema.enum(["direct", "reviewed", "full"])
+      .describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.openRoomShape)}),
+    project: tool.schema.string().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.openRoomProject)}).optional()
+  },
+  execute(args, context) { return call("boss_rooms_open", args, context) }
+})
+
 export const spawn_worktree = tool({
   description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.spawnWorktree)},
   args: {

@@ -15,6 +15,7 @@ import type {
   ThreadBusThread
 } from '@shared/thread-bus'
 import { isPresence, type Presence } from '@shared/notification'
+import { ROOM_SHAPES, isRoomShape, type RoomShape } from '@shared/room'
 import { THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { NOTES_TOOL_DESCRIPTIONS, PRESENCE_TOOL_DESCRIPTIONS, REPORT_TOOL_DESCRIPTIONS, WORKFLOW_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import type { Workflow, WorkflowInput, WorkflowRun, WorkflowTrigger, WorkflowsSnapshot } from '@shared/workflow'
@@ -80,6 +81,17 @@ export interface ThreadBusHost {
   threadMessages(threadId: string, limit: number): Promise<MessageWithParts[]>
   deliverThreadMessage(threadId: string, body: string): Promise<void>
   spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId, project?: string): Promise<ThreadBusThread>
+  /** Start a room: a thread with a shape, and the first agent already working.
+   *
+   *  Separate from spawning a plain thread because a shape is the whole point.
+   *  The assistant could start a thread but never say which agents the job
+   *  gets, so the user's answer to "build and review?" had nowhere to go. */
+  openRoomThread(
+    threadId: string,
+    instruction: string,
+    shape: RoomShape,
+    project?: string
+  ): Promise<ThreadBusThread>
   useWorktree(threadId: string): Promise<{ path: string; branch: string }>
   leaveWorktree(threadId: string): Promise<{ path: string; branch: string }>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
@@ -448,7 +460,7 @@ export class ThreadBus {
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
-    if (!['boss_threads_list', 'boss_threads_read', 'boss_threads_send', 'boss_threads_reply', 'boss_threads_spawn_worktree', 'boss_threads_use_worktree', 'boss_threads_leave_worktree'].includes(tool)) {
+    if (!['boss_threads_list', 'boss_threads_read', 'boss_threads_send', 'boss_threads_reply', 'boss_threads_spawn_worktree', 'boss_rooms_open', 'boss_threads_use_worktree', 'boss_threads_leave_worktree'].includes(tool)) {
       throw new Error('Unknown BOSS thread tool.')
     }
 
@@ -511,6 +523,16 @@ export class ThreadBus {
           agent = requestedAgent
         }
         return this.host.spawnWorktreeThread(caller.id, instruction, agent, project || undefined)
+      }
+      case 'boss_rooms_open': {
+        if (policy !== 'collaborate') throw new Error('This project does not allow agents to create threads.')
+        const instruction = stringArg(args, 'instruction')
+        const shape = stringArg(args, 'shape')
+        const project = stringArg(args, 'project')
+        if (!instruction) throw new Error('Say what the job is.')
+        if (instruction.length > MAX_BODY) throw new Error(`Instructions are limited to ${MAX_BODY.toLocaleString()} characters.`)
+        if (!isRoomShape(shape)) throw new Error(`Shape must be one of: ${ROOM_SHAPES.join(', ')}.`)
+        return this.host.openRoomThread(caller.id, instruction, shape, project || undefined)
       }
       case 'boss_threads_leave_worktree':
         return this.host.leaveWorktree(caller.id)
@@ -863,6 +885,24 @@ export class ThreadBus {
             expectsReply: { type: 'boolean', default: false }
           },
           required: ['messageId', 'message'],
+          additionalProperties: false
+        }
+      },
+      {
+        name: 'boss_rooms_open',
+        description: THREAD_TOOL_DESCRIPTIONS.openRoom,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            instruction: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.openRoomInstruction },
+            shape: {
+              type: 'string',
+              enum: [...ROOM_SHAPES],
+              description: THREAD_TOOL_DESCRIPTIONS.openRoomShape
+            },
+            project: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.openRoomProject }
+          },
+          required: ['instruction', 'shape'],
           additionalProperties: false
         }
       },

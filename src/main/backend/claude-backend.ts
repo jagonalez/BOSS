@@ -617,6 +617,7 @@ export class ClaudeBackend implements Backend {
       'mcp__boss_thread_bus__boss_threads_send',
       'mcp__boss_thread_bus__boss_threads_reply',
       'mcp__boss_thread_bus__boss_threads_spawn_worktree',
+      'mcp__boss_thread_bus__boss_rooms_open',
       'mcp__boss_thread_bus__boss_threads_use_worktree',
       'mcp__boss_thread_bus__boss_threads_leave_worktree',
       'mcp__boss_thread_bus__boss_git_create_change_request',

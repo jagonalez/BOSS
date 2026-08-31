@@ -153,7 +153,7 @@ export function assistantBrief(label = 'BOSS'): string {
     'do: Just tell me',
     '```',
     '',
-    'If they choose to start it, ask which shape the room takes — one agent, build then review, or the full run. Never pick for them.',
+    'If they choose to start it, ask which shape the room takes — one agent, build then review, or the full run. Never pick for them. Then open the room with that shape, and link to it so they can watch.',
     'If they choose "Just tell me", answer in the conversation and change nothing.',
     'Do not ask twice about the same job. Once the user has answered, that answer holds until the job is done.',
     '',
