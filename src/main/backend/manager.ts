@@ -122,6 +122,13 @@ interface ThreadBinding {
    *  Stored on the binding so a renderer cannot promote an ordinary worker into
    *  one that reaches everything. */
   assistant?: boolean
+  /** We handed this thread set-up, so our own record is the fuller one.
+   *
+   *  Every engine glues the pieces of a message into one lump. Once set-up has
+   *  been sent, the engine's history can no longer say where it ended and the
+   *  user's words began — so rebuilding this thread from that history would put
+   *  the wall of text back and lose the seams for good. */
+  ownsHistory?: boolean
 }
 
 /** What the manager needs from the room manager.
@@ -1853,6 +1860,12 @@ export class BackendManager {
       return this.transcripts.messages(threadId, limit)
     }
     const hasStoredMessages = this.transcripts?.hasMessages(threadId) ?? false
+    // A thread we handed set-up to. The engine's history has those pieces glued
+    // into one lump, so rebuilding from it would put the wall of text back and
+    // lose the seams for good. Ours is the fuller record.
+    if (this.transcripts && binding.ownsHistory && hasStoredMessages) {
+      return this.transcripts.messages(threadId, limit)
+    }
     if (this.transcripts
       && binding.backendId === 'codex'
       && binding.nativeSessionOwnership === 'boss'
@@ -2049,11 +2062,17 @@ export class BackendManager {
     // hands back is every piece glued together, so it can say nothing about
     // where the set-up ended and the user's words began.
     if (setup.length > 0) {
-      this.recordSetup(this.binding(roomThreadId), setup)
+      const room = this.binding(roomThreadId)
+      this.recordSetup(room, setup)
       // Marked against the participant's own thread, because that is where the
       // engine's merged copy comes back — even though what it says is recorded
       // into the room.
       this.setupSent.set(participantThreadId, new Set())
+      // Both threads: the participant is where the engine's history lives, and
+      // the room is where the record of it was written.
+      this.binding(participantThreadId).ownsHistory = true
+      room.ownsHistory = true
+      this.save()
       for (const piece of setup) preface.push({ type: 'text', text: piece.text })
       // The user's own message travels in the same lump and would be dropped
       // with the echo, so it is recorded here as itself. Without this, sending
@@ -2289,8 +2308,13 @@ export class BackendManager {
     // a message into one lump and hands that lump back, so the returning copy
     // cannot say where the set-up ended and the user's words began.
     if (options?.setupTitle) {
-      this.recordSetup(this.binding(threadId), [{ title: options.setupTitle, text: textFromParts(parts) }])
+      const binding = this.binding(threadId)
+      this.recordSetup(binding, [{ title: options.setupTitle, text: textFromParts(parts) }])
       this.setupSent.set(threadId, new Set())
+      // From here our record is the fuller one, and rebuilding this thread from
+      // the engine's history would undo it.
+      binding.ownsHistory = true
+      this.save()
     }
     // A room's set-up is recorded by the room path, which marks the
     // participant's thread so the engine's merged copy is dropped there.

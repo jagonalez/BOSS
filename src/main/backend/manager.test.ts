@@ -535,7 +535,7 @@ test('what an agent is handed on arrival is recorded as set-up, not speech', () 
   const body = source.slice(start, source.indexOf('\n  }\n', start))
   const pieces = [...body.matchAll(/setup\.push\(\{ title:/g)]
   assert.ok(pieces.length >= 3, 'expected the brief, the notes, and the diff')
-  assert.match(body, /this\.recordSetup\(this\.binding\(roomThreadId\), setup\)/,
+  assert.match(body, /this\.recordSetup\(room, setup\)/,
     'recorded as our own copy, one line each')
   assert.match(body, /this\.setupSent\.set\(participantThreadId/,
     'and the engine\'s merged copy dropped where it comes back')
@@ -580,4 +580,32 @@ test('the user\'s own message survives travelling with set-up', () => {
   const start = source.indexOf('private async sendToParticipant(')
   const body = source.slice(start, source.indexOf('\n  }\n', start))
   assert.match(body, /this\.echoUserMessage\(/, 'what the user said is recorded as itself')
+})
+
+test('a thread we handed set-up to keeps its own history', () => {
+  // Every engine glues the pieces of a message into one lump. Once set-up has
+  // been sent, the engine's history can no longer say where it ended and the
+  // user's words began — so rebuilding from it puts the wall of text back and
+  // loses the seams for good.
+  const start = source.indexOf('async messagesList(threadId: string')
+  const body = source.slice(start, source.indexOf('\n  async ', start + 10))
+  const guard = body.indexOf('binding.ownsHistory')
+  assert.ok(guard > 0, 'a thread with its own record must be recognised')
+  assert.ok(guard < body.indexOf('ensureStarted'), 'before its engine is asked for a history')
+  assert.ok(guard < body.indexOf('reconcile'), 'and before anything is rebuilt over it')
+})
+
+test('sending set-up claims the history for our own record', () => {
+  // Claimed on both routes: the standing conversation, and a room handing an
+  // arriving agent its brief.
+  const send = source.indexOf('async sendMessage(threadId: string')
+  const sendBody = source.slice(send, source.indexOf('    const broadcasts', send))
+  assert.match(sendBody, /binding\.ownsHistory = true/, 'the direct route claims it')
+
+  const room = source.indexOf('private async sendToParticipant(')
+  const roomBody = source.slice(room, source.indexOf('\n  }\n', room))
+  assert.match(roomBody, /this\.binding\(participantThreadId\)\.ownsHistory = true/,
+    'the participant, where the engine keeps its history')
+  assert.match(roomBody, /room\.ownsHistory = true/,
+    'and the room, where the record was written')
 })
