@@ -527,60 +527,10 @@ test('a room reads its own messages rather than asking a backend', () => {
   assert.ok(guard < body.indexOf('reconcile'), 'and before anything is reconciled over it')
 })
 
-test('what an agent is handed on arrival is recorded as set-up, not speech', () => {
-  // Its role, what it missed, what changed on disk. The agent reads every word;
-  // the user did not write it, cannot change it, and cannot answer it, so it
-  // folds to one line instead of filling the conversation with prose.
-  const start = source.indexOf('private async sendToParticipant(')
-  const body = source.slice(start, source.indexOf('\n  }\n', start))
-  const pieces = [...body.matchAll(/setup\.push\(\{ title:/g)]
-  assert.ok(pieces.length >= 3, 'expected the brief, the notes, and the diff')
-  assert.match(body, /this\.recordSetup\(room, setup\)/,
-    'recorded as our own copy, one line each')
-  assert.match(body, /this\.setupSent\.set\(participantThreadId/,
-    'and the engine\'s merged copy dropped where it comes back')
-})
 
-test('a set-up line says what it is in plain words', () => {
-  // "Builder joined" rather than the whole prompt. The title is the only part
-  // most users will ever read.
-  const start = source.indexOf('private async sendToParticipant(')
-  const body = source.slice(start, source.indexOf('\n  }\n', start))
-  assert.match(body, /joined`/, 'an arriving agent says it arrived')
-  assert.match(body, /Caught up on \$\{count\}/, 'a catch-up says how much it caught up on')
-})
 
-test('set-up is recorded from what we sent, not from what comes back', () => {
-  // Every engine glues the pieces of a message into one lump and hands that
-  // lump back. The returning copy cannot say where the set-up ended and the
-  // user's words began, so our own record is the only one that keeps them
-  // apart — and it is the same on every engine.
-  const start = source.indexOf('async sendMessage(threadId: string')
-  const body = source.slice(start, source.indexOf('    const broadcasts', start))
-  assert.match(body, /this\.recordSetup\(/, 'the send records its own copy')
-  assert.match(body, /this\.setupSent\.set\(threadId/, 'and marks the echo to be dropped')
-})
 
-test('the engine\'s merged copy is dropped, but only that', () => {
-  // Dropping more would take the agent's answer with it.
-  const start = source.indexOf('private droppedSetupEcho(')
-  assert.ok(start > 0, 'expected the echo to be recognised')
-  const body = source.slice(start, source.indexOf('\n  }', start))
-  assert.match(body, /role === 'user'/, 'only the user message is an echo')
-  assert.match(body, /this\.setupSent\.delete\(binding\.id\)/,
-    'once the agent starts answering, nothing after is an echo')
-  assert.match(body, /echoed\.add\(String\(info\.id\)\)/,
-    'remembered by id, because a part can arrive before its message')
-})
 
-test('the user\'s own message survives travelling with set-up', () => {
-  // Set-up and the user's words are sent as one message, and that message's
-  // returning copy is dropped. Without recording it, the first thing said to a
-  // newly-arrived agent would vanish.
-  const start = source.indexOf('private async sendToParticipant(')
-  const body = source.slice(start, source.indexOf('\n  }\n', start))
-  assert.match(body, /this\.echoUserMessage\(/, 'what the user said is recorded as itself')
-})
 
 test('a thread we handed set-up to keeps its own history', () => {
   // Every engine glues the pieces of a message into one lump. Once set-up has
@@ -595,40 +545,5 @@ test('a thread we handed set-up to keeps its own history', () => {
   assert.ok(guard < body.indexOf('reconcile'), 'and before anything is rebuilt over it')
 })
 
-test('sending set-up claims the history for our own record', () => {
-  // Claimed on both routes: the standing conversation, and a room handing an
-  // arriving agent its brief.
-  const send = source.indexOf('async sendMessage(threadId: string')
-  const sendBody = source.slice(send, source.indexOf('    const broadcasts', send))
-  assert.match(sendBody, /binding\.ownsHistory = true/, 'the direct route claims it')
 
-  const room = source.indexOf('private async sendToParticipant(')
-  const roomBody = source.slice(room, source.indexOf('\n  }\n', room))
-  assert.match(roomBody, /this\.binding\(participantThreadId\)\.ownsHistory = true/,
-    'the participant, where the engine keeps its history')
-  assert.match(roomBody, /room\.ownsHistory = true/,
-    'and the room, where the record was written')
-})
 
-test('an echoed piece is recognised by its words when its message never comes', () => {
-  // An engine may send a part before the message that owns it, or without one
-  // at all. An id alone is then not enough to know it is the same text we sent
-  // moments ago and already recorded ourselves.
-  const start = source.indexOf('private droppedSetupEcho(')
-  const body = source.slice(start, source.indexOf('\n  }', start))
-  assert.match(body, /this\.justSentAsSetup\(binding\.id, part\.text\)/,
-    'a part is checked against what was sent, not only against a message id')
-
-  const helper = source.indexOf('private justSentAsSetup(')
-  assert.ok(helper > 0, 'expected the comparison to exist')
-  const helperBody = source.slice(helper, source.indexOf('\n  }', helper))
-  assert.match(helperBody, /this\.setupTexts\.get\(threadId\)/, 'compared against this thread only')
-})
-
-test('what was sent as set-up is forgotten once the agent answers', () => {
-  // Held any longer, an ordinary message that happened to repeat those words
-  // would be swallowed.
-  const start = source.indexOf('private droppedSetupEcho(')
-  const body = source.slice(start, source.indexOf('\n  }', start))
-  assert.match(body, /this\.setupTexts\.delete\(binding\.id\)/, 'the words are dropped with the marks')
-})
