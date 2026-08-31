@@ -1640,7 +1640,10 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
    *  thread", which names the one participant nobody is called. */
   const startingWith = useStore(appStore, (s) => {
     if (effectiveId && s.sessionMeta[effectiveId]?.kind === 'assistant') return 'BOSS'
-    const roleId = effectiveId ? splitOverride(s.rooms[effectiveId]?.recipient).roleId : undefined
+    // A thread with no room yet has no recipient, and splitting undefined
+    // crashed the whole view rather than falling back to the engine's name.
+    const recipient = effectiveId ? s.rooms[effectiveId]?.recipient : undefined
+    const roleId = recipient ? splitOverride(recipient).roleId : undefined
     const room = effectiveId ? s.rooms[effectiveId] : undefined
     return roleId && room
       ? recipientLabel(room, roleId, BACKEND_SHORT_LABELS[backendId])
