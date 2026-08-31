@@ -600,3 +600,17 @@ test('the agent working for the standing conversation knows what it is', () => {
   const body = source.slice(start, source.indexOf('\n      const who', start))
   assert.match(body, /binding\.parentID/, 'an agent is checked against the thread it belongs to')
 })
+
+test('a room agent\'s messages are announced against the room', () => {
+  // The agent runs in a hidden thread, and what it says is recorded into the
+  // room. Announced against the hidden thread, a client filed the answer under
+  // a conversation nobody was looking at — so it was stored correctly and never
+  // appeared until something else forced a reload.
+  const start = source.indexOf('const said = eventType.startsWith')
+  assert.ok(start > 0, 'expected messages to be told apart from run state')
+  const body = source.slice(start, source.indexOf('\n      if (eventType', start))
+  assert.match(body, /this\.transcriptSource\(binding\)\.threadId/,
+    'a message is named the same way its words are recorded')
+  assert.match(body, /said \? .* : binding\.id/,
+    'and only a message: a run start and end are announced against the room separately')
+})

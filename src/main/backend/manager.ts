@@ -1523,9 +1523,23 @@ export class BackendManager {
         binding.updatedAt = sessionInfo.time?.updated ?? now()
         this.save()
       }
-      if (properties.sessionID) properties.sessionID = binding.id
-      if (part) properties.part = { ...part, sessionID: binding.id }
-      if (messageInfo?.sessionID) properties.info = { ...messageInfo, sessionID: binding.id }
+      // A room's agent runs in a hidden thread of its own, and what it says is
+      // recorded into the room. An event naming that hidden thread is filed by
+      // a client under a conversation nobody is looking at — so the answer was
+      // stored correctly and never appeared, until something else forced a
+      // reload. Named as the room, the same way its words are.
+      //
+      // The room only, never its own thread: a client showing the room has no
+      // way to know the two are related.
+      //
+      // Messages only. A run's start and end are already announced against the
+      // room separately, and renaming those here would report the room busy
+      // twice over.
+      const said = eventType.startsWith('message.')
+      const shown = said ? this.transcriptSource(binding).threadId : binding.id
+      if (properties.sessionID) properties.sessionID = shown
+      if (part) properties.part = { ...part, sessionID: shown }
+      if (messageInfo?.sessionID) properties.info = { ...messageInfo, sessionID: shown }
       if (eventType === 'message.updated' && properties.info) {
         this.transcripts?.recordMessage(
           this.transcriptSource(binding),
