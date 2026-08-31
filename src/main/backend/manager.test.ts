@@ -642,3 +642,17 @@ test('a room\'s BOSS is handed both briefs', () => {
   assert.doesNotMatch(source, /const fromRoom = options\?\.fromRoom === true/,
     'a room send must not suppress the assistant brief')
 })
+
+test('a room\'s BOSS is created with its brief attached', () => {
+  // Two threads answer as BOSS: the standing chat, and a participant inside a
+  // room. Only the second one talks to the user in a room, and it is made by a
+  // different path that passed no brief at all.
+  //
+  // Codex reads the brief only as a thread is created — resume and fork accept
+  // it and ignore it — so a Codex room denied the name however many times the
+  // brief was sent afterwards.
+  const start = source.indexOf('async createParticipantThread(')
+  assert.ok(start > 0, 'expected participant creation')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.match(body, /roleId === ROOM_ASSISTANT_ID \? await this\.assistantBrief\(\)/)
+})

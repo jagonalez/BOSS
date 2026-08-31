@@ -269,7 +269,7 @@ export type BackendRequest =
    *  credentials again, which a running server never does. */
   | { type: 'backend.restart'; backendId: BackendId }
   | { type: 'thread.list' }
-  | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope; executionPath?: string }
+  | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope; executionPath?: string; assistant?: boolean }
   | { type: 'thread.backend.set'; threadId: string; backendId: BackendId }
   | { type: 'thread.get'; threadId: string }
   | { type: 'thread.delete'; threadId: string }

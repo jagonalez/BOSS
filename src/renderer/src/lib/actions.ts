@@ -1164,7 +1164,10 @@ async function startAssistantSession(): Promise<string> {
   // nothing, and the standing conversation ran on whatever was last selected.
   const team = await OpenCode.team().catch(() => undefined)
   const backendId = team?.roles.find((role) => role.id === ROOM_ASSISTANT_ID)?.backendId ?? loaded.engine
-  const session = await OpenCode.createSession('Assistant', backendId, 'global')
+  // Marked at creation, because Codex reads BOSS's brief only as the thread is
+  // made — sent later it is accepted and ignored, and a fresh chat denies the
+  // name.
+  const session = await OpenCode.createSession('Assistant', backendId, 'global', true)
   applyBackendDefaults(session.id, backendId)
   upsertSessionMeta(session.id, { kind: 'assistant', projectPath: '' })
   await refreshSessions()

@@ -137,8 +137,8 @@ export const OpenCode = {
   restartBackend: (backendId: BackendId) =>
     backendRequest<BackendDescriptor[]>({ type: 'backend.restart', backendId }),
   listSessions: () => backendRequest<SessionInfo[]>({ type: 'thread.list' }),
-  createSession: (title?: string, backendId: BackendId = 'opencode', scope: ThreadCreationScope = 'current') =>
-    backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, scope }),
+  createSession: (title?: string, backendId: BackendId = 'opencode', scope: ThreadCreationScope = 'current', assistant = false) =>
+    backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, scope, assistant }),
   createSessionInPath: (executionPath: string, title?: string, backendId: BackendId = 'opencode') =>
     backendRequest<SessionInfo>({ type: 'thread.create', backendId, title, executionPath }),
   setThreadBackend: (threadId: string, backendId: BackendId) =>

@@ -70,7 +70,12 @@ export interface Backend {
 
   /** Sessions */
   sessionsList(): Promise<SessionInfo[]>
-  sessionCreate(title?: string, directory?: string): Promise<SessionInfo>
+  /** `baseInstructions` replaces the engine's own prompt for this thread.
+   *
+   *  Only BOSS passes it, and only Codex reads it. Codex honours it on thread
+   *  creation alone — resume and fork accept the field and ignore it, both
+   *  verified against the running server. */
+  sessionCreate(title?: string, directory?: string, baseInstructions?: string): Promise<SessionInfo>
   /** Point the session's runs at this checkout and, for sandboxing backends,
    *  grant only the Git metadata that belongs to that project. This is where
    *  work happens, which for OpenCode is not the same as where the session is

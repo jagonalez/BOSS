@@ -992,7 +992,11 @@ export class BackendManager {
       },
       `${room.title ?? 'Room'} · ${input.roleId}`,
       undefined,
-      room.worktree
+      room.worktree,
+      // BOSS's brief has to be attached as the thread is made. Codex reads it
+      // only there — sent on resume or fork it is accepted and ignored — and
+      // this is the thread that answers the user in a room.
+      input.roleId === ROOM_ASSISTANT_ID ? await this.assistantBrief() : undefined
     )
     const binding = this.binding(created.id)
     // parentID is what already hides a thread from the sidebar and blocks its
@@ -1694,10 +1698,15 @@ export class BackendManager {
     backendId: BackendId,
     title?: string,
     lineage?: SessionInfo['lineage'],
-    creationScope: ThreadCreationScope = 'current'
+    creationScope: ThreadCreationScope = 'current',
+    assistant = false
   ): Promise<SessionInfo> {
     const scope = creationScope === 'global' ? this.globalScope : this.currentScope
-    return this.sessionCreateInScope(backendId, scope, title, lineage)
+    // BOSS's brief has to be attached as the thread is made. Codex reads it
+    // only there: sent on resume or fork it is accepted and ignored, so a
+    // thread created without it can never be told afterwards.
+    const brief = assistant ? await this.assistantBrief() : undefined
+    return this.sessionCreateInScope(backendId, scope, title, lineage, undefined, brief)
   }
 
   private async sessionCreateInScope(
@@ -1705,10 +1714,11 @@ export class BackendManager {
     scope: ProjectScope,
     title?: string,
     lineage?: SessionInfo['lineage'],
-    worktree?: WorktreeInfo
+    worktree?: WorktreeInfo,
+    baseInstructions?: string
   ): Promise<SessionInfo> {
     const backend = await this.ensureStarted(backendId)
-    const native = await backend.sessionCreate(title, scope.executionPath || undefined)
+    const native = await backend.sessionCreate(title, scope.executionPath || undefined, baseInstructions)
     const binding = this.registerNative(backendId, native, 'boss', lineage)
     binding.title = title ?? native.title
     binding.projectId = scope.projectId
@@ -3513,7 +3523,7 @@ export class BackendManager {
       case 'thread.list': return this.sessionsList()
       case 'thread.create': return request.executionPath
         ? this.createScopedThread(request.backendId, this.scopeFor(request.executionPath), request.title ?? 'Untitled thread')
-        : this.sessionCreate(request.backendId, request.title, undefined, request.scope)
+        : this.sessionCreate(request.backendId, request.title, undefined, request.scope, request.assistant === true)
       case 'room.get': return this.rooms?.room(request.threadId)
       case 'room.recipient.set': return this.rooms?.setRecipient(request.threadId, request.recipient)
       case 'room.join': {

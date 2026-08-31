@@ -277,14 +277,13 @@ test('BOSS replaces Codex\'s instructions rather than adding to them', () => {
   assert.doesNotMatch(turn, /params\.baseInstructions/, 'a turn ignores it silently, so it must not go there')
 })
 
-test('a live Codex thread is not resumed again to update its brief', () => {
-  // Re-resuming a running thread whenever the instructions changed disturbed
-  // the session: Codex said "Yes, I am BOSS" once, then went back to "I'm
-  // Codex, running inside the BOSS environment" on every later message.
-  //
-  // Once per thread is enough. Every turn still carries the brief as a
-  // developer note, so nothing is lost by not repeating the stronger channel.
+test('Codex gets BOSS\'s brief as the thread is created', () => {
+  // Creation is the only call that honours it. Tested against the running
+  // server: a thread started with the brief answers "Yes, I am BOSS", while
+  // the same brief sent on resume or fork leaves it answering "I'm your coding
+  // copilot, not your boss". Both later calls accept the field and ignore it,
+  // which is why sending it there looked correct and changed nothing.
   const source = readFileSync(join(import.meta.dirname, 'codex-backend.ts'), 'utf8')
-  assert.doesNotMatch(source, /this\.loadedThreads\.delete\(id\)\n\s*if \(this\.loadedThreads\.has/)
-  assert.match(source, /Only once per thread/)
+  const create = source.slice(source.indexOf('async sessionCreate('))
+  assert.match(create.slice(0, 900), /baseInstructions \? \{ baseInstructions \} : \{\}/)
 })

@@ -900,13 +900,18 @@ export class CodexBackend implements Backend {
     return this.sessionDirectories.resolve(sessionId, this.projectPath)
   }
 
-  async sessionCreate(title?: string, directory?: string): Promise<SessionInfo> {
-    const params = {
+  async sessionCreate(title?: string, directory?: string, baseInstructions?: string): Promise<SessionInfo> {
+    // Creation is the only call that honours this. Resume and fork accept the
+    // field and ignore it — both verified against the running server, where a
+    // thread started with the brief answers "Yes, I am BOSS" and the same brief
+    // sent later leaves it answering "I'm your coding copilot, not your boss".
+    const params: Record<string, unknown> = {
       cwd: directory || this.projectPath || undefined,
       approvalPolicy: 'on-request',
       sandbox: 'workspace-write',
       developerInstructions: QA_GUIDANCE,
-      dynamicTools: THREAD_BUS_TOOLS
+      dynamicTools: THREAD_BUS_TOOLS,
+      ...(baseInstructions ? { baseInstructions } : {})
     }
     let result: { thread: CodexThread }
     try {
@@ -918,6 +923,7 @@ export class CodexBackend implements Backend {
       result = await this.request('thread/start', fallback) as { thread: CodexThread }
     }
     this.loadedThreads.add(result.thread.id)
+    if (baseInstructions) this.instructed.set(result.thread.id, baseInstructions)
     if (title) await this.request('thread/name/set', { threadId: result.thread.id, name: title })
     return { ...threadInfo(result.thread), title: title ?? threadInfo(result.thread).title }
   }
@@ -1001,11 +1007,18 @@ export class CodexBackend implements Backend {
     // and silently ignores it on a turn, which is what made the first attempt
     // look correct and change nothing.
     //
-    // Only once per thread. Re-resuming a live thread to update its
-    // instructions disturbed the running session, and the brief already
-    // reaches every turn as a developer note — the resume is the stronger
-    // channel, not the only one.
-    if (this.loadedThreads.has(id)) return
+    // Once when the brief first arrives, and never again.
+    //
+    // A thread is created before the app knows it is BOSS, and creation marks
+    // it loaded — so without this the brief never reached a new thread at all,
+    // and a fresh chat denied the name.
+    //
+    // Resuming on every change was worse: a live session resumed mid-
+    // conversation is disturbed, so Codex answered correctly once and then
+    // reverted. The brief reaches every turn as a developer note anyway; this
+    // is the stronger channel, not the only one.
+    const missingBrief = base !== undefined && !this.instructed.has(id)
+    if (this.loadedThreads.has(id) && !missingBrief) return
     if (base) this.instructed.set(id, base)
     try {
       await this.request('thread/resume', {
