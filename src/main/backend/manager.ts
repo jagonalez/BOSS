@@ -2266,6 +2266,16 @@ export class BackendManager {
     }
     const parentBinding = this.bindings.get(parent)
     if (parentBinding) {
+      // The room, not the agent's own thread: the room is the conversation the
+      // user is looking at. Announced as a finished run rather than only as a
+      // change of state, because that is what makes a client read the messages
+      // again — without it the agent's answer sat in the room unread, and only
+      // appeared once something else forced a reload.
+      this.emit({
+        type: 'session.idle',
+        properties: { sessionID: parent },
+        backendId: parentBinding.backendId
+      })
       this.emit({
         type: 'session.status',
         properties: { sessionID: parent, status: { type: 'idle' } },
@@ -2408,7 +2418,13 @@ export class BackendManager {
       // user never wrote — including an example card, which rendered as though
       // it were a real result. Repeated here it also survives a conversation
       // that had to be started again.
-      const who = binding.assistant ? await this.assistantBrief() : undefined
+      // Also when this is the hidden agent working for the standing
+      // conversation. The mark sits on the visible thread, but the message runs
+      // in the agent's own — so testing only the mark left BOSS with no idea
+      // what it was, and asked who it was it answered "I am Claude".
+      const forAssistant = binding.assistant
+        || (binding.parentID ? this.bindings.get(binding.parentID)?.assistant === true : false)
+      const who = forAssistant ? await this.assistantBrief() : undefined
       await backend.sendMessage(binding.nativeSessionId, goalParts, {
         ...options,
         context: who ? `${who}\n\n${where}` : where

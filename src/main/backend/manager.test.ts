@@ -571,7 +571,32 @@ test('what BOSS is travels as instructions on every send', () => {
   const start = source.indexOf('const where = options?.context ??')
   assert.ok(start > 0, 'expected the context to be built for a send')
   const body = source.slice(start, source.indexOf('\n    } catch', start))
-  assert.match(body, /binding\.assistant \? await this\.assistantBrief\(\)/,
+  assert.match(body, /forAssistant \? await this\.assistantBrief\(\)/,
     'the standing conversation carries its own brief')
   assert.match(body, /context: who \?/, 'joined onto where the agent is working')
+})
+
+test('a room is told its run finished, not only that it went idle', () => {
+  // The room is the conversation the user is looking at, but the answer arrives
+  // on the agent's own hidden thread. A change of state alone does not make a
+  // client read the messages again, so the answer sat in the room unread until
+  // something else forced a reload.
+  const start = source.indexOf('private settleBusy(threadId: string)')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  const idle = body.indexOf("type: 'session.idle'")
+  assert.ok(idle > 0, 'the room must be told its run finished')
+  assert.ok(
+    body.indexOf('sessionID: parent', idle) > idle,
+    'and told about the room rather than the agent that ran'
+  )
+})
+
+test('the agent working for the standing conversation knows what it is', () => {
+  // The mark sits on the visible thread; the message runs in the agent's own.
+  // Testing only the mark left BOSS with no idea what it was, and asked who it
+  // was it answered "I am Claude".
+  const start = source.indexOf('const forAssistant =')
+  assert.ok(start > 0, 'expected the test to consider both threads')
+  const body = source.slice(start, source.indexOf('\n      const who', start))
+  assert.match(body, /binding\.parentID/, 'an agent is checked against the thread it belongs to')
 })
