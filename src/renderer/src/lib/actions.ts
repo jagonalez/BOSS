@@ -1103,6 +1103,27 @@ export async function refreshAutomations(): Promise<void> {
  *  already caught up when you arrive, not a chat you re-explain yourself to.
  *  Created and seeded once; reused forever after. Returns its session id and
  *  never navigates, so the Assistant home can embed it in place. */
+/** Claim a thread as the standing assistant, every time it is opened.
+ *
+ *  The mark lives in main, which is the only place that can grant reach across
+ *  backends and projects — a renderer must not be able to promote an ordinary
+ *  worker into one that reaches every thread.
+ *
+ *  Applied on reuse, not only on creation. Marked once at birth, a thread that
+ *  lost the mark never got it back: deleting the chats cleared it, the app then
+ *  found the thread again and handed it straight back unmarked, and BOSS ran
+ *  with no standing instructions at all. Asked who it was, it answered
+ *  "Claude" — correctly, because nothing had told it otherwise.
+ *
+ *  Marking a thread that already holds the mark does nothing, so repeating it
+ *  on every open is free. */
+async function adoptAssistant(id: string): Promise<string> {
+  await OpenCode.markAssistant(id).catch(() => {
+    /* Without the mark it still works, but only inside its own project. */
+  })
+  return id
+}
+
 /** The start already in flight, so two callers cannot each make one.
  *
  *  The BOSS page starts a conversation whenever it cannot find one, and it
@@ -1123,14 +1144,14 @@ async function startAssistantSession(): Promise<string> {
   const state = appStore.getState()
   const existingId = Object.values(state.sessionMeta).find((meta) => meta.kind === 'assistant')?.sessionId
   const existing = existingId ? state.sessions.find((session) => session.id === existingId) : undefined
-  if (existing) return existing.id
+  if (existing) return adoptAssistant(existing.id)
   // The list may not have arrived yet, and a conversation that exists on disk
   // must not be duplicated because the app had not read it. Asked for once,
   // rather than trusted from a state that may be empty for a different reason.
   await refreshSessions()
   const loaded = appStore.getState()
   const known = existingId ? loaded.sessions.find((session) => session.id === existingId) : undefined
-  if (known) return known.id
+  if (known) return adoptAssistant(known.id)
   // The note saying which thread is the assistant outlives the thread itself.
   // Deleted from the sidebar, or gone from the app's records for any other
   // reason, it leaves a note pointing at nothing — and the page then waits for
@@ -1151,9 +1172,7 @@ async function startAssistantSession(): Promise<string> {
   // Marked in main, which is the only place that can grant reach across
   // backends and projects. A renderer must not be able to promote an ordinary
   // worker into one that reaches every thread.
-  await OpenCode.markAssistant(session.id).catch(() => {
-    /* Without the mark it still works, but only inside its own project. */
-  })
+  const marked = await adoptAssistant(session.id)
   // This conversation is BOSS, so the composer should say so. Left unset it
   // fell back to naming the model, and the standing BOSS chat invited the user
   // to "Ask Claude" — the one name in it that nobody is called.
@@ -1162,7 +1181,7 @@ async function startAssistantSession(): Promise<string> {
   // message, attached in main. Posted here as a message it filled the
   // conversation with text the user never wrote — including an example card,
   // which rendered as though it were a real result.
-  return session.id
+  return marked
 }
 
 /** Ask from anywhere: routes into the standing conversation in place. */
