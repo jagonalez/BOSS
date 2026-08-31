@@ -106,28 +106,6 @@ if (!gotLock) {
   app.quit()
 }
 
-// The agent SDK warns that a named tool is approved before the permission
-// callback runs. That is true and intended: the list holds this app's own tools
-// — start a room, send to a thread, read a thread — which an agent uses without
-// asking. The user's approval still covers editing files and running commands,
-// which are not on the list.
-//
-// Silenced because it prints once per run, several hundred lines long, and
-// buried the output people actually read while debugging. Every other warning
-// still reaches the console.
-// Wrapping the emitter rather than listening for the event: a listener does not
-// replace Node's own printing, so the warning still appeared and everything
-// else appeared twice.
-const emitWarning = process.emitWarning.bind(process)
-process.emitWarning = ((warning: string | Error, ...rest: unknown[]): void => {
-  const first = rest[0]
-  const code = typeof first === 'object' && first !== null
-    ? (first as { code?: string }).code
-    : typeof rest[1] === 'string' ? rest[1] : undefined
-  if (code === 'CLAUDE_SDK_CAN_USE_TOOL_SHADOWED') return
-  ;(emitWarning as (...args: unknown[]) => void)(warning, ...rest)
-}) as typeof process.emitWarning
-
 let mainWindow: BrowserWindow | null = null
 
 // PATH repair covers the common Finder launch, but a non-POSIX login shell defeats the
