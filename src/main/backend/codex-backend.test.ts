@@ -261,3 +261,19 @@ test('title generation is a bounded structured turn in an ephemeral thread', () 
   assert.ok(notifications.indexOf('const titleRun') < notifications.indexOf('switch (method)'), 'ephemeral title events should be intercepted')
   assert.ok(notifications.includes('this.finishTitleRun(sessionId'), 'completion should settle the pending title')
 })
+
+test('BOSS replaces Codex\'s instructions rather than adding to them', () => {
+  // Sent as a developer note, the brief lost: asked "are you BOSS?", the agent
+  // looked up OpenAI's documentation and answered "I'm Codex, running inside
+  // the BOSS environment". Verified against the real binary — a note does not
+  // move it, and base instructions do.
+  //
+  // Only the coordinator. A builder needs Codex's own instructions, which
+  // carry its editing protocol.
+  const source = readFileSync(join(import.meta.dirname, 'codex-backend.ts'), 'utf8')
+  assert.match(source, /options\?\.coordinator && options\?\.context/)
+  assert.match(source, /params\.baseInstructions = options\.context/)
+  // Retried without it rather than failing the message: the field is not in a
+  // published schema, so a Codex that rejects it must still be able to send.
+  assert.match(source, /const \{ baseInstructions: _baseInstructions, \.\.\.fallback \} = params/)
+})

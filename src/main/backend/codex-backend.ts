@@ -1038,7 +1038,28 @@ export class CodexBackend implements Backend {
     // Per turn, not per session: a thread can move to a worktree, and the
     // instructions set when it was created would still describe the old one.
     if (options?.context) params.developerInstructions = `${options.context}\n\n${QA_GUIDANCE}`
-    const result = await this.request('turn/start', params) as { turn?: CodexTurn }
+    // BOSS replaces Codex's own instructions rather than adding to them. Added,
+    // they lost: asked "are you BOSS?", the agent read OpenAI's documentation
+    // and answered "I'm Codex, running inside the BOSS environment".
+    //
+    // Verified against the real binary: a developer note does not move it, and
+    // this does. Every other thread keeps Codex's own instructions, because a
+    // builder needs them.
+    if (options?.coordinator && options?.context) params.baseInstructions = options.context
+    // Retried without the override rather than failing the message. The field
+    // is not in a published schema, so a Codex version that rejects it must
+    // still be able to send: BOSS answers as Codex, which is wrong but far
+    // better than a thread that cannot talk at all.
+    let result: { turn?: CodexTurn }
+    try {
+      result = await this.request('turn/start', params) as { turn?: CodexTurn }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (!params.baseInstructions) throw error
+      if (!/baseInstructions|invalid params|unknown field|-32602/i.test(message)) throw error
+      const { baseInstructions: _baseInstructions, ...fallback } = params
+      result = await this.request('turn/start', fallback) as { turn?: CodexTurn }
+    }
     if (result.turn?.id) {
       this.activeTurns.set(sessionId, result.turn.id)
       this.turnAssistantSegments.set(`${sessionId}:${result.turn.id}`, 0)
