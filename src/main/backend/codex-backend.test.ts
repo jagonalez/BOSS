@@ -265,15 +265,14 @@ test('title generation is a bounded structured turn in an ephemeral thread', () 
 test('BOSS replaces Codex\'s instructions rather than adding to them', () => {
   // Sent as a developer note, the brief lost: asked "are you BOSS?", the agent
   // looked up OpenAI's documentation and answered "I'm Codex, running inside
-  // the BOSS environment". Verified against the real binary — a note does not
-  // move it, and base instructions do.
+  // the BOSS environment".
   //
-  // Only the coordinator. A builder needs Codex's own instructions, which
-  // carry its editing protocol.
+  // It has to go on thread start, fork or resume — the protocol schema puts it
+  // there. Sent on a turn instead, Codex accepted the unknown field, ignored
+  // it, and raised no error, so the first attempt looked right and did nothing.
   const source = readFileSync(join(import.meta.dirname, 'codex-backend.ts'), 'utf8')
-  assert.match(source, /options\?\.coordinator && options\?\.context/)
-  assert.match(source, /params\.baseInstructions = options\.context/)
-  // Retried without it rather than failing the message: the field is not in a
-  // published schema, so a Codex that rejects it must still be able to send.
-  assert.match(source, /const \{ baseInstructions: _baseInstructions, \.\.\.fallback \} = params/)
+  assert.match(source, /baseInstructions: base/, 'the brief rides the resume')
+  assert.match(source, /ensureLoaded\(sessionId, options\?\.coordinator/, 'only the coordinator sends it')
+  const turn = source.slice(source.indexOf("this.request('turn/start'") - 2000, source.indexOf("this.request('turn/start'"))
+  assert.doesNotMatch(turn, /params\.baseInstructions/, 'a turn ignores it silently, so it must not go there')
 })

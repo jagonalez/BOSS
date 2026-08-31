@@ -511,6 +511,8 @@ export class CodexBackend implements Backend {
   private pending = new Map<string, Pending>()
   private approvals = new Map<string, PendingApproval>()
   private loadedThreads = new Set<string>()
+  /** The instructions each thread is running under, so a change is noticed. */
+  private instructed = new Map<string, string>()
   private activeTurns = new Map<string, string>()
   private liveText = new Map<string, string>()
   /** turnId -> the turn's user item ids, in arrival order. Gives a streaming
@@ -988,13 +990,32 @@ export class CodexBackend implements Backend {
     })
   }
 
-  private async ensureLoaded(id: string): Promise<void> {
+  /** `base` replaces Codex's own instructions for this thread.
+   *
+   *  Only BOSS passes it. Codex takes this on thread start, fork and resume —
+   *  not on a turn, where an unknown field is accepted and silently ignored.
+   *  That is what made the first attempt look correct and change nothing. */
+  private async ensureLoaded(id: string, base?: string): Promise<void> {
+    // Sent on resume rather than only at creation: a thread is created before
+    // the app knows it is BOSS. Codex takes this on start, fork and resume —
+    // and silently ignores it on a turn, which is what made the first attempt
+    // look correct and change nothing.
+    //
+    // A thread created in this run is already marked loaded, so waiting for a
+    // natural resume meant the brief never arrived. Resent when it changes.
+    if (base && this.instructed.get(id) !== base) this.loadedThreads.delete(id)
     if (this.loadedThreads.has(id)) return
+    if (base) this.instructed.set(id, base)
     try {
-      await this.request('thread/resume', { threadId: id, dynamicTools: THREAD_BUS_TOOLS, developerInstructions: QA_GUIDANCE })
+      await this.request('thread/resume', {
+        threadId: id,
+        dynamicTools: THREAD_BUS_TOOLS,
+        developerInstructions: QA_GUIDANCE,
+        ...(base ? { baseInstructions: base } : {})
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (!/dynamicTools|developerInstructions|experimental|invalid params|unknown field|-32602/i.test(message)) throw error
+      if (!/dynamicTools|developerInstructions|baseInstructions|experimental|invalid params|unknown field|-32602/i.test(message)) throw error
       await this.request('thread/resume', { threadId: id })
     }
     this.loadedThreads.add(id)
@@ -1007,7 +1028,7 @@ export class CodexBackend implements Backend {
   }
 
   async sendMessage(sessionId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
-    await this.ensureLoaded(sessionId)
+    await this.ensureLoaded(sessionId, options?.coordinator ? options.context : undefined)
     const mode = options?.mode ?? 'ask'
     const input = userInputs(parts)
     const params: Record<string, unknown> = {
@@ -1038,28 +1059,7 @@ export class CodexBackend implements Backend {
     // Per turn, not per session: a thread can move to a worktree, and the
     // instructions set when it was created would still describe the old one.
     if (options?.context) params.developerInstructions = `${options.context}\n\n${QA_GUIDANCE}`
-    // BOSS replaces Codex's own instructions rather than adding to them. Added,
-    // they lost: asked "are you BOSS?", the agent read OpenAI's documentation
-    // and answered "I'm Codex, running inside the BOSS environment".
-    //
-    // Verified against the real binary: a developer note does not move it, and
-    // this does. Every other thread keeps Codex's own instructions, because a
-    // builder needs them.
-    if (options?.coordinator && options?.context) params.baseInstructions = options.context
-    // Retried without the override rather than failing the message. The field
-    // is not in a published schema, so a Codex version that rejects it must
-    // still be able to send: BOSS answers as Codex, which is wrong but far
-    // better than a thread that cannot talk at all.
-    let result: { turn?: CodexTurn }
-    try {
-      result = await this.request('turn/start', params) as { turn?: CodexTurn }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (!params.baseInstructions) throw error
-      if (!/baseInstructions|invalid params|unknown field|-32602/i.test(message)) throw error
-      const { baseInstructions: _baseInstructions, ...fallback } = params
-      result = await this.request('turn/start', fallback) as { turn?: CodexTurn }
-    }
+    const result = await this.request('turn/start', params) as { turn?: CodexTurn }
     if (result.turn?.id) {
       this.activeTurns.set(sessionId, result.turn.id)
       this.turnAssistantSegments.set(`${sessionId}:${result.turn.id}`, 0)
