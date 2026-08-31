@@ -92,17 +92,6 @@ export interface Part {
    *  both spellings are real and code that needs the name has to read both. */
   tool?: string
   text?: string
-  /** Set-up handed to an agent rather than something anyone said.
-   *
-   *  A joining agent is given its role, what it missed, what changed on disk,
-   *  and what the agent before it knew. The agent needs all of it as text, but
-   *  the user did not write it, cannot change it, and cannot answer it — so it
-   *  renders as one folded line, the same weight as a tool call, instead of a
-   *  wall of prose in the middle of the conversation.
-   *
-   *  `setupTitle` is what that line says. */
-  setup?: boolean
-  setupTitle?: string
   auto?: boolean
   overflow?: boolean
   tail_start_id?: string

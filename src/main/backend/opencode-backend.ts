@@ -255,15 +255,15 @@ export class OpenCodeBackend implements Backend {
   }
 
   async sendMessage(sessionId: string, parts: unknown[], opts?: BackendMessageOptions): Promise<void> {
-    // context is BOSS's own field, not an OpenCode parameter, so it is stripped
-    // rather than passed through into the body. promptAsync does take a system
-    // field that could carry it, the way claude and codex are given the same
-    // text; wiring that up changes what the agent is told, so it is its own
-    // change rather than a side effect of this one.
-    const { context: _context, ...rest } = opts ?? {}
+    // Standing instructions, handed over the way claude and codex are given the
+    // same text. Discarded before, an agent here was told nothing about which
+    // project it was in or — in a room — who it was, so a room had to put all
+    // of that in the message instead, where the user saw it as a wall of text
+    // they never wrote.
+    const { context, ...rest } = opts ?? {}
     const res = await this.sdk().session.promptAsync({
       path: { id: sessionId },
-      body: { parts: parts as never, ...rest },
+      body: { parts: parts as never, ...rest, ...(context ? { system: context } : {}) },
       query: { directory: this.executionFor(sessionId) }
     })
     unwrap(res, 'prompt')

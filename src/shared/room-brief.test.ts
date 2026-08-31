@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 // @ts-expect-error Application code uses bundler resolution.
-import { HANDOVER_PROMPT, briefForRole } from './room-brief.ts'
+import { HANDOVER_PROMPT, assistantBrief, briefForRole } from './room-brief.ts'
 
 test('every participant is told its own name, so a message can say who it is from', () => {
   const brief = briefForRole({ id: 'builder', label: 'Builder' })
@@ -85,4 +85,23 @@ test('every participant is told how to write a card', () => {
   for (const id of ['researcher', 'planner', 'builder', 'reviewer', 'boss']) {
     assert.match(briefForRole({ id, label: id }), /```boss-card/, `${id} can write a card`)
   }
+})
+
+test('the standing assistant is not told about a room it is not in', () => {
+  // Its conversation is not a room. Telling it to speak only when addressed,
+  // and never to reply to another agent, would describe a place it is not in.
+  const brief = assistantBrief()
+  assert.doesNotMatch(brief, /only when the user addresses you/)
+  assert.doesNotMatch(brief, /never reply to another agent/)
+})
+
+test('the standing assistant is told what it is for', () => {
+  const brief = assistantBrief()
+  assert.match(brief, /never write code yourself/i)
+  assert.match(brief, /word for word/)
+  assert.match(brief, /```boss-card/, 'and how to write a card')
+})
+
+test('the assistant is named in the words the user gave it', () => {
+  assert.match(assistantBrief('Chief'), /You are Chief, this user's standing assistant/)
 })

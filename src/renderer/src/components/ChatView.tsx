@@ -79,18 +79,6 @@ function Thinking({ id, text }: { id: string; text: string }): React.JSX.Element
 }
 
 function PartView({ part, sessionId }: { part: Part; sessionId?: string }): React.JSX.Element | null {
-  // Set-up handed to an agent, not something anyone said: its role, what it
-  // missed, what changed on disk, what the agent before it knew. The agent
-  // reads every word of it. The user did not write it, cannot change it, and
-  // cannot answer it, so it folds to one line — the same weight as a tool call.
-  if (part.setup) {
-    return (
-      <details className="setup-note">
-        <summary>{part.setupTitle ?? 'Set up'}</summary>
-        <pre>{partText(part)}</pre>
-      </details>
-    )
-  }
   switch (part.type) {
     case 'text': {
       // A card is a fenced block an agent writes, set apart from the prose

@@ -162,7 +162,12 @@ class PiRpcSession {
     private readonly cwd: string,
     private readonly onEvent: (sessionId: string, event: Record<string, unknown>) => void,
     private readonly threadBus?: ThreadBusConnection,
-    private readonly extensionPath?: string
+    private readonly extensionPath?: string,
+    /** Standing instructions, added to pi's own. Fixed for this runtime's life:
+     *  pi is started once per conversation and has no way to be told anything
+     *  later, so a thread that moves to a different copy of the code keeps the
+     *  instructions it started with. */
+    private readonly standing?: string
   ) {}
 
   async start(): Promise<void> {
@@ -171,6 +176,10 @@ class PiRpcSession {
       '--mode', 'rpc',
       '--session-id', this.sessionId,
       '--approve',
+      // Added to pi's own instructions rather than replacing them: what BOSS
+      // has to say is about where the agent is and who it is, not about how to
+      // write code.
+      ...(this.standing ? ['--append-system-prompt', this.standing] : []),
       ...(this.extensionPath ? ['--extension', this.extensionPath] : [])
     ], {
       cwd: this.cwd || process.cwd(),
@@ -551,7 +560,7 @@ export default function (pi: ExtensionAPI) {
     this.eventCb?.(event)
   }
 
-  private async runtime(sessionId: string): Promise<PiRpcSession> {
+  private async runtime(sessionId: string, standing?: string): Promise<PiRpcSession> {
     const existing = this.sessions.get(sessionId)
     if (existing) return existing
     const runtime = new PiRpcSession(
@@ -559,7 +568,8 @@ export default function (pi: ExtensionAPI) {
       this.sessionDirectories.get(sessionId) || this.projectPath,
       (activeSessionId, event) => this.mapEvent(activeSessionId, event),
       this.threadBus,
-      this.threadBusExtension || undefined
+      this.threadBusExtension || undefined,
+      standing
     )
     this.sessions.set(sessionId, runtime)
     try {
@@ -772,7 +782,9 @@ export default function (pi: ExtensionAPI) {
   }
 
   async sendMessage(sessionId: string, parts: unknown[], options?: BackendMessageOptions): Promise<void> {
-    const runtime = await this.runtime(sessionId)
+    // Given at start, because that is pi's only moment for it. A runtime
+    // already going keeps what it began with — see the note on the field.
+    const runtime = await this.runtime(sessionId, options?.context)
     if (options?.model) {
       await runtime.send({ type: 'set_model', provider: options.model.providerID, modelId: options.model.modelID })
       if (options.model.variant) await runtime.send({ type: 'set_thinking_level', level: options.model.variant })

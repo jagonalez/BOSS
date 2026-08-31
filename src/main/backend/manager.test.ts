@@ -547,3 +547,27 @@ test('a thread we handed set-up to keeps its own history', () => {
 
 
 
+
+test('a room hands an agent its brief as instructions, not as a message', () => {
+  // Its role, what it missed, what changed on disk. Sent as a message it was a
+  // wall of text the user never wrote — with an example card in it that
+  // rendered as though it were a real result.
+  const start = source.indexOf('private async sendToParticipant(')
+  const body = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.match(body, /const standing: string\[\] = \[\]/, 'the pieces are gathered as instructions')
+  assert.match(body, /context: \[options\?\.context, \.\.\.standing\]/,
+    'and handed over on the same channel that already carries where the agent is working')
+  assert.doesNotMatch(body, /preface/, 'nothing is prepended to the message any more')
+})
+
+test('what BOSS is travels as instructions on every send', () => {
+  // Posted once as a message, it filled the standing conversation with text the
+  // user never wrote — and was lost whenever the conversation had to be started
+  // again.
+  const start = source.indexOf('const where = options?.context ??')
+  assert.ok(start > 0, 'expected the context to be built for a send')
+  const body = source.slice(start, source.indexOf('\n    } catch', start))
+  assert.match(body, /binding\.assistant \? await this\.assistantBrief\(\)/,
+    'the standing conversation carries its own brief')
+  assert.match(body, /context: who \?/, 'joined onto where the agent is working')
+})

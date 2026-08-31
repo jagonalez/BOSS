@@ -260,3 +260,29 @@ test('uses OpenCode’s small-model session title when it becomes available', as
 
   assert.equal(title, 'Improve automatic thread naming')
 })
+
+test('standing instructions reach the agent instead of being thrown away', async () => {
+  // They were destructured out and discarded, so an agent here was told nothing
+  // about which project it was in or — in a room — who it was. A room had to
+  // put all of that in the message instead, where the user saw a wall of text
+  // they had never written.
+  const bodies: unknown[] = []
+  const { backend } = harness({}, bodies)
+  await backend.sendMessage('ses_worktree', [{ type: 'text', text: 'go' }], {
+    context: 'You are the reviewer.'
+  })
+
+  const prompt = bodies.find((body) => (body as { parts?: unknown }).parts) as { system?: string }
+  assert.equal(prompt?.system, 'You are the reviewer.')
+})
+
+test('a message with no standing instructions carries none', async () => {
+  // An empty field is not the same as no field, and an ordinary chat has
+  // nothing to say here.
+  const bodies: unknown[] = []
+  const { backend } = harness({}, bodies)
+  await backend.sendMessage('ses_worktree', [{ type: 'text', text: 'go' }])
+
+  const prompt = bodies.find((body) => (body as { parts?: unknown }).parts) as Record<string, unknown>
+  assert.ok(prompt && !('system' in prompt), 'no empty instruction is sent')
+})

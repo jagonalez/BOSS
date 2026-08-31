@@ -180,12 +180,6 @@ export interface BackendMessageOptions {
    *  A branch is the same room with the same participants; only where it is
    *  drawn differs. */
   branchOf?: string
-  /** This message is set-up handed to an agent, not something anyone said.
-   *
-   *  Carried on the options rather than only on the part, because a message
-   *  sent while a thread is busy is queued as plain text and would otherwise
-   *  arrive stripped of the one thing that keeps it out of the conversation. */
-  setupTitle?: string
   /** This send comes from the participant's own room.
    *
    *  A participant thread refuses anything else. Reached directly it would skip

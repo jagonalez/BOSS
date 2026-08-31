@@ -19,11 +19,15 @@ export interface ThreadContext {
  *  Returns an empty string when there is nothing worth saying, so a chat with
  *  no project does not get a paragraph explaining that it has no project.
  *
- *  Used by the backends that take a system prompt per message: claude through
- *  --append-system-prompt, codex through a turn's developerInstructions.
- *  OpenCode's prompt endpoint has a system field that could take it too, but
- *  it is not wired up yet; pi has no such hook. Both are already told their
- *  working directory. */
+ *  Every backend takes standing instructions, by its own route: claude and pi
+ *  append to their own, codex takes them per turn, opencode takes them on the
+ *  prompt, and lab owns the whole thing. Pi is the exception in one way — it is
+ *  started once per conversation, so what it is given at the start is what it
+ *  keeps.
+ *
+ *  A room sends much more this way: what an agent's role is, what it missed,
+ *  and what has changed on disk. All of it used to travel as a message, which
+ *  the user saw as a wall of text they never wrote. */
 export function threadContextPrompt(context: ThreadContext): string {
   const lines: string[] = []
   if (context.projectName) lines.push(`You are working in the ${context.projectName} project.`)

@@ -1,7 +1,6 @@
 import { appStore, type Attachment, type FailedSend } from '../state/AppState'
 import { OpenCode, isHighVariant, providerModels } from './opencode'
 import { errorSummary } from './errors'
-import { CARD_INSTRUCTIONS } from '@shared/room-cards'
 import type { MenuCommand, ProjectInfo, ProjectOpenedEvent } from '@shared/ipc'
 import { activityReducer, loadActivityFeed, saveActivityFeed, type ActivityKind } from './activity-feed'
 import { applyUiDensity, applyUiFontSize, loadUiDensityPreference, loadUiFontSizePreference, type UiDensity, type UiFontSize } from './themes'
@@ -1104,34 +1103,6 @@ export async function refreshAutomations(): Promise<void> {
  *  already caught up when you arrive, not a chat you re-explain yourself to.
  *  Created and seeded once; reused forever after. Returns its session id and
  *  never navigates, so the Assistant home can embed it in place. */
-/** What BOSS is told it is, once, when its conversation starts.
- *
- *  It coordinates and never writes code: every job becomes its own thread, even
- *  a one-line fix, so the user can say "also do this" half an hour later
- *  without the two tangling. It quotes rather than summarises, because the user
- *  does not trust a report of work it did not see — and quoting also keeps its
- *  own context small, since it holds a map of what exists rather than
- *  transcripts. */
-const ASSISTANT_SEED = [
-  '[BOSS]',
-  "You are BOSS, this user's standing assistant. One persistent conversation, reachable from anywhere, including their phone.",
-  '',
-  'What you do:',
-  '- Keep track of what jobs exist, what state each is in, and which thread each lives in.',
-  '- Start a thread per job. Never write code yourself, even for a one-line fix: the user may add another job half an hour later, and separate threads keep the two from tangling.',
-  '- Carry the user\'s instructions to other threads. You speak with their authority.',
-  '- Tell them when something needs a decision.',
-  '',
-  'How you answer:',
-  '- Quote other agents word for word, and link to their thread. Never write your own summary of work you did not see — the user checks the room, not your account of it.',
-  '- Look things up with the thread tools rather than answering from memory.',
-  '- Be brief. Say what happened, not what you are about to do.',
-  '',
-  'The user chooses the shape of every job — one agent, build then review, or the full run. Ask; never pick for them.',
-  '',
-  CARD_INSTRUCTIONS
-].join('\n')
-
 /** The start already in flight, so two callers cannot each make one.
  *
  *  The BOSS page starts a conversation whenever it cannot find one, and it
@@ -1187,7 +1158,10 @@ async function startAssistantSession(): Promise<string> {
   // fell back to naming the model, and the standing BOSS chat invited the user
   // to "Ask Claude" — the one name in it that nobody is called.
   setRoomRecipient(session.id, ROOM_ASSISTANT_ID)
-  await sendPrompt(ASSISTANT_SEED, session.id, undefined, 'BOSS joined')
+  // Nothing is sent. What BOSS is now travels as standing instructions on every
+  // message, attached in main. Posted here as a message it filled the
+  // conversation with text the user never wrote — including an example card,
+  // which rendered as though it were a real result.
   return session.id
 }
 
@@ -2686,12 +2660,7 @@ export function clearFailedSend(sessionID: string): void {
 /** Returns true when the message reached the backend or was queued as a
  *  follow-up, false when it failed and is being held for retry. The caller
  *  must not clear the composer on false, or the text is gone for good. */
-/** `setupTitle` marks this message as set-up rather than something anyone said.
- *
- *  The agent reads every word. The user did not write it, cannot change it, and
- *  cannot answer it, so the transcript folds it to one line carrying that
- *  title. */
-export async function sendPrompt(text: string, sessionId?: string, attachments?: Attachment[], setupTitle?: string): Promise<boolean> {
+export async function sendPrompt(text: string, sessionId?: string, attachments?: Attachment[]): Promise<boolean> {
   const cur = appStore.getState()
   const sessionID = sessionId ?? cur.activeSessionId
   if (!sessionID) return false
@@ -2706,7 +2675,7 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
   for (const a of attachments ?? []) {
     parts.push({ type: 'file', mime: a.mime, filename: a.name, url: a.dataUrl })
   }
-  if (body.trim()) parts.push({ type: 'text', text: body, ...(setupTitle ? { setup: true, setupTitle } : {}) })
+  if (body.trim()) parts.push({ type: 'text', text: body })
   const model = modelForSession(sessionID)
   const mode = modeForSession(sessionID)
   const modelKey = model ? modelKeyWithVariant(model, sessionID) : undefined
@@ -2723,11 +2692,7 @@ export async function sendPrompt(text: string, sessionId?: string, attachments?:
     agent,
     mode,
     ...(recipient ? { recipient } : {}),
-    ...(branchOf ? { branchOf } : {}),
-    // Also on the options, so a message queued behind a busy thread still
-    // arrives marked as set-up. A queued message carries text and options, not
-    // parts.
-    ...(setupTitle ? { setupTitle } : {})
+    ...(branchOf ? { branchOf } : {})
   }
   const queue = async (): Promise<boolean> => {
     try {

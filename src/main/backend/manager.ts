@@ -4,10 +4,10 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { trimToolOutput } from '../../shared/tool-output'
-import { ROOM_EVERYONE, ROOM_THREAD_AGENT } from '../../shared/room'
+import { ROOM_ASSISTANT_ID, ROOM_EVERYONE, ROOM_THREAD_AGENT } from '../../shared/room'
 import { isBackendId } from '../../shared/backend'
 import { catchUpFor, catchUpPrompt, deliveryFor } from '../../shared/room-routing'
-import { briefForRole, HANDOVER_PROMPT } from '../../shared/room-brief'
+import { assistantBrief, briefForRole, HANDOVER_PROMPT } from '../../shared/room-brief'
 import { runCommand } from '../review-provider'
 import type { Backend } from './backend'
 import { threadContextPrompt } from './thread-context'
@@ -1964,6 +1964,17 @@ export class BackendManager {
     return briefForRole(role ?? { id: roleId, label: roleId })
   }
 
+  /** What BOSS is, for its standing conversation.
+   *
+   *  Its own brief rather than a room role's: this conversation is not a room,
+   *  so the parts about speaking only when addressed and never replying to
+   *  another agent would be telling it about a place it is not in. */
+  private async assistantBrief(): Promise<string> {
+    const team = await this.rooms?.currentTeam()
+    const role = team?.roles.find((entry) => entry.id === ROOM_ASSISTANT_ID)
+    return assistantBrief(role?.label ?? 'BOSS')
+  }
+
   /** What has changed in the room's checkout, for an agent that just arrived.
    *
    *  Read from the working tree rather than from the backend that made the
@@ -2020,40 +2031,29 @@ export class BackendManager {
     const participant = room?.participants.find((entry) => entry.roleId === recipient)
     const missed = catchUpFor(this.transcripts?.messages(roomThreadId) ?? [], participant, now())
     const notes = room ? this.rooms?.briefFor(room.notes) : undefined
-    const preface: unknown[] = []
     // A participant that has never seen this room is told who it is, what the
     // job agreed and decided, and what has changed on disk — not the previous
     // participant's transcript. A reviewer holding only the plan and the diff
     // cannot be misled by the builder's account of itself, and that is exactly
     // why its verdict is worth something.
-    // Marked as set-up, not speech. The agent still reads every word; the user
-    // sees one folded line per piece. They did not write any of it, cannot
-    // change it, and cannot answer it — printed as prose it was a wall of text
-    // in the middle of their conversation.
-    const who = participant?.label ?? recipient ?? 'An agent'
-    const setup: Array<{ text: string; title: string }> = []
+    // Standing instructions, not a message. An agent needs all of this; the
+    // user wrote none of it, cannot change it, and cannot answer it. Sent as a
+    // message it was a wall of text in the middle of their conversation — with
+    // an example card in it that rendered as though it were a real result.
+    //
+    // Every engine has a channel for this that sits outside the conversation.
+    // The app already builds such text for other reasons and hands it over the
+    // same way, so this is that path carrying more.
+    const standing: string[] = []
     if (missed.first) {
       const brief = await this.roleBrief(recipient)
-      if (brief) setup.push({ title: `${who} joined`, text: brief })
-      if (notes) setup.push({ title: 'What this job agreed', text: `[JOB NOTES]\n${notes}` })
+      if (brief) standing.push(brief)
+      if (notes) standing.push(`[JOB NOTES]\n${notes}`)
       const diff = await this.roomDiff(roomThreadId)
-      if (diff) setup.push({ title: 'What has changed so far', text: diff })
+      if (diff) standing.push(diff)
     }
     const catchUp = catchUpPrompt(missed.missed, recipient ?? '')
-    if (catchUp) {
-      const count = missed.missed.length
-      setup.push({ title: `Caught up on ${count} message${count === 1 ? '' : 's'}`, text: catchUp })
-    }
-    // Sent as text, because that is the only way an engine takes it today.
-    // Recording a second, marked copy of the same words was worse: the engine
-    // still stored its own, so the set-up appeared twice — and the rule written
-    // to drop the engine's copy swallowed real messages, because it could not
-    // tell them apart from what we had just sent.
-    //
-    // The real answer is not to send set-up as a message at all. Every engine
-    // has a way to give an agent standing instructions that sit outside the
-    // conversation, and that is where this belongs.
-    for (const piece of setup) preface.push({ type: 'text', text: piece.text })
+    if (catchUp) standing.push(catchUp)
     if (recipient) await this.rooms?.touch(roomThreadId, recipient, 'working')
     // Claimed by the caller before it routed, so two quick messages cannot both
     // find the room idle. Announced here, once the run is really starting.
@@ -2063,8 +2063,15 @@ export class BackendManager {
       backendId: this.binding(roomThreadId).backendId
     })
     try {
-      await this.sendMessage(participantThreadId, [...preface, ...parts], {
+      await this.sendMessage(participantThreadId, parts, {
         ...options,
+        // Handed over as standing instructions rather than as part of the
+        // message, so the conversation holds only what the user and the agents
+        // actually said. Joined onto whatever the thread already carries: an
+        // agent needs to know where it is working as well as who it is.
+        ...(standing.length > 0
+          ? { context: [options?.context, ...standing].filter(Boolean).join('\n\n') }
+          : {}),
         // Cleared so the participant's own send does not try to route again.
         recipient: undefined,
         // Says this came from the room rather than around it.
@@ -2385,15 +2392,22 @@ export class BackendManager {
     try {
       // Built here rather than in each backend: the manager is what knows
       // which project a thread belongs to.
+      const where = options?.context ?? threadContextPrompt({
+        projectName: binding.projectPath ? basename(binding.projectPath) : undefined,
+        projectPath: binding.projectPath,
+        executionPath: binding.executionPath,
+        branch: binding.worktree?.branch,
+        worktree: binding.worktree?.status === 'active'
+      })
+      // What BOSS is, on every send rather than once as a message. Sent as a
+      // message it filled the standing conversation with a wall of text the
+      // user never wrote — including an example card, which rendered as though
+      // it were a real result. Repeated here it also survives a conversation
+      // that had to be started again.
+      const who = binding.assistant ? await this.assistantBrief() : undefined
       await backend.sendMessage(binding.nativeSessionId, goalParts, {
         ...options,
-        context: options?.context ?? threadContextPrompt({
-          projectName: binding.projectPath ? basename(binding.projectPath) : undefined,
-          projectPath: binding.projectPath,
-          executionPath: binding.executionPath,
-          branch: binding.worktree?.branch,
-          worktree: binding.worktree?.status === 'active'
-        })
+        context: who ? `${who}\n\n${where}` : where
       })
       if (fallbackTitle) void this.autoNameThread(threadId, backend, parts, fallbackTitle, options?.model)
     } catch (error) {

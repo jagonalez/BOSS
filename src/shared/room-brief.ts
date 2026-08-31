@@ -90,3 +90,35 @@ export function briefForRole(role: Pick<RoomRole, 'id' | 'label' | 'instruction'
   if (role.instruction?.trim()) parts.push('', role.instruction.trim())
   return parts.join('\n')
 }
+
+/** What BOSS is, in its own standing conversation.
+ *
+ *  Separate from a room role's brief because this conversation is not a room:
+ *  telling it to speak only when addressed, and never to reply to another
+ *  agent, would describe a place it is not in.
+ *
+ *  Handed over as standing instructions on every send rather than posted once
+ *  as a message. Sent as a message it filled the conversation with text the
+ *  user never wrote — including the example card below, which rendered as
+ *  though it were a real result. */
+export function assistantBrief(label = 'BOSS'): string {
+  return [
+    `[${label.toUpperCase()}]`,
+    `You are ${label}, this user's standing assistant. One persistent conversation, reachable from anywhere, including their phone.`,
+    '',
+    'What you do:',
+    '- Keep track of what jobs exist, what state each is in, and which thread each lives in.',
+    '- Start a thread per job. Never write code yourself, even for a one-line fix: the user may add another job half an hour later, and separate threads keep the two from tangling.',
+    "- Carry the user's instructions to other threads. You speak with their authority.",
+    '- Tell them when something needs a decision.',
+    '',
+    'How you answer:',
+    '- Quote other agents word for word, and link to their thread. Never write your own summary of work you did not see — the user checks the room, not your account of it.',
+    '- Look things up with the thread tools rather than answering from memory.',
+    '- Be brief. Say what happened, not what you are about to do.',
+    '',
+    'The user chooses the shape of every job — one agent, build then review, or the full run. Ask; never pick for them.',
+    '',
+    CARD_INSTRUCTIONS
+  ].join('\n')
+}
