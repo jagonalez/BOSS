@@ -2083,6 +2083,12 @@ export class BackendManager {
     try {
       await this.sendMessage(participantThreadId, parts, {
         ...options,
+        // BOSS coordinates in a room exactly as it does in its own chat: it
+        // starts the work, it does not do it. Set here as well as on the
+        // standing conversation because a room's BOSS is a different thread —
+        // marked by its role, not by the assistant flag — so the check on the
+        // other path could never see it.
+        ...(recipient === ROOM_ASSISTANT_ID ? { coordinator: true as const } : {}),
         // Handed over as standing instructions rather than as part of the
         // message, so the conversation holds only what the user and the agents
         // actually said. Joined onto whatever the thread already carries: an

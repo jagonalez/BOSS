@@ -156,3 +156,23 @@ test('the assistant does not ask twice about one job', () => {
   // question and becomes an obstacle.
   assert.match(assistantBrief(), /not ask twice/i)
 })
+
+test('BOSS knows the same things in a room as in its own chat', () => {
+  // Two copies of one identity, kept in step by hand, drifted: the room copy
+  // kept the shared name but lost what the app does and how to offer a room.
+  // Asked "who are you?" in a room, it described a coding assistant.
+  const standing = assistantBrief()
+  const inRoom = briefForRole({ id: 'boss', label: 'BOSS' })
+  for (const claim of [
+    /also called BOSS/,
+    /the answer is yes/,
+    /job notes/i,
+    /closes the app/,
+    /you are not one/i,
+    /Start a room for this\?/,
+    /do: Just tell me/
+  ]) {
+    assert.match(standing, claim, `the standing chat says ${claim}`)
+    assert.match(inRoom, claim, `a room says ${claim}`)
+  }
+})
