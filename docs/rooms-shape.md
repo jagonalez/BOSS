@@ -59,13 +59,26 @@ shape.
 - BOSS stops appearing in the chat list. It is not an ordinary chat.
 - Starting a job means starting a room in a project, with BOSS already in it.
 
+## Settings
+
+Both of these are the user's choice, set once, and both already have a home: the
+same screen that sets up the team.
+
+**How a job runs.** Either a shape the user names as their usual — just do it,
+build and review, the full run — or BOSS asks each time. This setting already
+exists and is read; what changes is that BOSS asking now happens in the
+conversation rather than as a row of buttons above the message box. The user
+found that row confusing, and it fired before they had said what the job was.
+
+**What happens to a finished room.** Either archive it or delete it. BOSS asks
+before doing either, whichever the setting says — so the choice is what BOSS
+proposes, never what it does unasked. Deleting is not something to infer from a
+setting made weeks earlier.
+
+Archiving a thread already exists in the app. What is missing is a way for BOSS
+to propose it — a card with one way forward and one way out, which is exactly
+what a card is for.
+
 ## Open
 
-**Does a room still choose its shape up front?** Today the user picks — just do
-it, build and review, the full run — before saying what the job is. If a room
-opens with BOSS in it, the natural thing is to say what you want and let BOSS
-ask which shape. The user has not said which they prefer, and the row of buttons
-was already something they found confusing.
-
-**What happens to a project's rooms over time?** A project will accumulate them.
-Nothing yet says when a room is done, or where finished ones go.
+Nothing. Both questions above are answered.
