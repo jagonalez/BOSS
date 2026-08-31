@@ -335,6 +335,12 @@ export class BackendManager {
    *  the one that keeps the pieces apart, so the returning copy is dropped
    *  rather than stored twice. */
   private readonly setupSent = new Map<string, Set<string>>()
+  /** The exact words sent as set-up, per thread.
+   *
+   *  An engine may echo a piece back before the message that owns it, or
+   *  without one at all, so an id is not always enough to recognise it. The
+   *  text is, and it is only held until the agent starts answering. */
+  private readonly setupTexts = new Map<string, string[]>()
   /** Who is waiting for a given thread's run to finish.
    *
    *  A backend's send resolves when the turn is dispatched, not when the agent
@@ -2068,6 +2074,7 @@ export class BackendManager {
       // engine's merged copy comes back — even though what it says is recorded
       // into the room.
       this.setupSent.set(participantThreadId, new Set())
+      this.setupTexts.set(participantThreadId, setup.map((piece) => piece.text.trim()))
       // Both threads: the participant is where the engine's history lives, and
       // the room is where the record of it was written.
       this.binding(participantThreadId).ownsHistory = true
@@ -2311,6 +2318,7 @@ export class BackendManager {
       const binding = this.binding(threadId)
       this.recordSetup(binding, [{ title: options.setupTitle, text: textFromParts(parts) }])
       this.setupSent.set(threadId, new Set())
+      this.setupTexts.set(threadId, [textFromParts(parts).trim()])
       // From here our record is the fuller one, and rebuilding this thread from
       // the engine's history would undo it.
       binding.ownsHistory = true
@@ -2501,10 +2509,33 @@ export class BackendManager {
       }
       // The agent has started answering. Nothing after this is an echo.
       this.setupSent.delete(binding.id)
+      this.setupTexts.delete(binding.id)
       return false
     }
-    const part = properties.part as { messageID?: string } | undefined
-    return Boolean(part?.messageID && echoed.has(part.messageID))
+    const part = properties.part as { messageID?: string; type?: string; text?: string } | undefined
+    if (!part?.messageID) return false
+    if (echoed.has(part.messageID)) return true
+    // A part can arrive before the message that owns it, and some engines never
+    // send the owning message at all. Recognised by its own words in that case:
+    // this is text we sent moments ago and already recorded ourselves.
+    if (part.type === 'text' && part.text && this.justSentAsSetup(binding.id, part.text)) {
+      echoed.add(part.messageID)
+      return true
+    }
+    return false
+  }
+
+  /** Whether this text is something we just handed the thread as set-up.
+   *
+   *  Compared against what was sent rather than by id, because an engine may
+   *  echo a part before — or without — the message it belongs to. Only the
+   *  pieces from the current send are held, and they are dropped as soon as the
+   *  agent starts answering. */
+  private justSentAsSetup(threadId: string, text: string): boolean {
+    const sent = this.setupTexts.get(threadId)
+    if (!sent) return false
+    const trimmed = text.trim()
+    return sent.some((piece) => piece === trimmed)
   }
 
   /** Record the user's own message when it travels alongside set-up.

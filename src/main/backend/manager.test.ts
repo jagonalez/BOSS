@@ -609,3 +609,26 @@ test('sending set-up claims the history for our own record', () => {
   assert.match(roomBody, /room\.ownsHistory = true/,
     'and the room, where the record was written')
 })
+
+test('an echoed piece is recognised by its words when its message never comes', () => {
+  // An engine may send a part before the message that owns it, or without one
+  // at all. An id alone is then not enough to know it is the same text we sent
+  // moments ago and already recorded ourselves.
+  const start = source.indexOf('private droppedSetupEcho(')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.match(body, /this\.justSentAsSetup\(binding\.id, part\.text\)/,
+    'a part is checked against what was sent, not only against a message id')
+
+  const helper = source.indexOf('private justSentAsSetup(')
+  assert.ok(helper > 0, 'expected the comparison to exist')
+  const helperBody = source.slice(helper, source.indexOf('\n  }', helper))
+  assert.match(helperBody, /this\.setupTexts\.get\(threadId\)/, 'compared against this thread only')
+})
+
+test('what was sent as set-up is forgotten once the agent answers', () => {
+  // Held any longer, an ordinary message that happened to repeat those words
+  // would be swallowed.
+  const start = source.indexOf('private droppedSetupEcho(')
+  const body = source.slice(start, source.indexOf('\n  }', start))
+  assert.match(body, /this\.setupTexts\.delete\(binding\.id\)/, 'the words are dropped with the marks')
+})
