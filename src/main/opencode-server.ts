@@ -162,7 +162,7 @@ export const list = tool({
 export const read = tool({
   description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.read)},
   args: {
-    threadId: tool.schema.string().describe("BOSS thread id returned by boss_threads_list"),
+    threadId: tool.schema.string().describe("Thread id returned by boss_threads_list"),
     limit: tool.schema.number().min(1).max(20).optional()
   },
   execute(args, context) { return call("boss_threads_read", args, context) }
@@ -224,7 +224,7 @@ export const git_create_change_request = tool({
 })
 
 export const mcp_list = tool({
-  description: "List external MCP tools available through BOSS connections. Pass tool to get one tool's full input schema before calling it.",
+  description: "List external MCP tools available through this app's connections. Pass tool to get one tool's full input schema before calling it.",
   args: {
     tool: tool.schema.string().optional().describe("Tool name from the catalog; returns its full input schema")
   },

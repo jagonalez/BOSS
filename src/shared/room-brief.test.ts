@@ -105,3 +105,21 @@ test('the standing assistant is told what it is for', () => {
 test('the assistant is named in the words the user gave it', () => {
   assert.match(assistantBrief('Chief'), /You are Chief, this user's standing assistant/)
 })
+
+test('the assistant is told the app carries its own name', () => {
+  // The tools around it are named after the app. Without this line an agent
+  // reads those names, decides BOSS is the system it talks to rather than
+  // itself, and answers "I am not BOSS" when the user asks directly.
+  for (const brief of [assistantBrief(), briefForRole({ id: 'boss', label: 'BOSS' })]) {
+    assert.match(brief, /also called BOSS/)
+    assert.match(brief, /the answer is yes/)
+  }
+})
+
+test('the assistant is named the same way throughout when renamed', () => {
+  // A brief that says "you are Chief" and then "you are BOSS" is the same
+  // confusion in reverse.
+  const brief = assistantBrief('Chief')
+  assert.match(brief, /also called Chief/)
+  assert.doesNotMatch(brief, /BOSS/)
+})

@@ -199,7 +199,7 @@ export function mcpToolResultContent(content: Array<Record<string, unknown>>): {
       if (!isDisplayableImageMime(found.mimeType)) {
         // Degrades to a sentence rather than disappearing or crashing: the
         // model is told an image came back and why it is not on screen.
-        text.push(`[Image omitted: ${found.mimeType} is not a format BOSS can display.]`)
+        text.push(`[Image omitted: ${found.mimeType} is not a format this app can display.]`)
       } else if (image) {
         text.push(`[Additional ${found.mimeType} image omitted: only the first is shown.]`)
       } else {
@@ -221,7 +221,7 @@ export function mcpToolResultContent(content: Array<Record<string, unknown>>): {
  *  what a tool does still has to guess when it applies; saying so plainly is
  *  what turns an available tool into a used one. */
 export const QA_GUIDANCE = [
-  'You can see and operate what you build: boss_browser_* drives web pages open in BOSS, and boss_computer drives native applications.',
+  'You can see and operate what you build: boss_browser_* drives web pages open on this machine, and boss_computer drives native applications.',
   'Reach for them whenever a claim about what something looks like or does would otherwise be a guess.',
   'That includes checking your own work after a change, answering a question about a page or an app, and reproducing a bug the user reports.',
   'Looking is cheap and does not need permission: listing tabs, reading a page, and capturing window or desktop state are always available.',
@@ -238,7 +238,7 @@ export const QA_GUIDANCE = [
  *  backend telling the agent the same thing. */
 export function qaDescription(name: QaAgentTool): string {
   const tool = QA_TOOL_DEFINITIONS.find((item) => item.name === name)
-  if (!tool) throw new Error(`No BOSS tool named ${name}.`)
+  if (!tool) throw new Error(`No tool named ${name}.`)
   return tool.description
 }
 
@@ -250,7 +250,7 @@ export const QA_TOOL_DEFINITIONS: Array<{
 }> = [
   {
     name: 'boss_browser_tabs',
-    description: 'Find out which web pages are open in BOSS, and get the tabId every other browser tool needs. Start here whenever you want to look at a page. An empty list means the user has no browser open, so ask them to open one rather than assuming the page is unreachable.',
+    description: 'Find out which web pages are open, and get the tabId every other browser tool needs. Start here whenever you want to look at a page. An empty list means the user has no browser open, so ask them to open one rather than assuming the page is unreachable.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     readOnly: true
   },
@@ -316,7 +316,7 @@ export const QA_TOOL_DEFINITIONS: Array<{
   },
   {
     name: 'boss_computer',
-    description: 'See and operate native applications on this machine — anything outside a web page, including BOSS itself. The arguments object is passed to the OSS CUA Driver after BOSS safely canonicalizes click action names. Looking is always available: list_apps and list_windows find what is running; get_window_state and get_desktop_state return state plus a screenshot; zoom crops a region; verify_state checks bounded postconditions. Inspection screenshots are returned to you but hidden from the transcript by default; set showInTranscript only when the user asked to see that specific screenshot. Acting needs Automatic QA. Prefer a current element_token from get_window_state over coordinates. Match the element actions in the returned tree: click action \"showmenu\" is accepted and translated to the driver action \"show_menu\"; click defaults to press. For a window action, x/y are local pixels from its get_window_state screenshot. For a desktop action, x/y are absolute pixels from get_desktop_state; never apply display scale or window offsets yourself. Follow the delivery ladder background action, fresh state, pixel action, fresh state, then delivery_mode \"foreground\". Use bring_to_front when a transient menu or focus-proxy surface must remain foreground across multiple calls. Look again after every action — an action you have not verified is not finished.',
+    description: 'See and operate native applications on this machine — anything outside a web page, including this app itself. The arguments object is passed to the OSS CUA Driver after the click action names are safely canonicalized. Looking is always available: list_apps and list_windows find what is running; get_window_state and get_desktop_state return state plus a screenshot; zoom crops a region; verify_state checks bounded postconditions. Inspection screenshots are returned to you but hidden from the transcript by default; set showInTranscript only when the user asked to see that specific screenshot. Acting needs Automatic QA. Prefer a current element_token from get_window_state over coordinates. Match the element actions in the returned tree: click action \"showmenu\" is accepted and translated to the driver action \"show_menu\"; click defaults to press. For a window action, x/y are local pixels from its get_window_state screenshot. For a desktop action, x/y are absolute pixels from get_desktop_state; never apply display scale or window offsets yourself. Follow the delivery ladder background action, fresh state, pixel action, fresh state, then delivery_mode \"foreground\". Use bring_to_front when a transient menu or focus-proxy surface must remain foreground across multiple calls. Look again after every action — an action you have not verified is not finished.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -817,7 +817,7 @@ export class ThreadBus {
   }
 
   private mcpTools(): Array<Record<string, unknown>> {
-    const threadId = { type: 'string', description: 'BOSS thread id returned by boss_threads_list.' }
+    const threadId = { type: 'string', description: 'Thread id returned by boss_threads_list.' }
     const message = { type: 'string', description: 'Message to send to the other agent.' }
     return [
       {
@@ -858,7 +858,7 @@ export class ThreadBus {
         inputSchema: {
           type: 'object',
           properties: {
-            messageId: { type: 'string', description: 'Message id from the incoming BOSS thread message.' },
+            messageId: { type: 'string', description: 'Message id from the incoming thread message.' },
             message,
             expectsReply: { type: 'boolean', default: false }
           },

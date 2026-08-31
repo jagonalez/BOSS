@@ -89,7 +89,7 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
     inputSchema: {
       type: 'object',
       properties: {
-        threadId: { type: 'string', description: 'BOSS thread id returned by boss_threads_list.' },
+        threadId: { type: 'string', description: 'Thread id returned by boss_threads_list.' },
         limit: { type: 'number', description: 'Number of recent messages to read, from 1 to 20.' }
       },
       required: ['threadId'],
@@ -103,7 +103,7 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
     inputSchema: {
       type: 'object',
       properties: {
-        threadId: { type: 'string', description: 'Target BOSS thread id.' },
+        threadId: { type: 'string', description: 'Target thread id.' },
         message: { type: 'string', description: 'Concise context, question, or requested task.' },
         expectsReply: { type: 'boolean', description: 'Whether the target should reply.' },
         maxTurns: { type: 'number', description: 'Maximum messages in this exchange, from 1 to 8.' }

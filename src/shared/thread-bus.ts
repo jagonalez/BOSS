@@ -115,20 +115,20 @@ export type ThreadBusAgentTool =
  *  tool decides whether it ever reaches for one, so it is worth keeping in a
  *  single place. */
 export const THREAD_TOOL_DESCRIPTIONS = {
-  list: 'Find the other BOSS threads working in this project on the same backend. Start here when you need to know who else is working, or to get a thread id for reading or sending.',
+  list: 'Find the other threads working in this project on the same backend. Start here when you need to know who else is working, or to get a thread id for reading or sending.',
   read: 'Catch up on what another thread has been doing, by reading its recent messages. Use it before asking a question the transcript already answers.',
-  send: 'Say something to another BOSS thread — a question, a piece of context it lacks, or a task. It arrives durably, and a busy thread gets it when it finishes.',
+  send: 'Say something to another thread — a question, a piece of context it lacks, or a task. It arrives durably, and a busy thread gets it when it finishes.',
   reply: 'Answer a message another thread sent this one. Only messages addressed here can be replied to.',
   /** The one that failed in practice: the old wording said "fork this
    *  conversation", which reads as one new thread, so a request to take on
    *  several items produced one thread instead of several. */
-  spawnWorktree: 'Hand a piece of work to a new BOSS thread with its own Git worktree, in this project or another project already opened in BOSS, so it proceeds independently of this one. Call it once per piece of work: asked to take on several items, spawn a thread for each rather than one thread for all of them. Omit project to use this thread\'s project; otherwise pass the target project\'s absolute path or unique folder name. Omit agent to reuse this thread\'s agent; set it only when the task should run on a different configured agent. Each new thread starts from the instruction alone, so say what to do and why, not "the second item above".',
+  spawnWorktree: 'Hand a piece of work to a new thread with its own Git worktree, in this project or another project already open here, so it proceeds independently of this one. Call it once per piece of work: asked to take on several items, spawn a thread for each rather than one thread for all of them. Omit project to use this thread\'s project; otherwise pass the target project\'s absolute path or unique folder name. Omit agent to reuse this thread\'s agent; set it only when the task should run on a different configured agent. Each new thread starts from the instruction alone, so say what to do and why, not "the second item above".',
   spawnWorktreeInstruction: 'What the new thread should do, stated in full. It cannot see this conversation.',
   spawnWorktreeAgent: 'Agent backend for the child thread. Omit to reuse the current thread\'s agent.',
-  spawnWorktreeProject: 'Target project already opened in BOSS, as an absolute path or unique folder name. Omit to use the current project.',
+  spawnWorktreeProject: 'Target project already open here, as an absolute path or unique folder name. Omit to use the current project.',
   leaveWorktree: 'Come off this thread\'s worktree and back to the project directory, once its work is committed or merged. Git refuses while anything is uncommitted or untracked, so nothing is lost by trying; the branch is kept either way.',
   useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. It returns the new path: your working directory changes from your next message, not during this one, so do not start editing files in the new checkout until then. Fails harmlessly if this thread already has a worktree.',
-  createChangeRequest: 'Publish the committed branch and open a pull request (GitHub) or merge request (GitLab) for this thread\'s checkout. Use it instead of running `gh pr create` or `glab mr create` yourself: BOSS uses its host credentials and GitHub publishing works even when the agent shell has no SSH key. Commit first; this refuses uncommitted files. Omit title and body to fill both from the commits.',
+  createChangeRequest: 'Publish the committed branch and open a pull request (GitHub) or merge request (GitLab) for this thread\'s checkout. Use it instead of running `gh pr create` or `glab mr create` yourself: this app uses its host credentials and GitHub publishing works even when the agent shell has no SSH key. Commit first; this refuses uncommitted files. Omit title and body to fill both from the commits.',
   createChangeRequestTitle: 'Title for the request. Omit together with body to fill both from the commits.',
   createChangeRequestBody: 'Description for the request, as Markdown. Omit together with title to fill both from the commits.',
   createChangeRequestBase: 'Branch to merge into. Omit to use the repository default.',
@@ -148,7 +148,7 @@ export const NOTES_TOOL_DESCRIPTIONS = {
 } as const
 
 export const REPORT_TOOL_DESCRIPTIONS = {
-  create: 'Create a durable report artifact in BOSS when the user asks for a report, brief, dashboard narrative, analysis, or other result worth keeping outside the chat. The body supports Markdown. Return the report id so you can refine it later.',
+  create: 'Create a durable report artifact when the user asks for a report, brief, dashboard narrative, analysis, or other result worth keeping outside the chat. The body supports Markdown. Return the report id so you can refine it later.',
   update: 'Update a report artifact previously created by this thread. Pass only the fields that should change; pass an empty summary to remove it.',
   title: 'Short human-facing title for the report.',
   summary: 'Optional one- or two-sentence description shown in the report inbox.',
@@ -160,9 +160,9 @@ export const REPORT_TOOL_DESCRIPTIONS = {
  *  backend. What an agent believes the primitives are decides whether the
  *  workflows it writes actually run. */
 export const WORKFLOW_TOOL_DESCRIPTIONS = {
-  list: 'List the durable BOSS workflows for this project (and global ones): id, name, triggers, whether the user has enabled them, and the latest run. Start here before creating or running one.',
+  list: 'List the durable workflows for this project (and global ones): id, name, triggers, whether the user has enabled them, and the latest run. Start here before creating or running one.',
   create:
-    'Create a durable BOSS workflow: a small JavaScript script whose steps are journaled and replayed, so a run survives app restarts mid-sequence and resumes exactly where it left off. Use one whenever work must outlive this conversation — watching CI or a PR, a recurring check, a multi-agent pipeline. The script runs in a sandbox with ONLY these async primitives: ' +
+    'Create a durable workflow: a small JavaScript script whose steps are journaled and replayed, so a run survives app restarts mid-sequence and resumes exactly where it left off. Use one whenever work must outlive this conversation — watching CI or a PR, a recurring check, a multi-agent pipeline. The script runs in a sandbox with ONLY these async primitives: ' +
     'agent(prompt, {backendId?, model?: {providerID, modelID}, mode?, workspace?: "worktree"|"project"|"none", maxMinutes?, title?}) runs an unattended agent conversation, resolving to {status: "success"|"failure"|"timeout"|"aborted", summary, text, changedFiles, threadId} — branch on status to escalate to a stronger backend; ' +
     'judge(input, options[], {rubric?}) classifies with a forced-verdict model call, resolving to {verdict, reason} — use it for every notify-or-not or is-this-real decision instead of guessing inline; ' +
     'waitFor({type, filters?}, {timeoutMs?}) suspends durably (days are fine, restarts are fine) until a matching event arrives, resolving to the event or null on timeout — event types include cron.fired, github.push, github.pull_request, github.pull_request_review, github.pull_request_review_comment, github.issue_comment, github.workflow_run, github.check_suite, with flat data fields (repo, branch, prNumber, author, conclusion, …) matched by filters; ' +
