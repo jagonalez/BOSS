@@ -1001,9 +1001,10 @@ export class CodexBackend implements Backend {
     // and silently ignores it on a turn, which is what made the first attempt
     // look correct and change nothing.
     //
-    // A thread created in this run is already marked loaded, so waiting for a
-    // natural resume meant the brief never arrived. Resent when it changes.
-    if (base && this.instructed.get(id) !== base) this.loadedThreads.delete(id)
+    // Only once per thread. Re-resuming a live thread to update its
+    // instructions disturbed the running session, and the brief already
+    // reaches every turn as a developer note — the resume is the stronger
+    // channel, not the only one.
     if (this.loadedThreads.has(id)) return
     if (base) this.instructed.set(id, base)
     try {

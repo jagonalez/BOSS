@@ -276,3 +276,15 @@ test('BOSS replaces Codex\'s instructions rather than adding to them', () => {
   const turn = source.slice(source.indexOf("this.request('turn/start'") - 2000, source.indexOf("this.request('turn/start'"))
   assert.doesNotMatch(turn, /params\.baseInstructions/, 'a turn ignores it silently, so it must not go there')
 })
+
+test('a live Codex thread is not resumed again to update its brief', () => {
+  // Re-resuming a running thread whenever the instructions changed disturbed
+  // the session: Codex said "Yes, I am BOSS" once, then went back to "I'm
+  // Codex, running inside the BOSS environment" on every later message.
+  //
+  // Once per thread is enough. Every turn still carries the brief as a
+  // developer note, so nothing is lost by not repeating the stronger channel.
+  const source = readFileSync(join(import.meta.dirname, 'codex-backend.ts'), 'utf8')
+  assert.doesNotMatch(source, /this\.loadedThreads\.delete\(id\)\n\s*if \(this\.loadedThreads\.has/)
+  assert.match(source, /Only once per thread/)
+})
