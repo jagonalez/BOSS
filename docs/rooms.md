@@ -85,12 +85,16 @@ The user's real pattern is different:
 
 ### BOSS
 
-15. BOSS is a participant, not a page. It appears in the sidebar as a standing
-    conversation, and joins each room as a participant of its own — one session
-    per room, reading that room. A single shared session raced: two rooms
-    addressing it at once crossed their replies and left one permanently unable
-    to accept a message. It holds a map of what exists rather than transcripts,
-    so a copy per room loses nothing.
+15. BOSS is a participant, not a page. It joins each room as a participant of
+    its own — one session per room, reading that room. The sidebar entry is a
+    way in, not a place: what needs you, a way to start a room, and one general
+    chat for asking. "A standing conversation" here was read as a separate
+    place with its own history and no project, which is exactly what a room
+    already is not — see docs/rooms-shape.md.
+
+    A single shared session raced: two rooms addressing it at once crossed their
+    replies and left one permanently unable to accept a message. It holds a map
+    of what exists rather than transcripts, so a copy per room loses nothing.
 16. BOSS **quotes** other agents verbatim and links to the room. It does not
     write its own summary of work it did not see. There is nothing for it to get
     wrong, and its context stays small.
