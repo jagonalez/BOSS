@@ -29,12 +29,18 @@ export function TeamRoles({
     <div className="team-setup-rows">
       {roles.map((role) => (
         <div className="team-setup-row" key={role.id}>
-          <input
-            className="role-name"
-            value={role.label}
-            aria-label={`Name for the ${role.id} role`}
-            onChange={(event) => update(role.id, { label: event.target.value }, true)}
-          />
+          {/* BOSS's name is the app's name. Renaming it here left the user
+              talking to one name and the agent answering to another. */}
+          {role.id === ROOM_ASSISTANT_ID ? (
+            <span className="role-name role-name-fixed">{role.label}</span>
+          ) : (
+            <input
+              className="role-name"
+              value={role.label}
+              aria-label={`Name for the ${role.id} role`}
+              onChange={(event) => update(role.id, { label: event.target.value }, true)}
+            />
+          )}
           <select
             className="role-agent"
             value={role.backendId}
@@ -45,16 +51,22 @@ export function TeamRoles({
               <option key={id} value={id}>{BACKEND_SHORT_LABELS[id]}</option>
             ))}
           </select>
-          <select
-            className="role-reach"
-            value={role.mode ?? 'plan'}
-            aria-label={`What ${role.label} may touch`}
-            onChange={(event) => update(role.id, { mode: event.target.value as RoomRole['mode'] })}
-          >
-            {REACH_CHOICES.map((choice) => (
-              <option key={choice.mode} value={choice.mode}>{choice.label}</option>
-            ))}
-          </select>
+          {/* BOSS has no reach to set. It never changes code: it starts a room
+              and the agents in that room do the work, each under its own
+              setting. Offering the control here asked the user to decide
+              something that changes nothing. */}
+          {role.id === ROOM_ASSISTANT_ID ? null : (
+            <select
+              className="role-reach"
+              value={role.mode ?? 'plan'}
+              aria-label={`What ${role.label} may touch`}
+              onChange={(event) => update(role.id, { mode: event.target.value as RoomRole['mode'] })}
+            >
+              {REACH_CHOICES.map((choice) => (
+                <option key={choice.mode} value={choice.mode}>{choice.label}</option>
+              ))}
+            </select>
+          )}
           {/* BOSS cannot be removed. It is who the user talks to, and every
               room needs it; a team without one would have nobody to ask. */}
           {role.id === ROOM_ASSISTANT_ID ? (

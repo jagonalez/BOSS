@@ -634,8 +634,11 @@ test('standing instructions are joined, never replaced', () => {
   }
 })
 
-test('BOSS is handed one description of itself, not two', () => {
-  // Its own brief is attached where the assistant is recognised. Adding the
-  // room role's brief as well gave it two identities in one message.
-  assert.match(source, /recipient === ROOM_ASSISTANT_ID \? undefined : await this\.roleBrief/)
+test('a room\'s BOSS is handed both briefs', () => {
+  // Its role brief says how a room works; the assistant brief says what BOSS
+  // is. Cutting the second as a "duplicate" is what made BOSS answer "I am
+  // Claude" — they say different things, and only one of them claims the name.
+  assert.match(source, /const forAssistant = binding\.assistant/)
+  assert.doesNotMatch(source, /const fromRoom = options\?\.fromRoom === true/,
+    'a room send must not suppress the assistant brief')
 })

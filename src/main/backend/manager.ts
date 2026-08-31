@@ -2063,10 +2063,10 @@ export class BackendManager {
     // message, and a message is said once — instructions are what an agent is
     // working under, and they have to be true for the message they arrive with.
     // Told only on arrival, an agent forgot its own role by its second answer.
-    // BOSS carries its own brief, attached where the assistant is recognised.
-    // Adding the role brief too handed it two descriptions of itself in one
-    // message, which is one more than it can act on.
-    const brief = recipient === ROOM_ASSISTANT_ID ? undefined : await this.roleBrief(recipient)
+    // BOSS gets its role brief here like every other participant. Skipping it
+    // on the grounds that the assistant path adds one left the room sending
+    // nothing, and BOSS answered as the agent underneath.
+    const brief = await this.roleBrief(recipient)
     if (brief) standing.push(brief)
     if (notes) standing.push(`[JOB NOTES]\n${notes}`)
     const diff = await this.roomDiff(roomThreadId)
@@ -2091,7 +2091,9 @@ export class BackendManager {
         // standing conversation because a room's BOSS is a different thread —
         // marked by its role, not by the assistant flag — so the check on the
         // other path could never see it.
-        ...(recipient === ROOM_ASSISTANT_ID ? { coordinator: true as const } : {}),
+        ...(recipient === ROOM_ASSISTANT_ID
+          ? { coordinator: true as const, strictTools: true as const }
+          : {}),
         // Handed over as standing instructions rather than as part of the
         // message, so the conversation holds only what the user and the agents
         // actually said. Joined onto whatever the thread already carries: an
@@ -2445,6 +2447,10 @@ export class BackendManager {
       // conversation. The mark sits on the visible thread, but the message runs
       // in the agent's own — so testing only the mark left BOSS with no idea
       // what it was, and asked who it was it answered "I am Claude".
+      // A room's BOSS gets both briefs: its role brief from the room, and this
+      // one. That is how it worked. Cutting the second as a "duplicate" is
+      // what broke it — they say different things, and the assistant brief is
+      // the one that describes what BOSS is.
       const forAssistant = binding.assistant
         || (binding.parentID ? this.bindings.get(binding.parentID)?.assistant === true : false)
       const who = forAssistant ? await this.assistantBrief() : undefined
@@ -2454,7 +2460,12 @@ export class BackendManager {
         // still reached for them, because it had them: asked what it could do
         // it described editing files and running commands, which is the job of
         // the room it is supposed to start.
-        ...(forAssistant ? { coordinator: true as const } : {}),
+        // BOSS runs with this app's tools only. The user's own tool servers —
+        // Datadog, Slack, Drive — loaded 491 tools into the session, and their
+        // descriptions drowned the brief: asked who it was, BOSS answered from
+        // the surrounding tools instead. It coordinates rooms and does not need
+        // them; a builder in a room still gets everything.
+        ...(forAssistant ? { coordinator: true as const, strictTools: true as const } : {}),
         // Joined, not replaced. A room builds its participant's brief into
         // `context` before it gets here; assigning over it threw that away, so
         // BOSS in a room ran on the standing brief alone and answered as the

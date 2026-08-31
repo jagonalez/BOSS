@@ -157,22 +157,24 @@ test('the assistant does not ask twice about one job', () => {
   assert.match(assistantBrief(), /not ask twice/i)
 })
 
-test('BOSS knows the same things in a room as in its own chat', () => {
-  // Two copies of one identity, kept in step by hand, drifted: the room copy
-  // kept the shared name but lost what the app does and how to offer a room.
-  // Asked "who are you?" in a room, it described a coding assistant.
-  const standing = assistantBrief()
-  const inRoom = briefForRole({ id: 'boss', label: 'BOSS' })
-  for (const claim of [
-    /also called BOSS/,
-    /the answer is yes/,
-    /job notes/i,
-    /closes the app/,
-    /you are not one/i,
-    /Start a room for this\?/,
-    /do: Just tell me/
-  ]) {
-    assert.match(standing, claim, `the standing chat says ${claim}`)
-    assert.match(inRoom, claim, `a room says ${claim}`)
+test('BOSS claims its name in both places, and claims it first', () => {
+  // The claim has to win against the hundreds of tool descriptions loaded
+  // around it, every one of which describes a coding assistant. It lost when
+  // the brief grew to nearly twice this size and pushed the sentence down.
+  for (const [where, brief] of [
+    ['the standing chat', assistantBrief()],
+    ['a room', briefForRole({ id: 'boss', label: 'BOSS' })]
+  ] as const) {
+    assert.match(brief, /the answer is yes/, `${where} claims the name`)
+    const head = brief.split('\n').slice(0, 4).join('\n')
+    assert.match(head, /the answer is yes/, `${where} claims it in the first lines`)
   }
+})
+
+test('the room brief stays short', () => {
+  // It worked at about 1,800 characters. Doubling it to explain rooms, notes,
+  // and cards is what buried the name. A room's BOSS is told what it needs to
+  // coordinate; the rest is what the room itself already carries.
+  const brief = briefForRole({ id: 'boss', label: 'BOSS' })
+  assert.ok(brief.length < 2500, `room brief is ${brief.length} characters`)
 })

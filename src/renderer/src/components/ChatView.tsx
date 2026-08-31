@@ -1634,6 +1634,18 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
     const path = session.projectPath ?? session.directory ?? session.path
     return path ? path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) : undefined
   })
+  /** Who the user is about to talk to, for the empty state.
+   *
+   *  The engine's name is not it: an empty BOSS chat read "Claude works in this
+   *  thread", which names the one participant nobody is called. */
+  const startingWith = useStore(appStore, (s) => {
+    if (effectiveId && s.sessionMeta[effectiveId]?.kind === 'assistant') return 'BOSS'
+    const roleId = effectiveId ? splitOverride(s.rooms[effectiveId]?.recipient).roleId : undefined
+    const room = effectiveId ? s.rooms[effectiveId] : undefined
+    return roleId && room
+      ? recipientLabel(room, roleId, BACKEND_SHORT_LABELS[backendId])
+      : BACKEND_SHORT_LABELS[backendId]
+  })
   const historyCapabilities = useStore(appStore, (s) => s.backends.find((backend) => backend.id === backendId)?.capabilities)
   // Raw record, not a defaulted array: a fresh [] each evaluation would defeat
   // the subscription's equality check and re-render on every store change.
@@ -2126,7 +2138,10 @@ export function ChatView({ sessionId, tabId, active = true }: { sessionId?: stri
           {turns.length === 0 && !activity ? (
             <div className="thread-start">
               <h2>{threadPlace ? `What should we do in ${threadPlace}?` : 'What should we do?'}</h2>
-              <p>Describe the change you want, or ask about the code. {BACKEND_SHORT_LABELS[backendId]} works in this thread.</p>
+              {/* Who the user is about to talk to, not which engine runs
+                  underneath. An empty BOSS chat said "Claude works in this
+                  thread", which names the one participant nobody is called. */}
+              <p>Describe the change you want, or ask about the code. {startingWith} works in this thread.</p>
             </div>
           ) : null}
           {turns.length > 0 ? (

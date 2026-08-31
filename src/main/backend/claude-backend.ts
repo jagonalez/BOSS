@@ -444,13 +444,40 @@ export class ClaudeBackend implements Backend {
         // Named rather than blocked: a deny list has to be updated every time
         // the harness gains a tool, and the one it misses is the one that
         // breaks the rule.
+        // What the assistant may reach for. It coordinates rooms; it does not
+        // change code. Reading stays, because answering a question about the
+        // code is a conversation, not work.
+        //
+        // Named rather than blocked: a deny list needs updating every time the
+        // harness gains a tool, and the one it misses breaks the rule.
         ...(options?.coordinator
           ? { tools: ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'TodoWrite'] }
           : {}),
+        // The user's own Claude Code settings do not belong to an agent this
+        // app runs. Left to default, the SDK loaded ~/.claude/settings.json —
+        // including the user's output style, which is a full system prompt and
+        // outranks anything appended. BOSS was handed a writing style meant for
+        // a different assistant, and answered as that assistant: asked "are you
+        // BOSS?", it said no.
+        //
+        // 'project' stays so a repository's own CLAUDE.md still reaches an
+        // agent working in it. That file describes the code, which is exactly
+        // what a builder should read.
+        settingSources: ['project'] as never,
         permissionMode: mode,
         canUseTool: canUseTool as never,
         includePartialMessages: true,
-        appendSystemPrompt: options?.context ? `${options.context}\n\n${QA_GUIDANCE}` : QA_GUIDANCE,
+        // Replaced, not appended, when this is the standing assistant. Appended,
+        // BOSS's brief sat underneath Claude Code's own prompt — which says the
+        // agent is a coding assistant — and lost every time: asked "are you
+        // BOSS?", it answered no, correctly describing what it had been told
+        // first. A plain string here replaces the built-in prompt entirely.
+        //
+        // Every other thread keeps the preset. A builder needs those coding
+        // instructions; BOSS does not, because BOSS does not write code.
+        ...(options?.coordinator
+          ? { systemPrompt: `${options?.context ?? ''}\n\n${QA_GUIDANCE}`.trim() }
+          : { appendSystemPrompt: options?.context ? `${options.context}\n\n${QA_GUIDANCE}` : QA_GUIDANCE }),
         ...(hasHistory ? { resume: sessionId } : { sessionId }),
         ...(options?.model?.modelID ? { model: options.model.modelID } : {}),
         ...(this.threadBus ? {

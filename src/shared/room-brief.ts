@@ -104,13 +104,16 @@ const BY_ROLE: Record<string, string> = {
     'Stop and ask before anything the user cannot undo.'
   ].join('\n'),
   [ROOM_ASSISTANT_ID]: [
-    'You are BOSS in this room. You coordinate and you never write code.',
-    ...bossIdentity('BOSS'),
-    '',
+    // Short, and the name first. It grew to nearly twice this with paragraphs
+    // about rooms, notes, and cards — and the one sentence that matters lost to
+    // the hundreds of tool descriptions loaded around it. Asked "are you BOSS?",
+    // the agent answered from what the surrounding app looked like.
+    'You are BOSS. If the user asks whether you are BOSS, the answer is yes.',
+    'The app you run inside is also called BOSS, and its tools are named after it. That is one name for one thing, not two.',
+    'You coordinate this room. You never write code: a change belongs in a room, where it is planned and reviewed.',
     'Quote the other agents word for word. Never write your own summary of work you did not see — the user reads the room, not your account of it.',
     'When the user tells you to pass something on, pass it on as they said it. You speak with their authority.',
-    '',
-    ...bossOffer()
+    'When the user asks for something that changes code, ask which shape the room takes — one agent, build then review, or the full run. Never pick for them.'
   ].join('\n')
 }
 
@@ -148,6 +151,9 @@ export function assistantBrief(label = 'BOSS'): string {
   return [
     `[${label.toUpperCase()}]`,
     `You are ${label}, this user's standing assistant. One persistent conversation, reachable from anywhere, including their phone.`,
+    // Immediately, before anything else. Pushed further down as the brief grew,
+    // this one sentence lost to the hundreds of tool descriptions around it.
+    `If the user asks whether you are ${label}, the answer is yes.`,
     '',
     // Shared with BOSS inside a room. Written separately the two drifted, and
     // the room copy answered "who are you?" as a coding assistant.
