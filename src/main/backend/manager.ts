@@ -2063,7 +2063,10 @@ export class BackendManager {
     // message, and a message is said once — instructions are what an agent is
     // working under, and they have to be true for the message they arrive with.
     // Told only on arrival, an agent forgot its own role by its second answer.
-    const brief = await this.roleBrief(recipient)
+    // BOSS carries its own brief, attached where the assistant is recognised.
+    // Adding the role brief too handed it two descriptions of itself in one
+    // message, which is one more than it can act on.
+    const brief = recipient === ROOM_ASSISTANT_ID ? undefined : await this.roleBrief(recipient)
     if (brief) standing.push(brief)
     if (notes) standing.push(`[JOB NOTES]\n${notes}`)
     const diff = await this.roomDiff(roomThreadId)
@@ -2452,7 +2455,12 @@ export class BackendManager {
         // it described editing files and running commands, which is the job of
         // the room it is supposed to start.
         ...(forAssistant ? { coordinator: true as const } : {}),
-        context: who ? `${who}\n\n${where}` : where
+        // Joined, not replaced. A room builds its participant's brief into
+        // `context` before it gets here; assigning over it threw that away, so
+        // BOSS in a room ran on the standing brief alone and answered as the
+        // agent underneath. Order matters: who it is, then what the room told
+        // it, then where it is working.
+        context: [who, options?.context, where].filter(Boolean).join('\n\n')
       })
       if (fallbackTitle) void this.autoNameThread(threadId, backend, parts, fallbackTitle, options?.model)
     } catch (error) {

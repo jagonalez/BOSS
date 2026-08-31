@@ -573,7 +573,10 @@ test('what BOSS is travels as instructions on every send', () => {
   const body = source.slice(start, source.indexOf('\n    } catch', start))
   assert.match(body, /forAssistant \? await this\.assistantBrief\(\)/,
     'the standing conversation carries its own brief')
-  assert.match(body, /context: who \?/, 'joined onto where the agent is working')
+  // Joined, not assigned. This asserted `context: who ?` — the overwrite
+  // itself — so it passed while a room's brief was built and then discarded.
+  assert.match(body, /context: \[who, options\?\.context, where\]/,
+    'the brief, the room, and the location are joined')
 })
 
 test('a room is told its run finished, not only that it went idle', () => {
@@ -613,4 +616,26 @@ test('a room agent\'s messages are announced against the room', () => {
     'a message is named the same way its words are recorded')
   assert.match(body, /said \? .* : binding\.id/,
     'and only a message: a run start and end are announced against the room separately')
+})
+
+test('standing instructions are joined, never replaced', () => {
+  // A room builds its participant's brief into the context before the send
+  // reaches the backend. Assigning over it threw that away, so BOSS in a room
+  // ran on the standing brief alone and answered as the agent underneath —
+  // with the log showing 3,256 characters built and then discarded.
+  const sends = source.match(/context: [^\n]+/g) ?? []
+  assert.ok(sends.length > 0, 'the send still sets standing instructions')
+  for (const line of sends) {
+    assert.doesNotMatch(
+      line,
+      /context: \w+ \? `\$\{\w+\}/,
+      `context is joined rather than overwritten: ${line}`
+    )
+  }
+})
+
+test('BOSS is handed one description of itself, not two', () => {
+  // Its own brief is attached where the assistant is recognised. Adding the
+  // room role's brief as well gave it two identities in one message.
+  assert.match(source, /recipient === ROOM_ASSISTANT_ID \? undefined : await this\.roleBrief/)
 })
