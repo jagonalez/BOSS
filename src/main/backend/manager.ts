@@ -2441,6 +2441,11 @@ export class BackendManager {
       const who = forAssistant ? await this.assistantBrief() : undefined
       await backend.sendMessage(binding.nativeSessionId, goalParts, {
         ...options,
+        // The assistant runs without a builder's tools. Told in words alone it
+        // still reached for them, because it had them: asked what it could do
+        // it described editing files and running commands, which is the job of
+        // the room it is supposed to start.
+        ...(forAssistant ? { coordinator: true as const } : {}),
         context: who ? `${who}\n\n${where}` : where
       })
       if (fallbackTitle) void this.autoNameThread(threadId, backend, parts, fallbackTitle, options?.model)

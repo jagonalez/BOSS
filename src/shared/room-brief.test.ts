@@ -123,3 +123,36 @@ test('the assistant is named the same way throughout when renamed', () => {
   assert.match(brief, /also called Chief/)
   assert.doesNotMatch(brief, /BOSS/)
 })
+
+test('the assistant is told what the app around it does', () => {
+  // Asked "what can you do?", it answered like a coding agent: read files, run
+  // commands, fix bugs. Every one of those describes the builder it starts.
+  // It fell back on what it already was because nothing described rooms, job
+  // notes, or work that outlives the window.
+  const brief = assistantBrief()
+  assert.match(brief, /room/i, 'knows work happens in rooms')
+  assert.match(brief, /job notes/i, 'knows what carries between agents')
+  assert.match(brief, /closes the app/i, 'knows work outlives the window')
+})
+
+test('the assistant is told it is not the coding agent', () => {
+  // It holds a builder's tools, so it will use them unless told the difference.
+  const brief = assistantBrief()
+  assert.match(brief, /you are not one/i)
+  assert.match(brief, /belongs in a room/i)
+})
+
+test('the assistant offers a room before anything changes code', () => {
+  // The one moment the user decides. A card, because it is a question with
+  // answers they can press — not a mode they had to set beforehand.
+  const brief = assistantBrief()
+  assert.match(brief, /Start a room for this\?/)
+  assert.match(brief, /do: Start it/)
+  assert.match(brief, /do: Just tell me/)
+})
+
+test('the assistant does not ask twice about one job', () => {
+  // Asked again after the user already answered, the offer stops being a
+  // question and becomes an obstacle.
+  assert.match(assistantBrief(), /not ask twice/i)
+})

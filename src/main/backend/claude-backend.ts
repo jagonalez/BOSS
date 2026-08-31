@@ -436,6 +436,17 @@ export class ClaudeBackend implements Backend {
           : packagedBinary
             ? { pathToClaudeCodeExecutable: packagedBinary }
             : {}),
+        // What the assistant may reach for. It coordinates rooms; it does not
+        // change code. Reading stays, because answering a question about the
+        // code is a conversation, not work — and taking reading away would
+        // make it guess instead of look.
+        //
+        // Named rather than blocked: a deny list has to be updated every time
+        // the harness gains a tool, and the one it misses is the one that
+        // breaks the rule.
+        ...(options?.coordinator
+          ? { tools: ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'TodoWrite'] }
+          : {}),
         permissionMode: mode,
         canUseTool: canUseTool as never,
         includePartialMessages: true,

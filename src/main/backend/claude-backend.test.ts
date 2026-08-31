@@ -304,3 +304,19 @@ test('a refused message is never half-recorded', () => {
     'the busy guard must precede the transcript record'
   )
 })
+
+test('the standing assistant runs without a builder\'s tools', () => {
+  // Told in words alone that it must not write code, it still answered "I read
+  // and change files, run commands, fix bugs" — the job of the room it is
+  // supposed to start. It had the tools, so it described them.
+  //
+  // Named rather than blocked: a deny list needs updating every time the
+  // harness gains a tool, and the one it misses is the one that breaks the
+  // rule.
+  const source = readFileSync(join(import.meta.dirname, 'claude-backend.ts'), 'utf8')
+  const allowed = source.match(/options\?\.coordinator[\s\S]{0,200}?tools: \[([^\]]*)\]/)
+  assert.ok(allowed, 'the assistant names its own tool set')
+  const names = allowed[1]
+  assert.match(names, /'Read'/, 'it may read, so it looks instead of guessing')
+  assert.doesNotMatch(names, /'Edit'|'Write'|'Bash'|'NotebookEdit'/, 'it may not change code')
+})

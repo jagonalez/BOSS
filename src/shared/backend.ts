@@ -186,6 +186,17 @@ export interface BackendMessageOptions {
    *  the catch-up and the room's busy tracking, and its reply would land in a
    *  conversation whose composer believes it is idle. */
   fromRoom?: boolean
+  /** This thread is the standing assistant, not a coding agent.
+   *
+   *  It coordinates: it starts rooms, carries the user's instructions, and
+   *  reports what happened. It must not change code itself — every change
+   *  belongs in a room, where it is planned and reviewed.
+   *
+   *  Told only in words it did not hold: asked what it could do, it answered
+   *  "I read and change files, run commands, fix bugs" — a description of the
+   *  builder it starts. It had those tools, so it reached for them. Taking
+   *  them away is what makes the instruction true. */
+  coordinator?: boolean
 }
 
 /** Fill a newly-created thread's first turn from the owning backend's saved
