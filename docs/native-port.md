@@ -88,7 +88,7 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | 2b | boss-engines: codex (app-server) | agent | done | 24 tests; bus via MCP config, no interception |
 | 2c | boss-engines: opencode + pi | agent | done | 36 tests; plugins POST to `/agent-call` (bus route added in follow-up) |
 | 3 | boss-bus: MCP server + hub client | agent | done | 44 tests; 25 tools; server tests need the sandbox off (port bind) |
-| 4 | boss-terminal | agent | in progress | alacritty_terminal + portable-pty |
+| 4 | boss-terminal | agent | done | 26 tests; example runs; no cursor blink, no SGR mouse yet |
 | 5 | boss-browser | agent | in progress | macOS first; Windows/Linux stubs compile |
 | 6a | boss-app transcript + composer + coalescer | agent | in progress | `list()` + render cache |
 | 6b | boss-app shell: window, sidebar, tabs, settings | agent | in progress | gpui-component dock |
