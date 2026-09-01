@@ -87,7 +87,7 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | 2a | boss-engines: claude (stream-json) | agent | in progress | |
 | 2b | boss-engines: codex (app-server) | agent | in progress | |
 | 2c | boss-engines: opencode + pi | agent | in progress | |
-| 3 | boss-bus: MCP server + hub client | agent | in progress | |
+| 3 | boss-bus: MCP server + hub client | agent | done | 44 tests; 25 tools; server tests need the sandbox off (port bind) |
 | 4 | boss-terminal | agent | in progress | alacritty_terminal + portable-pty |
 | 5 | boss-browser | agent | in progress | macOS first; Windows/Linux stubs compile |
 | 6a | boss-app transcript + composer + coalescer | agent | in progress | `list()` + render cache |
