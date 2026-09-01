@@ -14,6 +14,7 @@ pub mod event;
 pub mod ids;
 pub mod message;
 pub mod paths;
+pub mod rooms;
 pub mod store;
 pub mod thread;
 

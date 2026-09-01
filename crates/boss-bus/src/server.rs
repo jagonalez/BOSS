@@ -1,9 +1,12 @@
-//! The thread-bus MCP server: `POST /mcp` on loopback, JSON-RPC in, JSON out.
+//! The thread-bus server on loopback: `POST /mcp` (JSON-RPC, for engines
+//! that speak MCP) and `POST /agent-call` (plain JSON, for the generated
+//! opencode plugin and pi extension).
 //!
-//! Port of `handleMcp` in `src/main/thread-bus.ts`. Every request carries a
-//! bearer token minted by [`BusTokens`]; the server names the caller from it
-//! and hands the call to the app's [`BusHandler`]. It knows nothing about
-//! policy or which tools a caller may see — the handler owns that.
+//! Port of `handleMcp` and `handleAgentCall` in `src/main/thread-bus.ts`.
+//! Every request carries a bearer token minted by [`BusTokens`]; the server
+//! names the caller from it and hands the call to the app's [`BusHandler`].
+//! It knows nothing about policy or which tools a caller may see — the
+//! handler owns that.
 
 use crate::tokens::BusTokens;
 use crate::tools::{is_read_only, QA_GUIDANCE};
@@ -59,6 +62,7 @@ impl BusServer {
         let state = Arc::new(AppState { handler, tokens: tokens.clone(), instructions });
         let app = Router::new()
             .route("/mcp", any(handle_mcp))
+            .route("/agent-call", any(handle_agent_call))
             .with_state(state)
             .layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
         let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -84,6 +88,11 @@ impl BusServer {
     /// Full MCP endpoint URL.
     pub fn mcp_url(&self) -> String {
         format!("{}/mcp", self.url)
+    }
+
+    /// Full `/agent-call` URL, the plain-JSON route the opencode plugin and pi extension use.
+    pub fn agent_call_url(&self) -> String {
+        format!("{}/agent-call", self.url)
     }
 
     /// Token minter for this server's secret, to hand out [`boss_core::BusAccess`].
@@ -239,4 +248,83 @@ async fn handle_mcp(State(state): State<Arc<AppState>>, method: Method, headers:
         }
         _ => rpc_error(StatusCode::OK, id, -32601, "Method not found."),
     }
+}
+
+/// `BusToolResult` in the `/agent-call` shape the generated plugins read.
+///
+/// A single text block that parses as JSON is returned as that value, the way
+/// the TS bus returned raw tool results (lists, `{id, title}` objects), so the
+/// plugin's `JSON.stringify(result, null, 2)` prints it well. Anything else —
+/// prose, or a result with an image — is `{__bossToolResult, text, image?}`,
+/// which both plugins render as text plus an attachment.
+pub fn agent_call_result(result: &BusToolResult) -> Value {
+    let mut text: Vec<&str> = Vec::new();
+    let mut image: Option<Value> = None;
+    for block in &result.content {
+        match block {
+            BusContent::Text { text: t } => text.push(t),
+            BusContent::Image { data, mime_type } => {
+                if image.is_none() {
+                    image = Some(json!({ "mimeType": mime_type, "data": data }));
+                }
+            }
+        }
+    }
+    if image.is_none()
+        && let [only] = text.as_slice()
+        && let Ok(parsed) = serde_json::from_str::<Value>(only)
+        && (parsed.is_object() || parsed.is_array())
+    {
+        return parsed;
+    }
+    let mut value = json!({ "__bossToolResult": true, "text": text.join("\n") });
+    if let Some(image) = image {
+        value["image"] = image;
+    }
+    value
+}
+
+fn agent_call_error(status: StatusCode, message: impl Into<String>) -> Response {
+    json_response(status, json!({ "ok": false, "error": message.into() }))
+}
+
+/// `POST /agent-call` with `{ backendId, nativeThreadId, tool, arguments }`.
+/// Answers `{ ok: true, result }` or `{ ok: false, error }` (400).
+async fn handle_agent_call(State(state): State<Arc<AppState>>, method: Method, headers: HeaderMap, body: Bytes) -> Response {
+    if method != Method::POST {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let Some(caller) = authenticate(&state, &headers) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    let input: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(error) => return agent_call_error(StatusCode::BAD_REQUEST, error.to_string()),
+    };
+    let field = |key: &str| input.get(key).and_then(Value::as_str).filter(|s| !s.is_empty());
+    let (Some(backend), Some(native_thread), Some(tool)) = (field("backendId"), field("nativeThreadId"), field("tool"))
+    else {
+        return agent_call_error(StatusCode::BAD_REQUEST, "Invalid thread-bus request.");
+    };
+    // The token names the caller; the engine's own ids are kept for the log only.
+    tracing::debug!(backend, native_thread, tool, thread = %caller.thread_id, "agent-call");
+    let args = match input.get("arguments") {
+        Some(Value::Null) | None => json!({}),
+        Some(value) => value.clone(),
+    };
+    let result = state.handler.call_tool(&caller, tool, args).await;
+    if result.is_error {
+        let message = result
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                BusContent::Text { text } => Some(text.as_str()),
+                BusContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let message = if message.is_empty() { "BOSS thread tool failed.".to_owned() } else { message };
+        return agent_call_error(StatusCode::BAD_REQUEST, message);
+    }
+    json_response(StatusCode::OK, json!({ "ok": true, "result": agent_call_result(&result) }))
 }

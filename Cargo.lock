@@ -855,6 +855,7 @@ dependencies = [
  "async-channel",
  "async-trait",
  "boss-core",
+ "boss-runtime",
  "futures",
  "gpui",
  "gpui-component",
@@ -958,6 +959,26 @@ dependencies = [
  "tracing",
  "uuid",
  "which 7.0.3",
+]
+
+[[package]]
+name = "boss-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-trait",
+ "boss-bus",
+ "boss-core",
+ "boss-engines",
+ "futures",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

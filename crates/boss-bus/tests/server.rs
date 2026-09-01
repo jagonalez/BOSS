@@ -27,6 +27,7 @@ impl BusHandler for FakeHandler {
         self.calls.lock().unwrap().push((caller.clone(), name.to_owned(), args.clone()));
         match name {
             "boss_threads_list" => BusToolResult::text(json!([{ "id": "thr_other", "title": "Other", "busy": false }]).to_string()),
+            "boss_threads_use_worktree" => BusToolResult::text("Moved onto a worktree.\nEdit there from your next message."),
             "boss_browser_screenshot" => BusToolResult {
                 content: vec![
                     boss_core::BusContent::Text { text: "Screenshot of tab 1".into() },
@@ -257,4 +258,93 @@ async fn stop_releases_the_port() {
     server.stop().await;
     let result = http.post(&url).bearer_auth(token).json(&json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" })).send().await;
     assert!(result.is_err(), "server should be gone");
+}
+
+#[tokio::test]
+async fn agent_call_serves_the_generated_plugins() {
+    let h = Harness::start().await;
+    let url = h.server.agent_call_url();
+    assert_eq!(url, format!("{}/agent-call", h.server.url()));
+    let body = |tool: &str, args: Value| {
+        json!({ "backendId": "opencode", "nativeThreadId": "ses_123", "tool": tool, "arguments": args })
+    };
+
+    // A JSON result comes back as the raw value, as the TS bus returned it.
+    let response = h.http.post(&url).bearer_auth(&h.token).json(&body("boss_threads_list", json!({}))).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    let payload: Value = response.json().await.unwrap();
+    assert_eq!(payload["ok"], true);
+    assert_eq!(payload["result"], json!([{ "id": "thr_other", "title": "Other", "busy": false }]));
+
+    // Prose comes back in the __bossToolResult shape so the plugin prints result.text verbatim.
+    let response = h.http.post(&url).bearer_auth(&h.token).json(&body("boss_threads_use_worktree", json!(null))).send().await.unwrap();
+    let payload: Value = response.json().await.unwrap();
+    assert_eq!(payload["result"]["__bossToolResult"], true);
+    assert_eq!(payload["result"]["text"], "Moved onto a worktree.\nEdit there from your next message.");
+    assert!(payload["result"].get("image").is_none());
+
+    // Images ride along as { mimeType, data }, which both plugins turn into an attachment.
+    let response = h.http.post(&url).bearer_auth(&h.token).json(&body("boss_browser_screenshot", json!({ "tabId": "1" }))).send().await.unwrap();
+    let payload: Value = response.json().await.unwrap();
+    assert_eq!(payload["result"]["__bossToolResult"], true);
+    assert_eq!(payload["result"]["text"], "Screenshot of tab 1");
+    assert_eq!(payload["result"]["image"], json!({ "mimeType": "image/png", "data": "iVBORw0KGgo=" }));
+
+    // The handler saw the caller from the token, the tool, and {} for null arguments.
+    let calls = h.handler.calls.lock().unwrap();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[0].0, BusCaller { thread_id: "thr_1".into(), participant_id: "who_1".into() });
+    assert_eq!(calls[1].1, "boss_threads_use_worktree");
+    assert_eq!(calls[1].2, json!({}));
+    assert_eq!(calls[2].2, json!({ "tabId": "1" }));
+}
+
+#[tokio::test]
+async fn agent_call_reports_failures_the_way_the_plugins_read_them() {
+    let h = Harness::start().await;
+    let url = h.server.agent_call_url();
+    let good = json!({ "backendId": "pi", "nativeThreadId": "sid", "tool": "boss_threads_list", "arguments": {} });
+
+    // A tool error is a 400 with ok:false and the message the plugin throws.
+    let response = h
+        .http
+        .post(&url)
+        .bearer_auth(&h.token)
+        .json(&json!({ "backendId": "pi", "nativeThreadId": "sid", "tool": "boss_nope", "arguments": {} }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    let payload: Value = response.json().await.unwrap();
+    assert_eq!(payload, json!({ "ok": false, "error": "Unknown BOSS thread tool: boss_nope." }));
+
+    // Missing fields and bad JSON are 400s too.
+    for bad in [
+        json!({ "nativeThreadId": "sid", "tool": "boss_threads_list" }),
+        json!({ "backendId": "pi", "tool": "boss_threads_list" }),
+        json!({ "backendId": "pi", "nativeThreadId": "sid" }),
+        json!({ "backendId": "pi", "nativeThreadId": "", "tool": "boss_threads_list" }),
+    ] {
+        let response = h.http.post(&url).bearer_auth(&h.token).json(&bad).send().await.unwrap();
+        assert_eq!(response.status(), 400, "{bad}");
+        let payload: Value = response.json().await.unwrap();
+        assert_eq!(payload["ok"], false);
+        assert_eq!(payload["error"], "Invalid thread-bus request.");
+    }
+    let response = h.http.post(&url).bearer_auth(&h.token).body("nope").send().await.unwrap();
+    assert_eq!(response.status(), 400);
+    assert_eq!(response.json::<Value>().await.unwrap()["ok"], false);
+
+    // Same bearer scheme as /mcp: no token or a foreign token is refused before anything runs.
+    let response = h.http.post(&url).json(&good).send().await.unwrap();
+    assert_eq!(response.status(), 401);
+    let other = boss_bus::BusTokens::new([9u8; 32]).issue(&"thr_1".into(), &"who_1".into());
+    let response = h.http.post(&url).bearer_auth(other).json(&good).send().await.unwrap();
+    assert_eq!(response.status(), 401);
+
+    // Only POST exists here, as in the TS.
+    let response = h.http.get(&url).bearer_auth(&h.token).send().await.unwrap();
+    assert_eq!(response.status(), 404);
+
+    assert_eq!(h.handler.calls.lock().unwrap().len(), 1, "only the boss_nope call reached the handler");
 }
