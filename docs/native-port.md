@@ -84,9 +84,9 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | 1b | boss-core stores: json, state, settings, transcript (sqlite), secrets | agent | done | 29 tests; FTS5 search; keyring behind a feature |
 | 1c | boss-core rooms: routing, brief, cards, job notes, RoomManager intents | agent | in progress | port `room*.ts`, `room-manager.ts` |
 | 1d | boss-app `ThreadModel` fold (EngineEvent → Message) | lead | done | `crates/boss-app/src/model.rs` |
-| 2a | boss-engines: claude (stream-json) | agent | in progress | |
-| 2b | boss-engines: codex (app-server) | agent | in progress | |
-| 2c | boss-engines: opencode + pi | agent | in progress | |
+| 2a | boss-engines: claude (stream-json) | agent | done | 26 tests; system prompts travel in the initialize control request |
+| 2b | boss-engines: codex (app-server) | agent | done | 24 tests; bus via MCP config, no interception |
+| 2c | boss-engines: opencode + pi | agent | done | 36 tests; plugins POST to `/agent-call` (bus route added in follow-up) |
 | 3 | boss-bus: MCP server + hub client | agent | done | 44 tests; 25 tools; server tests need the sandbox off (port bind) |
 | 4 | boss-terminal | agent | in progress | alacritty_terminal + portable-pty |
 | 5 | boss-browser | agent | in progress | macOS first; Windows/Linux stubs compile |

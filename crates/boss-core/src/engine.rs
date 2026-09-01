@@ -121,6 +121,11 @@ pub trait Session: Send + Sync {
     async fn send(&self, prompt: Prompt) -> anyhow::Result<()>;
     async fn interrupt(&self) -> anyhow::Result<()>;
     async fn respond_permission(&self, request: RequestId, decision: PermissionDecision) -> anyhow::Result<()>;
+    /// Answer a `QuestionAsked` event. Engines without questions keep the default.
+    async fn respond_question(&self, request: RequestId, answer: String) -> anyhow::Result<()> {
+        let _ = (request, answer);
+        anyhow::bail!("this engine does not ask questions")
+    }
     async fn set_model(&self, model: String) -> anyhow::Result<()>;
     async fn set_permission_mode(&self, mode: PermissionMode) -> anyhow::Result<()>;
     async fn close(&self) -> anyhow::Result<()>;

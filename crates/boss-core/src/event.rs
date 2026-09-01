@@ -26,6 +26,8 @@ pub enum EngineEvent {
     PermissionRequested { request: RequestId, tool: String, input: Value, title: Option<String>, message_id: Option<MessageId> },
     /// The engine asked the user a question (ask_user_question and friends).
     QuestionAsked { request: RequestId, prompt: String, options: Vec<String> },
+    /// The engine no longer needs an answer (timed out, turn interrupted).
+    RequestWithdrawn { request: RequestId },
     /// Todo list for the session, whole list each time.
     Todos { items: Vec<Todo> },
     Status { busy: bool },
