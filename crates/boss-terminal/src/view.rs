@@ -66,6 +66,30 @@ impl TerminalView {
         })
     }
 
+    /// Like `new`, but the fallible spawn happens before the entity exists,
+    /// so callers get a `Result<Entity<Self>>` instead of a panic.
+    pub fn try_new(cwd: Option<PathBuf>, command: Option<Vec<String>>, cx: &mut gpui::App) -> Result<gpui::Entity<Self>> {
+        let (terminal, channels) = Terminal::spawn(cwd, command, GridSize { cols: 80, rows: 24 })?;
+        Ok(cx.new(|cx| {
+            let focus_handle = cx.focus_handle();
+            let tasks = vec![
+                Self::spawn_pty_task(channels.pty.clone(), cx),
+                Self::spawn_term_task(&channels, cx),
+            ];
+            Self {
+                terminal,
+                focus_handle,
+                style: None,
+                alive: true,
+                exit_code: None,
+                dragging: false,
+                scroll_accumulator: 0.0,
+                option_as_meta: false,
+                _tasks: tasks,
+            }
+        }))
+    }
+
     /// The window title the shell set, or the program name.
     pub fn title(&self) -> String {
         self.terminal.title()

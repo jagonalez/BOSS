@@ -91,14 +91,23 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | 3 | boss-bus: MCP server + hub client | agent | done | 44 tests; 25 tools; server tests need the sandbox off (port bind) |
 | 4 | boss-terminal | agent | done | 26 tests; example runs; no cursor blink, no SGR mouse yet |
 | 5 | boss-browser | agent | done | 16 tests; macOS verified (snapshot of example.com); Linux webview stubbed; Windows screenshot stubbed |
-| 6a | boss-app transcript + composer + coalescer | agent | in progress | `list()` + render cache |
-| 6b | boss-app shell: window, sidebar, tabs, settings | agent | in progress | gpui-component dock |
-| 7 | boss-runtime: Runtime, SessionManager, ThreadModel, RuntimeBusHandler | lead | in progress | headless crate; thread tools ported, worktree/rooms/reports tools stubbed |
-| 8 | Wiring: ShellActions impl, BusHandler impl, persistence, rooms intents | lead | queued | after 1b–6b land |
+| 6a | boss-app transcript + composer + coalescer | agent | done | 21 tests; 5,000-message example streams at 8 commits/s with 0.2–1.3 ms/s render cost |
+| 6b | boss-app shell: window, sidebar, tabs, settings | agent | done | 21 tests; tabs, drag reorder, shortcuts, settings page |
+| 7 | boss-runtime: Runtime, SessionManager, ThreadModel, RuntimeBusHandler | lead | done | headless crate; thread tools ported, worktree/rooms/reports tools stubbed |
+| 8 | Wiring: `BossApp` (ShellActions), event pump, tab views, browser tools on the bus | lead | done | verified: real Claude Code chat end to end in the native window |
+| 8b | Rooms: execute `RoomIntent`s, team setup UI, branch replies list | lead | queued | `RoomManager` is done; the app only creates a room with a BOSS seat today |
+| 8c | Bus tools still stubbed: spawn/use/leave worktree, rooms_open, reports, notes, presence, workflows, boss_computer | lead | queued | ported handlers return "not available yet" |
 | 9 | Delete Electron app, update README/CI | lead | queued | |
 | 10 | Packaging: signing, updater | later | queued | |
 
 States: queued, in progress, blocked, done.
+
+## Verified in the running app
+
+- Window, sidebar, tabs, settings page render (macOS, debug build, 48 MB binary).
+- New chat → Claude Code session over stream-json → streamed reply with markdown.
+- Threads and projects persist across restarts (JSON stores); messages persist to sqlite.
+- Thread bus listens on loopback; MCP hub imports and connects the user's servers.
 
 ## Risks
 

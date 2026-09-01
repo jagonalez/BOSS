@@ -140,6 +140,11 @@ impl Runtime {
         Ok(rt)
     }
 
+    /// The bus handler, so the app can attach browser/computer tools.
+    pub fn bus_handler(&self) -> &RuntimeBusHandler {
+        &self.handler
+    }
+
     /// Session events for the UI. Drain from one place.
     pub fn events(&self) -> Receiver<SessionEvent> {
         self.ui_rx.clone()
