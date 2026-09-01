@@ -9,9 +9,11 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
-# UI — pinned to the zed rev that gpui-component main was locked against.
-gpui = { git = "https://github.com/zed-industries/zed", rev = "f66ed399cdde86092af8af3dc7b418abf45f37f8" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "f66ed399cdde86092af8af3dc7b418abf45f37f8", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+# UI — zed is unpinned here on purpose: gpui-component depends on zed without a rev,
+# and a rev here would give two copies of gpui. Cargo.lock is the pin; bump with
+# `./scripts/cargo update -p gpui` when gpui-component moves.
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "5cb094628d27acbd557a1c22fd830417a702f0e5" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "5cb094628d27acbd557a1c22fd830417a702f0e5" }
 

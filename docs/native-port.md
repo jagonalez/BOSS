@@ -50,8 +50,9 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | Dependency | Pin | Note |
 |---|---|---|
 | Rust | 1.97.1 | matches zed `rust-toolchain.toml` |
-| gpui, gpui_platform | git zed-industries/zed, rev in `Cargo.toml` | pre-1.0, breaking changes; bump on our schedule |
-| gpui-component | git longbridge/gpui-component, rev in `Cargo.toml` | must match the zed rev it was built against |
+| gpui, gpui_platform | git zed-industries/zed, unpinned in `Cargo.toml`; `Cargo.lock` holds the commit (239d0aa) | gpui-component depends on zed without a rev, so a rev here would give two copies of gpui. Bump with `./scripts/cargo update -p gpui`. |
+| gpui-component | git longbridge/gpui-component, rev 5cb0946 in `Cargo.toml` | tracks zed main; bump both together |
+| cargo | `./scripts/cargo` wrapper | project-local `CARGO_HOME` (`.cargo-home/`) so builds work in the sandbox; git deps need one unsandboxed `cargo fetch` |
 
 ## Engine bridges
 
@@ -78,17 +79,23 @@ docs/rooms*.md        product design for rooms (still authoritative)
 
 | # | Package | Owner | State | Notes |
 |---|---|---|---|---|
-| 0 | Workspace skeleton, pins, hello window builds | lead | in progress | |
-| 1 | boss-core: types, events, stores | agent | queued | contract for all others |
-| 2 | boss-engines: claude + pi | agent | queued | stdio, fixtures from `src/main/backend/*.test.ts` |
-| 3 | boss-engines: codex + opencode | agent | queued | |
-| 4 | boss-bus: MCP server + hub client | agent | queued | port `src/main/thread-bus.ts`, `mcp-hub.ts` |
-| 5 | boss-terminal | agent | queued | alacritty_terminal + portable-pty |
-| 6 | boss-browser | agent | queued | macOS first; Windows/Linux stubs compile |
-| 7 | boss-app: shell, sidebar, transcript, composer | agent | queued | gpui-component |
-| 8 | Wiring: engines → core → views, persistence on disk | lead | queued | |
-| 9 | Rooms: coordinator, recipients, shapes | agent | queued | port `room-manager.ts`, `room*.ts` |
-| 10 | Packaging: signing, updater, CI | later | queued | |
+| 0 | Workspace skeleton, pins, hello window builds | lead | done | |
+| 1a | boss-core contract: ids, message, thread, engine, event, bus, paths | lead | done | |
+| 1b | boss-core stores: json, state, settings, transcript (sqlite), secrets | agent | done | 29 tests; FTS5 search; keyring behind a feature |
+| 1c | boss-core rooms: routing, brief, cards, job notes, RoomManager intents | agent | in progress | port `room*.ts`, `room-manager.ts` |
+| 1d | boss-app `ThreadModel` fold (EngineEvent → Message) | lead | done | `crates/boss-app/src/model.rs` |
+| 2a | boss-engines: claude (stream-json) | agent | in progress | |
+| 2b | boss-engines: codex (app-server) | agent | in progress | |
+| 2c | boss-engines: opencode + pi | agent | in progress | |
+| 3 | boss-bus: MCP server + hub client | agent | in progress | |
+| 4 | boss-terminal | agent | in progress | alacritty_terminal + portable-pty |
+| 5 | boss-browser | agent | in progress | macOS first; Windows/Linux stubs compile |
+| 6a | boss-app transcript + composer + coalescer | agent | in progress | `list()` + render cache |
+| 6b | boss-app shell: window, sidebar, tabs, settings | agent | in progress | gpui-component dock |
+| 7 | Session manager: engines → channels → ThreadModel | lead | in progress | `crates/boss-app/src/sessions.rs` |
+| 8 | Wiring: ShellActions impl, BusHandler impl, persistence, rooms intents | lead | queued | after 1b–6b land |
+| 9 | Delete Electron app, update README/CI | lead | queued | |
+| 10 | Packaging: signing, updater | later | queued | |
 
 States: queued, in progress, blocked, done.
 
