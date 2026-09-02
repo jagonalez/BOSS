@@ -3,8 +3,9 @@
 //! it through the bus.
 
 use crate::bus_handler::RuntimeBusHandler;
+use crate::rooms::{RoomCoordinator, RoomHost};
 use crate::sessions::{SessionEvent, SessionKey, SessionManager};
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use async_channel::Receiver;
 use boss_bus::hub::{McpConfigPaths, McpHub, load_configs};
 use boss_bus::server::BusServer;
@@ -58,9 +59,13 @@ pub struct Runtime {
     /// Threads with a busy session right now.
     busy: Mutex<HashSet<ThreadId>>,
     ui_rx: Receiver<SessionEvent>,
+    /// Synthetic events (system lines, failures) fed into the same pump.
+    inject: async_channel::Sender<SessionEvent>,
     /// Secondary taps (relay, web access, rooms). Lossy on lag by design.
     taps: tokio::sync::broadcast::Sender<SessionEvent>,
     handler: Arc<RuntimeBusHandler>,
+    /// Runs rooms: executes `RoomManager` intents. Set before `start` returns.
+    rooms: OnceLock<Arc<RoomCoordinator>>,
     self_ref: OnceLock<std::sync::Weak<Runtime>>,
 }
 
@@ -101,6 +106,7 @@ impl Runtime {
         .context("start thread bus")?;
 
         let (ui_tx, ui_rx) = async_channel::unbounded();
+        let (inject, inject_rx) = async_channel::unbounded();
         let (taps, _) = tokio::sync::broadcast::channel(4096);
         let rt = Arc::new(Self {
             handle: handle.clone(),
@@ -114,18 +120,32 @@ impl Runtime {
             hub,
             busy: Mutex::new(HashSet::new()),
             ui_rx,
+            inject,
             taps,
             handler: handler.clone(),
+            rooms: OnceLock::new(),
             self_ref: OnceLock::new(),
         });
         let _ = rt.self_ref.set(Arc::downgrade(&rt));
         handler.attach(Arc::downgrade(&rt));
 
         // Pump: observe busy flags and queued deliveries, then forward to the UI.
+        // Injected events take the same path, so the UI folds them like any
+        // engine event.
         let pump = rt.clone();
         let source = sessions.events();
         handle.spawn(async move {
-            while let Ok(ev) = source.recv().await {
+            loop {
+                let ev = tokio::select! {
+                    ev = source.recv() => match ev {
+                        Ok(ev) => ev,
+                        Err(_) => break,
+                    },
+                    ev = inject_rx.recv() => match ev {
+                        Ok(ev) => ev,
+                        Err(_) => break,
+                    },
+                };
                 pump.observe(&ev).await;
                 let _ = pump.taps.send(ev.clone());
                 if ui_tx.send(ev).await.is_err() {
@@ -133,6 +153,11 @@ impl Runtime {
                 }
             }
         });
+
+        let host: std::sync::Weak<Runtime> = Arc::downgrade(&rt);
+        let host: std::sync::Weak<dyn RoomHost> = host;
+        let rooms = RoomCoordinator::start(host, &rt.data_dir, handle.clone()).context("start rooms")?;
+        let _ = rt.rooms.set(rooms);
 
         // Connect MCP servers in the background; failures are per-server statuses.
         let hub = rt.hub.clone();
@@ -143,6 +168,17 @@ impl Runtime {
         });
 
         Ok(rt)
+    }
+
+    /// Rooms: open, address, and hand over between participants.
+    pub fn rooms(&self) -> &Arc<RoomCoordinator> {
+        self.rooms.get().expect("rooms start with the runtime")
+    }
+
+    /// Feed a synthetic event through the session pump. The UI, the taps,
+    /// and the busy tracking see it exactly like an engine event.
+    pub fn inject_event(&self, key: SessionKey, event: EngineEvent) {
+        let _ = self.inject.try_send(SessionEvent { key, event });
     }
 
     /// The bus handler, so the app can attach browser/computer tools.
@@ -223,10 +259,16 @@ impl Runtime {
         Ok(key)
     }
 
-    /// Send a prompt into a thread, starting the session when needed. Also
-    /// records the user turn.
+    /// Send a prompt into a thread, starting the session when needed. A
+    /// room routes through the coordinator, so a seat is always started with
+    /// its brief and catch-up; nothing else may start a room session.
     pub async fn send(&self, thread: &Thread, participant: &Participant, prompt: Prompt) -> Result<SessionKey> {
-        let key = self.ensure_session(thread, participant).await?;
+        let key = SessionKey { thread_id: thread.id.clone(), participant_id: participant.id.clone() };
+        if let ThreadKind::Room { .. } = thread.kind {
+            self.rooms().send_prompt(&thread.id, Some(participant.id.clone()), prompt).await?;
+            return Ok(key);
+        }
+        self.ensure_session(thread, participant).await?;
         self.sessions.send(&key, prompt).await?;
         self.state.update_thread(&thread.id, |t| t.updated_at = OffsetDateTime::now_utc())?;
         Ok(key)
@@ -243,10 +285,7 @@ impl Runtime {
                 is_boss: false,
                 native_session_id: self.native_session(&thread.id, engine),
             }),
-            ThreadKind::Room { room_id } => {
-                let room = self.state.room(room_id).ok_or_else(|| anyhow!("room {room_id} not found"))?;
-                room.participants.iter().find(|p| p.is_boss).cloned().ok_or_else(|| anyhow!("room has no BOSS seat"))
-            }
+            ThreadKind::Room { .. } => Ok(self.rooms().boss_seat(&thread.id)),
             ThreadKind::Assistant => Ok(Participant {
                 id: ParticipantId::from_raw(format!("{}:assistant", thread.id)),
                 name: "BOSS".into(),
@@ -322,4 +361,43 @@ fn build_engines(settings: &boss_core::store::Settings) -> Vec<Arc<dyn Engine>> 
         Arc::new(opencode),
         Arc::new(pi),
     ]
+}
+
+#[async_trait::async_trait]
+impl RoomHost for Runtime {
+    fn sessions(&self) -> Arc<SessionManager> {
+        self.sessions.clone()
+    }
+    fn state(&self) -> Arc<StateStore> {
+        self.state.clone()
+    }
+    fn bus_access(&self, thread: &ThreadId, participant: &ParticipantId) -> Option<BusAccess> {
+        Some(Runtime::bus_access(self, thread, participant))
+    }
+    fn default_engine(&self) -> EngineId {
+        self.settings.get().default_engine
+    }
+    fn load_messages(&self, thread: &ThreadId) -> Vec<Message> {
+        Runtime::load_messages(self, thread)
+    }
+    fn persist_message(&self, message: Message) {
+        let transcripts = self.transcripts.clone();
+        self.handle.spawn_blocking(move || {
+            if let Err(e) = transcripts.upsert_message(&message) {
+                tracing::warn!(error = %e, "persist message failed");
+            }
+        });
+    }
+    fn inject_event(&self, key: SessionKey, event: EngineEvent) {
+        Runtime::inject_event(self, key, event);
+    }
+    fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SessionEvent> {
+        Runtime::subscribe(self)
+    }
+    fn primary_participant(&self, thread: &Thread) -> Result<Participant> {
+        Runtime::primary_participant(self, thread)
+    }
+    async fn send(&self, thread: &Thread, participant: &Participant, prompt: Prompt) -> Result<()> {
+        Runtime::send(self, thread, participant, prompt).await.map(|_| ())
+    }
 }

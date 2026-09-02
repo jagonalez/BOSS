@@ -1,0 +1,233 @@
+name: Native
+
+# Builds, tests, and packages the GPUI app. The Electron workflows (ci.yml,
+# beta.yml) are untouched and keep shipping the current product until the port
+# lands; this one runs alongside them.
+on:
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - 'packaging/**'
+      - '.github/workflows/native.yml'
+  push:
+    branches: [main, boss-native]
+    # Same tag shapes the Electron release uses: vX.Y.Z is stable and
+    # vX.Y.Z-beta.N is a prerelease. The updater reads the channel off the tag,
+    # so this pattern is the whole channel mechanism.
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # The bundle scripts run cargo directly on CI; the sandbox-local CARGO_HOME
+  # that ./scripts/cargo sets is only needed on a developer machine.
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            bundle: bash packaging/bundle-macos.sh
+            manifest: latest-mac.json
+          - os: windows-latest
+            bundle: pwsh packaging/bundle-windows.ps1
+            manifest: latest-windows.json
+          - os: ubuntu-22.04
+            bundle: bash packaging/bundle-linux.sh
+            manifest: latest-linux.json
+    steps:
+      - uses: actions/checkout@v4
+
+      # No toolchain is named here: rust-toolchain.toml pins 1.97.1 to match
+      # zed's, and naming it twice is how the two drift apart.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: none
+      - run: rustup show active-toolchain || rustup toolchain install
+
+      # gpui needs these on Linux; they are not on the runner image.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-x11-dev \
+            libssl-dev libzstd-dev libvulkan1 libgit2-dev libsqlite3-dev \
+            libwebkit2gtk-4.1-dev libsoup-3.0-dev pkg-config mold
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # gpui is a git dependency and compiles for minutes; sharing the
+          # cache across jobs on one OS is what keeps this workflow usable.
+          shared-key: native-${{ matrix.os }}
+          cache-on-failure: true
+
+      - name: Format
+        if: runner.os == 'macOS'
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # The bus server tests bind a loopback port, which a developer sandbox
+      # refuses — so they carry #[ignore] and only run here, where binding is
+      # allowed. Reported, not fatal: a runner that blocks the bind should not
+      # fail a build that is otherwise good.
+      - name: Test (port-binding, CI only)
+        continue-on-error: true
+        run: cargo test --workspace -- --ignored --skip network
+
+      # Bundled binaries are gitignored, the same as in the Electron workflows.
+      # A build without them still packages; the app falls back to whatever is
+      # on PATH.
+      - name: Read the pinned opencode version
+        id: opencode
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').opencodeVersion")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: resources/opencode
+          key: opencode-${{ runner.os }}-${{ runner.arch }}-${{ steps.opencode.outputs.version }}
+
+      - name: Fetch the bundled binaries
+        continue-on-error: true
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/fetch-opencode.mjs
+          [ "$RUNNER_OS" = macOS ] && bash scripts/fetch-cua-driver.sh || true
+
+      # A tag stamps its own version into the bundle; every other build takes
+      # the one in the workspace Cargo.toml.
+      - name: Resolve the version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Signing needs the Developer ID certificate in a keychain. A dedicated
+      # one is unlocked without a GUI prompt and dies with the runner. Skipped
+      # entirely when the secret is absent, so a fork's PR still packages.
+      - name: Import the signing certificate
+        if: runner.os == 'macOS' && env.CERT_P12 != ''
+        env:
+          CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/build.keychain
+          PASS=$(uuidgen)
+          security create-keychain -p "$PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASS" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$PASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+          id=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep "Developer ID Application" | head -1 \
+            | sed -n 's/.*"\(.*\)".*/\1/p')
+          echo "CODESIGN_IDENTITY=$id" >> "$GITHUB_ENV"
+
+      # Notarization only on a tag: it waits on Apple's queue, and a PR build
+      # nobody installs does not need a ticket.
+      - name: Bundle
+        shell: bash
+        env:
+          BOSS_VERSION: ${{ steps.version.outputs.value }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          APPLE_ID: ${{ startsWith(github.ref, 'refs/tags/') && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/') && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ startsWith(github.ref, 'refs/tags/') && secrets.APPLE_TEAM_ID || '' }}
+          WINDOWS_CERT_FILE: ${{ secrets.WINDOWS_CERT_FILE }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: ${{ matrix.bundle }}
+
+      # An update only appears if the manifest shipped, so a build that
+      # produced no manifest is a failure rather than a release the updater
+      # silently ignores.
+      - name: Check the manifest was written
+        shell: bash
+        run: test -f "dist/${{ matrix.manifest }}" && cat "dist/${{ matrix.manifest }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boss-native-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.tar.gz
+            dist/*Setup*.exe
+            dist/latest-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    name: Publish
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # A `-beta.N` tag is a prerelease. That is the rule the updater reads:
+      # stable copies ignore prereleases, beta copies accept them. There is no
+      # per-channel manifest.
+      - name: Classify the tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect the assets
+        run: |
+          mkdir -p upload
+          find artifacts -type f \
+            \( -name '*.dmg' -o -name '*.zip' -o -name '*.AppImage' \
+               -o -name '*.tar.gz' -o -name '*Setup*.exe' -o -name 'latest-*.json' \) \
+            -exec cp {} upload/ \;
+          ls -la upload
+          # Without a manifest the release is not installable as an update, so
+          # stop rather than publish one the updater cannot read.
+          ls upload/latest-*.json >/dev/null
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          generate_release_notes: true
+          files: upload/*

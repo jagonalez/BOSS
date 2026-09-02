@@ -22,6 +22,22 @@ fn main() {
     };
     tracing::info!(bus = runtime.bus.url(), data = %runtime.data_dir.display(), "runtime ready");
 
+    // Phone access: the relay client (E2E through the Fly relay) and the
+    // Tailscale-fronted web server. Both start idle unless their config
+    // files say `enabled`.
+    let relay = boss_runtime::relay::RelayClient::start(
+        runtime.clone(),
+        boss_runtime::relay::RelayConfig { data_dir: runtime.data_dir.clone(), url: None },
+    );
+    let web_config = boss_runtime::web_access::WebAccessConfig::load(&runtime.data_dir);
+    let web_access = match handle.block_on(boss_runtime::web_access::WebAccess::start(runtime.clone(), web_config)) {
+        Ok(w) => Some(w),
+        Err(err) => {
+            tracing::warn!(%err, "web access did not start");
+            None
+        }
+    };
+
     let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
     app.run(move |cx| {
         gpui_component::init(cx);
@@ -29,7 +45,7 @@ fn main() {
         cx.activate(true);
 
         let state = cx.new(|_| BossApp::initial_state(&runtime));
-        let boss = BossApp::new(runtime.clone(), state.clone());
+        let boss = BossApp::new(runtime.clone(), state.clone(), relay, web_access);
         boss.install();
         let actions: Arc<dyn ShellActions> = boss.clone();
         match shell::open_main_window(state, actions, cx) {

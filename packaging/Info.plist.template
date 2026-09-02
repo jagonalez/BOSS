@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>@PRODUCT_NAME@</string>
+  <key>CFBundleDisplayName</key>
+  <string>@PRODUCT_NAME@</string>
+  <key>CFBundleIdentifier</key>
+  <string>@BUNDLE_ID@</string>
+  <key>CFBundleExecutable</key>
+  <string>@EXECUTABLE@</string>
+  <key>CFBundleIconFile</key>
+  <string>icon</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@VERSION@</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>@MIN_OS@</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.developer-tools</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <!-- Dictation records audio; the computer-use driver needs the two below. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>BOSS transcribes dictation into the composer.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>BOSS drives other applications when you ask an agent to use the computer.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Pages opened in the embedded browser may request the camera.</string>
+</dict>
+</plist>

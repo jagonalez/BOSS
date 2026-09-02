@@ -79,6 +79,14 @@ impl ThreadModel {
         id
     }
 
+    /// Append a ready-made message (for example one built by the rooms
+    /// coordinator) and return its id.
+    pub fn push_message(&mut self, msg: Message) -> MessageId {
+        let id = msg.id.clone();
+        self.push(msg);
+        id
+    }
+
     pub fn resolve_request(&mut self, request: &RequestId) {
         let before = self.pending.len();
         self.pending.retain(|p| p.request_id() != request);

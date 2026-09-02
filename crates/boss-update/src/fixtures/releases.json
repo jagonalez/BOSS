@@ -1,0 +1,41 @@
+[
+  {
+    "tag_name": "v0.3.0-beta.12",
+    "prerelease": true,
+    "draft": false,
+    "published_at": "2026-08-30T09:04:11Z",
+    "assets": [
+      { "name": "latest-mac.json", "browser_download_url": "https://github.com/jagonalez/BOSS/releases/download/v0.3.0-beta.12/latest-mac.json" },
+      { "name": "BOSS-0.3.0-beta.12-mac.zip", "browser_download_url": "https://github.com/jagonalez/BOSS/releases/download/v0.3.0-beta.12/BOSS-0.3.0-beta.12-mac.zip" },
+      { "name": "BOSS-0.3.0-beta.12.dmg", "browser_download_url": "https://github.com/jagonalez/BOSS/releases/download/v0.3.0-beta.12/BOSS-0.3.0-beta.12.dmg" }
+    ]
+  },
+  {
+    "tag_name": "v0.4.0",
+    "prerelease": false,
+    "draft": true,
+    "published_at": null,
+    "assets": []
+  },
+  {
+    "tag_name": "v0.2.0",
+    "prerelease": false,
+    "draft": false,
+    "published_at": "2026-08-21T17:30:00Z",
+    "assets": [
+      { "name": "latest-mac.json", "browser_download_url": "https://github.com/jagonalez/BOSS/releases/download/v0.2.0/latest-mac.json" },
+      { "name": "latest-windows.json", "browser_download_url": "https://github.com/jagonalez/BOSS/releases/download/v0.2.0/latest-windows.json" },
+      { "name": "latest-linux.json", "browser_download_url": "https://github.com/jagonalez/BOSS/releases/download/v0.2.0/latest-linux.json" },
+      { "name": "BOSS-0.2.0-mac.zip", "browser_download_url": "https://github.com/jagonalez/BOSS/releases/download/v0.2.0/BOSS-0.2.0-mac.zip" }
+    ]
+  },
+  {
+    "tag_name": "v0.1.9",
+    "prerelease": false,
+    "draft": false,
+    "published_at": "2026-08-02T11:00:00Z",
+    "assets": [
+      { "name": "latest-mac.json", "browser_download_url": "https://github.com/jagonalez/BOSS/releases/download/v0.1.9/latest-mac.json" }
+    ]
+  }
+]

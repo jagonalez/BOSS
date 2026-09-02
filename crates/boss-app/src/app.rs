@@ -45,16 +45,27 @@ struct OpenThread {
 pub struct BossApp {
     runtime: Arc<Runtime>,
     state: Entity<AppState>,
+    /// Mobile access through the relay (phone app).
+    pub relay: boss_runtime::relay::RelayHandle,
+    /// Tailscale-fronted web access (phone PWA), if the server started.
+    pub web_access: Option<boss_runtime::web_access::WebAccess>,
     window: RefCell<Option<WindowHandle<Root>>>,
     threads: RefCell<HashMap<ThreadId, OpenThread>>,
     browsers: RefCell<BrowserRegistry>,
 }
 
 impl BossApp {
-    pub fn new(runtime: Arc<Runtime>, state: Entity<AppState>) -> Arc<Self> {
+    pub fn new(
+        runtime: Arc<Runtime>,
+        state: Entity<AppState>,
+        relay: boss_runtime::relay::RelayHandle,
+        web_access: Option<boss_runtime::web_access::WebAccess>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             runtime,
             state,
+            relay,
+            web_access,
             window: RefCell::new(None),
             threads: RefCell::new(HashMap::new()),
             browsers: RefCell::new(BrowserRegistry::new()),
@@ -84,6 +95,7 @@ impl BossApp {
         *self.window.borrow_mut() = Some(window);
         let qa: Arc<dyn BusHandler> = Arc::new(QaBridge { tools: self.browsers.borrow().bus_tools() });
         self.runtime.bus_handler().set_qa_handler(qa);
+        self.runtime.bus_handler().set_room_opener(Arc::new(RoomOpenerBridge { runtime: self.runtime.clone() }));
         self.start_pump(cx);
     }
 
@@ -156,9 +168,7 @@ impl BossApp {
 
     fn participants_for(&self, thread: &Thread) -> Vec<Participant> {
         match &thread.kind {
-            ThreadKind::Room { room_id } => {
-                self.runtime.state.room(room_id).map(|r| r.participants).unwrap_or_default()
-            }
+            ThreadKind::Room { .. } => self.runtime.rooms().participants_for(&thread.id),
             _ => self.runtime.primary_participant(thread).map(|p| vec![p]).unwrap_or_default(),
         }
     }
@@ -253,43 +263,46 @@ impl BossApp {
         let runtime = self.runtime.clone();
         match event {
             ComposerEvent::Send { text, recipient, attachments } => {
-                let Ok((_, participant)) = self.session_key(&thread, recipient.as_ref()) else { return };
-                let atts: Vec<AttachmentPart> = attachments
-                    .iter()
-                    .map(|p| AttachmentPart {
-                        id: PartId::new(),
-                        mime: mime_for(p),
-                        source: p.display().to_string(),
-                        name: p.file_name().map(|n| n.to_string_lossy().into_owned()),
-                    })
-                    .collect();
-                let user_msg = model.update(cx, |m, cx| {
-                    let id = m.push_user_message(text.clone(), recipient.clone(), atts);
+                let prompt = Prompt {
+                    text: text.clone(),
+                    attachments: attachments.iter().map(|p| Attachment { mime: mime_for(p), path: p.clone() }).collect(),
+                };
+                let is_room = matches!(thread.kind, ThreadKind::Room { .. });
+                let msg = boss_runtime::rooms::user_message(&thread.id, recipient.clone(), &prompt);
+                model.update(cx, |m, cx| {
+                    m.push_message(msg.clone());
                     m.busy = true;
                     cx.notify();
-                    m.message(&id).cloned()
                 });
-                if let Some(msg) = user_msg {
-                    runtime.persist_message(msg);
-                }
                 self.state.update(cx, |s, cx| {
                     s.set_busy(thread_id, true);
                     cx.notify();
                 });
-                let prompt = Prompt {
-                    text,
-                    attachments: attachments.into_iter().map(|p| Attachment { mime: mime_for(&p), path: p }).collect(),
-                };
                 let sender = self.threads.borrow().get(thread_id).map(|o| o.sender.clone());
-                let pid = participant.id.clone();
-                runtime.handle.clone().spawn(async move {
-                    if let Err(e) = runtime.send(&thread, &participant, prompt).await {
-                        if let Some(tx) = sender {
-                            let _ = tx.send((Some(pid.clone()), EngineEvent::Error { message: e.to_string(), fatal: true })).await;
-                            let _ = tx.send((Some(pid), EngineEvent::Status { busy: false })).await;
+                if is_room {
+                    // The coordinator persists the message with the resolved
+                    // recipient and routes it per the room's shape.
+                    runtime.handle.clone().spawn(async move {
+                        if let Err(e) = runtime.rooms().send_message(msg).await {
+                            if let Some(tx) = sender {
+                                let _ = tx.send((None, EngineEvent::Error { message: e.to_string(), fatal: true })).await;
+                                let _ = tx.send((None, EngineEvent::Status { busy: false })).await;
+                            }
                         }
-                    }
-                });
+                    });
+                } else {
+                    let Ok((_, participant)) = self.session_key(&thread, recipient.as_ref()) else { return };
+                    runtime.persist_message(msg);
+                    let pid = participant.id.clone();
+                    runtime.handle.clone().spawn(async move {
+                        if let Err(e) = runtime.send(&thread, &participant, prompt).await {
+                            if let Some(tx) = sender {
+                                let _ = tx.send((Some(pid.clone()), EngineEvent::Error { message: e.to_string(), fatal: true })).await;
+                                let _ = tx.send((Some(pid), EngineEvent::Status { busy: false })).await;
+                            }
+                        }
+                    });
+                }
             }
             ComposerEvent::Permission { request, decision, always } => {
                 let participant = model.read(cx).pending.iter().find(|p| p.request_id() == &request).and_then(|p| match p {
@@ -390,33 +403,13 @@ impl ShellActions for BossApp {
     fn new_room(&self, project: &ProjectId, shape: RoomShape, cx: &mut App) {
         let Some(app) = ARC.with(|a| a.borrow().clone()) else { return };
         let Some(project) = app.runtime.state.project(project) else { return };
-        let now = time::OffsetDateTime::now_utc();
-        let room_id = RoomId::new();
-        let thread = Thread {
-            id: ThreadId::new(),
-            project_id: project.id.clone(),
-            title: "New room".into(),
-            kind: ThreadKind::Room { room_id: room_id.clone() },
-            created_at: now,
-            updated_at: now,
-            cwd: project.root.clone(),
-            archived: false,
-        };
-        let engine = app.runtime.settings.get().default_engine;
-        let boss = Participant {
-            id: ParticipantId::from_raw(format!("{}:boss", thread.id)),
-            name: "BOSS".into(),
-            engine,
-            model: None,
-            is_boss: true,
-            native_session_id: None,
-        };
-        let room = Room { id: room_id, thread_id: thread.id.clone(), shape, participants: vec![boss] };
-        if let Err(e) = app.runtime.state.upsert_thread(thread.clone()).and_then(|_| app.runtime.state.upsert_room(room.clone())) {
-            tracing::error!(error = %e, "new room failed");
-            return;
+        match app.runtime.rooms().open_room(&project, Some(shape), None) {
+            Ok(thread) => {
+                let room = app.runtime.state.room_for_thread(&thread.id);
+                app.open_new_thread(thread, vec![], room, cx);
+            }
+            Err(e) => tracing::error!(error = %e, "new room failed"),
         }
-        app.open_new_thread(thread, vec![], Some(room), cx);
     }
 
     fn archive_thread(&self, thread: &ThreadId, _cx: &mut App) {
@@ -528,6 +521,19 @@ impl BossApp {
     /// Register this instance as the process-wide app.
     pub fn install(self: &Arc<Self>) {
         ARC.with(|a| *a.borrow_mut() = Some(self.clone()));
+    }
+}
+
+/// Lets agents open rooms through the bus.
+struct RoomOpenerBridge {
+    runtime: Arc<Runtime>,
+}
+
+#[async_trait]
+impl boss_runtime::bus_handler::RoomOpener for RoomOpenerBridge {
+    async fn open_room(&self, project: &Project, shape: RoomShape, title: &str) -> Result<Thread> {
+        let title = if title.trim().is_empty() { None } else { Some(title.to_string()) };
+        self.runtime.rooms().open_room(project, Some(shape), title)
     }
 }
 

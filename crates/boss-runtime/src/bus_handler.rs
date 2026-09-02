@@ -3,6 +3,7 @@
 //! and delegation of browser, computer, and MCP tools.
 
 use crate::runtime::Runtime;
+use crate::worktree::Worktrees;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use boss_core::store::JsonFile;
@@ -65,6 +66,18 @@ impl KeyValueFile {
     }
 }
 
+/// Opens a room thread for `boss_rooms_open`.
+///
+/// A trait rather than a call into the room coordinator, because the bus
+/// handler is built before the coordinator exists and must not depend on the
+/// app's wiring to compile or be tested.
+#[async_trait]
+pub trait RoomOpener: Send + Sync {
+    /// Start a room in `project` with `shape`, titled `title`, and return
+    /// its thread.
+    async fn open_room(&self, project: &Project, shape: RoomShape, title: &str) -> Result<Thread>;
+}
+
 pub struct RuntimeBusHandler {
     runtime: OnceLock<Weak<Runtime>>,
     messages: Mutex<Vec<BusMessage>>,
@@ -73,6 +86,10 @@ pub struct RuntimeBusHandler {
     native_sessions: KeyValueFile,
     /// Browser and computer tools, provided by the app once the UI exists.
     qa: Mutex<Option<std::sync::Arc<dyn BusHandler>>>,
+    /// Git worktrees for the worktree tools.
+    worktrees: Worktrees,
+    /// Room opener, provided by the app once rooms are wired.
+    rooms: OnceLock<std::sync::Arc<dyn RoomOpener>>,
 }
 
 impl RuntimeBusHandler {
@@ -86,7 +103,16 @@ impl RuntimeBusHandler {
             delivery_locks: Mutex::new(HashSet::new()),
             native_sessions: KeyValueFile::open(&data_dir, "native-sessions.json")?,
             qa: Mutex::new(None),
+            // Beside the rest of this instance's data, so a test data dir
+            // does not put checkouts in the real one.
+            worktrees: Worktrees::with_root(data_dir.join("worktrees")),
+            rooms: OnceLock::new(),
         })
+    }
+
+    /// The app sets this once the room coordinator exists.
+    pub fn set_room_opener(&self, opener: std::sync::Arc<dyn RoomOpener>) {
+        let _ = self.rooms.set(opener);
     }
 
     pub(crate) fn attach(&self, runtime: Weak<Runtime>) {
@@ -131,6 +157,54 @@ impl RuntimeBusHandler {
             }
         }
         Ok(target)
+    }
+
+    /// The project a thread belongs to.
+    fn project_of(&self, rt: &Runtime, thread: &Thread) -> Result<Project> {
+        rt.state
+            .project(&thread.project_id)
+            .ok_or_else(|| anyhow!("Projectless chats cannot use Git worktrees."))
+    }
+
+    /// Where a spawned thread or room goes: the caller's project, or the one
+    /// it named.
+    ///
+    /// Only among projects the user opened. Accepting an arbitrary path would
+    /// let a thread widen its own filesystem scope to a folder the user never
+    /// put in BOSS.
+    fn target_project(&self, rt: &Runtime, caller: &Thread, requested: &str) -> Result<Project> {
+        let requested = requested.trim();
+        if requested.is_empty() {
+            return self.project_of(rt, caller);
+        }
+        let known = rt.state.projects();
+        let path = Path::new(requested);
+        if path.is_absolute() {
+            let target = normalize(path);
+            if let Some(found) = known.iter().find(|p| normalize(&p.root) == target) {
+                return Ok(found.clone());
+            }
+        }
+        let wanted = requested.to_lowercase();
+        let matches: Vec<&Project> = known
+            .iter()
+            .filter(|p| {
+                p.root.file_name().map(|n| n.to_string_lossy().to_lowercase()) == Some(wanted.clone())
+            })
+            .collect();
+        match matches.len() {
+            1 => Ok(matches[0].clone()),
+            0 => {
+                let available: Vec<String> =
+                    known.iter().map(|p| p.root.file_name().unwrap_or_default().to_string_lossy().into_owned()).collect();
+                let available = if available.is_empty() { "none".to_owned() } else { available.join(", ") };
+                bail!("Project {requested} is not open in BOSS. Available projects: {available}.")
+            }
+            _ => {
+                let paths: Vec<String> = matches.iter().map(|p| p.root.display().to_string()).collect();
+                bail!("Project name {requested} is ambiguous. Use one of these full paths: {}.", paths.join(", "))
+            }
+        }
     }
 
     fn prompt(&self, rt: &Runtime, m: &BusMessage) -> String {
@@ -344,8 +418,85 @@ impl RuntimeBusHandler {
                 let to = reply_to.from.to_string();
                 self.send(&rt, &thread, &to, &s("message"), b("expectsReply", false), reply_to.max_turns, Some(&reply_to)).await
             }
-            "boss_threads_spawn_worktree" | "boss_rooms_open" | "boss_threads_use_worktree" | "boss_threads_leave_worktree" => {
-                bail!("{name} is not available yet in this build of BOSS.")
+            "boss_threads_use_worktree" => {
+                let project = self.project_of(&rt, &thread)?;
+                if thread.cwd != project.root {
+                    bail!("This thread already has its own worktree.");
+                }
+                let info = self.worktrees.create(&project.root, &thread.title).await?;
+                // Only the cwd: the next message starts a session there, and
+                // restarting one mid-turn would drop the agent's context for
+                // the tool call it is answering right now.
+                rt.state.update_thread(&thread.id, |t| t.cwd = info.path.clone())?;
+                Ok(json!({ "path": info.path, "branch": info.branch }))
+            }
+            "boss_threads_leave_worktree" => {
+                let project = self.project_of(&rt, &thread)?;
+                if thread.cwd == project.root {
+                    bail!("This thread is not on a worktree.");
+                }
+                let worktree = thread.cwd.clone();
+                let branch = crate::worktree::branch_of(&worktree).await.unwrap_or_default();
+                // Moved back first: git refuses a removal that would lose
+                // work, and the thread should still return home when it does.
+                rt.state.update_thread(&thread.id, |t| t.cwd = project.root.clone())?;
+                self.worktrees.remove(&worktree).await?;
+                Ok(json!({ "path": project.root, "branch": branch }))
+            }
+            "boss_threads_spawn_worktree" => {
+                let instruction = s("instruction");
+                if instruction.trim().is_empty() {
+                    bail!("An implementation instruction is required.");
+                }
+                if instruction.len() > MAX_BODY {
+                    bail!("Instructions are limited to {MAX_BODY} characters.");
+                }
+                let engine = match s("agent").as_str() {
+                    "" => match thread.kind {
+                        ThreadKind::Chat { engine } => engine,
+                        _ => rt.settings.get().default_engine,
+                    },
+                    requested => rooms::parse_engine(requested).ok_or_else(|| {
+                        anyhow!("Agent must be one of: {}.", EngineId::ALL.map(EngineId::as_str).join(", "))
+                    })?,
+                };
+                let project = self.target_project(&rt, &thread, &s("project"))?;
+                let title = first_line(&instruction);
+                let info = self.worktrees.create(&project.root, &title).await?;
+                let created = match rt.new_chat(&project, engine, Some(title.clone())) {
+                    Ok(created) => created,
+                    Err(e) => {
+                        let _ = self.worktrees.remove(&info.path).await;
+                        return Err(e);
+                    }
+                };
+                let created = rt
+                    .state
+                    .update_thread(&created.id, |t| t.cwd = info.path.clone())?
+                    .ok_or_else(|| anyhow!("The worktree thread could not be registered."))?;
+                let participant = rt.primary_participant(&created)?;
+                // Sending starts the session, so the new thread is already
+                // working when this call returns.
+                rt.send(&created, &participant, Prompt { text: instruction, attachments: vec![] }).await?;
+                Ok(json!({ "id": created.id, "title": created.title, "path": info.path, "branch": info.branch }))
+            }
+            "boss_rooms_open" => {
+                let instruction = s("instruction");
+                if instruction.trim().is_empty() {
+                    bail!("Say what the job is.");
+                }
+                if instruction.len() > MAX_BODY {
+                    bail!("Instructions are limited to {MAX_BODY} characters.");
+                }
+                let shape = s("shape");
+                let shape = rooms::parse_room_shape(&shape).ok_or_else(|| {
+                    anyhow!("Shape must be one of: {}.", rooms::ROOM_SHAPES.map(rooms::room_shape_name).join(", "))
+                })?;
+                let opener =
+                    self.rooms.get().ok_or_else(|| anyhow!("BOSS cannot open rooms in this build."))?.clone();
+                let project = self.target_project(&rt, &thread, &s("project"))?;
+                let opened = opener.open_room(&project, shape, &instruction).await?;
+                Ok(json!({ "id": opened.id, "title": opened.title }))
             }
             "boss_reports_create" | "boss_reports_update" | "boss_notes_record" | "boss_presence_set" => {
                 bail!("{name} is not available yet in this build of BOSS.")
@@ -354,6 +505,30 @@ impl RuntimeBusHandler {
             _ => bail!("Unknown BOSS thread tool."),
         }
     }
+}
+
+/// A thread title from an instruction: its first non-empty line, trimmed to
+/// something a sidebar can show.
+fn first_line(instruction: &str) -> String {
+    let line = instruction.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").trim();
+    let title: String = line.chars().take(80).collect();
+    if title.is_empty() { "Worktree thread".to_owned() } else { title }
+}
+
+/// Drop `.` and resolve `..` without touching the filesystem, so comparing a
+/// requested path to an open project does not depend on either existing.
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn same_engine(a: &Thread, b: &Thread) -> bool {
@@ -399,5 +574,186 @@ impl BusHandler for RuntimeBusHandler {
             Ok(v) => BusToolResult::text(serde_json::to_string_pretty(&v).unwrap_or_default()),
             Err(e) => BusToolResult::error(e.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    struct FakeRooms {
+        opened: Mutex<Vec<(PathBuf, RoomShape, String)>>,
+    }
+
+    #[async_trait]
+    impl RoomOpener for FakeRooms {
+        async fn open_room(&self, project: &Project, shape: RoomShape, title: &str) -> Result<Thread> {
+            self.opened.lock().unwrap().push((project.root.clone(), shape, title.to_owned()));
+            let now = time::OffsetDateTime::now_utc();
+            Ok(Thread {
+                id: ThreadId::from("thr_room"),
+                project_id: project.id.clone(),
+                title: "Ship the thing".into(),
+                kind: ThreadKind::Room { room_id: RoomId::new() },
+                created_at: now,
+                updated_at: now,
+                cwd: project.root.clone(),
+                archived: false,
+            })
+        }
+    }
+
+    /// A git repository with one commit, for the worktree tools.
+    async fn repo(at: PathBuf) -> PathBuf {
+        std::fs::create_dir_all(&at).unwrap();
+        for args in [
+            vec!["init", "--initial-branch=main", "."],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "Test"],
+            vec!["config", "commit.gpgsign", "false"],
+        ] {
+            let out = tokio::process::Command::new("git").arg("-C").arg(&at).args(&args).output().await.unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+        std::fs::write(at.join("README.md"), "hello\n").unwrap();
+        for args in [vec!["add", "."], vec!["commit", "-m", "first"]] {
+            let out = tokio::process::Command::new("git").arg("-C").arg(&at).args(&args).output().await.unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+        at
+    }
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        rt: Arc<Runtime>,
+        rooms: Arc<FakeRooms>,
+        project: Project,
+        thread: Thread,
+    }
+
+    impl Fixture {
+        async fn call(&self, name: &str, args: Value) -> Result<Value> {
+            let caller = BusCaller {
+                thread_id: self.thread.id.clone(),
+                participant_id: ParticipantId::from("who_test"),
+            };
+            self.rt.bus_handler().call(&caller, name, args).await
+        }
+
+        fn thread(&self) -> Thread {
+            self.rt.state.thread(&self.thread.id).unwrap()
+        }
+    }
+
+    /// A runtime on a temp data dir with one project, one chat thread, and a
+    /// fake room opener. Binds a loopback port for the bus.
+    async fn fixture() -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let rt = Runtime::start(Some(data), tokio::runtime::Handle::current()).await.unwrap();
+        let root = repo(dir.path().join("acme")).await;
+        let project = rt.state.add_project(root, None).unwrap();
+        let thread = rt.new_chat(&project, EngineId::Pi, Some("Fix the login bug".into())).unwrap();
+        let rooms = Arc::new(FakeRooms { opened: Mutex::new(vec![]) });
+        rt.bus_handler().set_room_opener(rooms.clone());
+        Fixture { _dir: dir, rt, rooms, project, thread }
+    }
+
+    #[tokio::test]
+    async fn use_worktree_moves_the_thread_and_leave_brings_it_back() {
+        let f = fixture().await;
+        let used = f.call("boss_threads_use_worktree", json!({})).await.unwrap();
+        let path = PathBuf::from(used["path"].as_str().unwrap());
+        let branch = used["branch"].as_str().unwrap().to_owned();
+        assert!(branch.starts_with("boss/fix-the-login-bug-"), "branch was {branch}");
+        assert!(path.join("README.md").is_file());
+        assert_eq!(f.thread().cwd, path);
+
+        // A second call would orphan the first checkout.
+        let again = f.call("boss_threads_use_worktree", json!({})).await.unwrap_err().to_string();
+        assert!(again.contains("already has its own worktree"), "message was {again}");
+
+        let left = f.call("boss_threads_leave_worktree", json!({})).await.unwrap();
+        assert_eq!(left["path"].as_str().unwrap(), f.project.root.to_string_lossy());
+        assert_eq!(left["branch"].as_str().unwrap(), branch);
+        assert!(!path.exists());
+        assert_eq!(f.thread().cwd, f.project.root);
+
+        let twice = f.call("boss_threads_leave_worktree", json!({})).await.unwrap_err().to_string();
+        assert!(twice.contains("not on a worktree"), "message was {twice}");
+    }
+
+    #[tokio::test]
+    async fn leave_worktree_refuses_to_lose_uncommitted_work() {
+        let f = fixture().await;
+        let used = f.call("boss_threads_use_worktree", json!({})).await.unwrap();
+        let path = PathBuf::from(used["path"].as_str().unwrap());
+        std::fs::write(path.join("draft.txt"), "half a change\n").unwrap();
+
+        let e = f.call("boss_threads_leave_worktree", json!({})).await.unwrap_err().to_string();
+        assert!(e.contains("uncommitted or untracked"), "message was {e}");
+        assert!(path.join("draft.txt").is_file());
+        // The thread still went home; the checkout is simply still there.
+        assert_eq!(f.thread().cwd, f.project.root);
+    }
+
+    #[tokio::test]
+    async fn rooms_open_validates_then_hands_the_job_to_the_opener() {
+        let f = fixture().await;
+        let bad = f.call("boss_rooms_open", json!({ "instruction": "go", "shape": "sideways" })).await;
+        assert!(bad.unwrap_err().to_string().contains("Shape must be one of"));
+        let empty = f.call("boss_rooms_open", json!({ "instruction": "  ", "shape": "full" })).await;
+        assert!(empty.unwrap_err().to_string().contains("Say what the job is"));
+
+        let opened =
+            f.call("boss_rooms_open", json!({ "instruction": "Ship the thing", "shape": "reviewed" })).await.unwrap();
+        assert_eq!(opened["id"], "thr_room");
+        assert_eq!(opened["title"], "Ship the thing");
+        let seen = f.rooms.opened.lock().unwrap().clone();
+        assert_eq!(seen, vec![(f.project.root.clone(), RoomShape::Reviewed, "Ship the thing".to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn tools_refuse_a_project_the_user_never_opened() {
+        let f = fixture().await;
+        let e = f
+            .call("boss_rooms_open", json!({ "instruction": "go", "shape": "direct", "project": "/elsewhere/secret" }))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("is not open in BOSS"), "message was {e}");
+        assert!(e.contains("acme"), "message should list what is open: {e}");
+        assert!(f.rooms.opened.lock().unwrap().is_empty());
+
+        // The folder name of an open project is enough.
+        assert!(f.call("boss_rooms_open", json!({ "instruction": "go", "shape": "direct", "project": "ACME" })).await.is_ok());
+        // So is its full path.
+        let by_path = json!({ "instruction": "go", "shape": "direct", "project": f.project.root });
+        assert!(f.call("boss_rooms_open", by_path).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn spawn_worktree_checks_its_arguments_before_making_a_checkout() {
+        let f = fixture().await;
+        let empty = f.call("boss_threads_spawn_worktree", json!({ "instruction": " \n " })).await;
+        assert!(empty.unwrap_err().to_string().contains("instruction is required"));
+
+        let long = f.call("boss_threads_spawn_worktree", json!({ "instruction": "x".repeat(MAX_BODY + 1) })).await;
+        assert!(long.unwrap_err().to_string().contains("limited to"));
+
+        let agent = f.call("boss_threads_spawn_worktree", json!({ "instruction": "go", "agent": "hal" })).await;
+        assert!(agent.unwrap_err().to_string().contains("Agent must be one of"));
+
+        // Nothing was created by any of those.
+        assert_eq!(f.rt.state.threads().len(), 1);
+        assert!(!f.rt.bus_handler().worktrees.root().exists());
+    }
+
+    #[test]
+    fn a_title_is_the_first_line_of_the_instruction() {
+        assert_eq!(first_line("\n\n  Add a retry to the uploader  \nwhy: it flakes"), "Add a retry to the uploader");
+        assert_eq!(first_line("   "), "Worktree thread");
+        assert_eq!(first_line(&"z".repeat(200)).len(), 80);
     }
 }

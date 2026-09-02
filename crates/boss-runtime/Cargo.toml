@@ -11,12 +11,28 @@ boss-engines = { path = "../boss-engines" }
 boss-bus = { path = "../boss-bus" }
 anyhow.workspace = true
 async-channel.workspace = true
+async-stream = "0.3"
 async-trait = "0.1"
+axum.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 rand = "0.8"
+# Relay (mobile access): WebSocket client, AES-GCM frames, Ed25519 identity, QR codes.
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
+aes-gcm = "0.10"
+ed25519-dalek = "2"
+base64 = "0.22"
+qrcode = { version = "0.14", default-features = false }
+png = "0.17"
+sha2 = "0.10"
+
+[dev-dependencies]
+reqwest.workspace = true
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

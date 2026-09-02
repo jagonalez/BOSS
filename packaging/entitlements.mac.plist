@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Electron and the ONNX runtime behind local speech both JIT. -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!-- BOSS runs agent CLIs (opencode, codex, claude, pi) and node-pty shells
+       that Apple never signed. Hardened runtime blocks those without this. -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!-- Agents reach model providers and the embedded browser loads pages. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- The mobile access server and the loopback thread bus both listen. -->
+  <key>com.apple.security.network.server</key>
+  <true/>
+
+  <!-- Dictation records audio; agents open project folders anywhere on disk. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>
