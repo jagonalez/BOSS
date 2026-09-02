@@ -58,6 +58,8 @@ pub struct Runtime {
     /// Threads with a busy session right now.
     busy: Mutex<HashSet<ThreadId>>,
     ui_rx: Receiver<SessionEvent>,
+    /// Secondary taps (relay, web access, rooms). Lossy on lag by design.
+    taps: tokio::sync::broadcast::Sender<SessionEvent>,
     handler: Arc<RuntimeBusHandler>,
     self_ref: OnceLock<std::sync::Weak<Runtime>>,
 }
@@ -99,6 +101,7 @@ impl Runtime {
         .context("start thread bus")?;
 
         let (ui_tx, ui_rx) = async_channel::unbounded();
+        let (taps, _) = tokio::sync::broadcast::channel(4096);
         let rt = Arc::new(Self {
             handle: handle.clone(),
             data_dir,
@@ -111,6 +114,7 @@ impl Runtime {
             hub,
             busy: Mutex::new(HashSet::new()),
             ui_rx,
+            taps,
             handler: handler.clone(),
             self_ref: OnceLock::new(),
         });
@@ -123,6 +127,7 @@ impl Runtime {
         handle.spawn(async move {
             while let Ok(ev) = source.recv().await {
                 pump.observe(&ev).await;
+                let _ = pump.taps.send(ev.clone());
                 if ui_tx.send(ev).await.is_err() {
                     break;
                 }
@@ -143,6 +148,12 @@ impl Runtime {
     /// The bus handler, so the app can attach browser/computer tools.
     pub fn bus_handler(&self) -> &RuntimeBusHandler {
         &self.handler
+    }
+
+    /// A secondary stream of every session event, for relay, web access,
+    /// and room coordination. Lags drop old events instead of blocking.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SessionEvent> {
+        self.taps.subscribe()
     }
 
     /// Session events for the UI. Drain from one place.
