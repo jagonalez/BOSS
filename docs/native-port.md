@@ -114,6 +114,9 @@ States: queued, in progress, blocked, done.
 - New chat → Claude Code session over stream-json → streamed reply with markdown.
 - Threads and projects persist across restarts (JSON stores); messages persist to sqlite.
 - Thread bus listens on loopback; MCP hub imports and connects the user's servers.
+- Live smoke tests: claude, codex, opencode complete a turn and a permission round trip; pi is not logged in on this machine.
+- Workspace tests: 622 pass, 6 ignored (network or port binds).
+- Room flow (shape picker → job → builder/reviewer handover) is wired but not yet verified on screen.
 
 ## Risks
 
