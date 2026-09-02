@@ -132,6 +132,13 @@ fn models_from(result: &Value) -> Vec<ModelInfo> {
         .unwrap_or_default()
 }
 
+/// Who reviews codex approval requests. codex defaults to `user`, but a
+/// user's `~/.codex/config.toml` may set `approvals_reviewer` to a subagent
+/// that answers them itself; BOSS then never sees a `PermissionRequested`
+/// and the turn escapes its sandbox silently. Pin it so approvals always
+/// reach the app.
+pub const APPROVALS_REVIEWER: &str = "user";
+
 /// codex `approvalPolicy` for a BOSS permission mode.
 fn approval_policy(mode: PermissionMode) -> &'static str {
     match mode {
@@ -292,6 +299,7 @@ impl CodexSession {
         let mut params = json!({
             "cwd": opts.cwd,
             "approvalPolicy": approval_policy(opts.permission_mode),
+            "approvalsReviewer": APPROVALS_REVIEWER,
             "sandbox": sandbox_mode(opts.permission_mode),
         });
         if let Some(model) = &opts.model {
@@ -378,6 +386,7 @@ impl Session for CodexSession {
             "cwd": self.cwd,
             "input": user_input(&prompt),
             "approvalPolicy": approval_policy(mode),
+            "approvalsReviewer": APPROVALS_REVIEWER,
             "sandboxPolicy": sandbox_policy(mode, &self.cwd),
         });
         if let Some(model) = model {
@@ -496,6 +505,21 @@ mod tests {
         opts.allowed_tools = Some(vec!["boss_threads_list".into(), "boss_threads_reply".into()]);
         let args = spawn_args(&opts);
         assert_eq!(args[5], "mcp_servers.boss_thread_bus.enabled_tools=[\"boss_threads_list\", \"boss_threads_reply\"]");
+    }
+
+    #[test]
+    fn approvals_are_reviewed_by_the_user_not_a_subagent() {
+        // `approvals_reviewer = "guardian_subagent"` in the user's config makes
+        // codex answer its own approvals, so BOSS never sees a
+        // `PermissionRequested` and a turn can write outside its sandbox
+        // unasked. Both `thread/start` and `turn/start` must pin `user`.
+        assert_eq!(APPROVALS_REVIEWER, "user");
+        let source = include_str!("codex.rs");
+        assert_eq!(
+            source.matches("\"approvalsReviewer\": APPROVALS_REVIEWER").count(),
+            2,
+            "thread/start and turn/start must both send approvalsReviewer"
+        );
     }
 
     #[test]

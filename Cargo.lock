@@ -910,6 +910,7 @@ dependencies = [
  "boss-core",
  "boss-runtime",
  "boss-terminal",
+ "boss-update",
  "futures",
  "gpui",
  "gpui-component",

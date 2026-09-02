@@ -12,13 +12,23 @@ struct Shell {
 impl Shell {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let terminal = cx.new(|cx| TerminalView::new(None, None, cx).expect("spawn shell"));
-        cx.subscribe(&terminal, |this, _, event: &TerminalEvent, cx| {
-            if let TerminalEvent::Exit(code) = event {
-                this.status = format!("exited: {code}");
-                cx.notify();
+        cx.subscribe(&terminal, |this, terminal, event: &TerminalEvent, cx| {
+            match event {
+                TerminalEvent::Exit(code) => this.status = format!("exited: {code}"),
+                TerminalEvent::ConfirmPaste { text } => {
+                    // The real app asks first. The example reports the size
+                    // and sends it, so the hook is exercised end to end.
+                    let lines = text.lines().count();
+                    this.status = format!("pasted {lines} lines");
+                    let text = text.clone();
+                    terminal.update(cx, |view, cx| view.paste_confirmed(&text, cx));
+                }
+                _ => return,
             }
+            cx.notify();
         })
         .detach();
+        terminal.update(cx, |view, _| view.set_confirm_multiline_paste(true));
         terminal.read(cx).focus_handle(cx).focus(window, cx);
         Self { terminal, status: String::from("running") }
     }

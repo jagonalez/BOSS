@@ -15,6 +15,7 @@ use gpui::{
     prelude::*,
 };
 
+use crate::blink::BlinkState;
 use crate::element::{TerminalElement, TerminalStyle, scroll_lines_for};
 use crate::pty::PtyEvent;
 use crate::terminal::{GridSize, Terminal, TerminalChannels};
@@ -29,6 +30,14 @@ pub enum TerminalEvent {
     TitleChanged(String),
     /// BEL.
     Bell,
+    /// A paste spans more than one line, so it would run as several
+    /// commands. The embedder shows a confirmation and calls
+    /// [`TerminalView::paste_confirmed`] with this text if the user agrees.
+    /// Terminals that want the old behaviour can call it immediately.
+    ConfirmPaste {
+        /// Exactly what would be sent, unmodified.
+        text: String,
+    },
 }
 
 /// A focusable terminal pane.
@@ -41,6 +50,18 @@ pub struct TerminalView {
     dragging: bool,
     scroll_accumulator: f32,
     option_as_meta: bool,
+    blink: BlinkState,
+    /// Set while a mouse button the program asked for is held, so the
+    /// release and any drag go to the program and not to selection.
+    mouse_reported_button: Option<crate::mouse::MouseButtonCode>,
+    /// Ask before sending a paste that spans several lines. Off by default
+    /// so an embedder that does not subscribe to `ConfirmPaste` still
+    /// pastes; the app turns it on when it can show the confirmation.
+    confirm_multiline_paste: bool,
+    /// A blink repaint that is already scheduled.
+    blink_task: Option<gpui::Task<()>>,
+    /// Focus state the last paint used, to spot changes.
+    was_focused: Option<bool>,
     _tasks: Vec<gpui::Task<()>>,
 }
 
@@ -62,6 +83,11 @@ impl TerminalView {
             dragging: false,
             scroll_accumulator: 0.0,
             option_as_meta: false,
+            blink: BlinkState::new(Instant::now()),
+            mouse_reported_button: None,
+            confirm_multiline_paste: false,
+            blink_task: None,
+            was_focused: None,
             _tasks: tasks,
         })
     }
@@ -85,6 +111,11 @@ impl TerminalView {
                 dragging: false,
                 scroll_accumulator: 0.0,
                 option_as_meta: false,
+                blink: BlinkState::new(Instant::now()),
+                mouse_reported_button: None,
+                confirm_multiline_paste: false,
+                blink_task: None,
+                was_focused: None,
                 _tasks: tasks,
             }
         }))
@@ -121,12 +152,70 @@ impl TerminalView {
         cx.notify();
     }
 
+    /// Ask before sending a paste that spans several lines.
+    ///
+    /// Turn this on once the embedder subscribes to
+    /// [`TerminalEvent::ConfirmPaste`] and can answer with
+    /// [`TerminalView::paste_confirmed`]. Left off, a multi-line paste goes
+    /// straight through, so a terminal that ignores the event still works.
+    pub fn set_confirm_multiline_paste(&mut self, on: bool) {
+        self.confirm_multiline_paste = on;
+    }
+
     /// Paste the clipboard into the shell.
+    ///
+    /// Text with a newline in it would run as several commands the moment
+    /// it lands. With [`TerminalView::set_confirm_multiline_paste`] on it is
+    /// held back and [`TerminalEvent::ConfirmPaste`] is emitted instead.
     pub fn paste(&mut self, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.terminal.paste(&text);
-            cx.notify();
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else { return };
+        if self.confirm_multiline_paste && needs_paste_confirmation(&text) {
+            cx.emit(TerminalEvent::ConfirmPaste { text });
+            return;
         }
+        self.paste_confirmed(&text, cx);
+    }
+
+    /// Send text the embedder has approved (or that never needed approval).
+    pub fn paste_confirmed(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.terminal.paste(text);
+        self.blink.typed(Instant::now());
+        cx.notify();
+    }
+
+    /// Blink phase for the painter: whether the cursor is drawn right now.
+    pub fn cursor_visible(&self, focused: bool) -> bool {
+        self.blink.visible(Instant::now(), self.terminal.cursor_blinks(), focused)
+    }
+
+    /// Keep the blink phase running by scheduling the next repaint. Called
+    /// by the element after it paints; a no-op when nothing will change or
+    /// a repaint is already queued.
+    pub(crate) fn schedule_blink(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.blink_task.is_some() {
+            return;
+        }
+        let Some(delay) = self.blink.next_change(Instant::now(), self.terminal.cursor_blinks(), focused) else {
+            return;
+        };
+        self.blink_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = this.update(cx, |view, cx| {
+                view.blink_task = None;
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Note the focus state the element is about to paint with. Focus
+    /// changes restart the cycle so a terminal that regains focus shows a
+    /// solid cursor first. Returns whether the cursor should be drawn.
+    pub(crate) fn sync_focus(&mut self, focused: bool) -> bool {
+        if self.was_focused != Some(focused) {
+            self.was_focused = Some(focused);
+            self.blink.reset(Instant::now());
+        }
+        self.cursor_visible(focused)
     }
 
     /// Copy the selection, if any. Returns whether something was copied.
@@ -163,6 +252,25 @@ impl TerminalView {
 
     pub(crate) fn accumulate_scroll(&mut self, delta: ScrollDelta, line_height: Pixels) -> i32 {
         scroll_lines_for(delta, line_height, &mut self.scroll_accumulator)
+    }
+
+    /// The button currently held for mouse reporting, if any.
+    pub(crate) fn reported_button(&self) -> Option<crate::mouse::MouseButtonCode> {
+        self.mouse_reported_button
+    }
+
+    pub(crate) fn set_reported_button(&mut self, button: Option<crate::mouse::MouseButtonCode>) {
+        self.mouse_reported_button = button;
+    }
+
+    /// Open a URL the user Cmd+clicked. The scheme is checked again here
+    /// so nothing reaches the OS that `links::is_openable` would reject.
+    pub(crate) fn open_link(&self, url: &str, cx: &mut App) {
+        if crate::links::is_openable(url) {
+            cx.open_url(url.trim());
+        } else {
+            tracing::warn!(url, "refusing to open a terminal link with an unknown scheme");
+        }
     }
 
     fn spawn_pty_task(rx: async_channel::Receiver<PtyEvent>, cx: &mut Context<Self>) -> gpui::Task<()> {
@@ -293,6 +401,7 @@ impl TerminalView {
 
         if self.terminal.key_down(ks, self.option_as_meta) {
             self.terminal.clear_selection();
+            self.blink.typed(Instant::now());
             cx.stop_propagation();
             cx.notify();
         }
@@ -358,6 +467,7 @@ impl EntityInputHandler for TerminalView {
     ) {
         self.terminal.write(text.as_bytes());
         self.terminal.clear_selection();
+        self.blink.typed(Instant::now());
         cx.notify();
     }
 
@@ -397,5 +507,27 @@ impl Drop for TerminalView {
     fn drop(&mut self) {
         // The reader and waiter threads exit on EOF once the child is gone.
         self.terminal.kill();
+    }
+}
+
+/// Would this paste run as more than one command? Trailing newlines are
+/// what a copied line ends with and are not, by themselves, a reason to ask.
+pub fn needs_paste_confirmation(text: &str) -> bool {
+    text.trim_end_matches(['\r', '\n']).contains(['\n', '\r'])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_genuinely_multi_line_pastes_need_confirming() {
+        assert!(!needs_paste_confirmation("ls -la"));
+        assert!(!needs_paste_confirmation("ls -la\n"), "one command with a trailing newline");
+        assert!(!needs_paste_confirmation("ls -la\r\n"));
+        assert!(needs_paste_confirmation("cd /tmp\nrm -rf x"));
+        assert!(needs_paste_confirmation("cd /tmp\nrm -rf x\n"));
+        assert!(needs_paste_confirmation("a\rb"), "a bare CR also submits");
+        assert!(!needs_paste_confirmation(""));
     }
 }

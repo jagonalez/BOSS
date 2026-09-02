@@ -3,18 +3,19 @@
 //! `ShellActions`.
 
 use super::actions::{ShellActions, default_terminal_cwd};
-use super::settings::SettingsPage;
+use super::settings::{ProbeState, SettingsPage};
 use super::sidebar::{Sidebar, SidebarEvent};
 use super::state::{AppState, Tab as OpenTab, TabKind};
 use super::{
-    ActivateTab, CloseTab, NewChat, NewRoom, NewTerminal, NextTab, OpenSettings, PrevTab, ToggleSidebar, apply_font_size,
-    apply_theme,
+    ActivateTab, CloseTab, FocusSidebarFilter, NewChat, NewRoom, NewTerminal, NextTab, OpenSettings, PrevTab, ReopenTab,
+    ToggleSidebar, apply_font_size, apply_theme,
 };
 use boss_core::store::Theme as ThemePref;
 use boss_core::*;
 use gpui::{
-    App, Bounds, Context, Entity, FocusHandle, Focusable, IntoElement, MouseButton, ParentElement, Render, SharedString,
-    Styled, Subscription, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions, div, prelude::*, px, size,
+    App, Bounds, Context, Entity, FocusHandle, Focusable, IntoElement, MouseButton, ParentElement, Pixels, Point,
+    Render, SharedString, Size, Styled, Subscription, Window, WindowBounds, WindowHandle, WindowKind, WindowOptions,
+    div, prelude::*, px,
 };
 use gpui_component::{
     ActiveTheme, Icon, IconName, Root, Sizable, TitleBar, h_flex,
@@ -23,8 +24,10 @@ use gpui_component::{
     tab::{Tab, TabBar},
     v_flex,
 };
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Page a new browser tab opens with until the app supplies one.
 pub const DEFAULT_BROWSER_URL: &str = "https://docs.rs/gpui";
@@ -35,6 +38,107 @@ pub const SIDEBAR_MIN: f32 = 210.;
 pub const SIDEBAR_MAX: f32 = 480.;
 /// Width the sidebar opens with.
 pub const SIDEBAR_DEFAULT: f32 = 268.;
+
+/// Where the window bounds are remembered, under the user data dir.
+pub const WINDOW_FILE: &str = "window.json";
+
+/// How long the window must sit still before its bounds are written. A
+/// drag fires dozens of move events; only the last one reaches disk.
+pub const BOUNDS_DEBOUNCE: Duration = Duration::from_millis(400);
+
+/// The default window size before anything is saved.
+pub const DEFAULT_WINDOW_SIZE: Size<Pixels> = Size { width: px(1280.), height: px(840.) };
+
+/// Smallest window the user can drag to.
+pub const MIN_WINDOW_SIZE: Size<Pixels> = Size { width: px(720.), height: px(480.) };
+
+/// The remembered position, size and screen of the main window.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct WindowState {
+    /// Left edge, in the global coordinate space that spans every display.
+    pub x: f32,
+    /// Top edge.
+    pub y: f32,
+    /// Width in logical pixels.
+    pub width: f32,
+    /// Height in logical pixels.
+    pub height: f32,
+    /// The window was maximized (zoomed) when it was last saved.
+    pub maximized: bool,
+    /// The window was fullscreen when it was last saved.
+    pub fullscreen: bool,
+    /// UUID of the display it was on, so a saved position can be checked
+    /// against the screens that are actually attached now.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+}
+
+impl WindowState {
+    /// Read the current window's bounds and screen.
+    pub fn capture(window: &Window, cx: &App) -> Self {
+        let (bounds, maximized, fullscreen) = match window.window_bounds() {
+            WindowBounds::Windowed(b) => (b, false, false),
+            WindowBounds::Maximized(b) => (b, true, false),
+            WindowBounds::Fullscreen(b) => (b, false, true),
+        };
+        Self {
+            x: bounds.origin.x.into(),
+            y: bounds.origin.y.into(),
+            width: bounds.size.width.into(),
+            height: bounds.size.height.into(),
+            maximized,
+            fullscreen,
+            display: window.display(cx).and_then(|d| d.uuid().ok()).map(|u| u.to_string()),
+        }
+    }
+
+    /// The saved rectangle in GPUI terms.
+    pub fn bounds(&self) -> Bounds<Pixels> {
+        Bounds { origin: Point { x: px(self.x), y: px(self.y) }, size: Size { width: px(self.width), height: px(self.height) } }
+    }
+
+    /// Turn a saved state into the bounds to open with, or `None` when it
+    /// cannot be trusted: a degenerate size, or a rectangle that no longer
+    /// overlaps any attached display (the screen was unplugged).
+    pub fn to_window_bounds(&self, displays: &[Bounds<Pixels>]) -> Option<WindowBounds> {
+        let bounds = self.bounds();
+        if bounds.size.width < MIN_WINDOW_SIZE.width || bounds.size.height < MIN_WINDOW_SIZE.height {
+            return None;
+        }
+        if !displays.iter().any(|d| visibly_overlaps(&bounds, d)) {
+            return None;
+        }
+        Some(if self.fullscreen {
+            WindowBounds::Fullscreen(bounds)
+        } else if self.maximized {
+            WindowBounds::Maximized(bounds)
+        } else {
+            WindowBounds::Windowed(bounds)
+        })
+    }
+}
+
+/// Is enough of `window` on `display` that the user could grab its title
+/// bar? A sliver poking onto a screen is as good as off-screen.
+pub fn visibly_overlaps(window: &Bounds<Pixels>, display: &Bounds<Pixels>) -> bool {
+    let overlap = |a0: f32, a1: f32, b0: f32, b1: f32| (a1.min(b1) - a0.max(b0)).max(0.0);
+    let wx0: f32 = window.origin.x.into();
+    let wy0: f32 = window.origin.y.into();
+    let wx1 = wx0 + f32::from(window.size.width);
+    let wy1 = wy0 + f32::from(window.size.height);
+    let dx0: f32 = display.origin.x.into();
+    let dy0: f32 = display.origin.y.into();
+    let dx1 = dx0 + f32::from(display.size.width);
+    let dy1 = dy0 + f32::from(display.size.height);
+    // 120x40 is about a title bar: enough to drag the window back.
+    overlap(wx0, wx1, dx0, dx1) >= 120.0 && overlap(wy0, wy1, dy0, dy1) >= 40.0
+}
+
+/// The `window.json` file in the user data dir.
+pub fn window_file() -> boss_core::store::JsonFile {
+    boss_core::store::JsonFile::in_dir(None, WINDOW_FILE)
+}
 
 /// A tab being dragged along the tab bar.
 #[derive(Clone, Debug)]
@@ -64,8 +168,11 @@ pub struct Workspace {
     actions: Arc<dyn ShellActions>,
     sidebar: Entity<Sidebar>,
     settings_page: Entity<SettingsPage>,
+    probe_state: Entity<ProbeState>,
     focus_handle: FocusHandle,
     last_title: String,
+    /// The pending debounced write of `window.json`.
+    save_bounds: Option<gpui::Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -73,7 +180,11 @@ impl Workspace {
     /// Build the workspace over shared state and the app's actions.
     pub fn new(state: Entity<AppState>, actions: Arc<dyn ShellActions>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(state.clone(), window, cx));
-        let settings_page = cx.new(|cx| SettingsPage::new(state.clone(), actions.clone(), window, cx));
+        // The app fills this entity from `Engine::probe` / `list_models`;
+        // the settings page observes it. See `ProbeState`.
+        let probe_state = cx.new(|_| ProbeState::new());
+        let settings_page =
+            cx.new(|cx| SettingsPage::new(state.clone(), probe_state.clone(), actions.clone(), window, cx));
 
         let settings = state.read(cx).settings.clone();
         apply_theme(settings.theme, Some(window), cx);
@@ -83,6 +194,7 @@ impl Workspace {
         let subscriptions = vec![
             cx.observe(&state, |_, _, cx| cx.notify()),
             cx.subscribe_in(&sidebar, window, Self::on_sidebar_event),
+            cx.observe_window_bounds(window, Self::on_window_bounds_changed),
             window.observe_window_appearance(move |window, cx| {
                 if appearance_state.read(cx).settings.theme == ThemePref::System {
                     apply_theme(ThemePref::System, Some(window), cx);
@@ -95,10 +207,30 @@ impl Workspace {
             actions,
             sidebar,
             settings_page,
+            probe_state,
             focus_handle: cx.focus_handle(),
             last_title: String::new(),
+            save_bounds: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// The window moved or was resized. Writing on every event would hit
+    /// disk dozens of times per drag, so the last position after
+    /// [`BOUNDS_DEBOUNCE`] of quiet is the one that lands.
+    fn on_window_bounds_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = WindowState::capture(window, cx);
+        self.save_bounds = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(BOUNDS_DEBOUNCE).await;
+            cx.background_executor()
+                .spawn(async move {
+                    if let Err(err) = window_file().save(&state) {
+                        tracing::warn!(%err, "could not save window bounds");
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |this, _| this.save_bounds = None);
+        }));
     }
 
     /// The shared state.
@@ -114,6 +246,12 @@ impl Workspace {
     /// The settings view (mounted when the settings tab is active).
     pub fn settings_page(&self) -> &Entity<SettingsPage> {
         &self.settings_page
+    }
+
+    /// Live engine probe and model results. `app.rs` updates this entity
+    /// from the tokio runtime and the settings page redraws itself.
+    pub fn probe_state(&self) -> &Entity<ProbeState> {
+        &self.probe_state
     }
 
     fn mutate(&self, cx: &mut Context<Self>, f: impl FnOnce(&mut AppState)) {
@@ -255,6 +393,35 @@ impl Workspace {
 
     fn on_toggle_sidebar(&mut self, _: &ToggleSidebar, _: &mut Window, cx: &mut Context<Self>) {
         self.toggle_sidebar(cx);
+    }
+
+    /// Cmd+Shift+T: bring back the tab that was closed last. A thread tab
+    /// also needs its pane rebuilt, so the app is told as if the thread had
+    /// been picked in the sidebar.
+    fn on_reopen_tab(&mut self, _: &ReopenTab, _: &mut Window, cx: &mut Context<Self>) {
+        let reopened = self.state.update(cx, |s, cx| {
+            let kind = s.reopen_closed_tab();
+            if kind.is_some() {
+                cx.notify();
+            }
+            kind
+        });
+        match reopened {
+            Some(TabKind::Thread(id)) => self.actions.open_thread(&id, cx),
+            Some(TabKind::Terminal { cwd }) => self.actions.new_terminal(&cwd, cx),
+            Some(TabKind::Browser { url }) => self.actions.new_browser(&url, cx),
+            Some(TabKind::Settings) => self.actions.open_settings(cx),
+            None => {}
+        }
+    }
+
+    /// Cmd+K: put the caret in the sidebar's filter box, opening the
+    /// sidebar first if it is hidden.
+    fn on_focus_sidebar_filter(&mut self, _: &FocusSidebarFilter, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).sidebar_collapsed {
+            self.mutate(cx, AppState::toggle_sidebar);
+        }
+        self.sidebar.update(cx, |sidebar, cx| sidebar.focus_search(window, cx));
     }
 
     // ---- rendering ---------------------------------------------------
@@ -460,6 +627,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_prev_tab))
             .on_action(cx.listener(Self::on_activate_tab))
             .on_action(cx.listener(Self::on_toggle_sidebar))
+            .on_action(cx.listener(Self::on_reopen_tab))
+            .on_action(cx.listener(Self::on_focus_sidebar_filter))
             .size_full()
             .child(self.render_title_bar(&title, state.sidebar_collapsed, cx))
             .child(
@@ -478,28 +647,55 @@ impl Render for Workspace {
     }
 }
 
+/// The bounds to open with: what `window.json` remembers when it still
+/// lands on an attached display, otherwise a centred default.
+pub fn restored_or_default_bounds(cx: &mut App) -> WindowBounds {
+    let displays: Vec<Bounds<Pixels>> = cx.displays().iter().map(|d| d.bounds()).collect();
+    let saved = match window_file().load::<WindowState>() {
+        Ok(saved) => saved,
+        Err(err) => {
+            tracing::warn!(%err, "window.json could not be read; using the default bounds");
+            None
+        }
+    };
+    if let Some(bounds) = saved.and_then(|s| s.to_window_bounds(&displays)) {
+        return bounds;
+    }
+    let mut window_size = DEFAULT_WINDOW_SIZE;
+    if let Some(display) = cx.primary_display() {
+        let display_size = display.bounds().size;
+        window_size.width = window_size.width.min(display_size.width * 0.9);
+        window_size.height = window_size.height.min(display_size.height * 0.9);
+    }
+    WindowBounds::Windowed(Bounds::centered(None, window_size, cx))
+}
+
 /// Open the main window with a workspace over `state`.
 pub fn open_main_window(
     state: Entity<AppState>,
     actions: Arc<dyn ShellActions>,
     cx: &mut App,
 ) -> anyhow::Result<WindowHandle<Root>> {
-    // TODO(lead): restore the last window bounds from disk here and save them on move/resize.
-    let mut window_size = size(px(1280.), px(840.));
-    if let Some(display) = cx.primary_display() {
-        let display_size = display.bounds().size;
-        window_size.width = window_size.width.min(display_size.width * 0.9);
-        window_size.height = window_size.height.min(display_size.height * 0.9);
-    }
-    let bounds = Bounds::centered(None, window_size, cx);
+    open_main_window_with_workspace(state, actions, cx).map(|(w, _)| w)
+}
+
+/// Like `open_main_window`, but also hands back the `Workspace` entity so
+/// the app can reach the settings page and probe state.
+pub fn open_main_window_with_workspace(
+    state: Entity<AppState>,
+    actions: Arc<dyn ShellActions>,
+    cx: &mut App,
+) -> anyhow::Result<(WindowHandle<Root>, Entity<Workspace>)> {
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_min_size: Some(size(px(720.), px(480.))),
+        window_bounds: Some(restored_or_default_bounds(cx)),
+        window_min_size: Some(MIN_WINDOW_SIZE),
         kind: WindowKind::Normal,
         ..TitleBar::window_options()
     };
     let title = state.read(cx).window_title();
-    let window = cx.open_window(options, |window, cx| {
+    let slot: std::rc::Rc<std::cell::RefCell<Option<Entity<Workspace>>>> = Default::default();
+    let slot_in = slot.clone();
+    let window = cx.open_window(options, move |window, cx| {
         let workspace = cx.new(|cx| Workspace::new(state, actions, window, cx));
         let focus = workspace.focus_handle(cx);
         window.defer(cx, move |window, cx| {
@@ -507,13 +703,15 @@ pub fn open_main_window(
                 focus.focus(window, cx);
             }
         });
+        *slot_in.borrow_mut() = Some(workspace.clone());
         cx.new(|cx| Root::new(workspace, window, cx))
     })?;
     window.update(cx, |_, window, _| {
         window.activate_window();
         window.set_window_title(&title);
     })?;
-    Ok(window)
+    let workspace = slot.borrow_mut().take().expect("workspace was created with the window");
+    Ok((window, workspace))
 }
 
 #[cfg(test)]
@@ -521,6 +719,85 @@ mod tests {
     use super::*;
     use crate::shell::NoopActions;
     use gpui::TestAppContext;
+
+    fn display(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
+        Bounds { origin: Point { x: px(x), y: px(y) }, size: Size { width: px(w), height: px(h) } }
+    }
+
+    fn saved(x: f32, y: f32, w: f32, h: f32) -> WindowState {
+        WindowState { x, y, width: w, height: h, ..WindowState::default() }
+    }
+
+    #[test]
+    fn saved_bounds_on_an_attached_display_are_restored() {
+        let displays = [display(0., 0., 1920., 1080.)];
+        let state = saved(100., 80., 1280., 840.);
+        assert_eq!(
+            state.to_window_bounds(&displays),
+            Some(WindowBounds::Windowed(state.bounds()))
+        );
+        // Maximized and fullscreen carry their restore size through.
+        let max = WindowState { maximized: true, ..state.clone() };
+        assert_eq!(max.to_window_bounds(&displays), Some(WindowBounds::Maximized(state.bounds())));
+        let full = WindowState { fullscreen: true, ..state.clone() };
+        assert_eq!(full.to_window_bounds(&displays), Some(WindowBounds::Fullscreen(state.bounds())));
+        // Fullscreen wins if both are somehow set.
+        let both = WindowState { fullscreen: true, maximized: true, ..state };
+        assert_eq!(both.to_window_bounds(&displays), Some(WindowBounds::Fullscreen(both.bounds())));
+    }
+
+    #[test]
+    fn off_screen_and_degenerate_bounds_fall_back_to_the_default() {
+        let displays = [display(0., 0., 1920., 1080.)];
+        // The second monitor was unplugged.
+        assert_eq!(saved(2400., 100., 1280., 840.).to_window_bounds(&displays), None);
+        // Dragged nearly off the bottom: not enough title bar left to grab.
+        assert_eq!(saved(200., 1070., 1280., 840.).to_window_bounds(&displays), None);
+        // Smaller than the window can legally be.
+        assert_eq!(saved(0., 0., 400., 300.).to_window_bounds(&displays), None);
+        // No displays at all.
+        assert_eq!(saved(0., 0., 1280., 840.).to_window_bounds(&[]), None);
+        // A default (all zeroes) file is never trusted.
+        assert_eq!(WindowState::default().to_window_bounds(&displays), None);
+    }
+
+    #[test]
+    fn a_window_spanning_two_displays_still_restores() {
+        let displays = [display(0., 0., 1920., 1080.), display(1920., 0., 1920., 1080.)];
+        // Mostly on the right-hand screen.
+        let state = saved(1800., 100., 1280., 840.);
+        assert!(state.to_window_bounds(&displays).is_some());
+    }
+
+    #[test]
+    fn window_state_round_trips_through_json() {
+        let state = WindowState {
+            x: 12.5,
+            y: -40.0,
+            width: 1400.0,
+            height: 900.0,
+            maximized: true,
+            fullscreen: false,
+            display: Some("D5F0F5A0-0000-0000-0000-000000000000".into()),
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        assert_eq!(serde_json::from_str::<WindowState>(&json).unwrap(), state);
+        // Missing fields default, so an older or hand-edited file loads.
+        let partial: WindowState = serde_json::from_str(r#"{"x":10,"y":20}"#).unwrap();
+        assert_eq!((partial.x, partial.y, partial.width), (10.0, 20.0, 0.0));
+        assert_eq!(partial.display, None);
+    }
+
+    #[test]
+    fn overlap_needs_a_grabbable_title_bar() {
+        let screen = display(0., 0., 1000., 800.);
+        // 200px of the window is on screen: fine.
+        assert!(visibly_overlaps(&display(-1080., 100., 1280., 840.), &screen));
+        // Only 100px across: not enough to grab.
+        assert!(!visibly_overlaps(&display(-1180., 100., 1280., 840.), &screen));
+        // Plenty across but only 20px down.
+        assert!(!visibly_overlaps(&display(100., 780., 1280., 840.), &screen));
+    }
 
     fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut gpui::VisualTestContext) {
         cx.update(gpui_component::init);
@@ -579,6 +856,69 @@ mod tests {
             assert_eq!(s.tabs.len(), 3);
             assert_eq!(s.active_tab, Some(1));
             assert!(s.sidebar_collapsed);
+        });
+    }
+
+    #[gpui::test]
+    fn cmd_shift_t_reopens_the_last_closed_tab(cx: &mut TestAppContext) {
+        let (workspace, cx) = workspace(cx);
+        workspace.update_in(cx, |w, window, cx| {
+            w.on_open_settings(&OpenSettings, window, cx);
+            w.on_close_tab(&CloseTab, window, cx);
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        workspace.read_with(cx, |w, cx| {
+            let s = w.state().read(cx);
+            assert_eq!(s.tabs.len(), 2);
+            assert_eq!(s.last_closed_tab(), Some(&TabKind::Settings));
+        });
+
+        workspace.update_in(cx, |w, window, cx| w.on_reopen_tab(&ReopenTab, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        workspace.read_with(cx, |w, cx| {
+            let s = w.state().read(cx);
+            assert_eq!(s.tabs.len(), 3);
+            assert_eq!(s.active_tab().map(|t| t.kind.clone()), Some(TabKind::Settings));
+            assert_eq!(s.closed_tab_count(), 0);
+        });
+
+        // Nothing left to reopen: the shortcut is a no-op, not a panic.
+        workspace.update_in(cx, |w, window, cx| w.on_reopen_tab(&ReopenTab, window, cx));
+        workspace.read_with(cx, |w, cx| assert_eq!(w.state().read(cx).tabs.len(), 3));
+    }
+
+    #[gpui::test]
+    fn cmd_k_opens_the_sidebar_and_focuses_its_filter(cx: &mut TestAppContext) {
+        let (workspace, cx) = workspace(cx);
+        workspace.update_in(cx, |w, window, cx| w.on_toggle_sidebar(&ToggleSidebar, window, cx));
+        workspace.read_with(cx, |w, cx| assert!(w.state().read(cx).sidebar_collapsed));
+
+        workspace.update_in(cx, |w, window, cx| w.on_focus_sidebar_filter(&FocusSidebarFilter, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        workspace.read_with(cx, |w, cx| assert!(!w.state().read(cx).sidebar_collapsed, "the sidebar reopened"));
+    }
+
+    #[gpui::test]
+    fn probe_results_reach_the_settings_page(cx: &mut TestAppContext) {
+        let (workspace, cx) = workspace(cx);
+        let probes = workspace.read_with(cx, |w, _| w.probe_state().clone());
+        probes.update(cx, |state, cx| {
+            state.set_probe(
+                EngineId::Claude,
+                boss_core::EngineProbe { installed: true, version: Some("2.1.0".into()), auth_error: None },
+                cx,
+            );
+            state.set_models(
+                EngineId::Claude,
+                vec![boss_core::ModelInfo { id: "claude-opus-5".into(), label: "Opus 5".into(), provider: None }],
+                cx,
+            );
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        probes.read_with(cx, |state, _| {
+            assert_eq!(crate::shell::settings::probe_label(state.probe(EngineId::Claude), false), "Ready · 2.1.0");
+            assert_eq!(state.models(EngineId::Claude).map(<[_]>::len), Some(1));
+            assert!(state.probe(EngineId::Codex).is_none(), "only Claude was probed");
         });
     }
 

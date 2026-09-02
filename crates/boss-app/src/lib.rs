@@ -12,5 +12,6 @@
 
 pub mod app;
 pub mod model;
+pub mod rooms;
 pub mod shell;
 pub mod transcript;

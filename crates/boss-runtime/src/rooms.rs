@@ -292,7 +292,7 @@ impl RoomCoordinator {
         let thread = host.state().thread(thread).ok_or_else(|| anyhow!("thread {thread} not found"))?;
         let message = user_message(&thread.id, recipient, &prompt);
         let id = message.id.clone();
-        show(host.as_ref(), &message);
+        show_message(host.as_ref(), &message);
         self.route(&host, &thread, prompt, Some(message)).await?;
         Ok(id)
     }
@@ -525,7 +525,7 @@ impl RoomCoordinator {
         message.status = MessageStatus::Complete;
         message.parts.push(Part::Text(TextPart { id: PartId::new(), text }));
         host.persist_message(message.clone());
-        show(host, &message);
+        show_message(host, &message);
     }
 
     /// Wait until the participant's run settles: a `Status { busy: false }`,
@@ -785,7 +785,9 @@ fn prompt_of(message: &Message) -> Prompt {
 }
 
 /// Show a stored message in the UI by replaying it as engine events.
-fn show(host: &dyn RoomHost, message: &Message) {
+/// Used for user turns that did not come from the desktop composer
+/// (rooms, the phone) and for system lines.
+pub fn show_message(host: &dyn RoomHost, message: &Message) {
     let author = match message.role {
         Role::User => ROOM_USER_ID,
         _ => SYSTEM_AUTHOR,

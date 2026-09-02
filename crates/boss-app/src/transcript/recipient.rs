@@ -2,13 +2,19 @@
 //!
 //! Minimal port of `src/renderer/src/lib/recipient.ts` (`retarget`) and
 //! `src/shared/room.ts` (`resolveMention`) against `ThreadModel.participants`.
-//! `boss_core::rooms::recipient` has the fuller version keyed on `RoomState`;
-//! it is not exported from `boss_core` yet, so this stays local until it is.
+//! `boss_core::rooms::recipient` has the fuller version, but it is keyed on
+//! a `RoomState` the composer does not hold — it reads `ThreadModel`, which
+//! carries participants and no room. The reserved ids are shared with it, so
+//! `@everyone` here and `everyone` there are the same value.
 
+use boss_core::rooms::{ROOM_EVERYONE, everyone_id};
 use boss_core::{Participant, ParticipantId};
 
 /// Reserved mention that addresses the coordinator (`is_boss`).
 pub const BOSS_MENTION: &str = "boss";
+
+/// Reserved mention that addresses every participant, each replying once.
+pub const EVERYONE_MENTION: &str = ROOM_EVERYONE;
 
 /// Result of a leading `@name` in composed text.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +57,11 @@ pub fn resolve_mention(name: &str, participants: &[Participant]) -> Option<Parti
     let wanted = name.trim().trim_start_matches('@').to_lowercase();
     if wanted.is_empty() {
         return None;
+    }
+    // Only where it means something: in a chat with one agent a broadcast is
+    // the same message with a stranger word on it.
+    if wanted == EVERYONE_MENTION && participants.len() > 1 {
+        return Some(everyone_id());
     }
     if wanted == BOSS_MENTION
         && let Some(boss) = participants.iter().find(|p| p.is_boss)
@@ -119,6 +130,18 @@ mod tests {
         assert!(retarget("ask @builder about it", &team(), false).is_none());
         assert!(retarget("@builder2 hi", &team(), false).is_none(), "longer name is a different name");
         assert!(retarget("email me@builder.dev", &team(), false).is_none());
+    }
+
+    #[test]
+    fn everyone_broadcasts_but_only_where_there_is_more_than_one_agent() {
+        let m = retarget("@everyone status please", &team(), false).expect("a broadcast");
+        assert_eq!(m.recipient.as_str(), EVERYONE_MENTION);
+        assert_eq!(m.rest, "status please");
+        let alone = &team()[..1];
+        assert!(
+            resolve_mention("everyone", alone).is_none(),
+            "with one agent a broadcast is the same message with a stranger word on it"
+        );
     }
 
     #[test]

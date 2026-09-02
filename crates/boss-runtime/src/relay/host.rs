@@ -192,6 +192,10 @@ impl RuntimeHost {
             let id = model.push_user_message(text.clone(), None, vec![]);
             if let Some(message) = model.message(&id) {
                 self.runtime.persist_message(message.clone());
+                // The desktop transcript learns about phone-sent turns the
+                // same way it learns about room turns: as replayed events.
+                let host: &dyn crate::rooms::RoomHost = self.runtime.as_ref();
+                crate::rooms::show_message(host, message);
                 self.emit(json!({ "type": "message.updated", "properties": { "info": wire::info_to_wire(message) } }));
             }
         }

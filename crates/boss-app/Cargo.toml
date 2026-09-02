@@ -17,6 +17,7 @@ boss-core = { path = "../boss-core" }
 boss-runtime = { path = "../boss-runtime" }
 boss-terminal = { path = "../boss-terminal" }
 boss-browser = { path = "../boss-browser" }
+boss-update = { path = "../boss-update" }
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true

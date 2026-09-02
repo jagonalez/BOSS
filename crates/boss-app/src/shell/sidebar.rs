@@ -4,6 +4,7 @@
 
 use super::state::AppState;
 use super::time_ago;
+use crate::rooms::{SHAPES, shape_label};
 use boss_core::*;
 use gpui::{
     App, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, MouseButton, Render, SharedString,
@@ -62,6 +63,55 @@ pub struct ThreadRow {
     pub busy: bool,
     /// This is the selected thread.
     pub selected: bool,
+    /// The room's card: shape, who is in it, and who is working. `None` for
+    /// a chat, which is one agent and needs no card.
+    pub card: Option<RoomCard>,
+}
+
+/// What a room row says under its title. A room is several agents and a
+/// shape, and a count alone does not say which.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomCard {
+    /// How the job runs, in the user's words.
+    pub shape: &'static str,
+    /// Seats in the room, BOSS included.
+    pub participants: usize,
+    /// Who is working right now. `None` when the room is idle; `Some` names
+    /// the agent only when one of them can be named, because "someone is
+    /// working" is true and "the builder is working" may not be.
+    pub working: Option<String>,
+}
+
+impl RoomCard {
+    /// The card as one line: what the row shows under its title.
+    pub fn summary(&self) -> String {
+        let seats = if self.participants == 1 {
+            "1 agent".to_owned()
+        } else {
+            format!("{} agents", self.participants)
+        };
+        match &self.working {
+            Some(who) => format!("{} · {who} working", self.shape),
+            None => format!("{} · {seats}", self.shape),
+        }
+    }
+}
+
+/// The card for a room thread, or `None` for anything else.
+///
+/// `AppState` records that a room is busy, not which seat is running. With
+/// exactly one agent besides BOSS the answer is unambiguous, so the card
+/// names it; with more it says the room is working rather than guessing.
+pub fn room_card(state: &AppState, thread: &Thread) -> Option<RoomCard> {
+    let room = state.room_for(&thread.id)?;
+    let working = state.is_busy(&thread.id).then(|| {
+        let mut workers = room.participants.iter().filter(|p| !p.is_boss);
+        match (workers.next(), workers.next()) {
+            (Some(only), None) => only.name.clone(),
+            _ => "someone".to_owned(),
+        }
+    });
+    Some(RoomCard { shape: shape_label(room.shape), participants: room.participants.len(), working })
 }
 
 /// A project header and the thread rows under it.
@@ -96,6 +146,7 @@ fn row_for(state: &AppState, thread: &Thread) -> ThreadRow {
         participants,
         busy: state.is_busy(&thread.id),
         selected: state.selected_thread.as_ref() == Some(&thread.id),
+        card: room_card(state, thread),
     }
 }
 
@@ -144,17 +195,6 @@ pub fn archived_rows(state: &AppState, query: &str) -> Vec<ThreadRow> {
     rows
 }
 
-/// The user-facing name of a room shape.
-pub fn shape_label(shape: RoomShape) -> &'static str {
-    match shape {
-        RoomShape::Direct => "Just do it",
-        RoomShape::Reviewed => "Build and review",
-        RoomShape::Full => "The full run",
-    }
-}
-
-/// Every shape, in the order the picker lists them.
-pub const SHAPES: [RoomShape; 3] = [RoomShape::Direct, RoomShape::Reviewed, RoomShape::Full];
 
 /// The sidebar view.
 pub struct Sidebar {
@@ -372,10 +412,12 @@ impl Sidebar {
         let archived = row.thread.archived;
         let renaming = self.renaming.as_ref() == Some(&id);
         let kind_icon = if is_room { IconName::Network } else { IconName::Bot };
-        let badge: SharedString = match (row.engine, row.participants) {
-            (Some(engine), _) => engine.as_str().into(),
-            (None, n) if n > 0 => format!("{n} agents").into(),
-            _ => "".into(),
+        // A chat is one agent, so its engine is the whole answer. A room is
+        // a shape and several agents, and a bare count says neither.
+        let badge: SharedString = match (&row.card, row.engine) {
+            (Some(card), _) => card.summary().into(),
+            (None, Some(engine)) => engine.as_str().into(),
+            (None, None) => "".into(),
         };
         let open_id = id.clone();
         let weak = cx.weak_entity();
@@ -413,11 +455,15 @@ impl Sidebar {
                 this.child(
                     div()
                         .px_1()
+                        .min_w_0()
                         .rounded(cx.theme().radius)
                         .bg(cx.theme().muted)
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .flex_shrink_0()
+                        // A room's card is a sentence, so it gives way before
+                        // the title does; a chat's one word never has to.
+                        .when(row.card.is_none(), |d| d.flex_shrink_0())
+                        .truncate()
                         .child(badge),
                 )
             })
@@ -588,10 +634,48 @@ mod tests {
         assert_eq!(archived_rows(&s, "boss").len(), 1);
     }
 
+    fn row(state: &AppState, title: &str) -> ThreadRow {
+        state
+            .threads
+            .iter()
+            .find(|t| t.title == title)
+            .map(|t| row_for(state, t))
+            .expect("a thread by that title")
+    }
+
     #[test]
-    fn shape_labels_match_the_design() {
-        assert_eq!(shape_label(RoomShape::Direct), "Just do it");
-        assert_eq!(shape_label(RoomShape::Reviewed), "Build and review");
-        assert_eq!(shape_label(RoomShape::Full), "The full run");
+    fn a_room_row_says_its_shape_and_who_is_in_it_where_a_chat_names_its_engine() {
+        let s = demo();
+        // Idle: the busy demo rooms are 1 and 6, so 3 is the quiet one.
+        let quiet = row(&s, "Settings page: theme + fonts");
+        let card = quiet.card.expect("a room has a card");
+        assert_eq!(card.shape, "Build and review");
+        assert_eq!(card.participants, 3);
+        assert_eq!(card.working, None);
+        assert_eq!(card.summary(), "Build and review · 3 agents");
+
+        let chat = row(&s, "Why does the list jump on scroll?");
+        assert_eq!(chat.card, None, "a chat is one agent and needs no card");
+        assert_eq!(chat.engine, Some(EngineId::Claude));
+    }
+
+    #[test]
+    fn a_busy_room_names_the_only_agent_it_could_be_and_otherwise_says_someone() {
+        let s = demo();
+        // One builder besides BOSS: there is only one answer.
+        let alone = row(&s, "Rotate the relay signing key").card.expect("a card");
+        assert_eq!(alone.working.as_deref(), Some("builder"));
+        assert_eq!(alone.summary(), "Just do it · builder working");
+
+        // Three besides BOSS: naming one of them would be a guess.
+        let crowded = row(&s, "Port the sidebar to GPUI").card.expect("a card");
+        assert_eq!(crowded.working.as_deref(), Some("someone"));
+        assert_eq!(crowded.summary(), "The full run · someone working");
+    }
+
+    #[test]
+    fn a_one_agent_room_counts_in_the_singular() {
+        let card = RoomCard { shape: "Just do it", participants: 1, working: None };
+        assert_eq!(card.summary(), "Just do it · 1 agent");
     }
 }

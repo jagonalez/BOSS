@@ -12,16 +12,33 @@ use alacritty_terminal::vte::ansi::CursorShape;
 use gpui::{
     App, Bounds, ClipboardItem, ContentMask, CursorStyle, DispatchPhase, Element, ElementId,
     ElementInputHandler, Entity, FocusHandle, Font, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
-    InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point as GpuiPoint, ScrollDelta, ScrollWheelEvent, SharedString,
-    StrikethroughStyle, Style, TextAlign, TextRun, UnderlineStyle, Window, fill, outline, point,
-    px, relative, size,
+    InspectorElementId, IntoElement, LayoutId, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point as GpuiPoint, ScrollDelta, ScrollWheelEvent,
+    SharedString, StrikethroughStyle, Style, TextAlign, TextRun, UnderlineStyle, Window, fill,
+    outline, point, px, relative, size,
 };
 use gpui_component::ActiveTheme;
 
 use crate::colors::Palette;
+use crate::mouse::{MouseButtonCode, MouseEventKind, MouseModifiers, MouseReport};
 use crate::terminal::{Frame, GridSize, SelectionKind, Terminal};
 use crate::view::TerminalView;
+
+/// Map a GPUI button onto the code a program is told about. Buttons past
+/// the third are not reported.
+pub fn report_button(button: MouseButton) -> Option<MouseButtonCode> {
+    match button {
+        MouseButton::Left => Some(MouseButtonCode::Left),
+        MouseButton::Middle => Some(MouseButtonCode::Middle),
+        MouseButton::Right => Some(MouseButtonCode::Right),
+        _ => None,
+    }
+}
+
+/// GPUI modifiers as the mouse protocol's three bits.
+pub fn report_modifiers(m: &Modifiers) -> MouseModifiers {
+    MouseModifiers { shift: m.shift, alt: m.alt, control: m.control }
+}
 
 /// Font and cell metrics the terminal paints with.
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +110,11 @@ pub struct Layout {
     cell_width: Pixels,
     line_height: Pixels,
     focused: bool,
+    /// Blink phase: false means the cursor is in its "off" half.
+    cursor_visible: bool,
+    /// The program is reading the mouse, so the pointer is an arrow and
+    /// drags do not select.
+    mouse_reporting: bool,
 }
 
 impl TerminalElement {
@@ -130,10 +152,41 @@ impl TerminalElement {
                 if !focus.is_focused(window) {
                     focus.focus(window, cx);
                 }
+                let (cell, side) = cell_at(event.position - origin, cell_width, line_height, grid);
+
+                // Cmd+click opens a URL instead of selecting it. Checked
+                // first so a link in a full-screen program still works.
+                if event.button == MouseButton::Left
+                    && event.modifiers.platform
+                    && let Some(url) = terminal.link_at(cell)
+                {
+                    view.update(cx, |view, cx| view.open_link(&url, cx));
+                    cx.stop_propagation();
+                    return;
+                }
+
+                // The program asked for the mouse: hand the press over.
+                if let Some(button) = report_button(event.button) {
+                    let report = MouseReport {
+                        button,
+                        kind: MouseEventKind::Press,
+                        col: cell.column.0,
+                        row: cell.line.0.max(0) as usize,
+                        modifiers: report_modifiers(&event.modifiers),
+                    };
+                    if terminal.report_mouse(&report) {
+                        view.update(cx, |view, cx| {
+                            view.set_reported_button(Some(button));
+                            cx.notify();
+                        });
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
+
                 if event.button != MouseButton::Left {
                     return;
                 }
-                let (cell, side) = cell_at(event.position - origin, cell_width, line_height, grid);
                 let kind = match event.click_count {
                     0 => return,
                     1 if event.modifiers.alt => SelectionKind::Block,
@@ -158,13 +211,41 @@ impl TerminalElement {
             let terminal = self.terminal.clone();
             let view = self.view.clone();
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
-                if phase != DispatchPhase::Bubble || !event.dragging() {
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                let (cell, side) = cell_at(event.position - origin, cell_width, line_height, grid);
+                let col = cell.column.0;
+                let row = cell.line.0.max(0) as usize;
+
+                // A drag the program owns: report the motion, do not select.
+                if let Some(button) = view.read(cx).reported_button() {
+                    let report = MouseReport {
+                        button,
+                        kind: MouseEventKind::Motion,
+                        col,
+                        row,
+                        modifiers: report_modifiers(&event.modifiers),
+                    };
+                    terminal.report_mouse(&report);
+                    cx.stop_propagation();
+                    return;
+                }
+                // Mode 1003 wants every move, button or not.
+                if !event.dragging() {
+                    let report = MouseReport {
+                        button: MouseButtonCode::Left,
+                        kind: MouseEventKind::Motion,
+                        col,
+                        row,
+                        modifiers: report_modifiers(&event.modifiers),
+                    };
+                    terminal.report_mouse(&report);
                     return;
                 }
                 if !view.read(cx).is_dragging() {
                     return;
                 }
-                let (cell, side) = cell_at(event.position - origin, cell_width, line_height, grid);
                 terminal.update_selection(cell, side);
                 view.update(cx, |_, cx| cx.notify());
             });
@@ -174,7 +255,30 @@ impl TerminalElement {
             let terminal = self.terminal.clone();
             let view = self.view.clone();
             window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
-                if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                // Release the button the program is tracking.
+                if let Some(button) = view.read(cx).reported_button()
+                    && report_button(event.button) == Some(button)
+                {
+                    let (cell, _) = cell_at(event.position - origin, cell_width, line_height, grid);
+                    let report = MouseReport {
+                        button,
+                        kind: MouseEventKind::Release,
+                        col: cell.column.0,
+                        row: cell.line.0.max(0) as usize,
+                        modifiers: report_modifiers(&event.modifiers),
+                    };
+                    terminal.report_mouse(&report);
+                    view.update(cx, |view, cx| {
+                        view.set_reported_button(None);
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                    return;
+                }
+                if event.button != MouseButton::Left {
                     return;
                 }
                 if !view.read(cx).is_dragging() {
@@ -200,16 +304,37 @@ impl TerminalElement {
                     return;
                 }
                 let lines = view.update(cx, |view, _| view.accumulate_scroll(event.delta, line_height));
-                if lines != 0 {
-                    terminal.scroll_lines(lines);
-                    view.update(cx, |_, cx| cx.notify());
+                if lines == 0 {
+                    cx.stop_propagation();
+                    return;
                 }
+                // A program reading the mouse gets wheel buttons 64/65, one
+                // per line, instead of the view scrolling.
+                if terminal.mouse_reporting() && !event.modifiers.shift {
+                    let (cell, _) = cell_at(event.position - origin, cell_width, line_height, grid);
+                    let button = if lines > 0 { MouseButtonCode::WheelUp } else { MouseButtonCode::WheelDown };
+                    let report = MouseReport {
+                        button,
+                        kind: MouseEventKind::Press,
+                        col: cell.column.0,
+                        row: cell.line.0.max(0) as usize,
+                        modifiers: report_modifiers(&event.modifiers),
+                    };
+                    for _ in 0..lines.unsigned_abs() {
+                        terminal.report_mouse(&report);
+                    }
+                    cx.stop_propagation();
+                    return;
+                }
+                terminal.scroll_lines(lines);
+                view.update(cx, |_, cx| cx.notify());
                 cx.stop_propagation();
             });
         }
     }
 
     fn paint_frame(&self, layout: &mut Layout, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        let layout_cursor_visible = layout.cursor_visible;
         let Layout { frame, palette, cell_width, line_height, focused, .. } = &*layout;
         let cell_width = *cell_width;
         let line_height = *line_height;
@@ -244,6 +369,9 @@ impl TerminalElement {
         }
 
         let cursor_cell = frame.cursor.filter(|_| frame.display_offset == 0);
+        // In the "off" half of the blink the cursor is simply not drawn;
+        // the glyph under it renders normally.
+        let cursor_cell = cursor_cell.filter(|_| layout_cursor_visible);
         if let (Some(cursor), true) = (cursor_cell, *focused) {
             let width = if cursor.wide { 2 } else { 1 };
             let cursor_bounds = cell_bounds(cursor.col, cursor.row, width);
@@ -379,7 +507,22 @@ impl Element for TerminalElement {
         let frame = self.terminal.frame(&palette);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         window.set_focus_handle(&self.focus, cx);
-        Layout { hitbox, frame, palette, cell_width, line_height, focused: self.focus.is_focused(window) }
+        let focused = self.focus.is_focused(window);
+        let cursor_visible = self.view.update(cx, |view, cx| {
+            let visible = view.sync_focus(focused);
+            view.schedule_blink(focused, cx);
+            visible
+        });
+        Layout {
+            hitbox,
+            frame,
+            palette,
+            cell_width,
+            line_height,
+            focused,
+            cursor_visible,
+            mouse_reporting: self.terminal.mouse_reporting(),
+        }
     }
 
     fn paint(
@@ -393,7 +536,10 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) {
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            window.set_cursor_style(CursorStyle::IBeam, &layout.hitbox);
+            // A program reading the mouse gets the arrow, so it is obvious
+            // that a drag will not select.
+            let style = if layout.mouse_reporting { CursorStyle::Arrow } else { CursorStyle::IBeam };
+            window.set_cursor_style(style, &layout.hitbox);
             window.handle_input(&self.focus, ElementInputHandler::new(bounds, self.view.clone()), cx);
             self.register_mouse(layout, bounds, window);
             self.paint_frame(layout, bounds, window, cx);

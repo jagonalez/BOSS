@@ -7,18 +7,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use alacritty_terminal::event::{Event as TermEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Line, Point, Side};
+use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config, Term, TermMode};
-use alacritty_terminal::vte::ansi::{ClearMode, CursorShape, Handler, Processor};
+use alacritty_terminal::vte::ansi::{ClearMode, CursorShape, CursorStyle, Handler, Processor};
 use anyhow::Result;
 use gpui::Hsla;
 use parking_lot::Mutex;
 
 use crate::colors::Palette;
 use crate::keys::{KeyModes, key_to_bytes};
+use crate::links::{LinkSpan, find_links};
+use crate::mouse::{MouseReport, encode as encode_mouse};
 use crate::pty::{Pty, PtyEvent, PtySpec};
 use crate::throttle::FlowControl;
 
@@ -220,7 +222,13 @@ impl Terminal {
         let (term_tx, term_rx) = async_channel::unbounded();
         let (pty_tx, pty_rx) = async_channel::bounded(64);
 
-        let config = Config { scrolling_history: SCROLLBACK_LINES, ..Config::default() };
+        // Terminals blink their cursor by default; DECSCUSR steady shapes
+        // and `set_blinking_cursor` turn it off.
+        let config = Config {
+            scrolling_history: SCROLLBACK_LINES,
+            default_cursor_style: CursorStyle { shape: CursorShape::Block, blinking: true },
+            ..Config::default()
+        };
         let term = Arc::new(FairMutex::new(Term::new(config, &size, Listener { events: term_tx })));
 
         let flow = FlowControl::new();
@@ -292,6 +300,85 @@ impl Terminal {
             app_cursor: mode.contains(TermMode::APP_CURSOR),
             disambiguate: mode.contains(TermMode::DISAMBIGUATE_ESC_CODES),
         }
+    }
+
+    /// Does the program want a blinking cursor? DECSCUSR steady shapes
+    /// (`CSI 2 SP q` and friends) turn this off.
+    pub fn cursor_blinks(&self) -> bool {
+        self.term.lock().cursor_style().blinking
+    }
+
+    /// Is the program reading the mouse itself (any of modes 1000/1002/1003)?
+    pub fn mouse_reporting(&self) -> bool {
+        self.mode().intersects(TermMode::MOUSE_MODE)
+    }
+
+    /// Forward a mouse event to the program if it asked for one. Returns
+    /// whether it was sent, so the caller can fall back to selection.
+    pub fn report_mouse(&self, report: &MouseReport) -> bool {
+        match encode_mouse(self.mode(), report) {
+            // Reports go straight to the pty: they must not scroll the view
+            // back to the bottom the way typing does.
+            Some(bytes) => {
+                if let Err(err) = self.pty.write(&bytes) {
+                    tracing::warn!(%err, "mouse report write failed");
+                    return false;
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The visible row as text, one character per column. Wide characters
+    /// occupy their spacer column with a space so columns line up.
+    pub fn row_text(&self, row: usize) -> String {
+        let term = self.term.lock();
+        let offset = term.grid().display_offset();
+        if row >= term.screen_lines() {
+            return String::new();
+        }
+        let line = Line(row as i32 - offset as i32);
+        let grid_row = &term.grid()[line];
+        (0..term.columns())
+            .map(|col| {
+                let cell = &grid_row[Column(col)];
+                if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+                    ' '
+                } else {
+                    cell.c
+                }
+            })
+            .collect()
+    }
+
+    /// The OSC 8 hyperlink on a visible cell, if the program set one and
+    /// its scheme is one BOSS will open.
+    pub fn osc_hyperlink_at(&self, point: Point) -> Option<String> {
+        let term = self.term.lock();
+        let offset = term.grid().display_offset();
+        if point.line.0 < 0 || point.line.0 as usize >= term.screen_lines() {
+            return None;
+        }
+        let grid_point = viewport_to_grid(point, offset);
+        term.grid()[grid_point].hyperlink().map(|h| h.uri().to_owned()).filter(|uri| crate::links::is_openable(uri))
+    }
+
+    /// The URL under a visible cell: the program's OSC 8 link if there is
+    /// one, else a plain URL found in the row's text.
+    pub fn link_at(&self, point: Point) -> Option<String> {
+        if let Some(uri) = self.osc_hyperlink_at(point) {
+            return Some(uri);
+        }
+        if point.line.0 < 0 {
+            return None;
+        }
+        crate::links::link_at(&self.row_text(point.line.0 as usize), point.column.0)
+    }
+
+    /// Every plain URL on a visible row, with the columns it covers.
+    pub fn links_on_row(&self, row: usize) -> Vec<LinkSpan> {
+        find_links(&self.row_text(row))
     }
 
     /// Send raw bytes to the shell and snap the view back to the bottom.
@@ -610,7 +697,6 @@ pub fn build_frame<T: EventListener>(term: &Term<T>, palette: &Palette) -> Frame
 mod tests {
     use super::*;
     use alacritty_terminal::event::VoidListener;
-    use alacritty_terminal::index::Column;
 
     fn term_with(cols: usize, rows: usize, input: &str) -> Term<VoidListener> {
         let size = GridSize { cols, rows };
@@ -703,5 +789,97 @@ mod tests {
     fn paste_bytes_forms() {
         assert_eq!(paste_bytes("a\r\nb\nc", false), b"a\rb\rc".to_vec());
         assert_eq!(paste_bytes("x\x1by", true), b"\x1b[200~xy\x1b[201~".to_vec());
+    }
+
+    /// `row_text` reads a locked `Term`; this is the same walk, so the row
+    /// extraction that link detection depends on is covered without a pty.
+    fn row_text_of<T: alacritty_terminal::event::EventListener>(term: &Term<T>, row: usize) -> String {
+        let offset = term.grid().display_offset();
+        let line = Line(row as i32 - offset as i32);
+        let grid_row = &term.grid()[line];
+        (0..term.columns())
+            .map(|col| {
+                let cell = &grid_row[Column(col)];
+                if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
+                    ' '
+                } else {
+                    cell.c
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_url_printed_to_the_grid_is_found_at_its_column() {
+        let term = term_with(48, 2, "open https://boss.dev/docs now");
+        let row = row_text_of(&term, 0);
+        assert!(row.starts_with("open https://boss.dev/docs now"));
+        assert_eq!(crate::links::link_at(&row, 10).as_deref(), Some("https://boss.dev/docs"));
+        assert_eq!(crate::links::link_at(&row, 2), None, "the word 'open' is not a link");
+        assert_eq!(crate::links::link_at(&row, 40), None, "trailing blanks are not a link");
+    }
+
+    #[test]
+    fn osc_8_hyperlinks_are_recorded_on_their_cells() {
+        // OSC 8 wraps "docs" in a link that the visible text does not show.
+        let term = term_with(20, 2, "\x1b]8;;https://boss.dev/x\x1b\\docs\x1b]8;;\x1b\\ end");
+        let link = term.grid()[Point::new(Line(0), Column(1))].hyperlink();
+        assert_eq!(link.map(|h| h.uri().to_owned()), Some("https://boss.dev/x".to_owned()));
+        assert!(term.grid()[Point::new(Line(0), Column(6))].hyperlink().is_none());
+    }
+
+    #[test]
+    fn mouse_modes_switch_on_and_off_through_the_grid() {
+        // 1000 = report clicks, 1006 = SGR encoding.
+        let mut term = term_with(20, 4, "");
+        let mut processor: Processor = Processor::new();
+        assert!(!term.mode().intersects(TermMode::MOUSE_MODE));
+        processor.advance(&mut term, b"\x1b[?1000h\x1b[?1006h");
+        assert!(term.mode().contains(TermMode::MOUSE_REPORT_CLICK));
+        assert!(term.mode().contains(TermMode::SGR_MOUSE));
+
+        let report = crate::mouse::MouseReport {
+            button: crate::mouse::MouseButtonCode::Left,
+            kind: crate::mouse::MouseEventKind::Press,
+            col: 4,
+            row: 1,
+            modifiers: Default::default(),
+        };
+        assert_eq!(crate::mouse::encode(*term.mode(), &report).unwrap(), b"\x1b[<0;5;2M".to_vec());
+
+        // 1002 adds drag reporting; without it motion is not sent.
+        assert!(crate::mouse::encode(*term.mode(), &crate::mouse::MouseReport {
+            kind: crate::mouse::MouseEventKind::Motion,
+            ..report
+        })
+        .is_none());
+        processor.advance(&mut term, b"\x1b[?1002h");
+        assert!(crate::mouse::encode(*term.mode(), &crate::mouse::MouseReport {
+            kind: crate::mouse::MouseEventKind::Motion,
+            ..report
+        })
+        .is_some());
+
+        processor.advance(&mut term, b"\x1b[?1000l\x1b[?1002l");
+        assert!(!term.mode().intersects(TermMode::MOUSE_MODE));
+        assert_eq!(crate::mouse::encode(*term.mode(), &report), None);
+    }
+
+    #[test]
+    fn decscusr_turns_cursor_blinking_off_and_on() {
+        let size = GridSize { cols: 20, rows: 3 };
+        let config = Config {
+            default_cursor_style: CursorStyle { shape: CursorShape::Block, blinking: true },
+            ..Config::default()
+        };
+        let mut term = Term::new(config, &size, VoidListener);
+        let mut processor: Processor = Processor::new();
+        assert!(term.cursor_style().blinking, "a fresh terminal blinks");
+        // CSI 2 SP q: steady block.
+        processor.advance(&mut term, b"\x1b[2 q");
+        assert!(!term.cursor_style().blinking);
+        // CSI 1 SP q: blinking block again.
+        processor.advance(&mut term, b"\x1b[1 q");
+        assert!(term.cursor_style().blinking);
     }
 }

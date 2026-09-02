@@ -19,6 +19,11 @@ pub struct Palette {
     pub cursor: Hsla,
     /// Selection highlight.
     pub selection: Hsla,
+    /// Render bold text in the eight base colours with their bright twin,
+    /// the way xterm does. On against a dark background, where the bright
+    /// set reads as emphasis; off against a light one, where brightening
+    /// only washes the text out.
+    pub bold_as_bright: bool,
 }
 
 /// ANSI colours tuned for dark backgrounds (the "One Dark"-ish set the
@@ -38,13 +43,15 @@ impl Palette {
     /// Build a palette from the app theme: text, background, caret and
     /// selection come from the theme; the ANSI set is chosen by light/dark.
     pub fn from_theme(theme: &Theme) -> Self {
-        let ansi = if theme.is_dark() { DARK_ANSI } else { LIGHT_ANSI };
+        let dark = theme.is_dark();
+        let ansi = if dark { DARK_ANSI } else { LIGHT_ANSI };
         Self {
             ansi: ansi.map(|hex| rgb(hex).into()),
             foreground: theme.foreground,
             background: theme.background,
             cursor: theme.caret,
             selection: theme.selection,
+            bold_as_bright: dark,
         }
     }
 
@@ -56,6 +63,19 @@ impl Palette {
             background: rgb(0x1e2127).into(),
             cursor: rgb(0x61afef).into(),
             selection: rgb(0x3e4451).into(),
+            bold_as_bright: true,
+        }
+    }
+
+    /// A light palette that needs no theme; bold does not brighten.
+    pub fn light() -> Self {
+        Self {
+            ansi: LIGHT_ANSI.map(|hex| rgb(hex).into()),
+            foreground: rgb(0x383a42).into(),
+            background: rgb(0xfafafa).into(),
+            cursor: rgb(0x0184bc).into(),
+            selection: rgb(0xd6dae0).into(),
+            bold_as_bright: false,
         }
     }
 
@@ -71,8 +91,9 @@ impl Palette {
     }
 
     /// The foreground to use for a cell, honouring bold-as-bright for the
-    /// eight base colours the way xterm does.
+    /// eight base colours the way xterm does, when the theme asks for it.
     pub fn foreground_for(&self, color: Color, overrides: &Colors, bold: bool, dim: bool) -> Hsla {
+        let bold = bold && self.bold_as_bright;
         let color = match color {
             Color::Named(named) if bold && (named as usize) < 8 => Color::Named(named.to_bright()),
             Color::Indexed(index) if bold && index < 8 => Color::Indexed(index + 8),
@@ -179,5 +200,20 @@ mod tests {
         );
         assert_eq!(p.foreground_for(Color::Indexed(9), &none, true, false), p.ansi[9]);
         assert_eq!(p.foreground_for(Color::Indexed(200), &none, true, false), p.indexed(200, &none));
+    }
+
+    #[test]
+    fn bold_as_bright_follows_the_theme() {
+        let none = Colors::default();
+        let light = Palette::light();
+        assert!(!light.bold_as_bright);
+        // Bold keeps the normal colour when the theme says so.
+        assert_eq!(
+            light.foreground_for(Color::Named(NamedColor::Red), &none, true, false),
+            light.ansi[1]
+        );
+        // An explicitly bright colour is still bright.
+        assert_eq!(light.foreground_for(Color::Indexed(9), &none, false, false), light.ansi[9]);
+        assert!(Palette::dark().bold_as_bright);
     }
 }

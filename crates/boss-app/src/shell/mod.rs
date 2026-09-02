@@ -14,7 +14,7 @@ pub use actions::{NoopActions, ShellActions};
 pub use settings::SettingsPage;
 pub use sidebar::{Sidebar, SidebarEvent};
 pub use state::{AppState, Tab, TabId, TabKind};
-pub use workspace::{Workspace, open_main_window};
+pub use workspace::{Workspace, open_main_window, open_main_window_with_workspace};
 
 use boss_core::store::Theme as ThemePref;
 use gpui::{App, KeyBinding, Window, px};
@@ -40,6 +40,10 @@ gpui::actions!(
         PrevTab,
         /// Show or hide the sidebar.
         ToggleSidebar,
+        /// Reopen the tab that was closed most recently.
+        ReopenTab,
+        /// Put the caret in the sidebar's filter box.
+        FocusSidebarFilter,
     ]
 );
 
@@ -74,6 +78,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-w", CloseTab, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-b", ToggleSidebar, None),
+        KeyBinding::new("cmd-shift-t", ReopenTab, None),
+        KeyBinding::new("cmd-k", FocusSidebarFilter, None),
         KeyBinding::new("cmd-shift-]", NextTab, None),
         KeyBinding::new("cmd-shift-[", PrevTab, None),
         KeyBinding::new("ctrl-tab", NextTab, None),
@@ -84,6 +90,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-w", CloseTab, None),
         KeyBinding::new("ctrl-,", OpenSettings, None),
         KeyBinding::new("ctrl-b", ToggleSidebar, None),
+        KeyBinding::new("ctrl-shift-t", ReopenTab, None),
+        KeyBinding::new("ctrl-k", FocusSidebarFilter, None),
     ];
     for n in 1..=9usize {
         bindings.push(KeyBinding::new(&format!("cmd-{n}"), ActivateTab(n - 1), None));

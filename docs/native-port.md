@@ -96,13 +96,13 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | 7 | boss-runtime: Runtime, SessionManager, ThreadModel, RuntimeBusHandler | lead | done | headless crate; thread tools ported, worktree/rooms/reports tools stubbed |
 | 8 | Wiring: `BossApp` (ShellActions), event pump, tab views, browser tools on the bus | lead | done | verified: real Claude Code chat end to end in the native window |
 | 8b1 | Rooms runtime: `RoomCoordinator` executes intents, session hooks, handover | agent (fable) | done | 7 tests; state in `rooms-manager.json`; seats go stale on restart |
-| 8b2 | Rooms UI: team setup, team bar, recipient menu, replies panel, room cards | agent (opus) | in progress | `crates/boss-app/src/rooms/` |
+| 8b2 | Rooms UI: team setup, team bar, recipient menu, replies panel, room cards | agent (opus) | done | 93 tests; `RoomPane` mounts team bar + transcript; replies panel on the right |
 | 8c1 | Worktree tools: spawn/use/leave worktree, rooms_open | agent (opus) | done | 16 tests; `RoomOpener` trait filled by the app |
 | 8c2 | Still stubbed: reports, notes, presence, workflows, boss_computer | lead | queued | |
-| 8d | Live engine smoke tests: codex, opencode, pi against real binaries | agent (opus) | in progress | `crates/boss-runtime/examples/engine_smoke.rs` |
+| 8d | Live engine smoke tests: codex, opencode, pi against real binaries | agent (opus) | done | claude, codex, opencode pass live; pi not logged in here; fixed codex `approvalsReviewer` (user config could auto-approve) |
 | 8e | Relay client for the phone app (E2E crypto, pairing, resume) | agent (fable) | done | 50 tests; byte-compatible frames, crypto, and `remote-access.json`; live socket loop only under `--ignored` |
 | 8f | Tailscale web access server for the PWA | agent (opus) | done | 52 tests; same routes and PWA bundle as the TS; automations/reports snapshots empty until 8c2 |
-| 8g | Polish: terminal cursor/mouse/links, window bounds, live probes and models, MCP editor, shortcuts | agent (opus) | in progress | |
+| 8g | Polish: terminal cursor/mouse/links, window bounds, live probes and models, MCP editor, shortcuts | agent (opus) | done | 50 terminal tests; `window.json`; `ProbeState`; `SettingsEvent` for remote access |
 | 9 | Delete Electron app, update README/CI | lead | queued | |
 | 10 | Packaging: macOS bundle, sign, notarize, updater crate, CI matrix | agent (opus) | done | 18 tests; dmg/zip/manifest verified locally; app must call `boss-update` (see report) |
 

@@ -37,6 +37,7 @@ impl Global for TabViews {}
 struct OpenThread {
     model: Entity<ThreadModel>,
     pane: Option<Entity<ThreadPane>>,
+    room_pane: Option<Entity<crate::rooms::RoomPane>>,
     sender: async_channel::Sender<Batched>,
     _drive: gpui::Task<()>,
     _subs: Vec<Subscription>,
@@ -50,6 +51,8 @@ pub struct BossApp {
     /// Tailscale-fronted web access (phone PWA), if the server started.
     pub web_access: Option<boss_runtime::web_access::WebAccess>,
     window: RefCell<Option<WindowHandle<Root>>>,
+    workspace: RefCell<Option<Entity<crate::shell::Workspace>>>,
+    settings_subs: RefCell<Vec<Subscription>>,
     threads: RefCell<HashMap<ThreadId, OpenThread>>,
     browsers: RefCell<BrowserRegistry>,
 }
@@ -67,6 +70,8 @@ impl BossApp {
             relay,
             web_access,
             window: RefCell::new(None),
+            workspace: RefCell::new(None),
+            settings_subs: RefCell::new(Vec::new()),
             threads: RefCell::new(HashMap::new()),
             browsers: RefCell::new(BrowserRegistry::new()),
         })
@@ -91,12 +96,76 @@ impl BossApp {
 
     /// Call once the main window exists. Starts the event pump and registers
     /// browser tools with the bus.
-    pub fn attach_window(self: &Arc<Self>, window: WindowHandle<Root>, cx: &mut App) {
+    pub fn attach_window(self: &Arc<Self>, window: WindowHandle<Root>, workspace: Entity<crate::shell::Workspace>, cx: &mut App) {
         *self.window.borrow_mut() = Some(window);
+        let settings_page = workspace.read(cx).settings_page().clone();
+        *self.workspace.borrow_mut() = Some(workspace);
+        let app = self.clone();
+        let sub = cx.subscribe(&settings_page, move |_page, event: &crate::shell::settings::SettingsEvent, cx| {
+            app.on_settings_event(event, cx);
+        });
+        self.settings_subs.borrow_mut().push(sub);
+        self.probe_engines(cx);
+        self.check_for_updates();
         let qa: Arc<dyn BusHandler> = Arc::new(QaBridge { tools: self.browsers.borrow().bus_tools() });
         self.runtime.bus_handler().set_qa_handler(qa);
         self.runtime.bus_handler().set_room_opener(Arc::new(RoomOpenerBridge { runtime: self.runtime.clone() }));
         self.start_pump(cx);
+    }
+
+    fn on_settings_event(self: &Arc<Self>, event: &crate::shell::settings::SettingsEvent, cx: &mut App) {
+        use crate::shell::settings::SettingsEvent;
+        match event {
+            SettingsEvent::EnableRemote(on) => {
+                let on = *on;
+                let relay = self.relay.clone();
+                let app = self.clone();
+                self.runtime.handle.clone().spawn(async move {
+                    let status = relay
+                        .apply(boss_runtime::relay::RemotePatch { enabled: Some(on), relay_url: None, forget_device_id: None, revoke_all: false })
+                        .await;
+                    tracing::info!(?status, "relay access toggled");
+                    let _ = app;
+                });
+                if let Some(web) = self.web_access.as_ref() {
+                    // WebAccess enable/disable take &mut; run through a clone-free
+                    // path: the handle is cheap to share via a mutex in the runtime.
+                    let _ = web;
+                }
+            }
+            SettingsEvent::ShowPairing => {
+                let relay = self.relay.clone();
+                let page = self.workspace.borrow().as_ref().map(|w| w.read(cx).settings_page().clone());
+                let (tx, rx) = futures::channel::oneshot::channel::<(Option<String>, Option<Vec<u8>>)>();
+                self.runtime.handle.clone().spawn(async move {
+                    let _ = relay.apply(boss_runtime::relay::RemotePatch { enabled: Some(true), relay_url: None, forget_device_id: None, revoke_all: false }).await;
+                    relay.begin_pairing();
+                    let _ = tx.send((relay.pairing_payload(), relay.pairing_qr_png()));
+                });
+                cx.spawn(async move |cx: &mut AsyncApp| {
+                    if let Ok((code, png)) = rx.await {
+                        if let Some(page) = page {
+                            let _ = page.update(cx, |p, cx| p.set_pairing(code, png, cx));
+                        }
+                    }
+                })
+                .detach();
+            }
+        }
+    }
+
+    /// Ask GitHub for a newer release on the user's channel. Logs only for
+    /// now; the settings page shows nothing until an update UI exists.
+    fn check_for_updates(&self) {
+        let channel = self.runtime.settings.get().update_channel;
+        self.runtime.handle.clone().spawn(async move {
+            let updater = boss_update::Updater::new(env!("CARGO_PKG_VERSION"));
+            match updater.check(channel).await {
+                Ok(Some(release)) => tracing::info!(?release, "update available"),
+                Ok(None) => tracing::info!("no update available"),
+                Err(e) => tracing::debug!(error = %e, "update check failed"),
+            }
+        });
     }
 
     fn start_pump(self: &Arc<Self>, cx: &mut App) {
@@ -143,6 +212,11 @@ impl BossApp {
             _ => {}
         }
         self.ensure_thread(&thread_id, cx);
+        let room_pane = self.threads.borrow().get(&thread_id).and_then(|o| o.room_pane.clone());
+        if let Some(pane) = room_pane {
+            let participants = self.runtime.rooms().room(&thread_id).participants;
+            pane.update(cx, |p, cx| p.set_participants(participants, cx));
+        }
         if let Some(open) = self.threads.borrow().get(&thread_id) {
             let _ = open.sender.try_send((Some(participant), ev.event));
         }
@@ -186,7 +260,7 @@ impl BossApp {
         let task = drive(model.clone(), rx, MAX_COMMITS_PER_SECOND, cx);
         self.threads.borrow_mut().insert(
             thread_id.clone(),
-            OpenThread { model: model.clone(), pane: None, sender: tx, _drive: task, _subs: Vec::new() },
+            OpenThread { model: model.clone(), pane: None, room_pane: None, sender: tx, _drive: task, _subs: Vec::new() },
         );
         Some(model)
     }
@@ -204,6 +278,16 @@ impl BossApp {
         let existing = self.threads.borrow().get(thread_id).and_then(|o| o.pane.clone());
         if let Some(pane) = existing {
             self.register_active_tab_view(pane.into(), cx);
+            return;
+        }
+        let existing_room = self.threads.borrow().get(thread_id).and_then(|o| o.room_pane.clone());
+        if let Some(pane) = existing_room {
+            self.register_active_tab_view(pane.into(), cx);
+            return;
+        }
+        let is_room = self.runtime.state.thread(thread_id).map(|t| matches!(t.kind, ThreadKind::Room { .. })).unwrap_or(false);
+        if is_room {
+            self.mount_room(thread_id, model, cx);
             return;
         }
         let Some(window) = *self.window.borrow() else {
@@ -228,6 +312,79 @@ impl BossApp {
             if let Some(open) = app.threads.borrow_mut().get_mut(&tid) {
                 open.pane = Some(pane.clone());
                 open._subs.push(sub);
+            }
+            app.register_active_tab_view(pane.into(), cx);
+        });
+    }
+
+    /// Room tabs: team bar + transcript, or team setup until a shape exists.
+    fn mount_room(self: &Arc<Self>, thread_id: &ThreadId, model: Entity<ThreadModel>, cx: &mut App) {
+        let Some(window) = *self.window.borrow() else { return };
+        let app = self.clone();
+        let tid = thread_id.clone();
+        cx.defer(move |cx| {
+            let rooms = app.runtime.rooms();
+            let room = rooms.room(&tid);
+            let setup = if room.shape.is_none() {
+                let team = rooms.team().unwrap_or_else(|| boss_core::rooms::RoomTeam {
+                    roles: boss_core::rooms::manager::suggested_roles(&[app.runtime.settings.get().default_engine]),
+                    ask_shape: true,
+                    default_shape: RoomShape::Direct,
+                });
+                Some((team, Vec::new()))
+            } else {
+                None
+            };
+            let participants = room.participants.clone();
+            let pane = match window.update(cx, |_, window, cx| {
+                cx.new(|cx| crate::rooms::RoomPane::new(model.clone(), participants, setup, window, cx))
+            }) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(error = %e, "mount_room: window update failed");
+                    return;
+                }
+            };
+            let a = app.clone();
+            let t = tid.clone();
+            let composer_sub = cx.subscribe(&pane, move |_p, event: &ComposerEvent, cx| a.on_composer(&t, event.clone(), cx));
+            let a = app.clone();
+            let t = tid.clone();
+            let room_sub = cx.subscribe(&pane, move |_p, event: &crate::rooms::RoomPaneEvent, cx| {
+                let rooms = a.runtime.rooms();
+                match event {
+                    crate::rooms::RoomPaneEvent::Start { shape, team } => {
+                        rooms.configure_team(team.clone());
+                        rooms.choose_shape(&t, *shape);
+                    }
+                    crate::rooms::RoomPaneEvent::AddRole { role, engine } => {
+                        if let Some(mut team) = rooms.team() {
+                            if let Some(r) = team.roles.iter_mut().find(|r| &r.id == role) {
+                                r.engine = *engine;
+                            }
+                            rooms.configure_team(team);
+                        }
+                    }
+                    crate::rooms::RoomPaneEvent::RemoveRole { participant } => {
+                        tracing::info!(%participant, "remove role is not wired yet");
+                    }
+                    crate::rooms::RoomPaneEvent::Cancel => {}
+                }
+                let participants = rooms.room(&t).participants;
+                a.state.update(cx, |s, cx| {
+                    if let Some(room) = a.runtime.state.room_for_thread(&t) {
+                        if let Some(r) = s.rooms.iter_mut().find(|r| r.id == room.id) {
+                            *r = room;
+                        }
+                    }
+                    cx.notify();
+                });
+                let _ = participants;
+            });
+            if let Some(open) = app.threads.borrow_mut().get_mut(&tid) {
+                open.room_pane = Some(pane.clone());
+                open._subs.push(composer_sub);
+                open._subs.push(room_sub);
             }
             app.register_active_tab_view(pane.into(), cx);
         });
@@ -498,15 +655,38 @@ impl ShellActions for BossApp {
         let _ = app.runtime.settings.replace(settings.clone());
     }
 
-    fn probe_engines(&self, _cx: &mut App) {
+    fn probe_engines(&self, cx: &mut App) {
         let Some(app) = ARC.with(|a| a.borrow().clone()) else { return };
+        let Some(probe_state) = app.workspace.borrow().as_ref().map(|w| w.read(cx).probe_state().clone()) else { return };
         for engine in app.runtime.sessions.engines().cloned().collect::<Vec<_>>() {
+            let id = engine.id();
+            let (tx, rx) = futures::channel::oneshot::channel::<(Result<EngineProbe>, Result<Vec<ModelInfo>>)>();
             app.runtime.handle.clone().spawn(async move {
-                match engine.probe().await {
-                    Ok(p) => tracing::info!(engine = ?engine.id(), installed = p.installed, version = ?p.version, "probe"),
-                    Err(e) => tracing::warn!(engine = ?engine.id(), error = %e, "probe failed"),
-                }
+                let probe = engine.probe().await;
+                let models = if probe.as_ref().map(|p| p.installed).unwrap_or(false) {
+                    engine.list_models().await
+                } else {
+                    Ok(Vec::new())
+                };
+                let _ = tx.send((probe, models));
             });
+            let state = probe_state.clone();
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                if let Ok((probe, models)) = rx.await {
+                    let _ = state.update(cx, |state, cx| {
+                        match probe {
+                            Ok(p) => state.set_probe(id, p, cx),
+                            Err(e) => state.set_probe_error(id, e.to_string(), cx),
+                        }
+                        if let Ok(models) = models {
+                            if !models.is_empty() {
+                                state.set_models(id, models, cx);
+                            }
+                        }
+                    });
+                }
+            })
+            .detach();
         }
     }
 }

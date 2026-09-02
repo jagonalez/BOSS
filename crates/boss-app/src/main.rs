@@ -48,8 +48,8 @@ fn main() {
         let boss = BossApp::new(runtime.clone(), state.clone(), relay, web_access);
         boss.install();
         let actions: Arc<dyn ShellActions> = boss.clone();
-        match shell::open_main_window(state, actions, cx) {
-            Ok(window) => boss.attach_window(window, cx),
+        match shell::open_main_window_with_workspace(state, actions, cx) {
+            Ok((window, workspace)) => boss.attach_window(window, workspace, cx),
             Err(err) => {
                 tracing::error!(%err, "could not open the main window");
                 cx.quit();

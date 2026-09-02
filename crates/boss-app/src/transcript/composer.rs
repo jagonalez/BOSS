@@ -5,10 +5,13 @@ use crate::model::{PendingRequest, ThreadModel};
 use crate::transcript::cache::head_lines;
 use crate::transcript::mono_block;
 use crate::transcript::recipient::{default_recipient, participant_name, retarget};
+use boss_core::rooms::{everyone_id, is_everyone};
 use boss_core::{Participant, ParticipantId, PermissionDecision, RequestId};
-use gpui::{prelude::*, *};
+use gpui::prelude::*;
+use gpui::{AnyElement, App, Context, ElementId, Entity, EventEmitter, Render, Subscription, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{InputEvent, Textarea, TextareaState};
+use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::tag::Tag;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use std::path::PathBuf;
@@ -128,16 +131,56 @@ impl Composer {
         cx.notify();
     }
 
-    fn cycle_recipient(&mut self, cx: &mut Context<Self>) {
+    /// Who this thread can be addressed to, in menu order: the participants
+    /// the user is working with, then a broadcast. Mirrors
+    /// `boss_core::rooms::recipient::recipient_options`, which is keyed on a
+    /// `RoomState` the composer does not hold.
+    pub fn recipient_options(&self, cx: &App) -> Vec<RecipientOption> {
         let participants = &self.model.read(cx).participants;
         if participants.is_empty() {
-            return;
+            return Vec::new();
         }
-        let current = self.recipient.as_ref().and_then(|r| participants.iter().position(|p| &p.id == r));
-        let next = current.map_or(0, |ix| (ix + 1) % participants.len());
-        self.recipient = Some(participants[next].id.clone());
-        cx.notify();
+        let mut options: Vec<RecipientOption> = participants
+            .iter()
+            .map(|p| RecipientOption {
+                id: p.id.clone(),
+                label: p.name.clone(),
+                detail: if p.is_boss { "assistant".to_owned() } else { p.engine.label().to_owned() },
+            })
+            .collect();
+        // Only offered where it means something. In a chat with one agent a
+        // broadcast is the same message with a stranger word on it.
+        if participants.len() > 1 {
+            options.push(RecipientOption {
+                id: everyone_id(),
+                label: "Everyone".to_owned(),
+                detail: "one reply each".to_owned(),
+            });
+        }
+        options
     }
+
+    /// What the chip shows for the current recipient.
+    pub fn recipient_label(&self, cx: &App) -> String {
+        let Some(recipient) = &self.recipient else { return "nobody".to_owned() };
+        if is_everyone(recipient) {
+            return "Everyone".to_owned();
+        }
+        participant_name(&self.model.read(cx).participants, recipient)
+            .map(str::to_owned)
+            .unwrap_or_else(|| recipient.to_string())
+    }
+}
+
+/// One entry in the recipient chip's menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecipientOption {
+    /// The recipient the composer holds when this is chosen.
+    pub id: ParticipantId,
+    /// What the chip shows.
+    pub label: String,
+    /// What it is, beside the name: its engine, or what a broadcast does.
+    pub detail: String,
 }
 
 impl Render for Composer {
@@ -146,11 +189,10 @@ impl Render for Composer {
         let model = self.model.read(cx);
         let in_room = !model.participants.is_empty();
         let busy = model.busy;
-        let recipient_label = self
-            .recipient
-            .as_ref()
-            .map(|r| participant_name(&model.participants, r).map(str::to_owned).unwrap_or_else(|| r.to_string()))
-            .unwrap_or_else(|| "nobody".to_owned());
+        let recipient_label = self.recipient_label(cx);
+        let options = self.recipient_options(cx);
+        let chosen = self.recipient.clone();
+        let weak = cx.weak_entity();
         let requests: Vec<AnyElement> = model.pending.iter().map(|req| render_request(req, &model.participants, cx)).collect();
 
         v_flex()
@@ -192,7 +234,28 @@ impl Render for Composer {
                                 .outline()
                                 .label(format!("@{recipient_label}"))
                                 .tooltip("Who this message goes to. Click to change, or type @name.")
-                                .on_click(cx.listener(|this, _, _, cx| this.cycle_recipient(cx))),
+                                .dropdown_menu(move |mut menu: PopupMenu, _, _| {
+                                    for option in options.clone() {
+                                        let weak = weak.clone();
+                                        let picked = option.id.clone();
+                                        let label = if option.detail.is_empty() {
+                                            option.label.clone()
+                                        } else {
+                                            format!("{} · {}", option.label, option.detail)
+                                        };
+                                        menu = menu.item(
+                                            PopupMenuItem::new(label)
+                                                .checked(chosen.as_ref() == Some(&option.id))
+                                                .on_click(move |_, _, cx| {
+                                                    let picked = picked.clone();
+                                                    let _ = weak.update(cx, |this, cx| {
+                                                        this.set_recipient(Some(picked), cx)
+                                                    });
+                                                }),
+                                        );
+                                    }
+                                    menu
+                                }),
                         )
                     })
                     .child(Textarea::new(&self.input).flex_1())
@@ -285,7 +348,10 @@ fn render_request(request: &PendingRequest, participants: &[Participant], cx: &C
 
 #[cfg(test)]
 mod tests {
-    use super::is_edit_tool;
+    use super::*;
+    use boss_core::{EngineId, ProjectId, RoomId, Thread, ThreadId, ThreadKind};
+    use gpui::TestAppContext;
+    use time::OffsetDateTime;
 
     #[test]
     fn edit_tools_get_allow_always() {
@@ -294,5 +360,123 @@ mod tests {
         assert!(is_edit_tool("mcp__fs_write"));
         assert!(!is_edit_tool("Bash"));
         assert!(!is_edit_tool("Read"));
+    }
+
+    fn seat(id: &str, name: &str, engine: EngineId, is_boss: bool) -> Participant {
+        Participant {
+            id: ParticipantId::from_raw(id),
+            name: name.into(),
+            engine,
+            model: None,
+            is_boss,
+            native_session_id: None,
+        }
+    }
+
+    fn composer(cx: &mut TestAppContext, participants: Vec<Participant>) -> (Entity<Composer>, &mut gpui::VisualTestContext) {
+        cx.update(gpui_component::init);
+        let thread = Thread {
+            id: ThreadId::from_raw("thr_1"),
+            project_id: ProjectId::from_raw("prj_1"),
+            title: "Port the sidebar".into(),
+            kind: ThreadKind::Room { room_id: RoomId::from_raw("room_1") },
+            created_at: OffsetDateTime::now_utc(),
+            updated_at: OffsetDateTime::now_utc(),
+            cwd: PathBuf::from("/tmp"),
+            archived: false,
+        };
+        let model = cx.new(|_| ThreadModel::new(thread, participants, Vec::new()));
+        let (view, cx) = cx.add_window_view(move |window, cx| Composer::new(model, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (view, cx)
+    }
+
+    fn room() -> Vec<Participant> {
+        vec![
+            seat("who_boss", "BOSS", EngineId::Claude, true),
+            seat("who_build", "Builder", EngineId::Codex, false),
+            seat("who_rev", "Reviewer", EngineId::Claude, false),
+        ]
+    }
+
+    #[gpui::test]
+    fn the_menu_lists_every_participant_and_a_broadcast(cx: &mut TestAppContext) {
+        let (view, cx) = composer(cx, room());
+        view.read_with(cx, |this, cx| {
+            let options = this.recipient_options(cx);
+            let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+            assert_eq!(labels, vec!["BOSS", "Builder", "Reviewer", "Everyone"]);
+            assert_eq!(options[3].id, everyone_id());
+        });
+    }
+
+    #[gpui::test]
+    fn a_chat_with_one_agent_is_not_offered_a_broadcast(cx: &mut TestAppContext) {
+        let (view, cx) = composer(cx, vec![seat("who_1", "Claude Code", EngineId::Claude, false)]);
+        view.read_with(cx, |this, cx| {
+            let options = this.recipient_options(cx);
+            let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+            assert_eq!(labels, vec!["Claude Code"], "a broadcast to one agent says nothing");
+        });
+    }
+
+    #[gpui::test]
+    fn a_plain_chat_has_no_chip_at_all(cx: &mut TestAppContext) {
+        let (view, cx) = composer(cx, Vec::new());
+        view.read_with(cx, |this, cx| {
+            assert!(this.recipient_options(cx).is_empty());
+            assert_eq!(this.recipient(), None);
+            assert_eq!(this.recipient_label(cx), "nobody");
+        });
+    }
+
+    #[gpui::test]
+    fn choosing_from_the_menu_moves_the_chip_and_it_stays_across_sends(cx: &mut TestAppContext) {
+        let (view, cx) = composer(cx, room());
+        view.read_with(cx, |this, _| {
+            assert_eq!(this.recipient().map(|r| r.to_string()), Some("who_boss".into()), "a room opens on BOSS");
+        });
+        view.update(cx, |this, cx| this.set_recipient(Some(ParticipantId::from_raw("who_rev")), cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        view.read_with(cx, |this, cx| assert_eq!(this.recipient_label(cx), "Reviewer"));
+
+        view.update_in(cx, |this, window, cx| {
+            this.input().update(cx, |input, cx| input.set_value("look at this", window, cx));
+            this.send(window, cx);
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        view.read_with(cx, |this, cx| {
+            assert_eq!(this.recipient_label(cx), "Reviewer", "the chip does not reset on send");
+        });
+    }
+
+    #[gpui::test]
+    fn the_chip_reads_everyone_for_a_broadcast(cx: &mut TestAppContext) {
+        let (view, cx) = composer(cx, room());
+        view.update(cx, |this, cx| this.set_recipient(Some(everyone_id()), cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        view.read_with(cx, |this, cx| assert_eq!(this.recipient_label(cx), "Everyone"));
+    }
+
+    #[gpui::test]
+    fn typing_a_name_still_retargets_the_chip(cx: &mut TestAppContext) {
+        let (view, cx) = composer(cx, room());
+        view.update_in(cx, |this, window, cx| {
+            this.input().update(cx, |input, cx| input.set_value("@builder ", window, cx));
+            this.retarget_while_typing(window, cx);
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        view.read_with(cx, |this, cx| {
+            assert_eq!(this.recipient_label(cx), "Builder");
+            assert_eq!(this.input().read(cx).value(), "", "the chip carries the name, so the text drops it");
+        });
+
+        // A broadcast reaches the chip the same way.
+        view.update_in(cx, |this, window, cx| {
+            this.input().update(cx, |input, cx| input.set_value("@everyone status ", window, cx));
+            this.retarget_while_typing(window, cx);
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        view.read_with(cx, |this, cx| assert_eq!(this.recipient_label(cx), "Everyone"));
     }
 }

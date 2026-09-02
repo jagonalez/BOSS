@@ -8,6 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use time::{Duration, OffsetDateTime};
 
+/// How many closed tabs Cmd+Shift+T can walk back through.
+pub const MAX_CLOSED_TABS: usize = 20;
+
 /// Stable id of an open tab. Never reused within a session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TabId(pub u64);
@@ -63,6 +66,8 @@ pub struct AppState {
     pub settings: Settings,
     /// Whether the sidebar is hidden.
     pub sidebar_collapsed: bool,
+    /// Tabs the user closed, most recent last. Cmd+Shift+T pops this.
+    closed_tabs: Vec<TabKind>,
     next_tab_id: u64,
 }
 
@@ -86,6 +91,7 @@ impl AppState {
             selected_thread: None,
             settings: Settings::default(),
             sidebar_collapsed: false,
+            closed_tabs: Vec::new(),
             next_tab_id: 1,
         }
     }
@@ -231,6 +237,7 @@ impl AppState {
             return None;
         }
         let removed = self.tabs.remove(ix);
+        self.remember_closed(removed.kind.clone());
         self.active_tab = if self.tabs.is_empty() {
             None
         } else {
@@ -249,6 +256,54 @@ impl AppState {
     /// Close the active tab.
     pub fn close_active_tab(&mut self) -> Option<Tab> {
         self.active_tab.and_then(|ix| self.close_tab(ix))
+    }
+
+    /// How many closed tabs are on the reopen stack.
+    pub fn closed_tab_count(&self) -> usize {
+        self.closed_tabs.len()
+    }
+
+    /// What Cmd+Shift+T would reopen, without reopening it.
+    pub fn last_closed_tab(&self) -> Option<&TabKind> {
+        self.closed_tabs.last()
+    }
+
+    /// Reopen the tab closed most recently and return what it shows.
+    ///
+    /// A thread that has since been archived, or a tab that is somehow open
+    /// again, is skipped rather than reopened, so the shortcut keeps working
+    /// down the stack instead of doing nothing.
+    pub fn reopen_closed_tab(&mut self) -> Option<TabKind> {
+        while let Some(kind) = self.closed_tabs.pop() {
+            if self.tab_index(&kind).is_some() {
+                continue;
+            }
+            if let TabKind::Thread(id) = &kind
+                && !self.thread(id).is_some_and(|t| !t.archived)
+            {
+                continue;
+            }
+            match &kind {
+                TabKind::Thread(id) => {
+                    self.open_thread(id.clone())?;
+                }
+                other => {
+                    self.open_tab(other.clone());
+                }
+            }
+            return Some(kind);
+        }
+        None
+    }
+
+    /// Push a closed tab onto the reopen stack, newest last, bounded so a
+    /// long session cannot grow it without limit.
+    fn remember_closed(&mut self, kind: TabKind) {
+        self.closed_tabs.retain(|k| k != &kind);
+        self.closed_tabs.push(kind);
+        if self.closed_tabs.len() > MAX_CLOSED_TABS {
+            self.closed_tabs.remove(0);
+        }
     }
 
     /// Move tab `from` so it sits at index `to`. The active tab follows its content.
@@ -597,6 +652,80 @@ mod tests {
         assert!(!s.rename_thread(&tid(2), "   "));
         assert!(s.rename_thread(&tid(2), "  Scroll jump  "));
         assert_eq!(s.thread(&tid(2)).unwrap().title, "Scroll jump");
+    }
+
+    #[test]
+    fn closing_and_reopening_walks_back_through_the_stack() {
+        let mut s = AppState::demo();
+        s.open_tab(TabKind::Settings);
+        s.open_tab(TabKind::Terminal { cwd: PathBuf::from("/tmp") });
+        let before: Vec<TabKind> = s.tabs.iter().map(|t| t.kind.clone()).collect();
+        assert_eq!(s.closed_tab_count(), 0);
+
+        // Close the terminal, then the settings tab.
+        let terminal_ix = s.tab_index(&TabKind::Terminal { cwd: PathBuf::from("/tmp") }).unwrap();
+        s.close_tab(terminal_ix);
+        let settings_ix = s.tab_index(&TabKind::Settings).unwrap();
+        s.close_tab(settings_ix);
+        assert_eq!(s.closed_tab_count(), 2);
+        assert_eq!(s.last_closed_tab(), Some(&TabKind::Settings));
+
+        // Reopening is last-closed-first.
+        assert_eq!(s.reopen_closed_tab(), Some(TabKind::Settings));
+        assert_eq!(s.active_tab().map(|t| t.kind.clone()), Some(TabKind::Settings));
+        assert_eq!(s.reopen_closed_tab(), Some(TabKind::Terminal { cwd: PathBuf::from("/tmp") }));
+        assert_eq!(s.reopen_closed_tab(), None, "the stack is empty");
+
+        let after: Vec<TabKind> = s.tabs.iter().map(|t| t.kind.clone()).collect();
+        assert_eq!(after.len(), before.len());
+        for kind in before {
+            assert!(after.contains(&kind), "{kind:?} came back");
+        }
+    }
+
+    #[test]
+    fn reopen_skips_tabs_that_are_open_again_or_gone() {
+        let mut s = AppState::demo();
+        // Close a thread tab, then open it again by hand.
+        s.close_tab(0);
+        let reopened_by_hand = match s.closed_tabs.last().cloned() {
+            Some(TabKind::Thread(id)) => id,
+            other => panic!("expected a thread tab, got {other:?}"),
+        };
+        s.open_thread(reopened_by_hand.clone());
+        // The stack entry is stale: it is skipped, not opened twice.
+        assert_eq!(s.reopen_closed_tab(), None);
+        let expected = TabKind::Thread(reopened_by_hand);
+        assert_eq!(s.tabs.iter().filter(|t| t.kind == expected).count(), 1);
+
+        // Archiving closes the tab; reopening must not resurrect it.
+        let mut s = AppState::demo();
+        let archived = tid(1);
+        s.archive_thread(&archived);
+        assert!(s.closed_tab_count() >= 1);
+        assert_eq!(s.reopen_closed_tab(), None);
+        assert!(s.tab_index(&TabKind::Thread(archived)).is_none());
+    }
+
+    #[test]
+    fn the_reopen_stack_is_bounded_and_deduplicated() {
+        let mut s = AppState::empty();
+        for n in 0..MAX_CLOSED_TABS + 5 {
+            let ix = s.open_tab(TabKind::Browser { url: format!("https://example.com/{n}") });
+            s.close_tab(ix);
+        }
+        assert_eq!(s.closed_tab_count(), MAX_CLOSED_TABS);
+        // The newest close is on top; the oldest fell off.
+        let newest = format!("https://example.com/{}", MAX_CLOSED_TABS + 4);
+        assert_eq!(s.last_closed_tab(), Some(&TabKind::Browser { url: newest }));
+
+        // Closing the same tab twice leaves one entry.
+        let mut s = AppState::empty();
+        for _ in 0..3 {
+            let ix = s.open_tab(TabKind::Settings);
+            s.close_tab(ix);
+        }
+        assert_eq!(s.closed_tab_count(), 1);
     }
 
     #[test]
