@@ -105,6 +105,14 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | 8g | Polish: terminal cursor/mouse/links, window bounds, live probes and models, MCP editor, shortcuts | agent (opus) | done | 50 terminal tests; `window.json`; `ProbeState`; `SettingsEvent` for remote access |
 | 9 | Delete Electron app, update README/CI | lead | queued | |
 | 10 | Packaging: macOS bundle, sign, notarize, updater crate, CI matrix | agent (opus) | done | 18 tests; dmg/zip/manifest verified locally; app must call `boss-update` (see report) |
+| 11 | Settings-tab crash fix; native data moves to `BOSS-native` | lead | done | probe state read the workspace inside its own update; native app had written into the Electron folder and overwrote `rooms.json` |
+| 12a | Chats and rooms without a project; remove role; branch replies; headless room-flow test | agent (opus) | in progress | `Thread.project_id` becomes optional |
+| 12b | Tab context strips, terminal title/exit/paste, web-access switch, update banner | agent (opus) | in progress | |
+| 12c | Theme port from `styles.css`; restyle transcript, composer, sidebar, rooms | agent (opus) | in progress | screenshots of the example window only |
+| 12d | Bus tools: reports, notes, presence | agent (opus) | in progress | `reports.json` stays Electron-compatible |
+| 12e | Workflows and automations engine, cron, `boss_workflow_*` | agent (opus) | in progress | Electron file formats kept |
+| 12f | `boss_computer` via cua-driver, QA gate, bundle the driver | agent (opus) | in progress | |
+| 12g | One-time import of Electron data into `BOSS-native` | agent (opus) | in progress | read-only on the Electron folder |
 
 States: queued, in progress, blocked, done.
 
@@ -117,6 +125,7 @@ States: queued, in progress, blocked, done.
 - Live smoke tests: claude, codex, opencode complete a turn and a permission round trip; pi is not logged in on this machine.
 - Workspace tests: 622 pass, 6 ignored (network or port binds).
 - Room flow (shape picker → job → builder/reviewer handover) is wired but not yet verified on screen.
+- User test (2026-09-03): chat, browser, terminal work; Settings tab crashed (fixed); chat/room need a project (12a); tab ownership unclear (12b); look needs the theme (12c).
 
 ## Risks
 
