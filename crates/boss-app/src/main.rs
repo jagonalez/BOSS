@@ -49,7 +49,22 @@ fn main() {
         boss.install();
         let actions: Arc<dyn ShellActions> = boss.clone();
         match shell::open_main_window_with_workspace(state, actions, cx) {
-            Ok((window, workspace)) => boss.attach_window(window, workspace, cx),
+            Ok((window, workspace)) => {
+                boss.attach_window(window, workspace.clone(), cx);
+                // Debug aid: `BOSS_OPEN_TAB=settings` opens a tab at launch so
+                // a crash in it can be reproduced without clicking.
+                // `settings:light` also presses the Light theme button.
+                let open_tab = std::env::var("BOSS_OPEN_TAB").unwrap_or_default();
+                if open_tab.starts_with("settings") {
+                    workspace.update(cx, |w, cx| w.open_settings(cx));
+                }
+                if open_tab == "settings:light" {
+                    let page = workspace.read(cx).settings_page().clone();
+                    let _ = window.update(cx, |_, window, cx| {
+                        page.update(cx, |page, cx| page.set_theme(boss_core::store::Theme::Light, window, cx));
+                    });
+                }
+            }
             Err(err) => {
                 tracing::error!(%err, "could not open the main window");
                 cx.quit();

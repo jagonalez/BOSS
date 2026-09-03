@@ -52,6 +52,9 @@ pub struct BossApp {
     pub web_access: Option<boss_runtime::web_access::WebAccess>,
     window: RefCell<Option<WindowHandle<Root>>>,
     workspace: RefCell<Option<Entity<crate::shell::Workspace>>>,
+    /// Held here so engine probes never read the workspace entity; the
+    /// settings tab opens from inside a workspace update.
+    probe_state: RefCell<Option<Entity<crate::shell::settings::ProbeState>>>,
     settings_subs: RefCell<Vec<Subscription>>,
     threads: RefCell<HashMap<ThreadId, OpenThread>>,
     browsers: RefCell<BrowserRegistry>,
@@ -71,6 +74,7 @@ impl BossApp {
             web_access,
             window: RefCell::new(None),
             workspace: RefCell::new(None),
+            probe_state: RefCell::new(None),
             settings_subs: RefCell::new(Vec::new()),
             threads: RefCell::new(HashMap::new()),
             browsers: RefCell::new(BrowserRegistry::new()),
@@ -99,6 +103,7 @@ impl BossApp {
     pub fn attach_window(self: &Arc<Self>, window: WindowHandle<Root>, workspace: Entity<crate::shell::Workspace>, cx: &mut App) {
         *self.window.borrow_mut() = Some(window);
         let settings_page = workspace.read(cx).settings_page().clone();
+        *self.probe_state.borrow_mut() = Some(workspace.read(cx).probe_state().clone());
         *self.workspace.borrow_mut() = Some(workspace);
         let app = self.clone();
         let sub = cx.subscribe(&settings_page, move |_page, event: &crate::shell::settings::SettingsEvent, cx| {
@@ -657,7 +662,7 @@ impl ShellActions for BossApp {
 
     fn probe_engines(&self, cx: &mut App) {
         let Some(app) = ARC.with(|a| a.borrow().clone()) else { return };
-        let Some(probe_state) = app.workspace.borrow().as_ref().map(|w| w.read(cx).probe_state().clone()) else { return };
+        let Some(probe_state) = app.probe_state.borrow().clone() else { return };
         for engine in app.runtime.sessions.engines().cloned().collect::<Vec<_>>() {
             let id = engine.id();
             let (tx, rx) = futures::channel::oneshot::channel::<(Result<EngineProbe>, Result<Vec<ModelInfo>>)>();

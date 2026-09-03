@@ -3,10 +3,10 @@
 
 use std::path::PathBuf;
 
-pub const APP_DIR_NAME: &str = "BOSS";
+pub const APP_DIR_NAME: &str = "BOSS-native";
 
-/// `~/Library/Application Support/BOSS` on macOS, `%APPDATA%/BOSS` on
-/// Windows, `~/.config/BOSS` on Linux. `BOSS_USER_DATA` overrides.
+/// `~/Library/Application Support/BOSS-native` on macOS, `%APPDATA%/BOSS-native` on
+/// Windows, `~/.config/BOSS-native` on Linux. Separate from the Electron app until the import lands. `BOSS_USER_DATA` overrides.
 pub fn user_data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("BOSS_USER_DATA") {
         return PathBuf::from(dir);

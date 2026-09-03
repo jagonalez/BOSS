@@ -381,7 +381,7 @@ impl SettingsPage {
         self.update_settings(cx, |s| s.set_default_model(engine, model));
     }
 
-    fn set_theme(&mut self, theme: ThemePref, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_theme(&mut self, theme: ThemePref, window: &mut Window, cx: &mut Context<Self>) {
         self.update_settings(cx, |s| s.theme = theme);
         apply_theme(theme, Some(window), cx);
         self.actions.set_theme(theme, cx);
