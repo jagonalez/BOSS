@@ -107,13 +107,15 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | 9 | Delete Electron app, update README/CI | lead | queued | |
 | 10 | Packaging: macOS bundle, sign, notarize, updater crate, CI matrix | agent (opus) | done | 18 tests; dmg/zip/manifest verified locally; app must call `boss-update` (see report) |
 | 11 | Settings-tab crash fix; native data moves to `BOSS-native` | lead | done | probe state read the workspace inside its own update; native app had written into the Electron folder and overwrote `rooms.json` |
-| 12a | Chats and rooms without a project; remove role; branch replies; headless room-flow test | agent (opus) | in progress | `Thread.project_id` becomes optional |
-| 12b | Tab context strips, terminal title/exit/paste, web-access switch, update banner | agent (opus) | in progress | |
-| 12c | Theme port from `styles.css`; restyle transcript, composer, sidebar, rooms | agent (opus) | in progress | screenshots of the example window only |
-| 12d | Bus tools: reports, notes, presence | agent (opus) | in progress | `reports.json` stays Electron-compatible |
-| 12e | Workflows and automations engine, cron, `boss_workflow_*` | agent (opus) | in progress | Electron file formats kept |
-| 12f | `boss_computer` via cua-driver, QA gate, bundle the driver | agent (opus) | in progress | |
-| 12g | One-time import of Electron data into `BOSS-native` | agent (opus) | in progress | read-only on the Electron folder |
+| 12a | Chats and rooms without a project; remove role; branch replies | agent (opus) | done | `Thread.project_id` is optional; headless room-flow test still open |
+| 12b | Tab context strips, terminal title/exit/paste, web-access switch, update banner | agent (opus) | done | tabs show the project or thread they belong to |
+| 12c | Theme port from `styles.css`; restyle transcript, composer, sidebar, rooms | agent (opus) | done | `theme.rs`; light and dark palettes, fonts; not yet checked on screen |
+| 12d | Bus tools: reports, notes, presence | agent (opus) | done | `reports.json` stays Electron-compatible |
+| 12e | Workflows and automations engine, cron, store, event bus, GitHub deliveries | agent (opus) | done | 7 300 lines; Electron file formats kept; not wired yet (see 13a) |
+| 12f | `boss_computer` via cua-driver, QA gate, bundle the driver | agent (opus) | done | runs in the runtime bus handler; QA policy per thread |
+| 12g | One-time import of Electron data into `BOSS-native` | agent (opus) | done | runs once at first start; read-only on the Electron folder; settings can re-run it |
+| 13a | Wire automations into the runtime: host impl, scheduler tick, `boss_workflow_*` tools, web access lists | agent (opus) | in progress | |
+| 13b | Headless room-flow test; second launch crash after Light theme (not reproduced) | lead | queued | need the panic line from the user |
 
 States: queued, in progress, blocked, done.
 
@@ -124,7 +126,7 @@ States: queued, in progress, blocked, done.
 - Threads and projects persist across restarts (JSON stores); messages persist to sqlite.
 - Thread bus listens on loopback; MCP hub imports and connects the user's servers.
 - Live smoke tests: claude, codex, opencode complete a turn and a permission round trip; pi is not logged in on this machine.
-- Workspace tests: 622 pass, 6 ignored (network or port binds).
+- Workspace tests: app 118, browser 16, bus 28 pass; hub tests need a port and fail in the sandbox; runtime and core runs pending after wave 3.
 - Room flow (shape picker → job → builder/reviewer handover) is wired but not yet verified on screen.
 - User test (2026-09-03): chat, browser, terminal work; Settings tab crashed (fixed); chat/room need a project (12a); tab ownership unclear (12b); look needs the theme (12c).
 
@@ -140,7 +142,18 @@ States: queued, in progress, blocked, done.
 ## Run
 
 ```
-rustup toolchain install 1.97.1
-cargo run -p boss-app
-cargo test --workspace
+cd .boss/worktrees/boss-native
+./scripts/cargo run -p boss-app        # debug build, ~6 min cold, seconds warm
+./scripts/cargo test --workspace
 ```
+
+`./scripts/cargo` uses a project-local CARGO_HOME and the pinned toolchain (1.97.1).
+
+Data lives in `~/Library/Application Support/BOSS-native` (`BOSS_USER_DATA` overrides it).
+The Electron folder `BOSS` is read-only for the native app; the first start imports it.
+
+Debug switches:
+
+- `BOSS_OPEN_TAB=settings` opens the settings tab at launch.
+- `BOSS_OPEN_TAB=settings:light` also selects the light theme.
+- `RUST_LOG=debug` for verbose logs; a panic prints to the terminal that started the app.
