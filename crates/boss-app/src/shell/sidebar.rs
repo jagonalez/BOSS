@@ -26,17 +26,18 @@ use time::OffsetDateTime;
 pub enum SidebarEvent {
     /// A thread row was clicked.
     OpenThread(ThreadId),
-    /// "New chat" with an engine, in a project.
+    /// "New chat" with an engine. `None` starts a scratch chat, which is
+    /// what "New chat" does before the user has added any project.
     NewChat {
-        /// Project to start in.
-        project: ProjectId,
+        /// Project to start in, or `None` for a scratch chat.
+        project: Option<ProjectId>,
         /// Engine to run.
         engine: EngineId,
     },
-    /// "New room" with a shape, in a project.
+    /// "New room" with a shape. `None` starts a scratch room.
     NewRoom {
-        /// Project to start in.
-        project: ProjectId,
+        /// Project to start in, or `None` for a scratch room.
+        project: Option<ProjectId>,
         /// How the job runs.
         shape: RoomShape,
     },
@@ -154,6 +155,23 @@ fn newest_first(rows: &mut [ThreadRow]) {
     rows.sort_by(|a, b| b.thread.updated_at.cmp(&a.thread.updated_at).then_with(|| a.thread.title.cmp(&b.thread.title)));
 }
 
+/// What the section of threads that belong to no project is called.
+pub const SCRATCH_TITLE: &str = "Scratch";
+
+/// Active threads that belong to no project, newest first. They are shown
+/// above the projects: a chat started before the first project was added
+/// must still be reachable.
+pub fn scratch_rows(state: &AppState, query: &str) -> Vec<ThreadRow> {
+    let mut rows: Vec<ThreadRow> = state
+        .threads
+        .iter()
+        .filter(|t| t.project_id.is_none() && !t.archived && matches(t, SCRATCH_TITLE, query))
+        .map(|t| row_for(state, t))
+        .collect();
+    newest_first(&mut rows);
+    rows
+}
+
 /// Active threads grouped by project, in project order, newest first. A
 /// non-empty query unfolds every section: search replaces drilling.
 pub fn sections(state: &AppState, query: &str, collapsed: &HashSet<ProjectId>) -> Vec<ProjectSection> {
@@ -165,7 +183,7 @@ pub fn sections(state: &AppState, query: &str, collapsed: &HashSet<ProjectId>) -
             let mut rows: Vec<ThreadRow> = state
                 .threads
                 .iter()
-                .filter(|t| t.project_id == project.id && !t.archived && matches(t, &project.name, query))
+                .filter(|t| t.project_id.as_ref() == Some(&project.id) && !t.archived && matches(t, &project.name, query))
                 .map(|t| row_for(state, t))
                 .collect();
             newest_first(&mut rows);
@@ -186,7 +204,10 @@ pub fn archived_rows(state: &AppState, query: &str) -> Vec<ThreadRow> {
         .iter()
         .filter(|t| t.archived)
         .filter(|t| {
-            let name = state.project(&t.project_id).map(|p| p.name.as_str()).unwrap_or("");
+            let name = match &t.project_id {
+                Some(id) => state.project(id).map(|p| p.name.as_str()).unwrap_or(""),
+                None => SCRATCH_TITLE,
+            };
             matches(t, name, query)
         })
         .map(|t| row_for(state, t))
@@ -273,16 +294,17 @@ impl Sidebar {
         self.state.read(cx).current_project().map(|p| p.id.clone())
     }
 
+    /// Start a chat. `project` is the section the request came from; the
+    /// header buttons pass `None` and land wherever the user is working, or
+    /// in Scratch when that is nowhere.
     fn new_chat(&mut self, project: Option<ProjectId>, engine: EngineId, cx: &mut Context<Self>) {
-        if let Some(project) = project.or_else(|| self.current_project(cx)) {
-            cx.emit(SidebarEvent::NewChat { project, engine });
-        }
+        let project = project.or_else(|| self.current_project(cx));
+        cx.emit(SidebarEvent::NewChat { project, engine });
     }
 
     fn new_room(&mut self, project: Option<ProjectId>, shape: RoomShape, cx: &mut Context<Self>) {
-        if let Some(project) = project.or_else(|| self.current_project(cx)) {
-            cx.emit(SidebarEvent::NewRoom { project, shape });
-        }
+        let project = project.or_else(|| self.current_project(cx));
+        cx.emit(SidebarEvent::NewRoom { project, shape });
     }
 
     /// Show the inline rename box on a thread row.
@@ -376,6 +398,23 @@ impl Sidebar {
             .child(Input::new(&self.search).small().prefix(Icon::new(IconName::Search).xsmall()).cleanable(true))
     }
 
+    /// The header over threads that belong to no project. No project menu:
+    /// there is no project to start work in, and the top buttons already do
+    /// the only thing that makes sense here.
+    fn render_scratch_header(&self, total: usize, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .id("scratch-section")
+            .h_7()
+            .px_1()
+            .gap_1()
+            .items_center()
+            .text_xs()
+            .text_color(cx.theme().sidebar_foreground.opacity(0.75))
+            .child(Icon::new(IconName::Bot).xsmall())
+            .child(div().flex_1().truncate().font_weight(gpui::FontWeight::SEMIBOLD).child(SCRATCH_TITLE))
+            .child(div().child(total.to_string()))
+    }
+
     fn render_project(&self, section: &ProjectSection, cx: &mut Context<Self>) -> impl IntoElement {
         let project_id = section.project.id.clone();
         let toggle_id = project_id.clone();
@@ -426,14 +465,20 @@ impl Sidebar {
         h_flex()
             .id(SharedString::from(format!("thread-{id}")))
             .h_7()
-            .pl_3()
+            .pl_2p5()
             .pr_1()
             .gap_1p5()
             .items_center()
             .rounded(cx.theme().radius)
             .cursor_pointer()
             .text_sm()
-            .when(row.selected, |s| s.bg(cx.theme().sidebar_accent).text_color(cx.theme().sidebar_accent_foreground))
+            .border_l_2()
+            .border_color(gpui::transparent_black())
+            .when(row.selected, |s| {
+                s.bg(cx.theme().sidebar_accent)
+                    .border_color(cx.theme().sidebar_primary)
+                    .text_color(cx.theme().sidebar_accent_foreground)
+            })
             .when(!row.selected, |s| s.hover(|s| s.bg(cx.theme().sidebar_accent.opacity(0.6))))
             .when(archived, |s| s.text_color(cx.theme().muted_foreground))
             .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| cx.emit(SidebarEvent::OpenThread(open_id.clone()))))
@@ -511,16 +556,26 @@ impl Focusable for Sidebar {
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now = OffsetDateTime::now_utc();
-        let (sections, archived) = {
+        let (scratch, sections, archived) = {
             let state = self.state.read(cx);
-            (sections(state, &self.query, &self.collapsed), archived_rows(state, &self.query))
+            (
+                scratch_rows(state, &self.query),
+                sections(state, &self.query, &self.collapsed),
+                archived_rows(state, &self.query),
+            )
         };
         let filtering = !self.query.trim().is_empty();
-        let shown: usize = sections.iter().map(|s| s.total).sum();
-        let no_projects = sections.is_empty();
+        let shown: usize = sections.iter().map(|s| s.total).sum::<usize>() + scratch.len();
+        let no_projects = sections.is_empty() && scratch.is_empty();
         let show_archived = self.show_archived || filtering;
 
         let mut list = v_flex().id("sidebar-list").flex_1().min_h_0().overflow_y_scroll().px_2().pt_1().gap_0p5();
+        if !scratch.is_empty() {
+            list = list.child(self.render_scratch_header(scratch.len(), cx));
+            for row in &scratch {
+                list = list.child(self.render_thread(row, now, cx));
+            }
+        }
         for section in &sections {
             list = list.child(self.render_project(section, cx));
             for row in &section.rows {
@@ -528,7 +583,7 @@ impl Render for Sidebar {
             }
         }
         if no_projects {
-            list = list.child(self.render_empty("No projects yet. Add one to start.", cx));
+            list = list.child(self.render_empty("Start a chat, or add a project.", cx));
         } else if shown == 0 {
             list = list.child(self.render_empty(if filtering { "Nothing matches" } else { "No threads yet" }, cx));
         }
@@ -566,6 +621,7 @@ impl Render for Sidebar {
             .text_color(cx.theme().sidebar_foreground)
             .border_r_1()
             .border_color(cx.theme().sidebar_border)
+            .when(cfg!(target_os = "macos"), |this| this.pt(px(28.)))
             .child(self.render_header(cx))
             .child(list)
     }

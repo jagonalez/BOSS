@@ -11,7 +11,8 @@ use super::job_notes::brief_of;
 use super::recipient::split_override;
 use super::room::{
     JobNotes, JobNotesPatch, ParticipantState, ROOM_ASSISTANT_ID, RoomParticipant, RoomRole,
-    RoomState, RoomTeam, is_assistant, is_everyone, is_thread_agent, participant_is_stale,
+    RoomState, RoomTeam, assistant_id, is_assistant, is_everyone, is_thread_agent,
+    participant_is_stale,
 };
 use super::routing::{catch_up_for, catch_up_prompt, delivery_for};
 use crate::engine::{EngineId, PermissionMode, Prompt, SessionOptions};
@@ -415,6 +416,39 @@ impl RoomManager {
             participant.state = ParticipantState::Stale;
         }
         intents
+    }
+
+    /// Take a participant out of the room for good: close its session, drop
+    /// its seat, and say so. `None` when there is no such seat.
+    ///
+    /// BOSS cannot be removed. It is the seat the user always has to fall
+    /// back on, and a room with nobody in it could not answer anything.
+    /// A composer pointing at the seat that just left is aimed back at BOSS
+    /// rather than left addressing a ghost.
+    pub fn remove_participant(
+        &mut self,
+        thread: &ThreadId,
+        role: &ParticipantId,
+    ) -> Option<Vec<RoomIntent>> {
+        if is_assistant(role) {
+            return None;
+        }
+        let room = self.rooms.get_mut(thread)?;
+        let ix = room.participants.iter().position(|seat| seat.id() == role)?;
+        let mut seat = room.participants.remove(ix);
+        let mut intents = vec![RoomIntent::EndSession {
+            thread_id: thread.clone(),
+            participant: role.clone(),
+            native_session_id: seat.participant.native_session_id.take(),
+        }];
+        if &room.recipient == role {
+            room.recipient = assistant_id();
+        }
+        intents.push(RoomIntent::Notify {
+            thread_id: thread.clone(),
+            text: format!("{} left", seat.label()),
+        });
+        Some(intents)
     }
 
     /// Record what survives a participant's session. Only the fields in the

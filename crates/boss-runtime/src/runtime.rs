@@ -9,8 +9,9 @@ use anyhow::{Context, Result};
 use async_channel::Receiver;
 use boss_bus::hub::{McpConfigPaths, McpHub, load_configs};
 use boss_bus::server::BusServer;
+use crate::notify::Notifier;
 use boss_core::store::{
-    JsonFile, KeyringSecrets, Secrets, SettingsStore, StateStore, TranscriptStore,
+    JsonFile, KeyringSecrets, ReportStore, Secrets, SettingsStore, StateStore, TranscriptStore,
 };
 use boss_core::*;
 use boss_engines::claude::ClaudeEngine;
@@ -56,6 +57,10 @@ pub struct Runtime {
     pub sessions: Arc<SessionManager>,
     pub bus: BusServer,
     pub hub: Arc<McpHub>,
+    /// Durable artifacts agents and automations write.
+    pub reports: Arc<ReportStore>,
+    /// Presence and the one path an event takes to a person.
+    pub notify: Arc<Notifier>,
     /// Threads with a busy session right now.
     busy: Mutex<HashSet<ThreadId>>,
     ui_rx: Receiver<SessionEvent>,
@@ -75,6 +80,23 @@ impl Runtime {
     pub async fn start(data_dir: Option<PathBuf>, handle: tokio::runtime::Handle) -> Result<Arc<Self>> {
         let data_dir = data_dir.unwrap_or_else(paths::user_data_dir);
         std::fs::create_dir_all(&data_dir).with_context(|| format!("create {}", data_dir.display()))?;
+
+        // First run beside an Electron install: bring the user's history
+        // across before the stores open, so they see it immediately. A
+        // failure here is logged, never fatal — a broken import must not
+        // stop the app from starting.
+        let electron = crate::import::default_electron_dir();
+        if crate::import::should_import(&data_dir, &electron) {
+            match crate::import::import(&data_dir, &electron) {
+                Ok(report) => tracing::info!(
+                    threads = report.counts.threads,
+                    messages = report.counts.messages,
+                    errors = report.errors.len(),
+                    "imported data from the Electron app"
+                ),
+                Err(e) => tracing::warn!(error = %e, "import from the Electron app failed"),
+            }
+        }
 
         let state = Arc::new(StateStore::open(Some(&data_dir))?);
         let settings = Arc::new(SettingsStore::open(Some(&data_dir))?);
@@ -96,6 +118,8 @@ impl Runtime {
         };
 
         let hub = Arc::new(McpHub::new());
+        let reports = Arc::new(ReportStore::open(Some(&data_dir))?);
+        let notify = Arc::new(Notifier::new(settings.clone()));
         let handler = Arc::new(RuntimeBusHandler::new(data_dir.clone())?);
         let bus = BusServer::start_with_instructions(
             handler.clone(),
@@ -118,6 +142,8 @@ impl Runtime {
             sessions: sessions.clone(),
             bus,
             hub,
+            reports,
+            notify,
             busy: Mutex::new(HashSet::new()),
             ui_rx,
             inject,
@@ -158,6 +184,17 @@ impl Runtime {
         let host: std::sync::Weak<dyn RoomHost> = host;
         let rooms = RoomCoordinator::start(host, &rt.data_dir, handle.clone()).context("start rooms")?;
         let _ = rt.rooms.set(rooms);
+
+        // Bring the cua-driver back up if the user left Computer Use on. In
+        // the background: the daemon gets fifteen seconds to open its socket,
+        // and a slow or missing driver must not hold up the window.
+        let restore = rt.clone();
+        handle.spawn(async move {
+            let status = restore.handler.computer().restore().await;
+            if let Some(error) = status.error {
+                tracing::warn!(%error, "computer use did not start");
+            }
+        });
 
         // Connect MCP servers in the background; failures are per-server statuses.
         let hub = rt.hub.clone();
@@ -320,17 +357,33 @@ impl Runtime {
         self.transcripts.messages_for_thread(thread).unwrap_or_default()
     }
 
-    /// Create a chat thread in a project.
-    pub fn new_chat(&self, project: &Project, engine: EngineId, title: Option<String>) -> Result<Thread> {
+    /// Import an Electron `BOSS` folder into this runtime's data directory,
+    /// on demand — the settings button behind the automatic first-run
+    /// import. `path` is the Electron folder; `None` is the default one
+    /// beside the native folder.
+    ///
+    /// The source is only ever read. Running it twice is safe: threads and
+    /// messages are upserted under their Electron ids and files are copied
+    /// only when absent, so the second run reports nothing new. The stores
+    /// this runtime already holds are not reopened, so the caller reloads
+    /// the sidebar afterwards.
+    pub fn import_from_electron(&self, path: Option<PathBuf>) -> Result<crate::ImportReport> {
+        let source = path.unwrap_or_else(crate::import::default_electron_dir);
+        crate::import::import(&self.data_dir, &source)
+    }
+
+    /// Create a chat thread. With no project it is a scratch chat: it runs
+    /// in the user's home directory and sits outside every project section.
+    pub fn new_chat(&self, project: Option<&Project>, engine: EngineId, title: Option<String>) -> Result<Thread> {
         let now = OffsetDateTime::now_utc();
         let thread = Thread {
             id: ThreadId::new(),
-            project_id: project.id.clone(),
+            project_id: project.map(|p| p.id.clone()),
             title: title.unwrap_or_else(|| format!("New {} chat", engine.label())),
             kind: ThreadKind::Chat { engine },
             created_at: now,
             updated_at: now,
-            cwd: project.root.clone(),
+            cwd: Thread::cwd_for(project),
             archived: false,
         };
         self.state.upsert_thread(thread.clone())?;

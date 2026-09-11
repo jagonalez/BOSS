@@ -224,6 +224,25 @@ impl RoomCoordinator {
         });
     }
 
+    /// Take a participant out of a room: close its session, drop its seat,
+    /// write the room out, and post the system line. The stored `Room` row
+    /// follows, so the sidebar and the team bar agree with the manager.
+    ///
+    /// BOSS cannot be removed; asking is a no-op rather than an error,
+    /// because the only caller is a menu item the user can always click.
+    pub async fn remove_participant(&self, thread: &ThreadId, participant: &ParticipantId) -> Result<()> {
+        let host = self.host()?;
+        let Some(entry) = host.state().thread(thread) else { return Ok(()) };
+        let lock = self.room_lock(thread);
+        let _guard = lock.lock().await;
+        let Some(intents) = self.manage(|m| m.remove_participant(thread, participant)) else {
+            return Ok(());
+        };
+        // The seat is gone from the manager already, so `execute`'s failure
+        // path has nothing to mark stale: this only closes and notifies.
+        self.execute(&entry, intents, false).await
+    }
+
     /// Record what survives a participant's session (the `boss_notes_record`
     /// tool). Only the fields in the patch change.
     pub fn record_notes(&self, thread: &ThreadId, patch: JobNotesPatch) -> JobNotes {
@@ -236,14 +255,15 @@ impl RoomCoordinator {
         self.locks.lock().unwrap().remove(thread);
     }
 
-    /// Create a room in a project: a thread with the user and BOSS in it.
-    /// With a shape (given, or the team's standing one) the composer aims at
-    /// the room's own agent, so the first message brings in the opening
-    /// role; without one it aims at BOSS, who asks. A team is configured
-    /// from the default engine when the user never opened setup.
+    /// Create a room: a thread with the user and BOSS in it. With a shape
+    /// (given, or the team's standing one) the composer aims at the room's
+    /// own agent, so the first message brings in the opening role; without
+    /// one it aims at BOSS, who asks. A team is configured from the default
+    /// engine when the user never opened setup. With no project the room is
+    /// a scratch room and works in the user's home directory.
     pub fn open_room(
         &self,
-        project: &Project,
+        project: Option<&Project>,
         shape: Option<RoomShape>,
         title: Option<String>,
     ) -> Result<Thread> {
@@ -252,12 +272,12 @@ impl RoomCoordinator {
         let now = now();
         let thread = Thread {
             id: ThreadId::new(),
-            project_id: project.id.clone(),
+            project_id: project.map(|p| p.id.clone()),
             title: title.unwrap_or_else(|| "New room".to_owned()),
             kind: ThreadKind::Room { room_id: RoomId::new() },
             created_at: now,
             updated_at: now,
-            cwd: project.root.clone(),
+            cwd: Thread::cwd_for(project),
             archived: false,
         };
         host.state().upsert_thread(thread.clone())?;
@@ -1080,7 +1100,7 @@ mod tests {
     async fn the_first_message_into_a_direct_room_starts_the_builder_with_bus_cwd_and_brief() {
         let h = harness().await;
         h.rooms.configure_team(team());
-        let thread = h.rooms.open_room(&h.project, Some(RoomShape::Direct), None).unwrap();
+        let thread = h.rooms.open_room(Some(&h.project), Some(RoomShape::Direct), None).unwrap();
         assert_eq!(h.rooms.room(&thread.id).recipient, thread_agent_id());
         assert_eq!(
             h.rooms.participants_for(&thread.id).iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
@@ -1113,7 +1133,7 @@ mod tests {
     #[tokio::test]
     async fn boss_runs_as_the_coordinator_with_its_brief_and_only_bus_tools() {
         let h = harness().await;
-        let thread = h.rooms.open_room(&h.project, None, Some("Ask".into())).unwrap();
+        let thread = h.rooms.open_room(Some(&h.project), None, Some("Ask".into())).unwrap();
         assert_eq!(h.rooms.room(&thread.id).recipient, assistant_id(), "no shape: BOSS asks");
         assert!(h.rooms.team().is_some(), "a team is suggested when none was set up");
 
@@ -1136,7 +1156,7 @@ mod tests {
     async fn a_finished_builder_in_a_reviewed_room_brings_in_the_reviewer() {
         let h = harness().await;
         h.rooms.configure_team(team());
-        let thread = h.rooms.open_room(&h.project, Some(RoomShape::Reviewed), None).unwrap();
+        let thread = h.rooms.open_room(Some(&h.project), Some(RoomShape::Reviewed), None).unwrap();
         h.rooms.send_user_message(&thread.id, None, prompt("add a search box")).await.unwrap();
 
         let recorder = h.recorder.clone();
@@ -1168,7 +1188,7 @@ mod tests {
     async fn joining_is_a_system_line_in_the_transcript_and_on_screen() {
         let h = harness().await;
         h.rooms.configure_team(team());
-        let thread = h.rooms.open_room(&h.project, Some(RoomShape::Direct), None).unwrap();
+        let thread = h.rooms.open_room(Some(&h.project), Some(RoomShape::Direct), None).unwrap();
         let user = h.rooms.send_user_message(&thread.id, None, prompt("go")).await.unwrap();
 
         let stored = h.host.load_messages(&thread.id);
@@ -1201,7 +1221,7 @@ mod tests {
     async fn a_broadcast_reaches_everyone_and_advances_nobody() {
         let h = harness().await;
         h.rooms.configure_team(team());
-        let thread = h.rooms.open_room(&h.project, Some(RoomShape::Reviewed), None).unwrap();
+        let thread = h.rooms.open_room(Some(&h.project), Some(RoomShape::Reviewed), None).unwrap();
         h.rooms.send_user_message(&thread.id, None, prompt("build it")).await.unwrap();
         let recorder = h.recorder.clone();
         wait_for("the reviewer to join", || !recorder.prompts_to("reviewer").is_empty()).await;
@@ -1231,7 +1251,7 @@ mod tests {
     async fn a_restart_replaces_seats_rather_than_resuming_them() {
         let h = harness().await;
         h.rooms.configure_team(team());
-        let thread = h.rooms.open_room(&h.project, Some(RoomShape::Direct), None).unwrap();
+        let thread = h.rooms.open_room(Some(&h.project), Some(RoomShape::Direct), None).unwrap();
         h.rooms.send_user_message(&thread.id, None, prompt("first")).await.unwrap();
         let recorder = h.recorder.clone();
         wait_for("the builder's session id", || {
@@ -1265,7 +1285,7 @@ mod tests {
         let now = now();
         let chat = Thread {
             id: ThreadId::new(),
-            project_id: h.project.id.clone(),
+            project_id: Some(h.project.id.clone()),
             title: "chat".into(),
             kind: ThreadKind::Chat { engine: EngineId::Codex },
             created_at: now,
@@ -1278,5 +1298,129 @@ mod tests {
         assert_eq!(h.host.plain.lock().unwrap().as_slice(), &[(chat.id.clone(), ParticipantId::from("agent"), "hello".to_owned())]);
         assert!(h.recorder.starts().is_empty(), "the room machinery stays out of it");
         assert_eq!(h.host.load_messages(&chat.id).len(), 1, "the user turn is still recorded");
+    }
+    /// The whole flow on one room, with nothing mocked but the engine:
+    /// open, configure a team, send a job, the builder answers, the
+    /// reviewer is handed the work, and every step leaves a system line.
+    #[tokio::test]
+    async fn a_room_runs_a_whole_job_from_setup_to_handover() {
+        let h = harness().await;
+
+        // 1. Set up the team and open a reviewed room.
+        h.rooms.configure_team(team());
+        let thread = h.rooms.open_room(Some(&h.project), Some(RoomShape::Reviewed), Some("Add a search box".into())).unwrap();
+        assert_eq!(h.rooms.room(&thread.id).shape, Some(RoomShape::Reviewed));
+        assert_eq!(
+            h.rooms.participants_for(&thread.id).iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec!["boss"],
+            "a room opens with the user and BOSS and nobody else"
+        );
+
+        // 2. The user gives the job. The builder joins and answers.
+        h.rooms.send_user_message(&thread.id, None, prompt("add a search box")).await.unwrap();
+        let recorder = h.recorder.clone();
+        wait_for("the builder to answer", || !recorder.prompts_to("builder").is_empty()).await;
+        assert_eq!(h.recorder.prompts_to("builder"), vec!["add a search box".to_owned()]);
+
+        // 3. The builder settling hands the work to the reviewer.
+        wait_for("the reviewer to be handed the work", || !recorder.prompts_to("reviewer").is_empty()).await;
+        let handover = &h.recorder.prompts_to("reviewer")[0];
+        assert!(handover.ends_with(HANDOVER_PROMPT), "the reviewer is told what to do: {handover}");
+        assert!(handover.contains("add a search box"), "and caught up on the job: {handover}");
+
+        // 4. Both agents ran, on their own engines and permission modes,
+        //    in the project the room was opened in.
+        let builder = h.recorder.start_for("builder").expect("the builder started");
+        let reviewer = h.recorder.start_for("reviewer").expect("the reviewer started");
+        assert_eq!(builder.permission_mode, PermissionMode::Bypass);
+        assert_eq!(reviewer.permission_mode, PermissionMode::Plan);
+        assert_eq!(builder.cwd, h.project.root);
+        assert_eq!(reviewer.cwd, h.project.root);
+        let seats = h.rooms.room(&thread.id);
+        assert_eq!(seats.find_participant(&ParticipantId::from("builder")).unwrap().engine(), EngineId::Codex);
+        assert_eq!(seats.find_participant(&ParticipantId::from("reviewer")).unwrap().engine(), EngineId::Claude);
+
+        // 5. Every arrival is a system line, in the transcript and on screen.
+        wait_for("both joins to be recorded", || {
+            h.host.load_messages(&thread.id).iter().filter(|m| m.role == Role::System).count() == 2
+        })
+        .await;
+        let stored = h.host.load_messages(&thread.id);
+        let system: Vec<String> = stored.iter().filter(|m| m.role == Role::System).map(Message::text).collect();
+        assert_eq!(system, vec!["Builder joined".to_owned(), "Reviewer joined".to_owned()]);
+        assert!(
+            h.host.injected().iter().any(|e| matches!(
+                &e.event,
+                EngineEvent::TextDelta { delta, .. } if delta == "Reviewer joined"
+            )),
+            "system lines reach the UI through the pump"
+        );
+
+        // 6. The transcript holds the user turn and both agents' answers,
+        //    each attributed to the seat that wrote it.
+        wait_for("the reviewer to answer", || {
+            h.host
+                .load_messages(&thread.id)
+                .iter()
+                .any(|m| m.author.as_ref().map(ParticipantId::as_str) == Some("reviewer"))
+        })
+        .await;
+        let stored = h.host.load_messages(&thread.id);
+        let user: Vec<&Message> = stored.iter().filter(|m| m.role == Role::User).collect();
+        assert_eq!(user.len(), 1);
+        assert_eq!(user[0].recipient.as_ref().map(ParticipantId::as_str), Some("builder"));
+
+        // 7. The stored room row matches the manager, so the sidebar and
+        //    the team bar cannot disagree with it.
+        let row = h.host.state.room_for_thread(&thread.id).expect("a room row");
+        assert_eq!(row.shape, RoomShape::Reviewed);
+        assert_eq!(
+            row.participants.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            vec!["boss", "builder", "reviewer"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_room_opens_without_a_project_and_works_in_the_scratch_directory() {
+        let h = harness().await;
+        h.rooms.configure_team(team());
+
+        let thread = h.rooms.open_room(None, Some(RoomShape::Direct), None).unwrap();
+        assert_eq!(thread.project_id, None, "a scratch room belongs to no project");
+        assert_eq!(thread.cwd, boss_core::scratch_cwd());
+
+        h.rooms.send_user_message(&thread.id, None, prompt("what is in here?")).await.unwrap();
+        let opts = h.recorder.start_for("builder").expect("the builder still starts");
+        assert_eq!(opts.cwd, boss_core::scratch_cwd(), "it works where the thread does");
+        assert_eq!(h.recorder.prompts_to("builder"), vec!["what is in here?".to_owned()]);
+    }
+
+    #[tokio::test]
+    async fn removing_a_participant_closes_its_session_drops_the_seat_and_says_so() {
+        let h = harness().await;
+        h.rooms.configure_team(team());
+        let thread = h.rooms.open_room(Some(&h.project), Some(RoomShape::Direct), None).unwrap();
+        h.rooms.send_user_message(&thread.id, None, prompt("go")).await.unwrap();
+        let recorder = h.recorder.clone();
+        wait_for("the builder to be running", || !recorder.prompts_to("builder").is_empty()).await;
+        let builder = ParticipantId::from("builder");
+        let key = session_key(&thread.id, &builder);
+        assert!(h.host.sessions.get(&key).await.is_some(), "the builder has a session");
+
+        h.rooms.remove_participant(&thread.id, &builder).await.unwrap();
+
+        assert!(h.host.sessions.get(&key).await.is_none(), "its session is closed");
+        let room = h.rooms.room(&thread.id);
+        assert!(room.find_participant(&builder).is_none(), "the seat is gone");
+        assert_eq!(room.recipient, assistant_id(), "the composer no longer points at a ghost");
+        let row = h.host.state.room_for_thread(&thread.id).expect("a room row");
+        assert_eq!(row.participants.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), vec!["boss"]);
+        let system: Vec<String> =
+            h.host.load_messages(&thread.id).iter().filter(|m| m.role == Role::System).map(Message::text).collect();
+        assert_eq!(system, vec!["Builder joined".to_owned(), "Builder left".to_owned()]);
+
+        // A room always has BOSS to fall back on, so it cannot be emptied.
+        h.rooms.remove_participant(&thread.id, &assistant_id()).await.unwrap();
+        assert!(h.rooms.room(&thread.id).find_participant(&assistant_id()).is_some());
     }
 }

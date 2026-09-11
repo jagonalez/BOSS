@@ -34,6 +34,53 @@ pub enum TabKind {
     Settings,
 }
 
+/// Where a terminal or browser tab came from, so the header strip above it
+/// can say what it belongs to instead of leaving the user guessing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TabContext {
+    /// Project the tab was opened from, if any.
+    pub project: Option<ProjectId>,
+    /// Thread the tab was opened from, if any.
+    pub thread: Option<ThreadId>,
+}
+
+impl TabContext {
+    /// A context that names neither a project nor a thread.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// A context for a project.
+    pub fn project(id: ProjectId) -> Self {
+        Self { project: Some(id), thread: None }
+    }
+
+    /// Nothing is known about where this tab came from.
+    pub fn is_empty(&self) -> bool {
+        self.project.is_none() && self.thread.is_none()
+    }
+}
+
+/// What a terminal tab reports about the shell running inside it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TerminalStatus {
+    /// Title the shell set, once it sets one.
+    pub title: Option<String>,
+    /// Exit code, once the shell has exited.
+    pub exited: Option<u32>,
+}
+
+/// What a browser tab reports about the page it is showing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BrowserStatus {
+    /// Document title.
+    pub title: String,
+    /// Current URL.
+    pub url: String,
+    /// The id agents use for this tab through `boss_browser_*`.
+    pub agent_id: Option<String>,
+}
+
 /// One open tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tab {
@@ -41,6 +88,19 @@ pub struct Tab {
     pub id: TabId,
     /// What the tab shows.
     pub kind: TabKind,
+    /// Project and thread the tab was opened from. Empty for scratch tabs.
+    pub context: TabContext,
+    /// Live terminal state, for `TabKind::Terminal` tabs.
+    pub terminal: Option<TerminalStatus>,
+    /// Live page state, for `TabKind::Browser` tabs.
+    pub browser: Option<BrowserStatus>,
+}
+
+impl Tab {
+    /// A tab with no context and no live status yet.
+    pub fn new(id: TabId, kind: TabKind) -> Self {
+        Self { id, kind, context: TabContext::none(), terminal: None, browser: None }
+    }
 }
 
 /// The shell's whole view of the app.
@@ -141,14 +201,33 @@ impl AppState {
     }
 
     /// Short label for a tab.
+    ///
+    /// Terminals start as the folder they opened in and switch to whatever
+    /// the shell sets its title to; browsers follow the page title.
     pub fn tab_title(&self, tab: &Tab) -> String {
         match &tab.kind {
             TabKind::Thread(id) => self.thread(id).map(|t| t.title.clone()).unwrap_or_else(|| "Thread".into()),
             TabKind::Terminal { cwd } => {
-                let name = cwd.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                if name.is_empty() { "Terminal".into() } else { format!("Terminal · {name}") }
+                let base = match tab.terminal.as_ref().and_then(|t| t.title.clone()) {
+                    Some(title) => title,
+                    None => {
+                        let name = cwd.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        if name.is_empty() { "Terminal".into() } else { name }
+                    }
+                };
+                match tab.terminal.as_ref().and_then(|t| t.exited) {
+                    Some(_) => format!("{base} (exited)"),
+                    None => base,
+                }
             }
-            TabKind::Browser { url } => url.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string(),
+            TabKind::Browser { url } => {
+                let title = tab.browser.as_ref().map(|b| b.title.trim().to_owned()).unwrap_or_default();
+                if !title.is_empty() {
+                    return title;
+                }
+                let shown = tab.browser.as_ref().map(|b| b.url.clone()).filter(|u| !u.is_empty()).unwrap_or_else(|| url.clone());
+                shown.trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_string()
+            }
             TabKind::Settings => "Settings".into(),
         }
     }
@@ -161,13 +240,15 @@ impl AppState {
         }
     }
 
-    /// The project new work should land in: the selected thread's, else the first.
+    /// The project new work should land in: the selected thread's, else the
+    /// first one added. `None` when there are no projects, or when the
+    /// selected thread is a scratch thread — new work then joins it there
+    /// rather than being pulled into a project the user did not pick.
     pub fn current_project(&self) -> Option<&Project> {
-        self.selected_thread
-            .as_ref()
-            .and_then(|id| self.thread(id))
-            .and_then(|t| self.project(&t.project_id))
-            .or_else(|| self.projects.first())
+        if let Some(thread) = self.selected_thread.as_ref().and_then(|id| self.thread(id)) {
+            return thread.project_id.as_ref().and_then(|id| self.project(id));
+        }
+        self.projects.first()
     }
 
     // ---- tabs --------------------------------------------------------
@@ -175,15 +256,29 @@ impl AppState {
     fn mint_tab(&mut self, kind: TabKind) -> Tab {
         let id = TabId(self.next_tab_id);
         self.next_tab_id += 1;
-        Tab { id, kind }
+        Tab::new(id, kind)
     }
 
     /// Open a tab for `kind`, or activate the existing one. Returns its index.
     pub fn open_tab(&mut self, kind: TabKind) -> usize {
+        self.open_tab_with_context(kind, TabContext::none())
+    }
+
+    /// Open a tab for `kind` and record where it came from. Reusing an open
+    /// tab keeps its original context, since that is where it really came
+    /// from; only a freshly minted tab takes the new one.
+    pub fn open_tab_with_context(&mut self, kind: TabKind, context: TabContext) -> usize {
         let ix = match self.tab_index(&kind) {
             Some(ix) => ix,
             None => {
-                let tab = self.mint_tab(kind.clone());
+                let mut tab = self.mint_tab(kind.clone());
+                tab.context = context;
+                if let TabKind::Terminal { .. } = &tab.kind {
+                    tab.terminal = Some(TerminalStatus::default());
+                }
+                if let TabKind::Browser { url } = &tab.kind {
+                    tab.browser = Some(BrowserStatus { url: url.clone(), ..BrowserStatus::default() });
+                }
                 // New tabs open next to the active one, like a browser.
                 let at = self.active_tab.map(|a| a + 1).unwrap_or(self.tabs.len()).min(self.tabs.len());
                 self.tabs.insert(at, tab);
@@ -192,6 +287,83 @@ impl AppState {
         };
         self.activate_tab(ix);
         ix
+    }
+
+    /// The tab with this id.
+    pub fn tab(&self, id: TabId) -> Option<&Tab> {
+        self.tabs.iter().find(|t| t.id == id)
+    }
+
+    /// The tab with this id, mutably.
+    pub fn tab_mut(&mut self, id: TabId) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|t| t.id == id)
+    }
+
+    /// Record the title a terminal's shell set.
+    pub fn set_terminal_title(&mut self, id: TabId, title: String) -> bool {
+        let Some(tab) = self.tab_mut(id) else { return false };
+        let status = tab.terminal.get_or_insert_with(TerminalStatus::default);
+        let title = title.trim().to_owned();
+        status.title = if title.is_empty() { None } else { Some(title) };
+        true
+    }
+
+    /// Mark a terminal's shell as exited, or (with `None`) alive again.
+    pub fn set_terminal_exited(&mut self, id: TabId, code: Option<u32>) -> bool {
+        let Some(tab) = self.tab_mut(id) else { return false };
+        let status = tab.terminal.get_or_insert_with(TerminalStatus::default);
+        status.exited = code;
+        true
+    }
+
+    /// Record what a browser tab is showing and the id agents address it by.
+    pub fn set_browser_page(&mut self, id: TabId, title: String, url: String) -> bool {
+        let Some(tab) = self.tab_mut(id) else { return false };
+        let status = tab.browser.get_or_insert_with(BrowserStatus::default);
+        status.title = title;
+        if !url.is_empty() {
+            status.url = url;
+        }
+        true
+    }
+
+    /// Record the `boss_browser_*` id for a browser tab.
+    pub fn set_browser_agent_id(&mut self, id: TabId, agent_id: String) -> bool {
+        let Some(tab) = self.tab_mut(id) else { return false };
+        tab.browser.get_or_insert_with(BrowserStatus::default).agent_id = Some(agent_id);
+        true
+    }
+
+    /// The header strip above a terminal or browser pane: what the tab
+    /// belongs to, so "which project is this shell in?" is never a guess.
+    ///
+    /// Returns `(heading, detail)`. A tab with no project reads "Scratch".
+    pub fn tab_context_lines(&self, tab: &Tab) -> Option<(String, String)> {
+        match &tab.kind {
+            TabKind::Terminal { cwd } => {
+                let heading = match tab.context.project.as_ref().and_then(|id| self.project(id)) {
+                    Some(project) => project.name.clone(),
+                    None => "Scratch".to_owned(),
+                };
+                let heading = match tab.context.thread.as_ref().and_then(|id| self.thread(id)) {
+                    Some(thread) => format!("{heading} · {}", thread.title),
+                    None => heading,
+                };
+                Some((heading, cwd.display().to_string()))
+            }
+            TabKind::Browser { url } => {
+                let status = tab.browser.as_ref();
+                let title = status.map(|s| s.title.clone()).unwrap_or_default();
+                let shown_url = status.map(|s| s.url.clone()).filter(|u| !u.is_empty()).unwrap_or_else(|| url.clone());
+                let heading = if title.trim().is_empty() { shown_url.clone() } else { title };
+                let detail = match status.and_then(|s| s.agent_id.clone()) {
+                    Some(agent) => format!("{shown_url} · Agents see this as browser tab {agent}"),
+                    None => shown_url,
+                };
+                Some((heading, detail))
+            }
+            TabKind::Thread(_) | TabKind::Settings => None,
+        }
     }
 
     /// Open (or focus) the thread's tab and select it in the sidebar.
@@ -426,7 +598,7 @@ impl AppState {
 
         let thread = |id: &str, project: &Project, title: &str, kind: ThreadKind, ago: Duration| Thread {
             id: ThreadId::from_raw(id),
-            project_id: project.id.clone(),
+            project_id: Some(project.id.clone()),
             title: title.into(),
             kind,
             created_at: now - ago - Duration::hours(3),
@@ -502,6 +674,19 @@ impl AppState {
         chat(&mut s, "thr_demo_7", &relay, "Add rate limits to /push", EngineId::Opencode, Some("openai/gpt-5"), Duration::hours(1));
         chat(&mut s, "thr_demo_8", &relay, "Mobile handshake notes", EngineId::Codex, Some("gpt-5"), Duration::days(2));
 
+        // Scratch: started before any project was added, so it belongs to none.
+        let scratch = Thread {
+            id: ThreadId::from_raw("thr_demo_9"),
+            project_id: None,
+            title: "Quick question about rustfmt".into(),
+            kind: ThreadKind::Chat { engine: EngineId::Claude },
+            created_at: now - Duration::minutes(20),
+            updated_at: now - Duration::minutes(10),
+            cwd: scratch_cwd(),
+            archived: false,
+        };
+        s.add_thread(scratch, vec![seat("who_thr_demo_9", "Claude Code", EngineId::Claude, None, false)]);
+
         s.set_busy(&ThreadId::from_raw("thr_demo_1"), true);
         s.set_busy(&ThreadId::from_raw("thr_demo_6"), true);
         s.set_archived(&ThreadId::from_raw("thr_demo_5"), true);
@@ -546,10 +731,12 @@ mod tests {
     }
 
     #[test]
-    fn demo_has_two_projects_and_eight_threads_across_engines() {
+    fn demo_has_two_projects_and_nine_threads_across_engines() {
         let s = AppState::demo();
         assert_eq!(s.projects.len(), 2);
-        assert_eq!(s.threads.len(), 8);
+        // Eight in a project, plus one scratch thread with no project.
+        assert_eq!(s.threads.len(), 9);
+        assert_eq!(s.threads.iter().filter(|t| t.project_id.is_none()).count(), 1);
         let rooms = s.threads.iter().filter(|t| matches!(t.kind, ThreadKind::Room { .. })).count();
         assert_eq!(rooms, 3);
         for room in &s.rooms {
@@ -731,12 +918,88 @@ mod tests {
     #[test]
     fn tab_titles_and_participants() {
         let s = AppState::demo();
-        let terminal = Tab { id: TabId(99), kind: TabKind::Terminal { cwd: PathBuf::from("/Users/demo/dev/BOSS") } };
-        assert_eq!(s.tab_title(&terminal), "Terminal · BOSS");
-        let browser = Tab { id: TabId(98), kind: TabKind::Browser { url: "https://docs.rs/".into() } };
+        let terminal = Tab::new(TabId(99), TabKind::Terminal { cwd: PathBuf::from("/Users/demo/dev/BOSS") });
+        assert_eq!(s.tab_title(&terminal), "BOSS");
+        let browser = Tab::new(TabId(98), TabKind::Browser { url: "https://docs.rs/".into() });
         assert_eq!(s.tab_title(&browser), "docs.rs");
         assert_eq!(s.participants_of(&tid(1)).len(), 4);
         assert_eq!(s.participants_of(&tid(2)).len(), 1);
         assert!(s.participants_of(&ThreadId::from_raw("nope")).is_empty());
+    }
+
+    #[test]
+    fn a_terminal_tab_title_follows_the_shell_then_notes_the_exit() {
+        let mut s = AppState::demo();
+        let ix = s.open_tab(TabKind::Terminal { cwd: PathBuf::from("/Users/demo/dev/BOSS") });
+        let id = s.tabs[ix].id;
+        // Until the shell sets a title, the folder name stands in.
+        assert_eq!(s.tab_title(&s.tabs[ix]), "BOSS");
+        assert!(s.set_terminal_title(id, "npm run dev".into()));
+        assert_eq!(s.tab_title(s.tab(id).unwrap()), "npm run dev");
+        // A blank title from the shell falls back rather than blanking the tab.
+        s.set_terminal_title(id, "   ".into());
+        assert_eq!(s.tab_title(s.tab(id).unwrap()), "BOSS");
+        s.set_terminal_title(id, "zsh".into());
+        s.set_terminal_exited(id, Some(130));
+        assert_eq!(s.tab_title(s.tab(id).unwrap()), "zsh (exited)");
+        // Reopening a shell clears the marker.
+        s.set_terminal_exited(id, None);
+        assert_eq!(s.tab_title(s.tab(id).unwrap()), "zsh");
+        assert!(!s.set_terminal_title(TabId(9999), "x".into()), "an unknown tab is a no-op");
+    }
+
+    #[test]
+    fn a_browser_tab_title_follows_the_page() {
+        let mut s = AppState::demo();
+        let ix = s.open_tab(TabKind::Browser { url: "https://docs.rs/gpui".into() });
+        let id = s.tabs[ix].id;
+        assert_eq!(s.tab_title(&s.tabs[ix]), "docs.rs/gpui");
+        s.set_browser_page(id, "gpui - Rust".into(), "https://docs.rs/gpui/latest/gpui/".into());
+        assert_eq!(s.tab_title(s.tab(id).unwrap()), "gpui - Rust");
+        // A page with no title falls back to the URL it actually landed on.
+        s.set_browser_page(id, String::new(), "https://docs.rs/gpui/latest/gpui/".into());
+        assert_eq!(s.tab_title(s.tab(id).unwrap()), "docs.rs/gpui/latest/gpui");
+    }
+
+    #[test]
+    fn the_header_strip_says_what_a_tab_belongs_to() {
+        let mut s = AppState::demo();
+        let project = s.projects[0].id.clone();
+        let ix = s.open_tab_with_context(
+            TabKind::Terminal { cwd: PathBuf::from("/Users/demo/dev/BOSS") },
+            TabContext { project: Some(project), thread: Some(tid(2)) },
+        );
+        let (heading, detail) = s.tab_context_lines(&s.tabs[ix]).unwrap();
+        assert_eq!(heading, "boss · Why does the list jump on scroll?");
+        assert_eq!(detail, "/Users/demo/dev/BOSS");
+
+        // A terminal opened from nowhere says so rather than showing nothing.
+        let ix = s.open_tab(TabKind::Terminal { cwd: PathBuf::from("/tmp") });
+        assert_eq!(s.tab_context_lines(&s.tabs[ix]).unwrap().0, "Scratch");
+
+        // Browsers carry the id agents drive them by.
+        let ix = s.open_tab(TabKind::Browser { url: "https://example.com".into() });
+        let id = s.tabs[ix].id;
+        s.set_browser_page(id, "Example".into(), "https://example.com/".into());
+        s.set_browser_agent_id(id, "browser-3".into());
+        let (heading, detail) = s.tab_context_lines(s.tab(id).unwrap()).unwrap();
+        assert_eq!(heading, "Example");
+        assert_eq!(detail, "https://example.com/ · Agents see this as browser tab browser-3");
+
+        // Threads and settings have no strip.
+        assert!(s.tab_context_lines(&Tab::new(TabId(1), TabKind::Settings)).is_none());
+        assert!(s.tab_context_lines(&Tab::new(TabId(2), TabKind::Thread(tid(1)))).is_none());
+    }
+
+    #[test]
+    fn reusing_a_tab_keeps_the_context_it_was_opened_with() {
+        let mut s = AppState::empty();
+        let kind = TabKind::Terminal { cwd: PathBuf::from("/tmp") };
+        let first = TabContext { project: Some(ProjectId::from_raw("prj_a")), thread: None };
+        let ix = s.open_tab_with_context(kind.clone(), first.clone());
+        let id = s.tabs[ix].id;
+        let again = s.open_tab_with_context(kind, TabContext { project: Some(ProjectId::from_raw("prj_b")), thread: None });
+        assert_eq!(again, ix, "the same tab is focused, not duplicated");
+        assert_eq!(s.tab(id).unwrap().context, first);
     }
 }

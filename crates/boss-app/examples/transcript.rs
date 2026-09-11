@@ -38,6 +38,15 @@ fn main() {
     let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
     app.run(move |cx| {
         gpui_component::init(cx);
+        // The example is how the transcript's look is reviewed, so it wears
+        // the same palette the app does. BOSS_THEME=light draws the light one.
+        boss_app::shell::init(cx);
+        let light = std::env::var("BOSS_THEME").is_ok_and(|v| v == "light");
+        boss_app::shell::apply_theme(
+            if light { boss_core::store::Theme::Light } else { boss_core::store::Theme::Dark },
+            None,
+            cx,
+        );
 
         let (thread, participants, messages) = synthetic_thread();
         let builder = participants[0].id.clone();
@@ -205,7 +214,7 @@ fn synthetic_thread() -> (Thread, Vec<Participant>, Vec<Message>) {
     let now = time::OffsetDateTime::now_utc();
     let thread = Thread {
         id: thread_id.clone(),
-        project_id: ProjectId::from_raw("prj_example"),
+        project_id: Some(ProjectId::from_raw("prj_example")),
         title: "Transcript stress test".into(),
         kind: ThreadKind::Room { room_id: RoomId::from_raw("room_example") },
         created_at: now - time::Duration::seconds(PRELOAD as i64),

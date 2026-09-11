@@ -667,7 +667,7 @@ mod tests {
     fn thread() -> Thread {
         Thread {
             id: ThreadId::from_raw("thr_1"),
-            project_id: ProjectId::from_raw("prj_1"),
+            project_id: Some(ProjectId::from_raw("prj_1")),
             title: "Fix the build".into(),
             kind: ThreadKind::Chat { engine: EngineId::Claude },
             created_at: datetime!(2024-01-01 00:00:00 UTC),

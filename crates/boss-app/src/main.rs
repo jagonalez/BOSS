@@ -29,13 +29,23 @@ fn main() {
         runtime.clone(),
         boss_runtime::relay::RelayConfig { data_dir: runtime.data_dir.clone(), url: None },
     );
+    // Only start the phone server if the user turned it on. Starting it
+    // regardless published a tailnet URL nobody asked for, and the failure
+    // to bind (another BOSS already holds the port) reached only the log.
+    // The error is kept so the settings page can say what went wrong.
     let web_config = boss_runtime::web_access::WebAccessConfig::load(&runtime.data_dir);
-    let web_access = match handle.block_on(boss_runtime::web_access::WebAccess::start(runtime.clone(), web_config)) {
-        Ok(w) => Some(w),
-        Err(err) => {
-            tracing::warn!(%err, "web access did not start");
-            None
+    let mut web_error = None;
+    let web_access = if web_config.enabled {
+        match handle.block_on(boss_runtime::web_access::WebAccess::start(runtime.clone(), web_config)) {
+            Ok(w) => Some(w),
+            Err(err) => {
+                tracing::warn!(%err, "web access did not start");
+                web_error = Some(err.to_string());
+                None
+            }
         }
+    } else {
+        None
     };
 
     let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
@@ -45,7 +55,7 @@ fn main() {
         cx.activate(true);
 
         let state = cx.new(|_| BossApp::initial_state(&runtime));
-        let boss = BossApp::new(runtime.clone(), state.clone(), relay, web_access);
+        let boss = BossApp::new(runtime.clone(), state.clone(), relay, web_access, web_error);
         boss.install();
         let actions: Arc<dyn ShellActions> = boss.clone();
         match shell::open_main_window_with_workspace(state, actions, cx) {

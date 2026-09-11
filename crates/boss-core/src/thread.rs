@@ -18,7 +18,12 @@ pub enum ThreadKind {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Thread {
     pub id: ThreadId,
-    pub project_id: ProjectId,
+    /// The project this thread belongs to, or `None` for a scratch thread
+    /// started before the user added any project. Missing or null in
+    /// `threads.json` reads as `None`, so files written before threads could
+    /// stand alone still load.
+    #[serde(default)]
+    pub project_id: Option<ProjectId>,
     pub title: String,
     pub kind: ThreadKind,
     #[serde(with = "time::serde::rfc3339")]
@@ -30,6 +35,21 @@ pub struct Thread {
     pub cwd: std::path::PathBuf,
     #[serde(default)]
     pub archived: bool,
+}
+
+/// Where a thread with no project works: the user's home directory. A
+/// scratch chat still needs somewhere to run, and home is the one place
+/// every user has.
+pub fn scratch_cwd() -> std::path::PathBuf {
+    dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"))
+}
+
+impl Thread {
+    /// Working directory for a new thread: the project's root, or the
+    /// scratch directory when there is no project.
+    pub fn cwd_for(project: Option<&Project>) -> std::path::PathBuf {
+        project.map(|p| p.root.clone()).unwrap_or_else(scratch_cwd)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

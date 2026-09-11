@@ -6,7 +6,7 @@ use crate::runtime::Runtime;
 use crate::worktree::Worktrees;
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
-use boss_core::store::JsonFile;
+use boss_core::store::{AgentReportInput, AgentReportPatch, JsonFile, Presence};
 use boss_core::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -73,9 +73,9 @@ impl KeyValueFile {
 /// app's wiring to compile or be tested.
 #[async_trait]
 pub trait RoomOpener: Send + Sync {
-    /// Start a room in `project` with `shape`, titled `title`, and return
-    /// its thread.
-    async fn open_room(&self, project: &Project, shape: RoomShape, title: &str) -> Result<Thread>;
+    /// Start a room in `project` (or with no project, when the caller has
+    /// none) with `shape`, titled `title`, and return its thread.
+    async fn open_room(&self, project: Option<&Project>, shape: RoomShape, title: &str) -> Result<Thread>;
 }
 
 pub struct RuntimeBusHandler {
@@ -84,8 +84,14 @@ pub struct RuntimeBusHandler {
     messages_file: JsonFile,
     delivery_locks: Mutex<HashSet<ThreadId>>,
     native_sessions: KeyValueFile,
-    /// Browser and computer tools, provided by the app once the UI exists.
+    /// Browser tools, provided by the app once the UI exists.
     qa: Mutex<Option<std::sync::Arc<dyn BusHandler>>>,
+    /// The embedded cua-driver. Owned here rather than by the app: it is a
+    /// child process and a socket, with no window behind it, so it needs
+    /// nothing the UI has and is testable without one.
+    computer: crate::computer_use::ComputerUse,
+    /// Per-thread QA policy, which decides whether an acting call goes through.
+    qa_policies: Mutex<crate::computer_use::QaPolicies>,
     /// Git worktrees for the worktree tools.
     worktrees: Worktrees,
     /// Room opener, provided by the app once rooms are wired.
@@ -103,6 +109,8 @@ impl RuntimeBusHandler {
             delivery_locks: Mutex::new(HashSet::new()),
             native_sessions: KeyValueFile::open(&data_dir, "native-sessions.json")?,
             qa: Mutex::new(None),
+            computer: crate::computer_use::ComputerUse::in_data_dir(&data_dir),
+            qa_policies: Mutex::new(crate::computer_use::QaPolicies::open(&data_dir)),
             // Beside the rest of this instance's data, so a test data dir
             // does not put checkouts in the real one.
             worktrees: Worktrees::with_root(data_dir.join("worktrees")),
@@ -119,9 +127,33 @@ impl RuntimeBusHandler {
         let _ = self.runtime.set(runtime);
     }
 
-    /// The app sets this once browser/computer tools exist.
+    /// The app sets this once browser tools exist.
     pub fn set_qa_handler(&self, qa: std::sync::Arc<dyn BusHandler>) {
         *self.qa.lock().unwrap() = Some(qa);
+    }
+
+    /// The embedded cua-driver, for the settings UI: status, the enable
+    /// toggle, the permission checks, and the emergency stop.
+    pub fn computer(&self) -> &crate::computer_use::ComputerUse {
+        &self.computer
+    }
+
+    /// The QA policy for one thread, falling back to the global default.
+    pub fn qa_policy(&self, thread: &ThreadId) -> crate::computer_use::QaPolicy {
+        self.qa_policies.lock().unwrap().policy(&thread.0)
+    }
+
+    /// Set one thread's QA policy, or `None` to follow the global default.
+    pub fn set_qa_policy(&self, thread: &ThreadId, policy: Option<crate::computer_use::QaPolicy>) {
+        self.qa_policies.lock().unwrap().set_policy(&thread.0, policy);
+    }
+
+    pub fn qa_default_policy(&self) -> crate::computer_use::QaPolicy {
+        self.qa_policies.lock().unwrap().default_policy()
+    }
+
+    pub fn set_qa_default_policy(&self, policy: crate::computer_use::QaPolicy) {
+        self.qa_policies.lock().unwrap().set_default(policy);
     }
 
     pub fn native_sessions(&self) -> &KeyValueFile {
@@ -159,11 +191,43 @@ impl RuntimeBusHandler {
         Ok(target)
     }
 
-    /// The project a thread belongs to.
+    /// The project a thread belongs to. A scratch thread has none, so the
+    /// worktree tools stop here rather than checking out into a home folder.
     fn project_of(&self, rt: &Runtime, thread: &Thread) -> Result<Project> {
-        rt.state
-            .project(&thread.project_id)
+        thread
+            .project_id
+            .as_ref()
+            .and_then(|id| rt.state.project(id))
             .ok_or_else(|| anyhow!("Projectless chats cannot use Git worktrees."))
+    }
+
+    /// A thread's project path as a report records it: the project root, or
+    /// `""` for a scratch thread. Matches the Electron file, where a global
+    /// automation report also carries an empty `projectPath`.
+    fn project_path_of(&self, rt: &Runtime, thread: &Thread) -> String {
+        thread
+            .project_id
+            .as_ref()
+            .and_then(|id| rt.state.project(id))
+            .map(|p| p.root.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
+    /// The engine a report's `backendId` records: the seat's engine in a
+    /// room, the thread's engine in a chat, and the default otherwise. Each
+    /// seat in a room can run on a different engine, so asking the thread
+    /// alone would attribute a reviewer's report to the builder's engine.
+    fn backend_id_of(&self, rt: &Runtime, thread: &Thread, caller: &BusCaller) -> &'static str {
+        if let ThreadKind::Chat { engine } = thread.kind {
+            return engine.as_str();
+        }
+        rt.rooms()
+            .participants_for(&thread.id)
+            .into_iter()
+            .find(|p| p.id == caller.participant_id)
+            .map(|p| p.engine)
+            .unwrap_or_else(|| rt.settings.get().default_engine)
+            .as_str()
     }
 
     /// Where a spawned thread or room goes: the caller's project, or the one
@@ -327,7 +391,7 @@ impl RuntimeBusHandler {
         let b = |k: &str, d: bool| args.get(k).and_then(Value::as_bool).unwrap_or(d);
         let n = |k: &str, d: f64| args.get(k).and_then(Value::as_f64).unwrap_or(d);
 
-        if name.starts_with("boss_browser_") || name == "boss_computer" {
+        if name.starts_with("boss_browser_") {
             let qa = self.qa.lock().unwrap().clone().ok_or_else(|| anyhow!("BOSS QA tools are not ready."))?;
             let r = qa.call_tool(caller, name, args).await;
             return if r.is_error { Err(anyhow!(text_of(&r))) } else { Ok(Value::String(text_of(&r))) };
@@ -463,7 +527,7 @@ impl RuntimeBusHandler {
                 let project = self.target_project(&rt, &thread, &s("project"))?;
                 let title = first_line(&instruction);
                 let info = self.worktrees.create(&project.root, &title).await?;
-                let created = match rt.new_chat(&project, engine, Some(title.clone())) {
+                let created = match rt.new_chat(Some(&project), engine, Some(title.clone())) {
                     Ok(created) => created,
                     Err(e) => {
                         let _ = self.worktrees.remove(&info.path).await;
@@ -494,12 +558,124 @@ impl RuntimeBusHandler {
                 })?;
                 let opener =
                     self.rooms.get().ok_or_else(|| anyhow!("BOSS cannot open rooms in this build."))?.clone();
-                let project = self.target_project(&rt, &thread, &s("project"))?;
-                let opened = opener.open_room(&project, shape, &instruction).await?;
+                // A scratch thread that names no project opens a scratch
+                // room: a room the user could not have opened otherwise
+                // would be a way to widen the caller's own scope.
+                let named = s("project");
+                let project = match (named.trim().is_empty(), &thread.project_id) {
+                    (true, None) => None,
+                    _ => Some(self.target_project(&rt, &thread, &named)?),
+                };
+                let opened = opener.open_room(project.as_ref(), shape, &instruction).await?;
                 Ok(json!({ "id": opened.id, "title": opened.title }))
             }
-            "boss_reports_create" | "boss_reports_update" | "boss_notes_record" | "boss_presence_set" => {
-                bail!("{name} is not available yet in this build of BOSS.")
+            // Job notes belong to the caller's own job, so they are not gated
+            // by the collaboration policy. They are the only thing that
+            // carries a job past the agents working on it: an agent brought
+            // in later reads these and nothing else.
+            "boss_notes_record" => {
+                let list = |key: &str| -> Option<Vec<String>> {
+                    let items = args.get(key)?.as_array()?;
+                    Some(
+                        items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::trim)
+                            .filter(|line| !line.is_empty())
+                            .map(str::to_owned)
+                            .collect(),
+                    )
+                };
+                let at = time::OffsetDateTime::now_utc();
+                let patch = rooms::JobNotesPatch {
+                    agreed: list("agreed"),
+                    decided: list("decided").map(|texts| {
+                        texts
+                            .into_iter()
+                            .map(|text| rooms::JobDecision {
+                                text,
+                                at,
+                                by: caller.participant_id.clone(),
+                            })
+                            .collect()
+                    }),
+                    changed: list("changed"),
+                };
+                if patch.agreed.is_none() && patch.decided.is_none() && patch.changed.is_none() {
+                    bail!("Record at least one of agreed, decided, or changed.");
+                }
+                // A participant records against its thread, because that is
+                // the job it is working on.
+                let notes = rt.rooms().record_notes(&thread.id, patch);
+                Ok(json!({
+                    "recorded": true,
+                    "updatedAt": notes.updated_at.map(|at| at.unix_timestamp_nanos() / 1_000_000).unwrap_or(0) as i64,
+                }))
+            }
+            // Presence is the user's own bar for being interrupted, not a
+            // collaboration question, so it is answered before the policy.
+            "boss_presence_set" => {
+                let wanted = match s("presence").as_str() {
+                    "desk" => Presence::Desk,
+                    "away" => Presence::Away,
+                    "quiet" => Presence::Quiet,
+                    _ => bail!("presence must be \"desk\", \"away\", or \"quiet\"."),
+                };
+                let held = rt.notify.set_presence(wanted);
+                Ok(json!({
+                    "presence": s("presence"),
+                    // Named so the assistant can say what waited rather than
+                    // leaving the user to discover it.
+                    "waiting": held
+                        .iter()
+                        .map(|e| json!({ "title": e.title, "body": e.body }))
+                        .collect::<Vec<_>>(),
+                }))
+            }
+            // Report artifacts are local to BOSS and belong to the calling
+            // thread, so creating or refining one does not depend on
+            // cross-thread collaboration either.
+            "boss_reports_create" => {
+                let summary = args.get("summary").and_then(Value::as_str).map(str::to_owned);
+                let report = rt.reports.create_from_agent(
+                    AgentReportInput {
+                        thread_id: thread.id.to_string(),
+                        project_path: self.project_path_of(&rt, &thread),
+                        backend_id: self.backend_id_of(&rt, &thread, caller).to_owned(),
+                        title: s("title"),
+                        summary,
+                        body: s("body"),
+                    },
+                    time::OffsetDateTime::now_ms(),
+                )?;
+                Ok(json!({ "id": report.id, "title": report.title, "summary": report.summary }))
+            }
+            "boss_reports_update" => {
+                let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
+                let patch = AgentReportPatch {
+                    title: text("title"),
+                    summary: text("summary"),
+                    body: text("body"),
+                };
+                if patch.is_empty() {
+                    bail!("Pass at least one report field to update.");
+                }
+                let id = s("reportId");
+                if id.trim().is_empty() {
+                    bail!("A reportId is required.");
+                }
+                let report = rt.reports.update_from_agent(
+                    &thread.id.to_string(),
+                    &id,
+                    patch,
+                    time::OffsetDateTime::now_ms(),
+                )?;
+                Ok(json!({
+                    "id": report.id,
+                    "title": report.title,
+                    "summary": report.summary,
+                    "updatedAt": report.updated_at,
+                }))
             }
             _ if name.starts_with("boss_workflow_") => bail!("Workflows are not available."),
             _ => bail!("Unknown BOSS thread tool."),
@@ -569,6 +745,13 @@ impl BusHandler for RuntimeBusHandler {
     }
 
     async fn call_tool(&self, caller: &BusCaller, name: &str, args: Value) -> BusToolResult {
+        // Answered here rather than through `call`, which returns a `Value`
+        // and so cannot carry an image: a state capture's screenshot is the
+        // larger half of its answer, and flattening it to text loses it.
+        if name == "boss_computer" {
+            let policy = self.qa_policy(&caller.thread_id);
+            return self.computer.call_bus_tool(&args, policy).await;
+        }
         match self.call(caller, name, args).await {
             Ok(Value::String(s)) => BusToolResult::text(s),
             Ok(v) => BusToolResult::text(serde_json::to_string_pretty(&v).unwrap_or_default()),
@@ -588,17 +771,17 @@ mod tests {
 
     #[async_trait]
     impl RoomOpener for FakeRooms {
-        async fn open_room(&self, project: &Project, shape: RoomShape, title: &str) -> Result<Thread> {
-            self.opened.lock().unwrap().push((project.root.clone(), shape, title.to_owned()));
+        async fn open_room(&self, project: Option<&Project>, shape: RoomShape, title: &str) -> Result<Thread> {
+            self.opened.lock().unwrap().push((Thread::cwd_for(project), shape, title.to_owned()));
             let now = time::OffsetDateTime::now_utc();
             Ok(Thread {
                 id: ThreadId::from("thr_room"),
-                project_id: project.id.clone(),
+                project_id: project.map(|p| p.id.clone()),
                 title: "Ship the thing".into(),
                 kind: ThreadKind::Room { room_id: RoomId::new() },
                 created_at: now,
                 updated_at: now,
-                cwd: project.root.clone(),
+                cwd: Thread::cwd_for(project),
                 archived: false,
             })
         }
@@ -641,6 +824,16 @@ mod tests {
             self.rt.bus_handler().call(&caller, name, args).await
         }
 
+        /// The tool path an agent actually takes, which unlike `call` can
+        /// carry an image back.
+        async fn call_tool(&self, name: &str, args: Value) -> BusToolResult {
+            let caller = BusCaller {
+                thread_id: self.thread.id.clone(),
+                participant_id: ParticipantId::from("who_test"),
+            };
+            self.rt.bus_handler().call_tool(&caller, name, args).await
+        }
+
         fn thread(&self) -> Thread {
             self.rt.state.thread(&self.thread.id).unwrap()
         }
@@ -654,7 +847,7 @@ mod tests {
         let rt = Runtime::start(Some(data), tokio::runtime::Handle::current()).await.unwrap();
         let root = repo(dir.path().join("acme")).await;
         let project = rt.state.add_project(root, None).unwrap();
-        let thread = rt.new_chat(&project, EngineId::Pi, Some("Fix the login bug".into())).unwrap();
+        let thread = rt.new_chat(Some(&project), EngineId::Pi, Some("Fix the login bug".into())).unwrap();
         let rooms = Arc::new(FakeRooms { opened: Mutex::new(vec![]) });
         rt.bus_handler().set_room_opener(rooms.clone());
         Fixture { _dir: dir, rt, rooms, project, thread }
@@ -715,6 +908,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn boss_computer_reaches_the_driver_with_its_screenshot_intact() {
+        // The bug this pins: the QA delegation flattened every result to text,
+        // so a state capture's screenshot — the larger half of its answer —
+        // was dropped before the agent ever saw it. No browser QA handler is
+        // registered here either, which is the point: the computer tool must
+        // not depend on the UI being up.
+        let _fake = crate::computer_use::FakeDriver::install();
+        let f = fixture().await;
+
+        let looked = f.call_tool("boss_computer", json!({ "operation": "get_window_state" })).await;
+        assert!(!looked.is_error, "{:?}", looked.content);
+        assert_eq!(looked.content.len(), 2, "text and image: {:?}", looked.content);
+        assert!(matches!(&looked.content[1], BusContent::Image { mime_type, .. } if mime_type == "image/png"));
+
+        // Acting goes through under the automatic default, with the click
+        // action canonicalized on the way.
+        let acted = f
+            .call_tool("boss_computer", json!({ "operation": "click", "arguments": { "action": "showmenu" } }))
+            .await;
+        assert!(!acted.is_error, "{:?}", acted.content);
+        let echoed: Value = serde_json::from_str(&text_of(&acted)).unwrap();
+        assert_eq!(echoed["arguments"]["action"], "show_menu");
+
+        // Under Suggest, looking still works and acting is refused with a
+        // message that says what to do about it.
+        f.rt.bus_handler().set_qa_policy(&f.thread.id, Some(crate::computer_use::QaPolicy::Suggest));
+        let refused = f.call_tool("boss_computer", json!({ "operation": "click" })).await;
+        assert!(refused.is_error);
+        assert!(text_of(&refused).contains("Automatic QA"), "{:?}", refused.content);
+        let still_looks = f.call_tool("boss_computer", json!({ "operation": "list_apps" })).await;
+        assert!(!still_looks.is_error, "{:?}", still_looks.content);
+    }
+
+    #[tokio::test]
     async fn tools_refuse_a_project_the_user_never_opened() {
         let f = fixture().await;
         let e = f
@@ -755,5 +982,210 @@ mod tests {
         assert_eq!(first_line("\n\n  Add a retry to the uploader  \nwhy: it flakes"), "Add a retry to the uploader");
         assert_eq!(first_line("   "), "Worktree thread");
         assert_eq!(first_line(&"z".repeat(200)).len(), 80);
+    }
+
+    // ------------------------------------------------------- reports
+
+    #[tokio::test]
+    async fn reports_create_stores_an_artifact_the_thread_owns() {
+        let f = fixture().await;
+        let made = f
+            .call(
+                "boss_reports_create",
+                json!({ "title": "  Findings  ", "summary": "The short version", "body": "# Findings\n\nDetail." }),
+            )
+            .await
+            .unwrap();
+        let id = made["id"].as_str().unwrap().to_owned();
+        assert_eq!(made["title"], "Findings", "the title is trimmed");
+        assert_eq!(made["summary"], "The short version");
+
+        let stored = f.rt.reports.get(&id).unwrap();
+        assert_eq!(stored.thread_id.as_deref(), Some(f.thread.id.as_str()));
+        assert_eq!(stored.project_path, f.project.root.to_string_lossy());
+        // The fixture thread runs on pi, so that is what the report records.
+        assert_eq!(stored.source, boss_core::store::ReportSource::Agent { backend_id: "pi".into() });
+        assert!(stored.created_at > 0);
+
+        // It survives a reopen of the store, so the artifact outlives the run.
+        let reopened = boss_core::store::ReportStore::open(Some(&f.rt.data_dir)).unwrap();
+        assert_eq!(reopened.get(&id).unwrap().body, "# Findings\n\nDetail.");
+    }
+
+    #[tokio::test]
+    async fn reports_create_refuses_empty_and_oversized_text() {
+        let f = fixture().await;
+        let blank = f.call("boss_reports_create", json!({ "title": "  ", "body": "x" })).await;
+        assert!(blank.unwrap_err().to_string().contains("Report title is required."));
+
+        let huge = json!({ "title": "t", "body": "x".repeat(250_001) });
+        let message = f.call("boss_reports_create", huge).await.unwrap_err().to_string();
+        assert!(message.contains("250,000 characters"), "message was {message}");
+        assert!(f.rt.reports.list().is_empty(), "nothing was stored");
+    }
+
+    #[tokio::test]
+    async fn reports_update_refines_the_thread_s_own_report_only() {
+        let f = fixture().await;
+        let made = f
+            .call("boss_reports_create", json!({ "title": "Findings", "summary": "Draft", "body": "First." }))
+            .await
+            .unwrap();
+        let id = made["id"].as_str().unwrap().to_owned();
+
+        // Clearing the summary means passing an empty one, as the TS did.
+        let updated =
+            f.call("boss_reports_update", json!({ "reportId": &id, "summary": "", "body": "Revised." })).await.unwrap();
+        assert_eq!(updated["id"], id.as_str());
+        assert!(updated["summary"].is_null(), "the summary was cleared");
+        assert!(updated["updatedAt"].as_i64().unwrap() > 0);
+        let stored = f.rt.reports.get(&id).unwrap();
+        assert_eq!(stored.body, "Revised.");
+        assert_eq!(stored.title, "Findings", "an unset field is left alone");
+
+        // Another thread cannot rewrite it.
+        let other = f.rt.new_chat(Some(&f.project), EngineId::Pi, Some("Other".into())).unwrap();
+        let denied = f
+            .rt
+            .bus_handler()
+            .call(
+                &BusCaller { thread_id: other.id, participant_id: ParticipantId::from("who_other") },
+                "boss_reports_update",
+                json!({ "reportId": &id, "title": "Hijacked" }),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(denied.contains("Only the thread that created"), "message was {denied}");
+        assert_eq!(f.rt.reports.get(&id).unwrap().title, "Findings");
+    }
+
+    #[tokio::test]
+    async fn reports_update_needs_a_field_and_an_id() {
+        let f = fixture().await;
+        let made = f.call("boss_reports_create", json!({ "title": "Findings", "body": "First." })).await.unwrap();
+        let id = made["id"].as_str().unwrap().to_owned();
+
+        let nothing = f.call("boss_reports_update", json!({ "reportId": &id })).await.unwrap_err().to_string();
+        assert!(nothing.contains("at least one report field"), "message was {nothing}");
+
+        let no_id = f.call("boss_reports_update", json!({ "title": "New" })).await.unwrap_err().to_string();
+        assert!(no_id.contains("reportId is required"), "message was {no_id}");
+
+        let missing =
+            f.call("boss_reports_update", json!({ "reportId": "nope", "title": "New" })).await.unwrap_err().to_string();
+        assert!(missing.contains("Report not found."), "message was {missing}");
+    }
+
+    #[tokio::test]
+    async fn the_phone_lists_reports_without_their_bodies_and_fetches_one_whole() {
+        let f = fixture().await;
+        f.call("boss_reports_create", json!({ "title": "Findings", "body": "A long body." })).await.unwrap();
+
+        let snapshot = f.rt.reports.snapshot();
+        let listed = &snapshot["reports"][0];
+        assert_eq!(listed["title"], "Findings");
+        assert!(listed.get("body").is_none(), "the list carries no bodies");
+
+        let whole = f.rt.reports.get(listed["id"].as_str().unwrap()).unwrap();
+        assert_eq!(whole.body, "A long body.");
+    }
+
+    // --------------------------------------------------------- notes
+
+    #[tokio::test]
+    async fn notes_record_stores_what_survives_the_job() {
+        let f = fixture().await;
+        let recorded = f
+            .call(
+                "boss_notes_record",
+                json!({
+                    "agreed": ["save the query and the sort order", "  "],
+                    "decided": ["chose sqlite over a file"],
+                    "changed": ["11 files, 3 new tests"],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recorded["recorded"], true);
+        assert!(recorded["updatedAt"].as_i64().unwrap() > 0);
+
+        let notes = f.rt.rooms().room(&f.thread.id).notes;
+        // Blank lines are dropped rather than stored as empty bullets.
+        assert_eq!(notes.agreed, vec!["save the query and the sort order"]);
+        assert_eq!(notes.changed, vec!["11 files, 3 new tests"]);
+        assert_eq!(notes.decided.len(), 1);
+        assert_eq!(notes.decided[0].text, "chose sqlite over a file");
+        assert_eq!(notes.decided[0].by.as_str(), "who_test", "the caller's seat is credited");
+        assert!(notes.updated_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn recording_one_heading_leaves_the_others_alone() {
+        let f = fixture().await;
+        f.call("boss_notes_record", json!({ "agreed": ["the plan"] })).await.unwrap();
+        f.call("boss_notes_record", json!({ "changed": ["the code"] })).await.unwrap();
+        let notes = f.rt.rooms().room(&f.thread.id).notes;
+        assert_eq!(notes.agreed, vec!["the plan"]);
+        assert_eq!(notes.changed, vec!["the code"]);
+    }
+
+    #[tokio::test]
+    async fn notes_record_needs_at_least_one_heading() {
+        let f = fixture().await;
+        let empty = f.call("boss_notes_record", json!({})).await.unwrap_err().to_string();
+        assert!(empty.contains("at least one of agreed, decided, or changed"), "message was {empty}");
+        assert!(f.rt.rooms().room(&f.thread.id).notes.is_empty());
+    }
+
+    // ------------------------------------------------------ presence
+
+    #[tokio::test]
+    async fn presence_set_moves_the_users_bar_and_persists_it() {
+        use boss_core::store::Presence;
+        let f = fixture().await;
+        let set = f.call("boss_presence_set", json!({ "presence": "quiet" })).await.unwrap();
+        assert_eq!(set["presence"], "quiet");
+        assert_eq!(set["waiting"].as_array().unwrap().len(), 0);
+        assert_eq!(f.rt.settings.get().notifications.presence, Presence::Quiet);
+
+        // Durable, so "do not disturb" is not quietly forgotten on restart.
+        let reopened = boss_core::store::SettingsStore::open(Some(&f.rt.data_dir)).unwrap();
+        assert_eq!(reopened.get().notifications.presence, Presence::Quiet);
+    }
+
+    #[tokio::test]
+    async fn coming_back_says_what_waited() {
+        use crate::notify::{NotifyEvent, NotifyEventType};
+        let f = fixture().await;
+        f.call("boss_presence_set", json!({ "presence": "quiet" })).await.unwrap();
+        f.rt.notify.publish(NotifyEvent {
+            kind: NotifyEventType::TaskNeedsAttention,
+            title: "Approve the migration".into(),
+            body: "It is waiting on you.".into(),
+            thread_id: None,
+            project_path: None,
+            created_at: 1,
+        });
+
+        let back = f.call("boss_presence_set", json!({ "presence": "desk" })).await.unwrap();
+        let waiting = back["waiting"].as_array().unwrap();
+        assert_eq!(waiting.len(), 1);
+        assert_eq!(waiting[0]["title"], "Approve the migration");
+        assert_eq!(waiting[0]["body"], "It is waiting on you.");
+
+        // Handed over once, so returning again does not repeat itself.
+        f.call("boss_presence_set", json!({ "presence": "quiet" })).await.unwrap();
+        let again = f.call("boss_presence_set", json!({ "presence": "desk" })).await.unwrap();
+        assert!(again["waiting"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn presence_set_refuses_a_value_it_does_not_know() {
+        use boss_core::store::Presence;
+        let f = fixture().await;
+        let bad = f.call("boss_presence_set", json!({ "presence": "asleep" })).await.unwrap_err().to_string();
+        assert!(bad.contains(r#"must be "desk", "away", or "quiet""#), "message was {bad}");
+        assert_eq!(f.rt.settings.get().notifications.presence, Presence::Desk, "unchanged");
     }
 }

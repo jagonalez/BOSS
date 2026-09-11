@@ -23,6 +23,13 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 rand = "0.8"
+# Workflows and automations: local-time cron. `time` refuses to read the
+# local UTC offset from a process that has spawned threads, which BOSS always
+# has, so it would silently schedule everything in UTC.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Import: reads the Electron transcripts database read-only.
+rusqlite.workspace = true
+dirs.workspace = true
 # Relay (mobile access): WebSocket client, AES-GCM frames, Ed25519 identity, QR codes.
 tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
 aes-gcm = "0.10"

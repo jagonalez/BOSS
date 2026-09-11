@@ -17,6 +17,11 @@ pub struct ThreadModel {
     /// Bumps on any change. Views compare it to skip work.
     pub revision: u64,
     index: HashMap<MessageId, usize>,
+    /// Participants that are answering inside a branch, and the turn each
+    /// branch hangs off. What an agent says while it is in here belongs to
+    /// the replies panel, not to the main transcript — the engine has no
+    /// idea a branch exists, so the model has to remember.
+    open_branches: HashMap<ParticipantId, MessageId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +49,7 @@ impl ThreadModel {
             busy: false,
             revision: 0,
             index: HashMap::new(),
+            open_branches: HashMap::new(),
         };
         for msg in messages {
             m.push(msg);
@@ -87,6 +93,18 @@ impl ThreadModel {
         id
     }
 
+    /// Answer `participant`'s next turn inside the branch under `parent`,
+    /// until it goes idle. Set when the user sends a branch reply.
+    pub fn open_branch(&mut self, participant: ParticipantId, parent: MessageId) {
+        self.open_branches.insert(participant, parent);
+        self.revision += 1;
+    }
+
+    /// The branch a participant is currently answering in, if any.
+    pub fn branch_of(&self, participant: &ParticipantId) -> Option<&MessageId> {
+        self.open_branches.get(participant)
+    }
+
     pub fn resolve_request(&mut self, request: &RequestId) {
         let before = self.pending.len();
         self.pending.retain(|p| p.request_id() != request);
@@ -113,6 +131,7 @@ impl ThreadModel {
                 let mut msg = Message::new(self.thread.id.clone(), role);
                 msg.id = message_id;
                 msg.author = author.cloned();
+                msg.branch_of = author.and_then(|a| self.open_branches.get(a)).cloned();
                 self.push(msg);
             }
             EngineEvent::TextDelta { message_id, part_id, delta } => {
@@ -209,6 +228,11 @@ impl ThreadModel {
                 self.revision += 1;
             }
             EngineEvent::Status { busy } => {
+                // The branch closes when its answerer settles: the next thing
+                // it says is a new turn in the room, not more of this reply.
+                if !busy && let Some(a) = author && self.open_branches.remove(a).is_some() {
+                    self.revision += 1;
+                }
                 if self.busy != busy {
                     self.busy = busy;
                     self.revision += 1;
@@ -239,6 +263,7 @@ impl ThreadModel {
             let mut msg = Message::new(self.thread.id.clone(), Role::Assistant);
             msg.id = id.clone();
             msg.author = author.cloned();
+            msg.branch_of = author.and_then(|a| self.open_branches.get(a)).cloned();
             self.push(msg);
         }
     }
@@ -252,7 +277,7 @@ mod tests {
     fn thread() -> Thread {
         Thread {
             id: ThreadId::new(),
-            project_id: ProjectId::new(),
+            project_id: Some(ProjectId::new()),
             title: "t".into(),
             kind: ThreadKind::Chat { engine: EngineId::Claude },
             created_at: OffsetDateTime::now_utc(),

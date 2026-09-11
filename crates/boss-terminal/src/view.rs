@@ -38,6 +38,12 @@ pub enum TerminalEvent {
         /// Exactly what would be sent, unmodified.
         text: String,
     },
+    /// Enter was pressed in a terminal whose shell has already exited.
+    ///
+    /// A dead terminal swallows every key, so the habit of pressing Return
+    /// looks like a hang. The embedder answers by replacing the view with a
+    /// fresh one in the same directory.
+    RestartRequested,
 }
 
 /// A focusable terminal pane.
@@ -353,6 +359,15 @@ impl TerminalView {
         let ks = &event.keystroke;
         let m = &ks.modifiers;
 
+        // A dead shell reads nothing, so every keystroke would vanish.
+        // Enter is the one that means "give me a shell back"; the rest are
+        // still swallowed, but Cmd+C for the scrollback keeps working below.
+        if asks_for_a_new_shell(self.is_alive(), ks) {
+            cx.emit(TerminalEvent::RestartRequested);
+            cx.stop_propagation();
+            return;
+        }
+
         // Command combinations that are the terminal's, not the app's.
         if m.platform && !m.alt {
             let handled = match ks.key.as_str() {
@@ -510,6 +525,16 @@ impl Drop for TerminalView {
     }
 }
 
+/// Does this keystroke mean "give me a shell back"?
+///
+/// A terminal whose child has exited reads nothing, so every keystroke
+/// vanishes and the pane looks hung. Enter is the key someone presses at a
+/// dead prompt, so it is the one that reopens the shell. Cmd+Enter is left
+/// alone: that belongs to whatever the app binds it to.
+pub fn asks_for_a_new_shell(alive: bool, keystroke: &gpui::Keystroke) -> bool {
+    !alive && keystroke.key == "enter" && !keystroke.modifiers.platform
+}
+
 /// Would this paste run as more than one command? Trailing newlines are
 /// what a copied line ends with and are not, by themselves, a reason to ask.
 pub fn needs_paste_confirmation(text: &str) -> bool {
@@ -519,6 +544,27 @@ pub fn needs_paste_confirmation(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key(name: &str, modifiers: gpui::Modifiers) -> gpui::Keystroke {
+        gpui::Keystroke { modifiers, key: name.into(), key_char: None }
+    }
+
+    #[test]
+    fn enter_in_a_dead_terminal_asks_for_a_new_shell() {
+        let plain = gpui::Modifiers::default();
+        assert!(asks_for_a_new_shell(false, &key("enter", plain)));
+        // A live shell wants the Return, not a new terminal.
+        assert!(!asks_for_a_new_shell(true, &key("enter", plain)));
+        // Other keys stay swallowed rather than respawning on a stray press.
+        assert!(!asks_for_a_new_shell(false, &key("a", plain)));
+        assert!(!asks_for_a_new_shell(false, &key("escape", plain)));
+        // Cmd+Enter belongs to whatever the app binds it to.
+        let cmd = gpui::Modifiers { platform: true, ..gpui::Modifiers::default() };
+        assert!(!asks_for_a_new_shell(false, &key("enter", cmd)));
+        // Shift+Enter at a dead prompt is still someone asking for a shell.
+        let shift = gpui::Modifiers { shift: true, ..gpui::Modifiers::default() };
+        assert!(asks_for_a_new_shell(false, &key("enter", shift)));
+    }
 
     #[test]
     fn only_genuinely_multi_line_pastes_need_confirming() {

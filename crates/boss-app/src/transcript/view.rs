@@ -12,6 +12,7 @@ use gpui::{prelude::*, *};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::tag::Tag;
 use gpui_component::text::TextView;
+use crate::theme::ActivePalette as _;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -202,7 +203,9 @@ impl TranscriptView {
         let model = self.model.clone();
         let model = model.read(cx);
 
-        let mut column = v_flex().w_full().px_5().py_3().gap_3();
+        // The renderer gave a turn generous side gutters and let the prose
+        // run to a readable measure rather than the pane's full width.
+        let mut column = v_flex().w_full().px_6().py_4().gap_3();
         let mut shown_author = false;
         for message_ix in turn.members() {
             let Some(msg) = model.messages.get(message_ix) else { continue };
@@ -238,6 +241,8 @@ impl Render for TranscriptView {
             .relative()
             .size_full()
             .overflow_hidden()
+            .bg(cx.palette().canvas)
+            .text_color(cx.palette().text)
             .child(list(self.list_state.clone(), cx.processor(|this, ix: usize, window, cx| this.render_turn(ix, window, cx))).size_full())
             .when(!following, |this| {
                 this.child(
@@ -282,18 +287,27 @@ fn render_message(
     cx: &Context<TranscriptView>,
 ) -> AnyElement {
     let theme = cx.theme();
+    let palette = *cx.palette();
     let muted = msg.role == Role::System;
     let is_error = msg.status == MessageStatus::Error;
     let is_user = msg.role == Role::User;
 
-    let mut body = v_flex().w_full().gap_2();
+    let mut body = v_flex().w_full().gap_1p5();
     if with_header {
-        let mut header = h_flex().gap_2().items_center().text_xs().text_color(theme.muted_foreground);
+        // The author line: a name in the engine's hue, then the quiet
+        // metadata. Small caps-weight, as in `.message-author`.
+        let mut header = h_flex().gap_2().items_center().text_xs().text_color(palette.text_subtle);
         header = header.child(
             div()
-                .text_sm()
+                .text_xs()
                 .font_semibold()
-                .text_color(if is_user { theme.primary } else if muted { theme.muted_foreground } else { theme.foreground })
+                .text_color(if is_user {
+                    palette.text_muted
+                } else if muted {
+                    palette.text_subtle
+                } else {
+                    author_color(msg, model, &palette)
+                })
                 .child(author_label(msg, model)),
         );
         if let Some(recipient) = &msg.recipient {
@@ -311,17 +325,43 @@ fn render_message(
 
     let mut blocks = v_flex().w_full().gap_2();
     if is_error {
-        blocks = blocks.text_color(theme.danger);
+        blocks = blocks.text_color(palette.danger);
     } else if muted {
-        blocks = blocks.text_color(theme.muted_foreground).italic();
+        blocks = blocks.text_color(palette.text_subtle).italic();
     }
     for block in &entry.blocks {
         blocks = blocks.child(render_block(block, turn_ix, muted, expanded, full_output, cx));
     }
     if is_user {
-        blocks = blocks.rounded_lg().bg(theme.secondary).px_3().py_2();
+        // The user's own words sit in a soft accent card with a rule down the
+        // leading edge, the shape `.message-user` drew in the renderer.
+        blocks = blocks
+            .rounded(theme.radius_lg)
+            .bg(palette.accent_soft)
+            .border_l_2()
+            .border_color(palette.accent)
+            .px_3()
+            .py_2();
+    } else if muted {
+        // System notes are machinery: a recessed strip, not a card.
+        blocks = blocks.rounded(theme.radius).bg(palette.inset).px_3().py_1p5().text_xs();
     }
     body.child(blocks).into_any_element()
+}
+
+/// The hue an author's name is drawn in: its engine's, so a backend reads
+/// the same in the transcript and on a tab. Ported from `--backend-*`.
+fn author_color(msg: &Message, model: &ThreadModel, palette: &crate::theme::Palette) -> gpui::Hsla {
+    let engine = msg
+        .author
+        .as_ref()
+        .and_then(|a| model.participants.iter().find(|p| &p.id == a))
+        .map(|p| p.engine)
+        .or(match &model.thread.kind {
+            ThreadKind::Chat { engine } => Some(*engine),
+            ThreadKind::Room { .. } | ThreadKind::Assistant => None,
+        });
+    engine.map(|e| palette.engine(e)).unwrap_or(palette.text)
 }
 
 fn render_block(
@@ -339,6 +379,10 @@ fn render_block(
             if muted { view.text_color(theme.muted_foreground) } else { view }.into_any_element()
         }
         Block::Reasoning { id, markdown } => {
+            // Thinking is not speech: it stays collapsed, and when opened it
+            // is set in the muted voice behind a purple rule, as
+            // `.message-reasoning` drew it.
+            let palette = cx.palette();
             let open = expanded.contains(id);
             let toggle_id = id.clone();
             v_flex()
@@ -353,12 +397,17 @@ fn render_block(
                 )
                 .when(open, |this| {
                     this.child(
-                        div().pl_3().border_l_2().border_color(theme.border).child(
-                            TextView::markdown(ElementId::Name(id.clone()), markdown.clone())
-                                .selectable(true)
-                                .text_sm()
-                                .text_color(theme.muted_foreground),
-                        ),
+                        div()
+                            .pl_3()
+                            .py_1()
+                            .border_l_2()
+                            .border_color(crate::theme::with_alpha(palette.purple, 0.55))
+                            .child(
+                                TextView::markdown(ElementId::Name(id.clone()), markdown.clone())
+                                    .selectable(true)
+                                    .text_sm()
+                                    .text_color(palette.text_muted),
+                            ),
                     )
                 })
                 .into_any_element()
@@ -396,29 +445,59 @@ fn render_tool_card(
     cx: &Context<TranscriptView>,
 ) -> AnyElement {
     let theme = cx.theme();
+    let palette = *cx.palette();
     let open = expanded.contains(&tool.id);
     let show_full = full_output.contains(&tool.id);
     let toggle_id = tool.id.clone();
+    // A running call earns a colored edge; a finished one is quiet furniture.
+    let edge = match tool.state {
+        ToolState::Running => palette.accent,
+        ToolState::Error => palette.danger,
+        ToolState::Pending | ToolState::Done => palette.border,
+    };
 
     let header = h_flex()
         .id(ElementId::Name(format!("{}/header", tool.id).into()))
         .w_full()
-        .px_2()
-        .py_1()
+        .px_2p5()
+        .py_1p5()
         .gap_2()
         .items_center()
         .cursor_pointer()
-        .hover(|style| style.bg(theme.list_hover))
+        .hover(|style| style.bg(palette.hover))
         .on_click(cx.listener(move |this, _, _, cx| this.toggle_expanded(toggle_id.clone(), turn_ix, cx)))
-        .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).xsmall())
-        .child(div().text_sm().font_semibold().child(tool.name.clone()))
+        .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).xsmall().text_color(palette.text_subtle))
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .font_family(theme.mono_font_family.clone())
+                .text_color(palette.text)
+                .child(tool.name.clone()),
+        )
         .when_some(tool.title.clone(), |this, title| {
-            this.child(div().flex_1().min_w_0().text_sm().text_color(theme.muted_foreground).truncate().child(title))
+            this.child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_xs()
+                    .font_family(theme.mono_font_family.clone())
+                    .text_color(palette.text_subtle)
+                    .truncate()
+                    .child(title),
+            )
         })
         .child(div().flex_1())
         .child(state_tag(&tool.state));
 
-    let card = v_flex().w_full().rounded_md().border_1().border_color(theme.border).bg(theme.secondary).overflow_hidden().child(header);
+    let card = v_flex()
+        .w_full()
+        .rounded(theme.radius)
+        .border_1()
+        .border_color(edge)
+        .bg(palette.surface_raised)
+        .overflow_hidden()
+        .child(header);
     if !open {
         return card.into_any_element();
     }
@@ -450,7 +529,16 @@ fn render_tool_card(
 }
 
 fn section(label: &'static str, content: impl IntoElement, cx: &App) -> Div {
-    v_flex().gap_1().child(div().text_xs().text_color(cx.theme().muted_foreground).child(label)).child(content)
+    v_flex()
+        .gap_1()
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(cx.palette().text_subtle)
+                .child(label),
+        )
+        .child(content)
 }
 
 fn state_tag(state: &ToolState) -> Tag {

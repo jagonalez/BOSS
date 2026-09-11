@@ -92,6 +92,7 @@ const LOCAL_REQUESTS: &[&str] = &[
     "thread.todos",
     "automation.list",
     "report.list",
+    "report.get",
     "assistant.snapshot",
 ];
 
@@ -106,6 +107,7 @@ const READ_ONLY_REQUESTS: &[&str] = &[
     "thread.todos",
     "automation.list",
     "report.list",
+    "report.get",
     "assistant.snapshot",
 ];
 
@@ -377,9 +379,10 @@ impl RuntimeHost {
 
     /// The project path a thread runs under, for the phone's thread cards.
     fn project_path(&self, thread: &Thread) -> String {
-        self.runtime
-            .state
-            .project(&thread.project_id)
+        thread
+            .project_id
+            .as_ref()
+            .and_then(|id| self.runtime.state.project(id))
             .map(|p| p.root.display().to_string())
             .unwrap_or_else(|| thread.cwd.display().to_string())
     }
@@ -524,11 +527,19 @@ impl WebAccessHost for RuntimeHost {
             "backend.list" => Ok(json!(
                 self.runtime.sessions.engines().map(|e| e.id().as_str()).collect::<Vec<_>>()
             )),
-            // Automations, reports, and the assistant are work package 8c2.
-            // An empty snapshot renders those tabs as empty rather than as an
+            // Automations and the assistant are still work package 8c2. An
+            // empty snapshot renders those tabs as empty rather than as an
             // error the user cannot act on.
             "automation.list" => Ok(json!({ "automations": [], "runs": [] })),
-            "report.list" => Ok(json!({ "reports": [] })),
+            // Summaries only: the phone lists reports and fetches a body when
+            // one is opened, so a long artifact never rides in the list.
+            "report.list" => Ok(self.runtime.reports.snapshot()),
+            "report.get" => {
+                let id = payload.get("reportId").and_then(Value::as_str).unwrap_or_default();
+                let report =
+                    self.runtime.reports.get(id).ok_or_else(|| anyhow::anyhow!("Report not found."))?;
+                Ok(serde_json::to_value(report)?)
+            }
             "assistant.snapshot" => Ok(json!({
                 "tasks": [], "taskPlans": {}, "pullRequests": [], "ciIncidents": [],
                 "questions": [], "activities": [], "mergeOrders": {}

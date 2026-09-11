@@ -13,6 +13,7 @@ use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{InputEvent, Textarea, TextareaState};
 use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::tag::Tag;
+use crate::theme::ActivePalette as _;
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 use std::path::PathBuf;
 
@@ -186,6 +187,7 @@ pub struct RecipientOption {
 impl Render for Composer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let palette = *cx.palette();
         let model = self.model.read(cx);
         let in_room = !model.participants.is_empty();
         let busy = model.busy;
@@ -198,9 +200,12 @@ impl Render for Composer {
         v_flex()
             .w_full()
             .border_t_1()
-            .border_color(theme.border)
-            .bg(theme.background)
-            .p_3()
+            .border_color(palette.border)
+            // The composer is a footer on the sidebar's fill, not on the
+            // canvas: it reads as chrome the transcript scrolls under.
+            .bg(palette.sidebar)
+            .px_4()
+            .py_3()
             .gap_2()
             .children(requests)
             .when(!self.attachments.is_empty(), |this| {
@@ -258,7 +263,18 @@ impl Render for Composer {
                                 }),
                         )
                     })
-                    .child(Textarea::new(&self.input).flex_1())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .rounded(theme.radius_lg)
+                            .bg(palette.inset)
+                            .border_1()
+                            .border_color(palette.border)
+                            .px_2p5()
+                            .py_1p5()
+                            .child(Textarea::new(&self.input).appearance(false)),
+                    )
                     .child(if busy {
                         Button::new("stop")
                             .danger()
@@ -285,7 +301,22 @@ fn is_edit_tool(tool: &str) -> bool {
 
 fn render_request(request: &PendingRequest, participants: &[Participant], cx: &Context<Composer>) -> AnyElement {
     let theme = cx.theme();
-    let frame = v_flex().w_full().rounded_md().border_1().border_color(theme.border).bg(theme.secondary).p_3().gap_2();
+    let palette = *cx.palette();
+    // A request is the one thing in the window that must be answered, so it
+    // is tinted rather than neutral: amber to ask permission, accent to ask
+    // a question. `.permission-card` / `.question-card` in the renderer.
+    let (tint, wash) = match request {
+        PendingRequest::Permission { .. } => (palette.warning, palette.warning_soft),
+        PendingRequest::Question { .. } => (palette.accent, palette.accent_soft),
+    };
+    let frame = v_flex()
+        .w_full()
+        .rounded(theme.radius_lg)
+        .border_1()
+        .border_color(crate::theme::with_alpha(tint, 0.45))
+        .bg(wash)
+        .p_3()
+        .gap_2p5();
     match request {
         PendingRequest::Permission { request, participant, tool, input, title, .. } => {
             let who = participant.as_ref().and_then(|p| participant_name(participants, p)).unwrap_or("The agent");
@@ -305,9 +336,9 @@ fn render_request(request: &PendingRequest, participants: &[Participant], cx: &C
                     h_flex()
                         .gap_2()
                         .items_center()
-                        .child(Icon::new(IconName::TriangleAlert).small())
+                        .child(Icon::new(IconName::TriangleAlert).small().text_color(tint))
                         .child(div().text_sm().font_semibold().child(format!("{who} wants to run {tool}")))
-                        .when_some(title.clone(), |this, title| this.child(div().flex_1().min_w_0().text_sm().text_color(theme.muted_foreground).truncate().child(title))),
+                        .when_some(title.clone(), |this, title| this.child(div().flex_1().min_w_0().text_sm().text_color(palette.text_muted).truncate().child(title))),
                 )
                 .when(!input_head.is_empty(), |this| this.child(mono_block(input_head.into(), cx)))
                 .child(
@@ -328,7 +359,7 @@ fn render_request(request: &PendingRequest, participants: &[Participant], cx: &C
                     h_flex()
                         .gap_2()
                         .items_center()
-                        .child(Icon::new(IconName::Info).small())
+                        .child(Icon::new(IconName::Info).small().text_color(tint))
                         .child(div().text_sm().font_semibold().child(format!("{who} asks")))
                         .child(div().flex_1().min_w_0().text_sm().child(prompt.clone())),
                 )
@@ -377,7 +408,7 @@ mod tests {
         cx.update(gpui_component::init);
         let thread = Thread {
             id: ThreadId::from_raw("thr_1"),
-            project_id: ProjectId::from_raw("prj_1"),
+            project_id: Some(ProjectId::from_raw("prj_1")),
             title: "Port the sidebar".into(),
             kind: ThreadKind::Room { room_id: RoomId::from_raw("room_1") },
             created_at: OffsetDateTime::now_utc(),

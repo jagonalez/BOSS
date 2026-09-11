@@ -188,14 +188,59 @@ impl ProbeState {
     }
 }
 
-/// What the settings page asks the window to do. The lead wires these to
-/// the relay and Tailscale once those land in the Rust app.
+/// What the settings page asks the window to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsEvent {
-    /// The remote-access switch was flipped.
+    /// The remote-access switch was flipped. The app turns both the relay
+    /// and the Tailscale web server on or off and reports back through
+    /// [`SettingsPage::set_remote_status`].
     EnableRemote(bool),
     /// The user asked to pair a phone; show the pairing code and QR.
     ShowPairing,
+}
+
+/// What web access is doing right now, as the settings page shows it.
+///
+/// The switch alone cannot tell the user whether the phone can actually
+/// reach this Mac: the loopback server may have failed to bind (another BOSS
+/// is already holding the port) and `tailscale serve` may have refused. Both
+/// failures used to be log lines only, which is why the page shows them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RemoteStatus {
+    /// The loopback server is listening.
+    pub running: bool,
+    /// Loopback URL, when it is.
+    pub url: Option<String>,
+    /// Why the loopback server is not listening.
+    pub error: Option<String>,
+    /// Tailnet URL, when `tailscale serve` succeeded.
+    pub tailscale_url: Option<String>,
+    /// What the tailscale CLI said when it did not.
+    pub tailscale_error: Option<String>,
+}
+
+impl RemoteStatus {
+    /// The one line under the switch. Failures win over successes: a URL
+    /// that cannot be reached is worse than no URL at all.
+    pub fn summary(&self) -> String {
+        if let Some(error) = &self.error {
+            return format!("Web access is off: {error}");
+        }
+        if !self.running {
+            return "Web access is off.".into();
+        }
+        let local = self.url.clone().unwrap_or_default();
+        match (&self.tailscale_url, &self.tailscale_error) {
+            (Some(url), _) => format!("On your tailnet at {url} (locally {local})"),
+            (None, Some(error)) => format!("Serving {local}, but not on your tailnet: {error}"),
+            (None, None) => format!("Serving {local}. Not published to your tailnet."),
+        }
+    }
+
+    /// Is there something the user has to act on?
+    pub fn is_problem(&self) -> bool {
+        self.error.is_some() || (self.running && self.tailscale_error.is_some())
+    }
 }
 
 type ModelSelect = Entity<SelectState<Vec<SharedString>>>;
@@ -236,6 +281,8 @@ pub struct SettingsPage {
     mcp_draft: Option<McpDraft>,
     tailscale_host: Entity<InputState>,
     remote_enabled: bool,
+    /// What web access is actually doing, pushed in by the app.
+    remote_status: RemoteStatus,
     focus_handle: FocusHandle,
     subscriptions: Vec<Subscription>,
 }
@@ -288,6 +335,7 @@ impl SettingsPage {
             mcp_draft: None,
             tailscale_host,
             remote_enabled: false,
+            remote_status: RemoteStatus::default(),
             focus_handle: cx.focus_handle(),
             subscriptions,
         }
@@ -468,8 +516,24 @@ impl SettingsPage {
 
     fn set_remote_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.remote_enabled = enabled;
+        // Clear last time's outcome so a stale error is not read as this
+        // attempt's; the app pushes the new one when it lands.
+        self.remote_status = RemoteStatus::default();
         cx.emit(SettingsEvent::EnableRemote(enabled));
         cx.notify();
+    }
+
+    /// Report what web access is doing. Called by the app after starting,
+    /// stopping, or publishing the server.
+    pub fn set_remote_status(&mut self, status: RemoteStatus, cx: &mut Context<Self>) {
+        self.remote_enabled = status.running;
+        self.remote_status = status;
+        cx.notify();
+    }
+
+    /// What the page currently shows about web access.
+    pub fn remote_status(&self) -> &RemoteStatus {
+        &self.remote_status
     }
 
     // ---- shared rendering helpers -------------------------------------
@@ -767,6 +831,18 @@ impl SettingsPage {
                 cx,
             ))
             .child(Self::row(
+                "Web access",
+                div()
+                    .text_xs()
+                    .text_color(if self.remote_status.is_problem() {
+                        cx.theme().danger
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .child(self.remote_status.summary()),
+                cx,
+            ))
+            .child(Self::row(
                 "Pair a phone",
                 h_flex()
                     .gap_3()
@@ -975,6 +1051,43 @@ mod tests {
         assert_eq!(c.name, "Copilot");
         assert!(c.command.is_none() && c.args.is_empty());
         assert_eq!(connection_target(&c), "https://api.githubcopilot.com/mcp/");
+    }
+
+    #[test]
+    fn a_bind_failure_is_shown_on_the_page_not_only_in_the_log() {
+        // The case the user hits: a second BOSS already holds port 4517.
+        let status = RemoteStatus {
+            running: false,
+            error: Some("address already in use (127.0.0.1:4517)".into()),
+            ..RemoteStatus::default()
+        };
+        assert_eq!(status.summary(), "Web access is off: address already in use (127.0.0.1:4517)");
+        assert!(status.is_problem());
+    }
+
+    #[test]
+    fn a_running_server_reports_where_the_phone_can_reach_it() {
+        let local = "http://127.0.0.1:4517";
+        let running = RemoteStatus { running: true, url: Some(local.into()), ..RemoteStatus::default() };
+        // Loopback only: honest about not being on the tailnet, not an error.
+        assert_eq!(running.summary(), "Serving http://127.0.0.1:4517. Not published to your tailnet.");
+        assert!(!running.is_problem());
+
+        let published = RemoteStatus { tailscale_url: Some("https://mac.tail.ts.net".into()), ..running.clone() };
+        assert_eq!(published.summary(), "On your tailnet at https://mac.tail.ts.net (locally http://127.0.0.1:4517)");
+        assert!(!published.is_problem());
+
+        // The CLI's own words, so a version difference is still readable.
+        let refused = RemoteStatus { tailscale_error: Some("tailscale not logged in".into()), ..running };
+        assert_eq!(refused.summary(), "Serving http://127.0.0.1:4517, but not on your tailnet: tailscale not logged in");
+        assert!(refused.is_problem(), "the user has something to fix");
+    }
+
+    #[test]
+    fn the_default_status_reads_as_off() {
+        let off = RemoteStatus::default();
+        assert_eq!(off.summary(), "Web access is off.");
+        assert!(!off.is_problem(), "off on purpose is not a problem");
     }
 
     #[test]

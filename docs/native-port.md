@@ -99,6 +99,7 @@ docs/rooms*.md        product design for rooms (still authoritative)
 | 8b2 | Rooms UI: team setup, team bar, recipient menu, replies panel, room cards | agent (opus) | done | 93 tests; `RoomPane` mounts team bar + transcript; replies panel on the right |
 | 8c1 | Worktree tools: spawn/use/leave worktree, rooms_open | agent (opus) | done | 16 tests; `RoomOpener` trait filled by the app |
 | 8c2 | Still stubbed: reports, notes, presence, workflows, boss_computer | lead | queued | |
+| 8c3 | `boss_computer`: cua-driver spawn, protocol, QA gate, permissions, packaging | agent (opus) | done | 28 tests; screenshots return as `BusContent::Image`; macOS grants need a real Accessibility/Screen Recording grant to verify |
 | 8d | Live engine smoke tests: codex, opencode, pi against real binaries | agent (opus) | done | claude, codex, opencode pass live; pi not logged in here; fixed codex `approvalsReviewer` (user config could auto-approve) |
 | 8e | Relay client for the phone app (E2E crypto, pairing, resume) | agent (fable) | done | 50 tests; byte-compatible frames, crypto, and `remote-access.json`; live socket loop only under `--ignored` |
 | 8f | Tailscale web access server for the PWA | agent (opus) | done | 52 tests; same routes and PWA bundle as the TS; automations/reports snapshots empty until 8c2 |

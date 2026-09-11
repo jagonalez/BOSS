@@ -15,8 +15,10 @@ use boss_core::{Message, MessageId, MessageStatus, Role};
 use gpui::prelude::*;
 use gpui::{App, Context, ElementId, Entity, EventEmitter, Render, SharedString, Subscription, Window, div};
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::input::{InputEvent, Textarea, TextareaState};
 use gpui_component::tag::Tag;
 use gpui_component::text::TextView;
+use crate::theme::ActivePalette as _;
 use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 
 /// What the replies panel asks the shell to do.
@@ -24,11 +26,13 @@ use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h
 pub enum RepliesEvent {
     /// The user closed the panel.
     Close,
-    /// Send a reply into this branch. The shell owns sending; the panel only
-    /// says which turn the reply belongs under.
+    /// Send a reply into this branch. The shell owns sending; the panel says
+    /// which turn the reply belongs under and what the user typed.
     Reply {
         /// The turn the reply hangs off.
         parent: MessageId,
+        /// What to say.
+        text: String,
     },
 }
 
@@ -36,18 +40,27 @@ pub enum RepliesEvent {
 pub struct RepliesPanel {
     model: Entity<ThreadModel>,
     parent: MessageId,
+    /// Where a reply is typed. Its own input, not the main composer: what is
+    /// typed here belongs to this branch, not to the room's main stream.
+    input: Entity<TextareaState>,
     cache: RenderCache,
     seen_revision: u64,
-    _subscription: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<RepliesEvent> for RepliesPanel {}
 
 impl RepliesPanel {
     /// Build a panel over the branch whose parent is `parent`.
-    pub fn new(model: Entity<ThreadModel>, parent: MessageId, cx: &mut Context<Self>) -> Self {
+    pub fn new(model: Entity<ThreadModel>, parent: MessageId, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let seen_revision = model.read(cx).revision;
-        let subscription = cx.observe(&model, |this: &mut Self, model, cx| {
+        let input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(1, 5)
+                .submit_on_enter(true)
+                .placeholder("Reply — Enter to send, Shift+Enter for a new line")
+        });
+        let observe = cx.observe(&model, |this: &mut Self, model, cx| {
             let revision = model.read(cx).revision;
             if revision == this.seen_revision {
                 return;
@@ -59,7 +72,41 @@ impl RepliesPanel {
             this.cache.retain(|id| m.message(id).is_some());
             cx.notify();
         });
-        Self { model, parent, cache: RenderCache::new(), seen_revision, _subscription: subscription }
+        let typed = cx.subscribe_in(&input, window, |this: &mut Self, _input, event: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { shift: false, .. } = event {
+                this.send(window, cx);
+            }
+        });
+        Self {
+            model,
+            parent,
+            input,
+            cache: RenderCache::new(),
+            seen_revision,
+            _subscriptions: vec![observe, typed],
+        }
+    }
+
+    /// Where a reply is typed, so the pane can focus it when the branch opens.
+    pub fn input(&self) -> &Entity<TextareaState> {
+        &self.input
+    }
+
+    /// Move keyboard focus into the reply box.
+    pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.update(cx, |state, cx| state.focus(window, cx));
+    }
+
+    /// Send what is typed into this branch and clear the box. Blank text
+    /// sends nothing: an empty reply would still start a run.
+    fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.input.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
+        self.input.update(cx, |state, cx| state.set_value("", window, cx));
+        cx.emit(RepliesEvent::Reply { parent: self.parent.clone(), text });
+        cx.notify();
     }
 
     /// The turn these replies hang off.
@@ -122,6 +169,7 @@ fn first_words(msg: &Message, limit: usize) -> Option<String> {
 impl Render for RepliesPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
+        let palette = *cx.palette();
         let title = self.title(cx);
         let model = self.model.clone();
         let model = model.read(cx);
@@ -146,12 +194,12 @@ impl Render for RepliesPanel {
                     .gap_2()
                     .items_center()
                     .text_xs()
-                    .text_color(theme.muted_foreground)
+                    .text_color(palette.text_subtle)
                     .child(
                         div()
-                            .text_sm()
+                            .text_xs()
                             .font_semibold()
-                            .text_color(if is_user { theme.primary } else { theme.foreground })
+                            .text_color(if is_user { palette.text_muted } else { palette.text })
                             .child(author),
                     )
                     .child(entry.time.clone())
@@ -169,7 +217,13 @@ impl Render for RepliesPanel {
                 }
             }
             if is_user {
-                blocks = blocks.rounded_lg().bg(theme.secondary).px_3().py_2();
+                blocks = blocks
+                    .rounded(theme.radius_lg)
+                    .bg(palette.accent_soft)
+                    .border_l_2()
+                    .border_color(palette.accent)
+                    .px_3()
+                    .py_2();
             }
             body = body.child(blocks);
             list = list.child(body);
@@ -178,18 +232,18 @@ impl Render for RepliesPanel {
             list = list.child(
                 div()
                     .text_xs()
-                    .text_color(theme.muted_foreground)
+                    .text_color(palette.text_subtle)
                     .child("No replies yet."),
             );
         }
 
-        let parent = self.parent.clone();
         v_flex()
             .id("replies-panel")
             .size_full()
-            .bg(theme.background)
+            .bg(palette.canvas)
+            .text_color(palette.text)
             .border_l_1()
-            .border_color(theme.border)
+            .border_color(palette.border)
             .child(
                 h_flex()
                     .w_full()
@@ -198,7 +252,8 @@ impl Render for RepliesPanel {
                     .px_4()
                     .py_2()
                     .border_b_1()
-                    .border_color(theme.border)
+                    .border_color(palette.border)
+                    .bg(palette.sidebar)
                     .child(div().flex_1().min_w_0().text_sm().font_semibold().truncate().child(title))
                     .child(
                         Button::new("replies-close")
@@ -213,19 +268,34 @@ impl Render for RepliesPanel {
             .child(
                 h_flex()
                     .w_full()
+                    .gap_2()
+                    .items_end()
                     .px_4()
                     .py_2()
                     .border_t_1()
-                    .border_color(theme.border)
+                    .border_color(palette.border)
+                    .bg(palette.sidebar)
+                    // The reply field wears the composer's shell, so the two
+                    // places a message is typed look like one control.
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .rounded(theme.radius_lg)
+                            .bg(palette.inset)
+                            .border_1()
+                            .border_color(palette.border)
+                            .px_2p5()
+                            .py_1p5()
+                            .child(Textarea::new(&self.input).appearance(false)),
+                    )
                     .child(
                         Button::new("replies-reply")
                             .small()
                             .outline()
                             .icon(IconName::ArrowUp)
-                            .label("Reply here")
-                            .on_click(cx.listener(move |_, _, _, cx| {
-                                cx.emit(RepliesEvent::Reply { parent: parent.clone() })
-                            })),
+                            .tooltip("Send this reply")
+                            .on_click(cx.listener(|this, _, window, cx| this.send(window, cx))),
                     ),
             )
     }
@@ -245,7 +315,7 @@ mod tests {
     fn model() -> (ThreadModel, MessageId) {
         let thread = Thread {
             id: ThreadId::from_raw("thr_1"),
-            project_id: ProjectId::from_raw("prj_1"),
+            project_id: Some(ProjectId::from_raw("prj_1")),
             title: "Port the sidebar".into(),
             kind: ThreadKind::Room { room_id: RoomId::from_raw("room_1") },
             created_at: OffsetDateTime::now_utc(),
@@ -299,7 +369,7 @@ mod tests {
         let (view, cx) = {
             let model = model.clone();
             let parent = parent.clone();
-            cx.add_window_view(move |_, cx| RepliesPanel::new(model, parent, cx))
+            cx.add_window_view(move |window, cx| RepliesPanel::new(model, parent, window, cx))
         };
         cx.update(|window, cx| window.draw(cx).clear(cx));
         (view, model, parent, cx)
@@ -348,21 +418,28 @@ mod tests {
     }
 
     #[gpui::test]
-    fn closing_and_replying_are_the_only_two_things_it_asks_for(cx: &mut TestAppContext) {
+    fn a_reply_carries_what_was_typed_and_clears_the_box(cx: &mut TestAppContext) {
         let (view, _model, parent, cx) = panel(cx);
         let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let sink = seen.clone();
         cx.update(|_, cx| {
             cx.subscribe(&view, move |_, event: &RepliesEvent, _| sink.borrow_mut().push(event.clone())).detach();
         });
-        view.update(cx, |_, cx| {
-            cx.emit(RepliesEvent::Reply { parent: parent.clone() });
+        // Typing and pressing send is what emits a reply; an empty box
+        // emits nothing, because an empty reply would still start a run.
+        view.update_in(cx, |this, window, cx| {
+            this.send(window, cx);
+            this.input().update(cx, |state, cx| state.set_value("Because of the plan.", window, cx));
+            this.send(window, cx);
             cx.emit(RepliesEvent::Close);
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert_eq!(
             *seen.borrow(),
-            vec![RepliesEvent::Reply { parent }, RepliesEvent::Close]
+            vec![
+                RepliesEvent::Reply { parent, text: "Because of the plan.".to_owned() },
+                RepliesEvent::Close
+            ]
         );
     }
 

@@ -18,7 +18,8 @@ use gpui::{AnyElement, ClickEvent, Context, EventEmitter, Render, SharedString, 
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
 use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme as _, IconName, Sizable as _, StyledExt as _, h_flex};
+use crate::theme::ActivePalette as _;
+use gpui_component::{IconName, Sizable as _, StyledExt as _, h_flex};
 use time::OffsetDateTime;
 
 /// What the team bar asks the shell to do.
@@ -93,7 +94,10 @@ impl TeamBar {
     }
 
     fn render_chip(&self, seat: &RoomParticipant, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme();
+        let palette = *cx.palette();
+        // A seat wears its engine's hue, the same one its name takes in the
+        // transcript, so the team bar and the reply below it agree.
+        let hue = palette.engine(seat.engine());
         let id = seat.id().clone();
         let state = effective_state(seat, self.now);
         let boss = is_assistant(seat.id());
@@ -111,10 +115,10 @@ impl TeamBar {
             .py_0p5()
             .rounded_full()
             .border_1()
-            .border_color(if boss { theme.primary.opacity(0.5) } else { theme.border })
-            .bg(if boss { theme.accent } else { theme.secondary })
+            .border_color(crate::theme::with_alpha(if boss { palette.accent } else { hue }, 0.45))
+            .bg(crate::theme::with_alpha(if boss { palette.accent } else { hue }, 0.13))
             .cursor_pointer()
-            .hover(|s| s.bg(theme.accent))
+            .hover(|s| s.bg(crate::theme::with_alpha(if boss { palette.accent } else { hue }, 0.24)))
             .text_xs()
             .when(state == ParticipantState::Done, |this| this.opacity(0.6))
             .tooltip({
@@ -130,10 +134,10 @@ impl TeamBar {
                 cx.emit(TeamBarEvent::Retarget { participant: target.clone() })
             }))
             .child(div().size(px(6.)).rounded_full().flex_shrink_0().bg(state_color(state, cx)))
-            .child(div().font_semibold().child(seat.label().to_owned()))
+            .child(div().font_semibold().text_color(palette.text).child(seat.label().to_owned()))
             .child(
                 div()
-                    .text_color(theme.muted_foreground)
+                    .text_color(palette.text_subtle)
                     .child(engine_badge(seat.engine())),
             )
             .when(removable, |this| {
@@ -159,7 +163,7 @@ impl Render for TeamBar {
         let chips: Vec<AnyElement> = seats.iter().map(|seat| self.render_chip(seat, cx)).collect();
         let addable = self.addable();
         let weak = cx.weak_entity();
-        let theme = cx.theme();
+        let palette = *cx.palette();
 
         h_flex()
             .w_full()
@@ -169,14 +173,16 @@ impl Render for TeamBar {
             .px_4()
             .py_1p5()
             .border_b_1()
-            .border_color(theme.border)
-            .bg(theme.background)
+            .border_color(palette.border)
+            // The bar is chrome over the transcript, so it takes the sidebar
+            // fill rather than the canvas the messages sit on.
+            .bg(palette.sidebar)
             .children(chips)
             .when(seats.is_empty(), |this| {
                 this.child(
                     div()
                         .text_xs()
-                        .text_color(theme.muted_foreground)
+                        .text_color(palette.text_subtle)
                         .child("Nobody here yet. Say what the job is and BOSS brings people in."),
                 )
             })

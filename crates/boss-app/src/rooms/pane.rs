@@ -22,6 +22,9 @@ pub enum RoomPaneEvent {
     Cancel,
     AddRole { role: ParticipantId, engine: EngineId },
     RemoveRole { participant: ParticipantId },
+    /// Send a reply into the branch under `parent`. It answers whoever wrote
+    /// that turn and streams into the replies panel, not the transcript.
+    Reply { parent: MessageId, text: String },
 }
 
 pub struct RoomPane {
@@ -49,9 +52,9 @@ impl RoomPane {
         let setup = setup.map(|(team, models)| cx.new(|_| TeamSetup::new(team, EngineId::ALL.to_vec(), models)));
         let mut subs = vec![
             cx.subscribe(&pane, |_, _, event: &ComposerEvent, cx| cx.emit(event.clone())),
-            cx.subscribe(&pane, |this: &mut Self, _, event: &TranscriptEvent, cx| {
+            cx.subscribe_in(&pane, window, |this: &mut Self, _, event: &TranscriptEvent, window, cx| {
                 let TranscriptEvent::OpenReplies { message } = event;
-                this.open_replies(message.clone(), cx);
+                this.open_replies(message.clone(), window, cx);
             }),
             cx.subscribe(&team_bar, |this: &mut Self, _, event: &TeamBarEvent, cx| match event {
                 TeamBarEvent::Retarget { participant } => {
@@ -88,23 +91,31 @@ impl RoomPane {
         self.team_bar.update(cx, |bar, cx| bar.set_participants(participants, cx));
     }
 
-    fn open_replies(&mut self, parent: MessageId, cx: &mut Context<Self>) {
+    fn open_replies(&mut self, parent: MessageId, window: &mut Window, cx: &mut Context<Self>) {
         match &self.replies {
-            Some(panel) => panel.update(cx, |p, cx| p.set_parent(parent, cx)),
+            Some(panel) => {
+                panel.update(cx, |p, cx| {
+                    p.set_parent(parent, cx);
+                    p.focus(window, cx);
+                });
+            }
             None => {
                 let model = self.model.clone();
-                let panel = cx.new(|cx| RepliesPanel::new(model, parent, cx));
+                let panel = cx.new(|cx| RepliesPanel::new(model, parent, window, cx));
                 self._subs.push(cx.subscribe(&panel, |this: &mut Self, _, event: &RepliesEvent, cx| match event {
                     RepliesEvent::Close => {
                         this.replies = None;
                         cx.notify();
                     }
-                    RepliesEvent::Reply { .. } => {
-                        // Branch replies go out through the composer as a normal
-                        // send for now; the branch id is not threaded yet.
-                        let _ = this;
-                    }
+                    // The branch is the shell's to send: it becomes a message
+                    // with `branch_of` set, so it never lands in the main
+                    // stream. The pane only forwards it.
+                    RepliesEvent::Reply { parent, text } => cx.emit(RoomPaneEvent::Reply {
+                        parent: parent.clone(),
+                        text: text.clone(),
+                    }),
                 }));
+                panel.update(cx, |p, cx| p.focus(window, cx));
                 self.replies = Some(panel);
             }
         }

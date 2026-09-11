@@ -206,7 +206,7 @@ impl RuntimeHost {
     }
 
     fn row(&self, st: &HostState, thread: &Thread) -> wire::ThreadRow {
-        let project = self.runtime.state.project(&thread.project_id);
+        let project = thread.project_id.as_ref().and_then(|id| self.runtime.state.project(id));
         let attention = st
             .models
             .get(&thread.id)
@@ -227,7 +227,7 @@ impl RuntimeHost {
     }
 
     fn info(&self, thread: &Thread) -> Value {
-        let project = self.runtime.state.project(&thread.project_id);
+        let project = thread.project_id.as_ref().and_then(|id| self.runtime.state.project(id));
         wire::session_info(thread, project.as_ref(), self.engine_for(thread), self.runtime.is_busy(&thread.id))
     }
 
@@ -251,7 +251,7 @@ impl RuntimeHost {
                     hits.into_iter()
                         .filter_map(|hit| {
                             let thread = self.runtime.state.thread(&hit.thread_id)?;
-                            let project = self.runtime.state.project(&thread.project_id);
+                            let project = thread.project_id.as_ref().and_then(|id| self.runtime.state.project(id));
                             Some(json!({
                                 "threadId": hit.thread_id.as_str(),
                                 "messageId": hit.message_id.as_str(),
@@ -412,7 +412,7 @@ impl RuntimeHost {
                     None => self.runtime.state.projects().into_iter().next(),
                 }
                 .ok_or("Add a project on the desktop first.")?;
-                let thread = self.runtime.new_chat(&project, engine, title).map_err(|e| e.to_string())?;
+                let thread = self.runtime.new_chat(Some(&project), engine, title).map_err(|e| e.to_string())?;
                 let info = self.info(&thread);
                 self.emit(json!({ "type": "session.created", "properties": { "info": info } }));
                 Ok(info)

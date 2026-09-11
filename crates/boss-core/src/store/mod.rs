@@ -6,12 +6,14 @@
 //! a base directory is given, which is what tests do.
 
 pub mod json;
+pub mod reports;
 pub mod secrets;
 pub mod settings;
 pub mod state;
 pub mod transcript;
 
 pub use json::JsonFile;
+pub use reports::{AgentReportInput, AgentReportPatch, Report, ReportSource, ReportStore};
 pub use secrets::{MemorySecrets, Secrets};
 #[cfg(feature = "keyring")]
 pub use secrets::KeyringSecrets;
@@ -59,6 +61,11 @@ pub enum StoreError {
     /// A value could not be serialized.
     #[error("serialize: {0}")]
     Serialize(#[from] serde_json::Error),
+    /// The caller passed something a store refuses: text that is empty when
+    /// it must not be, text past a limit, or a record it does not own. The
+    /// message is written for the agent or the user who sees it.
+    #[error("{0}")]
+    Invalid(String),
     /// The transcript database failed.
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),

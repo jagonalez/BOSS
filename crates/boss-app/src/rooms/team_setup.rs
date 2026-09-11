@@ -16,6 +16,7 @@ use gpui::prelude::*;
 use gpui::{AnyElement, Context, EventEmitter, Render, SharedString, Window, div, px};
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::{DropdownMenu as _, PopupMenu, PopupMenuItem};
+use crate::theme::ActivePalette as _;
 use gpui_component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _, h_flex, v_flex};
 
 /// First entry of a model picker: leave the engine to choose. The same
@@ -148,6 +149,7 @@ impl TeamSetup {
     fn render_shape(&self, shape: RoomShape, cx: &mut Context<Self>) -> AnyElement {
         let chosen = self.shape == shape;
         let theme = cx.theme();
+        let palette = *cx.palette();
         let uses = roles_for_shape(shape, &self.team).len();
         v_flex()
             .id(SharedString::from(format!("shape-{}", shape_label(shape))))
@@ -158,9 +160,9 @@ impl TeamSetup {
             .rounded(theme.radius)
             .border_1()
             .cursor_pointer()
-            .when(chosen, |this| this.border_color(theme.primary).bg(theme.accent))
+            .when(chosen, |this| this.border_color(palette.accent).bg(palette.accent_soft))
             .when(!chosen, |this| {
-                this.border_color(theme.border).hover(|s| s.bg(theme.accent.opacity(0.5)))
+                this.border_color(palette.border).bg(palette.surface).hover(|s| s.bg(palette.hover))
             })
             .on_click(cx.listener(move |this, _, _, cx| this.set_shape(shape, cx)))
             .child(
@@ -169,14 +171,14 @@ impl TeamSetup {
                     .items_center()
                     .map(|this| {
                         if chosen {
-                            this.child(Icon::new(IconName::CircleCheck).small().text_color(theme.primary))
+                            this.child(Icon::new(IconName::CircleCheck).small().text_color(palette.accent))
                         } else {
                             this.child(
                                 div()
                                     .size(px(14.))
                                     .rounded_full()
                                     .border_1()
-                                    .border_color(theme.muted_foreground)
+                                    .border_color(palette.border_strong)
                                     .flex_shrink_0(),
                             )
                         }
@@ -306,6 +308,7 @@ impl Render for TeamSetup {
             .id("team-setup")
             .size_full()
             .overflow_y_scroll()
+            .bg(cx.theme().background)
             .p_6()
             .gap_5()
             .child(

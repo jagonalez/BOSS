@@ -2,10 +2,11 @@
 //! selection in `AppState`; anything beyond the shell goes through
 //! `ShellActions`.
 
-use super::actions::{ShellActions, default_terminal_cwd};
+use super::actions::{ShellActions, home_dir};
 use super::settings::{ProbeState, SettingsPage};
 use super::sidebar::{Sidebar, SidebarEvent};
-use super::state::{AppState, Tab as OpenTab, TabKind};
+use super::state::{AppState, Tab as OpenTab, TabContext, TabId, TabKind};
+use super::update_banner::UpdateBanner;
 use super::{
     ActivateTab, CloseTab, FocusSidebarFilter, NewChat, NewRoom, NewTerminal, NextTab, OpenSettings, PrevTab, ReopenTab,
     ToggleSidebar, apply_font_size, apply_theme,
@@ -169,6 +170,8 @@ pub struct Workspace {
     sidebar: Entity<Sidebar>,
     settings_page: Entity<SettingsPage>,
     probe_state: Entity<ProbeState>,
+    /// The "a newer BOSS exists" bar. Hidden until the app offers a release.
+    update_banner: Entity<UpdateBanner>,
     focus_handle: FocusHandle,
     last_title: String,
     /// The pending debounced write of `window.json`.
@@ -188,11 +191,15 @@ impl Workspace {
 
         let settings = state.read(cx).settings.clone();
         apply_theme(settings.theme, Some(window), cx);
+        super::apply_fonts(&settings.typography, Some(window), cx);
         apply_font_size(settings.typography.reading_size, Some(window), cx);
+
+        let update_banner = cx.new(|_| UpdateBanner::new());
 
         let appearance_state = state.clone();
         let subscriptions = vec![
             cx.observe(&state, |_, _, cx| cx.notify()),
+            cx.observe(&update_banner, |_, _, cx| cx.notify()),
             cx.subscribe_in(&sidebar, window, Self::on_sidebar_event),
             cx.observe_window_bounds(window, Self::on_window_bounds_changed),
             window.observe_window_appearance(move |window, cx| {
@@ -208,6 +215,7 @@ impl Workspace {
             sidebar,
             settings_page,
             probe_state,
+            update_banner,
             focus_handle: cx.focus_handle(),
             last_title: String::new(),
             save_bounds: None,
@@ -254,6 +262,12 @@ impl Workspace {
         &self.probe_state
     }
 
+    /// The update bar. `app.rs` offers a release into it and drives its
+    /// stages; the workspace only mounts it.
+    pub fn update_banner(&self) -> &Entity<UpdateBanner> {
+        &self.update_banner
+    }
+
     fn mutate(&self, cx: &mut Context<Self>, f: impl FnOnce(&mut AppState)) {
         self.state.update(cx, |s, cx| {
             f(s);
@@ -264,8 +278,8 @@ impl Workspace {
     fn on_sidebar_event(&mut self, _: &Entity<Sidebar>, event: &SidebarEvent, _window: &mut Window, cx: &mut Context<Self>) {
         match event.clone() {
             SidebarEvent::OpenThread(id) => self.open_thread(id, cx),
-            SidebarEvent::NewChat { project, engine } => self.actions.new_chat(&project, engine, cx),
-            SidebarEvent::NewRoom { project, shape } => self.actions.new_room(&project, shape, cx),
+            SidebarEvent::NewChat { project, engine } => self.actions.new_chat(project.as_ref(), engine, cx),
+            SidebarEvent::NewRoom { project, shape } => self.actions.new_room(project.as_ref(), shape, cx),
             SidebarEvent::Archive(id) => {
                 self.mutate(cx, |s| {
                     s.archive_thread(&id);
@@ -307,27 +321,63 @@ impl Workspace {
         self.actions.open_settings(cx);
     }
 
-    /// Open a terminal tab.
+    /// Open a terminal tab with no recorded origin ("Scratch").
     pub fn open_terminal(&mut self, cwd: PathBuf, cx: &mut Context<Self>) {
-        self.mutate(cx, |s| {
-            s.open_tab(TabKind::Terminal { cwd: cwd.clone() });
+        self.open_terminal_in(cwd, TabContext::none(), cx);
+    }
+
+    /// Open a terminal tab and remember which project and thread it came
+    /// from, so the strip above it can say what it belongs to.
+    pub fn open_terminal_in(&mut self, cwd: PathBuf, context: TabContext, cx: &mut Context<Self>) {
+        let id = self.state.update(cx, |s, cx| {
+            let ix = s.open_tab_with_context(TabKind::Terminal { cwd: cwd.clone() }, context);
+            cx.notify();
+            s.tabs[ix].id
         });
-        self.actions.new_terminal(&cwd, cx);
+        self.actions.new_terminal(&cwd, id, cx);
     }
 
     /// Open a browser tab.
     pub fn open_browser(&mut self, url: String, cx: &mut Context<Self>) {
-        self.mutate(cx, |s| {
-            s.open_tab(TabKind::Browser { url: url.clone() });
-        });
-        self.actions.new_browser(&url, cx);
+        self.open_browser_in(url, TabContext::none(), cx);
     }
 
-    /// Close tab `ix`.
-    pub fn close_tab(&mut self, ix: usize, cx: &mut Context<Self>) {
-        self.mutate(cx, |s| {
-            s.close_tab(ix);
+    /// Open a browser tab and remember where it came from.
+    pub fn open_browser_in(&mut self, url: String, context: TabContext, cx: &mut Context<Self>) {
+        let id = self.state.update(cx, |s, cx| {
+            let ix = s.open_tab_with_context(TabKind::Browser { url: url.clone() }, context);
+            cx.notify();
+            s.tabs[ix].id
         });
+        self.actions.new_browser(&url, id, cx);
+    }
+
+    /// Where a new terminal should open and what it belongs to: the active
+    /// thread's working directory when there is one, else the current
+    /// project's root, else the home directory.
+    fn terminal_target(&self, cx: &App) -> (PathBuf, TabContext) {
+        let state = self.state.read(cx);
+        if let Some(thread) = state.selected_thread.as_ref().and_then(|id| state.thread(id)) {
+            let context = TabContext { project: thread.project_id.clone(), thread: Some(thread.id.clone()) };
+            return (thread.cwd.clone(), context);
+        }
+        match state.current_project() {
+            Some(project) => (project.root.clone(), TabContext::project(project.id.clone())),
+            None => (home_dir(), TabContext::none()),
+        }
+    }
+
+    /// Close tab `ix`. The app is told so it can drop the shell or page
+    /// behind it rather than leaving a child process running unseen.
+    pub fn close_tab(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let closed = self.state.update(cx, |s, cx| {
+            let tab = s.close_tab(ix);
+            cx.notify();
+            tab
+        });
+        if let Some(tab) = closed {
+            self.actions.close_tab(tab.id, cx);
+        }
     }
 
     /// Make tab `ix` active.
@@ -352,27 +402,25 @@ impl Workspace {
             let s = self.state.read(cx);
             (s.current_project().map(|p| p.id.clone()), s.settings.default_engine)
         };
-        if let Some(project) = project {
-            self.actions.new_chat(&project, engine, cx);
-        }
+        // With no project the chat is a scratch chat; the shortcut works
+        // from the first launch.
+        self.actions.new_chat(project.as_ref(), engine, cx);
     }
 
     fn on_new_room(&mut self, _: &NewRoom, _: &mut Window, cx: &mut Context<Self>) {
         let project = self.state.read(cx).current_project().map(|p| p.id.clone());
-        if let Some(project) = project {
-            self.actions.new_room(&project, RoomShape::Direct, cx);
-        }
+        self.actions.new_room(project.as_ref(), RoomShape::Direct, cx);
     }
 
     fn on_new_terminal(&mut self, _: &NewTerminal, _: &mut Window, cx: &mut Context<Self>) {
-        let cwd = default_terminal_cwd(self.state.read(cx).current_project());
-        self.open_terminal(cwd, cx);
+        let (cwd, context) = self.terminal_target(cx);
+        self.open_terminal_in(cwd, context, cx);
     }
 
     fn on_close_tab(&mut self, _: &CloseTab, _: &mut Window, cx: &mut Context<Self>) {
-        self.mutate(cx, |s| {
-            s.close_active_tab();
-        });
+        if let Some(ix) = self.state.read(cx).active_tab {
+            self.close_tab(ix, cx);
+        }
     }
 
     fn on_open_settings(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
@@ -400,17 +448,17 @@ impl Workspace {
     /// been picked in the sidebar.
     fn on_reopen_tab(&mut self, _: &ReopenTab, _: &mut Window, cx: &mut Context<Self>) {
         let reopened = self.state.update(cx, |s, cx| {
-            let kind = s.reopen_closed_tab();
-            if kind.is_some() {
-                cx.notify();
-            }
-            kind
+            let kind = s.reopen_closed_tab()?;
+            cx.notify();
+            // The tab the reopen just made or focused is the active one.
+            let id = s.active_tab().map(|t| t.id)?;
+            Some((kind, id))
         });
         match reopened {
-            Some(TabKind::Thread(id)) => self.actions.open_thread(&id, cx),
-            Some(TabKind::Terminal { cwd }) => self.actions.new_terminal(&cwd, cx),
-            Some(TabKind::Browser { url }) => self.actions.new_browser(&url, cx),
-            Some(TabKind::Settings) => self.actions.open_settings(cx),
+            Some((TabKind::Thread(id), _)) => self.actions.open_thread(&id, cx),
+            Some((TabKind::Terminal { cwd }, tab)) => self.actions.new_terminal(&cwd, tab, cx),
+            Some((TabKind::Browser { url }, tab)) => self.actions.new_browser(&url, tab, cx),
+            Some((TabKind::Settings, _)) => self.actions.open_settings(cx),
             None => {}
         }
     }
@@ -533,18 +581,87 @@ impl Workspace {
         if let Some(ix) = state.active_tab {
             bar = bar.selected_index(ix);
         }
-        div().w_full().flex_shrink_0().border_b_1().border_color(cx.theme().border).child(bar)
+        div()
+            .w_full()
+            .flex_shrink_0()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().tab_bar)
+            .child(bar)
     }
 
     fn render_placeholder(title: impl Into<SharedString>, lines: Vec<SharedString>, cx: &App) -> impl IntoElement {
+        // The empty state is quiet: a heading at reading weight over the
+        // canvas, hints below it in the faint voice. `.empty-state` gave it
+        // room rather than a border.
         v_flex()
             .size_full()
             .items_center()
             .justify_center()
-            .gap_2()
+            .gap_1p5()
+            .bg(cx.theme().background)
             .text_color(cx.theme().muted_foreground)
-            .child(div().text_lg().text_color(cx.theme().foreground).child(title.into()))
+            .child(
+                div()
+                    .text_xl()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(cx.theme().foreground)
+                    .child(title.into()),
+            )
             .children(lines.into_iter().map(|line| div().text_sm().child(line)))
+    }
+
+    /// The thin strip above a terminal or browser pane that says what the
+    /// tab belongs to. Terminals name their project and path; browsers name
+    /// the page, its URL, and the id agents drive it by.
+    fn render_tab_header(&self, tab: &OpenTab, state: &AppState, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let (heading, detail) = state.tab_context_lines(tab)?;
+        let icon = Self::tab_icon(&tab.kind, state);
+        let exited = tab.terminal.as_ref().and_then(|t| t.exited);
+        let tab_id = tab.id;
+        Some(
+            h_flex()
+                .w_full()
+                .flex_shrink_0()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_1()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().secondary)
+                .text_xs()
+                .child(Icon::new(icon).xsmall().text_color(cx.theme().muted_foreground))
+                .child(div().flex_shrink_0().font_weight(gpui::FontWeight::MEDIUM).truncate().child(heading))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(detail),
+                )
+                .when_some(exited, |this, code| {
+                    this.child(
+                        Button::new(("terminal-restart", tab_id.0 as usize))
+                            .label(format!("Shell exited ({code}) · Reopen"))
+                            .xsmall()
+                            .primary()
+                            .on_click(cx.listener(move |this, _, _, cx| this.restart_terminal(tab_id, cx))),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// Bring a terminal tab back after its shell exited. Also bound to Enter
+    /// inside the dead terminal, so the habit of pressing Return works.
+    pub fn restart_terminal(&mut self, tab: TabId, cx: &mut Context<Self>) {
+        self.state.update(cx, |s, cx| {
+            s.set_terminal_exited(tab, None);
+            cx.notify();
+        });
+        self.actions.restart_terminal(tab, cx);
     }
 
     fn render_content(&self, state: &AppState, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -556,8 +673,13 @@ impl Workspace {
             )
             .into_any_element();
         };
+        let header = self.render_tab_header(tab, state, cx);
         if let Some(view) = cx.try_global::<crate::app::TabViews>().and_then(|v| v.views.get(&tab.id).cloned()) {
-            return div().size_full().child(view).into_any_element();
+            return v_flex()
+                .size_full()
+                .children(header)
+                .child(div().flex_1().min_h_0().w_full().child(view))
+                .into_any_element();
         }
         match &tab.kind {
             TabKind::Thread(id) => {
@@ -631,6 +753,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::on_focus_sidebar_filter))
             .size_full()
             .child(self.render_title_bar(&title, state.sidebar_collapsed, cx))
+            .when(self.update_banner.read(cx).is_visible(), |this| this.child(self.update_banner.clone()))
             .child(
                 div().flex_1().min_h_0().w_full().child(
                 h_resizable("workspace-split")
@@ -935,6 +1058,159 @@ mod tests {
             assert!(s.thread(&ThreadId::from_raw("thr_demo_1")).unwrap().archived);
             assert_eq!(s.thread(&ThreadId::from_raw("thr_demo_2")).unwrap().title, "Scroll");
             assert_eq!(w.last_title, "Scroll — BOSS");
+        });
+    }
+
+    /// Records what the shell asked the app for, so the tests can check the
+    /// cwd and tab a terminal was opened with.
+    #[derive(Default)]
+    struct Recorder {
+        terminals: std::sync::Mutex<Vec<(PathBuf, super::super::state::TabId)>>,
+        closed: std::sync::Mutex<Vec<super::super::state::TabId>>,
+        restarted: std::sync::Mutex<Vec<super::super::state::TabId>>,
+    }
+
+    impl ShellActions for Recorder {
+        fn open_thread(&self, _: &ThreadId, _: &mut App) {}
+        fn new_chat(&self, _: Option<&ProjectId>, _: EngineId, _: &mut App) {}
+        fn new_room(&self, _: Option<&ProjectId>, _: RoomShape, _: &mut App) {}
+        fn archive_thread(&self, _: &ThreadId, _: &mut App) {}
+        fn rename_thread(&self, _: &ThreadId, _: &str, _: &mut App) {}
+        fn new_terminal(&self, cwd: &std::path::Path, tab: super::super::state::TabId, _: &mut App) {
+            self.terminals.lock().unwrap().push((cwd.to_path_buf(), tab));
+        }
+        fn new_browser(&self, _: &str, _: super::super::state::TabId, _: &mut App) {}
+        fn restart_terminal(&self, tab: super::super::state::TabId, _: &mut App) {
+            self.restarted.lock().unwrap().push(tab);
+        }
+        fn close_tab(&self, tab: super::super::state::TabId, _: &mut App) {
+            self.closed.lock().unwrap().push(tab);
+        }
+        fn open_settings(&self, _: &mut App) {}
+        fn open_project_picker(&self, _: &mut App) {}
+        fn set_theme(&self, _: ThemePref, _: &mut App) {}
+        fn save_settings(&self, _: &boss_core::store::Settings, _: &mut App) {}
+        fn probe_engines(&self, _: &mut App) {}
+    }
+
+    fn recording_workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, Arc<Recorder>, &mut gpui::VisualTestContext) {
+        cx.update(gpui_component::init);
+        cx.update(crate::shell::init);
+        let state = cx.new(|_| AppState::demo());
+        let recorder = Arc::new(Recorder::default());
+        let actions: Arc<dyn ShellActions> = recorder.clone();
+        let (workspace, cx) = cx.add_window_view(move |window, cx| Workspace::new(state, actions, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (workspace, recorder, cx)
+    }
+
+    #[gpui::test]
+    fn a_new_terminal_opens_where_the_active_thread_is(cx: &mut TestAppContext) {
+        let (workspace, recorder, cx) = recording_workspace(cx);
+        // The demo opens with thread 1 selected, rooted in the boss project.
+        workspace.update_in(cx, |w, window, cx| w.on_new_terminal(&NewTerminal, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let (cwd, tab) = recorder.terminals.lock().unwrap()[0].clone();
+        assert_eq!(cwd, PathBuf::from("/Users/demo/dev/BOSS"), "the thread's cwd, not the process's");
+        workspace.read_with(cx, |w, cx| {
+            let s = w.state().read(cx);
+            let opened = s.tab(tab).expect("the shell made the tab before asking the app");
+            assert_eq!(opened.context.thread, Some(ThreadId::from_raw("thr_demo_1")));
+            assert_eq!(opened.context.project.as_ref().map(|p| p.0.as_str()), Some("prj_demo_boss"));
+            // The strip says what it belongs to.
+            let (heading, detail) = s.tab_context_lines(opened).unwrap();
+            assert!(heading.starts_with("boss · Port the sidebar"), "{heading}");
+            assert_eq!(detail, "/Users/demo/dev/BOSS");
+        });
+    }
+
+    #[gpui::test]
+    fn a_terminal_with_no_thread_falls_back_to_the_project_then_home(cx: &mut TestAppContext) {
+        let (workspace, recorder, cx) = recording_workspace(cx);
+        workspace.update(cx, |w, cx| {
+            w.state.update(cx, |s, cx| {
+                s.select_thread(None);
+                cx.notify();
+            })
+        });
+        workspace.update_in(cx, |w, window, cx| w.on_new_terminal(&NewTerminal, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(recorder.terminals.lock().unwrap()[0].0, PathBuf::from("/Users/demo/dev/BOSS"), "the first project");
+
+        // No projects either: the home directory, never the process's cwd.
+        workspace.update(cx, |w, cx| {
+            w.state.update(cx, |s, cx| {
+                s.projects.clear();
+                s.threads.clear();
+                cx.notify();
+            })
+        });
+        workspace.update_in(cx, |w, window, cx| w.on_new_terminal(&NewTerminal, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let (cwd, tab) = recorder.terminals.lock().unwrap()[1].clone();
+        assert_eq!(cwd, home_dir());
+        workspace.read_with(cx, |w, cx| {
+            let s = w.state().read(cx);
+            assert_eq!(s.tab_context_lines(s.tab(tab).unwrap()).unwrap().0, "Scratch");
+        });
+    }
+
+    #[gpui::test]
+    fn closing_a_tab_tells_the_app_so_the_shell_behind_it_dies(cx: &mut TestAppContext) {
+        let (workspace, recorder, cx) = recording_workspace(cx);
+        workspace.update_in(cx, |w, window, cx| w.on_new_terminal(&NewTerminal, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let tab = recorder.terminals.lock().unwrap()[0].1;
+
+        workspace.update_in(cx, |w, window, cx| w.on_close_tab(&CloseTab, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(recorder.closed.lock().unwrap().as_slice(), [tab]);
+        workspace.read_with(cx, |w, cx| assert!(w.state().read(cx).tab(tab).is_none()));
+    }
+
+    #[gpui::test]
+    fn an_exited_shell_can_be_reopened_from_the_strip(cx: &mut TestAppContext) {
+        let (workspace, recorder, cx) = recording_workspace(cx);
+        workspace.update_in(cx, |w, window, cx| w.on_new_terminal(&NewTerminal, window, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let tab = recorder.terminals.lock().unwrap()[0].1;
+
+        workspace.update(cx, |w, cx| {
+            w.state.update(cx, |s, cx| {
+                s.set_terminal_title(tab, "zsh".into());
+                s.set_terminal_exited(tab, Some(1));
+                cx.notify();
+            })
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        workspace.read_with(cx, |w, cx| {
+            let s = w.state().read(cx);
+            assert_eq!(s.tab_title(s.tab(tab).unwrap()), "zsh (exited)");
+        });
+
+        workspace.update(cx, |w, cx| w.restart_terminal(tab, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(recorder.restarted.lock().unwrap().as_slice(), [tab]);
+        workspace.read_with(cx, |w, cx| {
+            let s = w.state().read(cx);
+            assert_eq!(s.tab_title(s.tab(tab).unwrap()), "zsh", "the exited marker is gone");
+        });
+    }
+
+    #[gpui::test]
+    fn the_update_banner_only_appears_once_a_release_is_offered(cx: &mut TestAppContext) {
+        let (workspace, cx) = workspace(cx);
+        let banner = workspace.read_with(cx, |w, _| w.update_banner().clone());
+        banner.read_with(cx, |b, _| assert!(!b.is_visible()));
+        banner.update(cx, |b, cx| b.offer("9.9.9".into(), cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        banner.read_with(cx, |b, _| {
+            assert!(b.is_visible());
+            assert_eq!(
+                super::super::update_banner::stage_label("9.9.9", b.stage()),
+                "BOSS 9.9.9 is available."
+            );
         });
     }
 }

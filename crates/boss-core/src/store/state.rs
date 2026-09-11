@@ -118,8 +118,8 @@ impl StateStore {
             return Ok(false);
         }
         let gone: Vec<ThreadId> =
-            state.threads.iter().filter(|t| &t.project_id == id).map(|t| t.id.clone()).collect();
-        state.threads.retain(|t| &t.project_id != id);
+            state.threads.iter().filter(|t| t.project_id.as_ref() == Some(id)).map(|t| t.id.clone()).collect();
+        state.threads.retain(|t| t.project_id.as_ref() != Some(id));
         state.rooms.retain(|r| !gone.contains(&r.thread_id));
         save_items(&self.projects_file, &state.projects)?;
         save_items(&self.threads_file, &state.threads)?;
@@ -136,7 +136,7 @@ impl StateStore {
 
     /// Threads in one project, including archived ones.
     pub fn threads_for_project(&self, project: &ProjectId) -> Vec<Thread> {
-        self.lock().threads.iter().filter(|t| &t.project_id == project).cloned().collect()
+        self.lock().threads.iter().filter(|t| t.project_id.as_ref() == Some(project)).cloned().collect()
     }
 
     /// One thread by id.
@@ -203,7 +203,7 @@ impl StateStore {
     pub fn rooms_for_project(&self, project: &ProjectId) -> Vec<Room> {
         let state = self.lock();
         let threads: Vec<&ThreadId> =
-            state.threads.iter().filter(|t| &t.project_id == project).map(|t| &t.id).collect();
+            state.threads.iter().filter(|t| t.project_id.as_ref() == Some(project)).map(|t| &t.id).collect();
         state.rooms.iter().filter(|r| threads.contains(&&r.thread_id)).cloned().collect()
     }
 
@@ -283,7 +283,7 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         Thread {
             id: ThreadId::new(),
-            project_id: project.clone(),
+            project_id: Some(project.clone()),
             title: "t".into(),
             kind,
             created_at: now,
@@ -345,7 +345,7 @@ mod tests {
         };
         let store = StateStore::open(Some(dir.path())).unwrap();
         assert_eq!(store.project(&project.id).unwrap().root, PathBuf::from("/code/a"));
-        assert_eq!(store.thread(&thread_id).unwrap().project_id, project.id);
+        assert_eq!(store.thread(&thread_id).unwrap().project_id, Some(project.id.clone()));
         assert_eq!(store.room(&room_id).unwrap().thread_id, thread_id);
         assert_eq!(store.room_for_thread(&thread_id).unwrap().id, room_id);
         assert_eq!(store.rooms_for_project(&project.id).len(), 1);

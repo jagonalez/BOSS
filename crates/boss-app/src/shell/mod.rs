@@ -8,12 +8,14 @@ pub mod actions;
 pub mod settings;
 pub mod sidebar;
 pub mod state;
+pub mod update_banner;
 pub mod workspace;
 
 pub use actions::{NoopActions, ShellActions};
 pub use settings::SettingsPage;
 pub use sidebar::{Sidebar, SidebarEvent};
-pub use state::{AppState, Tab, TabId, TabKind};
+pub use state::{AppState, Tab, TabContext, TabId, TabKind};
+pub use update_banner::{UpdateBanner, UpdateBannerEvent, UpdateStage};
 pub use workspace::{Workspace, open_main_window, open_main_window_with_workspace};
 
 use boss_core::store::Theme as ThemePref;
@@ -69,8 +71,11 @@ pub fn tokio_handle() -> tokio::runtime::Handle {
         .clone()
 }
 
-/// Register the shell's key bindings. Call once after `gpui_component::init`.
+/// Register the shell's key bindings and paint the BOSS palette over
+/// gpui-component's default theme. Call once after `gpui_component::init`.
 pub fn init(cx: &mut App) {
+    crate::theme::apply(crate::theme::for_mode(Theme::global(cx).is_dark()), cx);
+    crate::theme::apply_fonts("system", "system", cx);
     let mut bindings = vec![
         KeyBinding::new("cmd-n", NewChat, None),
         KeyBinding::new("cmd-shift-n", NewRoom, None),
@@ -101,11 +106,24 @@ pub fn init(cx: &mut App) {
 }
 
 /// Apply a theme preference to the gpui-component theme.
+///
+/// `Theme::change` reloads every color from the registry's theme config, so
+/// the BOSS palette is written on afterwards, not before.
 pub fn apply_theme(theme: ThemePref, window: Option<&mut Window>, cx: &mut App) {
     match theme {
         ThemePref::System => Theme::sync_system_appearance(window, cx),
         ThemePref::Light => Theme::change(ThemeMode::Light, window, cx),
         ThemePref::Dark => Theme::change(ThemeMode::Dark, window, cx),
+    }
+    let dark = Theme::global(cx).is_dark();
+    crate::theme::apply(crate::theme::for_mode(dark), cx);
+}
+
+/// Apply the fonts from `Settings.typography`.
+pub fn apply_fonts(typography: &boss_core::store::Typography, window: Option<&mut Window>, cx: &mut App) {
+    crate::theme::apply_fonts(&typography.ui_font, &typography.mono_font, cx);
+    if let Some(window) = window {
+        window.refresh();
     }
 }
 
