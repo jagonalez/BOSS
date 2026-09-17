@@ -4,7 +4,7 @@
   "version": "0.1.1",
   "description": "Configurable multi-backend desktop workspace for coding agents",
   "main": "./out/main/index.js",
-  "opencodeVersion": "v1.18.15",
+  "opencodeVersion": "v1.18.31",
   "author": "jeremy",
   "license": "MIT",
   "type": "module",
@@ -40,9 +40,9 @@
     "probe:opencode:todos": "esbuild ./src/main/backend/opencode-backend.ts --bundle --platform=node --format=esm --outfile=./out/probe/opencode-backend.js --external:electron --external:@opencode-ai/sdk --alias:@shared=./src/shared && esbuild ./src/shared/opencode.ts --bundle --platform=node --format=esm --outfile=./out/probe/shared-opencode.js && node scripts/probe-opencode-todos.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.234",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.274",
     "@huggingface/transformers": "^3.8.1",
-    "@opencode-ai/sdk": "^1.18.15",
+    "@opencode-ai/sdk": "^1.18.31",
     "@tanstack/react-virtual": "^3.14.9",
     "@types/ws": "^8.18.1",
     "@xterm/addon-fit": "^0.11.0",
