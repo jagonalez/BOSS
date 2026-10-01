@@ -2,6 +2,10 @@
 //! sessions. The UI holds one `Arc<Runtime>` and talks to it; agents reach
 //! it through the bus.
 
+use crate::automations::bus::{Clock, EventBus, SystemClock};
+use crate::automations::engine::NoScriptRunner;
+use crate::automations::runtime_host::{AgentSink, RuntimeHost};
+use crate::automations::{AutomationManager, AutomationStore, WorkflowEngine, WorkflowStore};
 use crate::bus_handler::RuntimeBusHandler;
 use crate::rooms::{RoomCoordinator, RoomHost};
 use crate::sessions::{SessionEvent, SessionKey, SessionManager};
@@ -23,6 +27,16 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use time::OffsetDateTime;
+
+/// How often the workflow and automation schedulers run. The TS uses the
+/// same thirty seconds: cron resolution is one minute, so this is fine
+/// enough to never miss a slot and coarse enough to cost nothing.
+const SCHEDULER_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Epoch milliseconds.
+fn now_ms() -> i64 {
+    (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
 
 /// Secret that signs bus tokens, kept on disk so tokens in generated plugin
 /// files stay valid across restarts.
@@ -71,6 +85,12 @@ pub struct Runtime {
     handler: Arc<RuntimeBusHandler>,
     /// Runs rooms: executes `RoomManager` intents. Set before `start` returns.
     rooms: OnceLock<Arc<RoomCoordinator>>,
+    /// Durable workflows. Set before `start` returns.
+    workflows: OnceLock<Arc<WorkflowEngine>>,
+    /// Scheduled and webhook-triggered automations. Set before `start` returns.
+    automations: OnceLock<Arc<AutomationManager>>,
+    /// What both engines use to run an agent and watch it.
+    automation_host: OnceLock<Arc<RuntimeHost>>,
     self_ref: OnceLock<std::sync::Weak<Runtime>>,
 }
 
@@ -150,6 +170,9 @@ impl Runtime {
             taps,
             handler: handler.clone(),
             rooms: OnceLock::new(),
+            workflows: OnceLock::new(),
+            automations: OnceLock::new(),
+            automation_host: OnceLock::new(),
             self_ref: OnceLock::new(),
         });
         let _ = rt.self_ref.set(Arc::downgrade(&rt));
@@ -185,6 +208,71 @@ impl Runtime {
         let rooms = RoomCoordinator::start(host, &rt.data_dir, handle.clone()).context("start rooms")?;
         let _ = rt.rooms.set(rooms);
 
+        // Workflows and automations. Both engines drive agent conversations
+        // through one `RuntimeHost`, which is also what watches the session
+        // events those conversations produce.
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let automation_host = RuntimeHost::new(Arc::downgrade(&rt));
+        let workflows = WorkflowEngine::new(
+            Arc::new(WorkflowStore::open(&rt.data_dir).context("open workflow store")?),
+            Arc::new(EventBus::open(&rt.data_dir, clock.clone()).context("open workflow event bus")?),
+            automation_host.clone(),
+            clock.clone(),
+            Arc::new(NoScriptRunner),
+        );
+        let automations = AutomationManager::new(
+            Arc::new(AutomationStore::open(&rt.data_dir).context("open automation store")?),
+            automation_host.clone(),
+            clock.clone(),
+        );
+        automation_host.add_sink(Arc::downgrade(&workflows) as std::sync::Weak<dyn AgentSink>);
+        automation_host.add_sink(Arc::downgrade(&automations) as std::sync::Weak<dyn AgentSink>);
+        let _ = rt.workflows.set(workflows.clone());
+        let _ = rt.automations.set(automations.clone());
+        let _ = rt.automation_host.set(automation_host.clone());
+
+        // Supervision watches the same tap the relay and web access use, so
+        // an unattended step's idle, error, permission, and question events
+        // reach the host without a second subscription on the session manager.
+        let watcher = automation_host.clone();
+        let mut events = rt.subscribe();
+        handle.spawn(async move {
+            loop {
+                match events.recv().await {
+                    Ok(event) => watcher.observe(&event).await,
+                    // Lagged only drops old events; the next recv resumes.
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Recovery, then the scheduler. Recovery runs in the background: a
+        // workflow run that resumes by starting an agent must not hold up
+        // the window, and a store that fails to recover is logged rather
+        // than fatal.
+        let scheduler = rt.clone();
+        handle.spawn(async move {
+            if let Err(e) = scheduler.workflows().recover().await {
+                tracing::warn!(error = %e, "workflow recovery failed");
+            }
+            if let Err(e) = scheduler.automations().catch_up().await {
+                tracing::warn!(error = %e, "automation catch-up failed");
+            }
+            let mut ticker = tokio::time::interval(SCHEDULER_INTERVAL);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                if let Err(e) = scheduler.workflows().tick().await {
+                    tracing::warn!(error = %e, "workflow tick failed");
+                }
+                if let Err(e) = scheduler.automations().tick().await {
+                    tracing::warn!(error = %e, "automation tick failed");
+                }
+                scheduler.automation_host().tick(now_ms()).await;
+            }
+        });
+
         // Bring the cua-driver back up if the user left Computer Use on. In
         // the background: the daemon gets fifteen seconds to open its socket,
         // and a slow or missing driver must not hold up the window.
@@ -210,6 +298,21 @@ impl Runtime {
     /// Rooms: open, address, and hand over between participants.
     pub fn rooms(&self) -> &Arc<RoomCoordinator> {
         self.rooms.get().expect("rooms start with the runtime")
+    }
+
+    /// Durable workflows: create, run, and replay.
+    pub fn workflows(&self) -> &Arc<WorkflowEngine> {
+        self.workflows.get().expect("workflows start with the runtime")
+    }
+
+    /// Automations: the schedule, the runs, and their history.
+    pub fn automations(&self) -> &Arc<AutomationManager> {
+        self.automations.get().expect("automations start with the runtime")
+    }
+
+    /// The host both engines run their agent conversations through.
+    pub fn automation_host(&self) -> &Arc<RuntimeHost> {
+        self.automation_host.get().expect("the automation host starts with the runtime")
     }
 
     /// Feed a synthetic event through the session pump. The UI, the taps,
@@ -391,6 +494,13 @@ impl Runtime {
     }
 
     pub async fn shutdown(&self) {
+        // Active runs are recorded as aborted before the sessions go, so
+        // nothing is left looking live in the history after a quit.
+        if let Some(automations) = self.automations.get()
+            && let Err(e) = automations.stop_all().await
+        {
+            tracing::warn!(error = %e, "stopping automation runs failed");
+        }
         self.sessions.close_all().await;
     }
 }

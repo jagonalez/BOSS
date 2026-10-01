@@ -1540,6 +1540,18 @@ impl ScriptRunner for SequenceRunner {
     }
 }
 
+/// The workflow engine takes a finished agent from the runtime host. A
+/// thread it does not own settles nothing, so both engines may be offered
+/// every outcome.
+#[async_trait]
+impl super::runtime_host::AgentSink for WorkflowEngine {
+    async fn on_agent_finished(&self, thread_id: &str, outcome: super::host::AgentOutcome) {
+        if let Err(error) = WorkflowEngine::on_agent_finished(self, thread_id, outcome).await {
+            tracing::warn!(%error, thread_id, "settling a workflow agent step failed");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,6 +2,10 @@
 //! `src/main/thread-bus.ts`: peer fences, durable inter-thread messages,
 //! and delegation of browser, computer, and MCP tools.
 
+use crate::automations::{
+    EventPattern, Workflow, WorkflowApprovalMode, WorkflowInput, WorkflowOverlapPolicy, WorkflowPatch,
+    WorkflowRun, WorkflowSource, WorkflowTrigger,
+};
 use crate::runtime::Runtime;
 use crate::worktree::Worktrees;
 use anyhow::{Result, anyhow, bail};
@@ -154,6 +158,12 @@ impl RuntimeBusHandler {
 
     pub fn set_qa_default_policy(&self, policy: crate::computer_use::QaPolicy) {
         self.qa_policies.lock().unwrap().set_default(policy);
+    }
+
+    /// Git worktrees, shared with the automation host so an unattended run
+    /// makes its checkouts in the same place a thread tool does.
+    pub fn worktrees(&self) -> &Worktrees {
+        &self.worktrees
     }
 
     pub fn native_sessions(&self) -> &KeyValueFile {
@@ -382,6 +392,169 @@ impl RuntimeBusHandler {
         }
         let stored = self.messages.lock().unwrap().iter().find(|x| x.id == id).cloned().unwrap_or(m);
         Ok(serde_json::to_value(stored)?)
+    }
+
+    /// The `boss_workflow_*` tools. Port of `runWorkflowTool` in
+    /// `src/main/thread-bus.ts`.
+    ///
+    /// A thread sees its own project's workflows plus global ones, which is
+    /// what keeps one project's agent from running another's workflow.
+    async fn workflow_tool(&self, rt: &Runtime, thread: &Thread, name: &str, args: &Value) -> Result<Value> {
+        let engine = rt.workflows();
+        let project_path = self.project_path_of(rt, thread);
+        let visible = |workflow: &Workflow| workflow.project_path == project_path || workflow.project_path.is_empty();
+        let workflows = engine.store().workflows();
+        let runs = engine.store().runs();
+        let approval_mode = engine.store().approval_mode();
+        let auto_approve = approval_mode == WorkflowApprovalMode::Auto;
+
+        let text = |key: &str| args.get(key).and_then(Value::as_str);
+        let require_workflow = |id: Option<&str>| -> Result<Workflow> {
+            let id = id.unwrap_or_default().trim();
+            if id.is_empty() {
+                bail!("A workflow id is required.");
+            }
+            workflows
+                .iter()
+                .find(|w| w.id == id)
+                .filter(|w| visible(w))
+                .cloned()
+                .ok_or_else(|| anyhow!("Workflow not found in this project."))
+        };
+
+        match name {
+            "boss_workflow_list" => {
+                let list: Vec<Value> = workflows
+                    .iter()
+                    .filter(|w| visible(w))
+                    .map(|workflow| {
+                        let latest = runs
+                            .iter()
+                            .filter(|run| run.workflow_id == workflow.id)
+                            .max_by_key(|run| run.started_at);
+                        let mut item = json!({
+                            "id": workflow.id,
+                            "name": workflow.name,
+                            "description": workflow.description.clone().unwrap_or_default(),
+                            "enabled": workflow.enabled,
+                            "source": workflow.source,
+                            "triggers": workflow.triggers,
+                        });
+                        if let Some(latest) = latest {
+                            item["lastRun"] = json!({
+                                "id": latest.id,
+                                "status": latest.status,
+                                "startedAt": latest.started_at,
+                                "error": latest.error,
+                            });
+                        }
+                        item
+                    })
+                    .collect();
+                Ok(Value::Array(list))
+            }
+            "boss_workflow_create" => {
+                let input = WorkflowInput {
+                    name: text("name").unwrap_or_default().to_owned(),
+                    description: text("description").filter(|d| !d.is_empty()).map(str::to_owned),
+                    script: text("script").unwrap_or_default().to_owned(),
+                    project_path: project_path.clone(),
+                    triggers: workflow_triggers_from(args),
+                    overlap_policy: WorkflowOverlapPolicy::Skip,
+                    budget: None,
+                    defaults: None,
+                    keep_runs: 0,
+                };
+                let workflow = engine.create(input, WorkflowSource::Agent)?;
+                Ok(json!({
+                    "id": workflow.id,
+                    "enabled": workflow.enabled,
+                    "note": if auto_approve {
+                        "Workflow approval is set to auto, so its triggers are live immediately. Use boss_workflow_run to also execute it once now."
+                    } else {
+                        "Created disabled: triggers stay dormant until the user enables it in the Workflows page. Use boss_workflow_run to execute it once now."
+                    },
+                }))
+            }
+            "boss_workflow_update" => {
+                let target = require_workflow(text("workflowId"))?;
+                // Under ask-mode approval an edited workflow is disabled
+                // again: editing is how an agent iterates, enabling is how
+                // the user approves.
+                let mut patch = WorkflowPatch { enabled: (!auto_approve).then_some(false), ..Default::default() };
+                if let Some(name) = text("name").map(str::trim).filter(|n| !n.is_empty()) {
+                    patch.name = Some(name.to_owned());
+                }
+                if let Some(description) = text("description") {
+                    patch.description = Some(description.to_owned());
+                }
+                if let Some(script) = text("script").filter(|s| !s.trim().is_empty()) {
+                    patch.script = Some(script.to_owned());
+                }
+                if ["cron", "eventType", "eventFilters"].iter().any(|key| args.get(key).is_some()) {
+                    patch.triggers = Some(workflow_triggers_from(args));
+                }
+                let updated = engine.update(&target.id, patch, true)?;
+                Ok(json!({
+                    "id": updated.id,
+                    "enabled": updated.enabled,
+                    "note": if auto_approve { "Saved." } else { "Saved, and disabled until the user re-enables it." },
+                }))
+            }
+            "boss_workflow_run" => {
+                let target = require_workflow(text("workflowId"))?;
+                let run = engine.run_now(&target.id, Some(thread.id.to_string())).await?;
+                Ok(json!({
+                    "runId": run.id,
+                    "status": run.status,
+                    "note": "The result will arrive in this conversation as a message when the run finishes.",
+                }))
+            }
+            "boss_workflow_runs" => {
+                let requested = text("workflowId").unwrap_or_default().trim();
+                let ids: Vec<String> = if requested.is_empty() {
+                    workflows.iter().filter(|w| visible(w)).map(|w| w.id.clone()).collect()
+                } else {
+                    vec![require_workflow(Some(requested))?.id]
+                };
+                let limit =
+                    args.get("limit").and_then(Value::as_f64).unwrap_or(5.0).clamp(1.0, 20.0) as usize;
+                let mut matching: Vec<&WorkflowRun> =
+                    runs.iter().filter(|run| ids.contains(&run.workflow_id)).collect();
+                matching.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+                let list: Vec<Value> = matching
+                    .into_iter()
+                    .take(limit)
+                    .map(|run| {
+                        json!({
+                            "id": run.id,
+                            "workflowId": run.workflow_id,
+                            "status": run.status,
+                            "trigger": run.trigger,
+                            "startedAt": run.started_at,
+                            "finishedAt": run.finished_at,
+                            "error": run.error,
+                            "result": run.result,
+                            "note": run.note,
+                            "steps": run.journal.iter().map(|entry| {
+                                let mut step = json!({
+                                    "seq": entry.seq,
+                                    "op": entry.op,
+                                    "label": entry.label,
+                                    "status": entry.status,
+                                });
+                                if let Some(error) = &entry.error {
+                                    step["error"] = json!(error);
+                                }
+                                step
+                            }).collect::<Vec<_>>(),
+                        })
+                    })
+                    .collect();
+                Ok(Value::Array(list))
+            }
+            _ => bail!("Unknown BOSS workflow tool."),
+        }
     }
 
     async fn call(&self, caller: &BusCaller, name: &str, args: Value) -> Result<Value> {
@@ -677,10 +850,51 @@ impl RuntimeBusHandler {
                     "updatedAt": report.updated_at,
                 }))
             }
-            _ if name.starts_with("boss_workflow_") => bail!("Workflows are not available."),
+            // Workflows are local to BOSS and scoped to the caller's project,
+            // so like reports they are answered without a peer check.
+            _ if name.starts_with("boss_workflow_") => {
+                self.workflow_tool(&rt, &thread, name, &args).await
+            }
             _ => bail!("Unknown BOSS thread tool."),
         }
     }
+}
+
+/// The triggers a `boss_workflow_create`/`update` call asks for. Port of
+/// `workflowTriggersFrom`: a cron expression and an event type are both
+/// optional and both may be given, and a workflow with neither is manual.
+///
+/// Only scalar filters survive, matching the TS: an object or array filter
+/// could never equal a flat event field, so keeping one would silently make
+/// the trigger unmatchable.
+fn workflow_triggers_from(args: &Value) -> Vec<WorkflowTrigger> {
+    let mut triggers = Vec::new();
+    let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::trim).unwrap_or("");
+    let cron = text("cron");
+    if !cron.is_empty() {
+        triggers.push(WorkflowTrigger::Cron { expression: cron.to_owned() });
+    }
+    let event_type = text("eventType");
+    if !event_type.is_empty() {
+        let filters: std::collections::BTreeMap<String, Value> = args
+            .get("eventFilters")
+            .and_then(Value::as_object)
+            .map(|raw| {
+                raw.iter()
+                    .filter(|(_, value)| value.is_string() || value.is_number() || value.is_boolean())
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        triggers.push(WorkflowTrigger::Event {
+            pattern: EventPattern {
+                kind: event_type.to_owned(),
+                project_path: None,
+                filters: Some(filters).filter(|f| !f.is_empty()),
+            },
+        });
+    }
+    triggers
 }
 
 /// A thread title from an instruction: its first non-empty line, trimmed to

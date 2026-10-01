@@ -799,6 +799,29 @@ fn format_stamp(at: i64) -> String {
     }
 }
 
+/// The automation manager takes a finished agent from the runtime host.
+/// A thread it does not own finishes nothing, so both engines may be
+/// offered every outcome.
+#[async_trait::async_trait]
+impl super::runtime_host::AgentSink for AutomationManager {
+    async fn on_agent_finished(&self, thread_id: &str, outcome: super::host::AgentOutcome) {
+        use super::host::AgentStatus;
+        let result = match outcome.status {
+            AgentStatus::Success => self.on_thread_idle(thread_id).await,
+            AgentStatus::Failure => {
+                let detail = outcome.error.as_deref().unwrap_or("The agent reported an error.");
+                self.on_thread_error(thread_id, detail).await
+            }
+            // A timeout or an abort was asked for by whoever stopped it, and
+            // that path already recorded the run.
+            AgentStatus::Timeout | AgentStatus::Aborted => Ok(()),
+        };
+        if let Err(error) = result {
+            tracing::warn!(%error, thread_id, "finishing an automation run failed");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

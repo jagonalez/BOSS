@@ -28,6 +28,7 @@ pub mod engine;
 pub mod github;
 pub mod host;
 pub mod manager;
+pub mod runtime_host;
 pub mod store;
 pub mod types;
 
@@ -35,5 +36,6 @@ pub use bus::EventBus;
 pub use engine::WorkflowEngine;
 pub use host::{AgentOutcome, AgentRequest, AutomationHost, Notice, RunOutcome, WorkflowHost};
 pub use manager::AutomationManager;
+pub use runtime_host::RuntimeHost;
 pub use store::{AutomationStore, WorkflowStore};
 pub use types::*;
