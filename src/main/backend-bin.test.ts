@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { BinaryOverrides, resolveBackendBin, setBinaryOverrideSource } from './backend-bin.ts'
+import { BinaryOverrides, findBackendExecutable, resolveBackendBin, setBinaryOverrideSource } from './backend-bin.ts'
 
 /** A real executable at a path no PATH lookup would ever reach. */
 function shim(dir: string, name: string): string {
@@ -93,5 +93,42 @@ test('survives a corrupt or non-string settings file', () => {
     assert.deepEqual(new BinaryOverrides(file).all(), {}, 'unreadable settings fall back to PATH')
     writeFileSync(file, JSON.stringify({ codex: 42, pi: '/bin/sh' }))
     assert.deepEqual(new BinaryOverrides(file).all(), { pi: '/bin/sh' }, 'non-string entries are dropped')
+  })
+})
+
+test('finds the installed CLI on PATH as an absolute path', () => {
+  withTempDir((dir) => {
+    const empty = join(dir, 'empty')
+    const bin = join(dir, 'bin')
+    mkdirSync(empty)
+    mkdirSync(bin)
+    const codex = shim(bin, 'codex')
+    assert.equal(findBackendExecutable('codex', [empty, bin].join(delimiter)), codex)
+  })
+})
+
+test('skips a PATH entry that is not executable', () => {
+  withTempDir((dir) => {
+    const first = join(dir, 'first')
+    const second = join(dir, 'second')
+    mkdirSync(first)
+    mkdirSync(second)
+    // A stray file with the right name must not shadow the real install behind it.
+    writeFileSync(join(first, 'codex'), 'not a program')
+    const codex = shim(second, 'codex')
+    assert.equal(findBackendExecutable('codex', [first, second].join(delimiter)), codex)
+  })
+})
+
+test('prefers an override to PATH and reports a missing CLI as undefined', () => {
+  withTempDir((dir) => {
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    shim(bin, 'codex')
+    const pinned = shim(dir, 'pinned-codex')
+    process.env.BOSS_CODEX_BIN = pinned
+    assert.equal(findBackendExecutable('codex', bin), pinned)
+    delete process.env.BOSS_CODEX_BIN
+    assert.equal(findBackendExecutable('codex', join(dir, 'nowhere')), undefined)
   })
 })

@@ -16,7 +16,13 @@
  *
  * Usage: node scripts/probe-claude-sdk.mjs
  */
+import { execFileSync } from 'node:child_process'
 import { query } from '@anthropic-ai/claude-agent-sdk'
+
+// The installed claude, as the backend runs it, rather than the binary the SDK
+// ships: that is the CLI the user updates and BOSS has to keep working with.
+const claude = process.env.BOSS_CLAUDE_BIN
+  || execFileSync('/bin/sh', ['-c', 'command -v claude'], { encoding: 'utf8' }).trim()
 
 // A 1x1 red PNG, small enough to inline.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -35,7 +41,7 @@ async function* once(content) {
 function run(content, extra = {}) {
   return query({
     prompt: once(content),
-    options: { cwd: process.cwd(), permissionMode: 'default', includePartialMessages: true, ...extra }
+    options: { cwd: process.cwd(), pathToClaudeCodeExecutable: claude, permissionMode: 'default', includePartialMessages: true, ...extra }
   })
 }
 

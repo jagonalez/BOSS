@@ -60,7 +60,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
 
       # Compiles main, preload, and renderer. Does not package: the .dmg needs
-      # the bundled opencode binary, which is fetched separately and gitignored.
+      # the cua-driver binary, which is fetched separately and gitignored.
       - run: npm run build
 
   e2e:

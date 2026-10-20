@@ -4,7 +4,6 @@
   "version": "0.1.1",
   "description": "Configurable multi-backend desktop workspace for coding agents",
   "main": "./out/main/index.js",
-  "opencodeVersion": "v1.18.15",
   "author": "jeremy",
   "license": "MIT",
   "type": "module",
@@ -30,7 +29,6 @@
     "test:e2e:headed": "npm run build && BOSS_E2E_SHOW=1 playwright test --headed",
     "probe:opencode": "esbuild ./src/main/backend/opencode-backend.ts --bundle --platform=node --format=esm --outfile=./out/probe/opencode-backend.js --external:electron --external:@opencode-ai/sdk --alias:@shared=./src/shared && node scripts/probe-opencode-sdk.mjs",
     "probe:claude": "node scripts/probe-claude-sdk.mjs",
-    "fetch:opencode": "node scripts/fetch-opencode.mjs",
     "fetch:cua-driver": "bash scripts/fetch-cua-driver.sh",
     "pack": "electron-vite build && electron-builder --dir",
     "dist": "electron-vite build && electron-builder",
@@ -84,20 +82,11 @@
     },
     "files": [
       "out/**/*",
-      "resources/**/*"
-    ],
-    "asarUnpack": [
-      "node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+      "resources/**/*",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "icon": "resources/icons/512x512.png",
     "extraResources": [
-      {
-        "from": "resources/opencode",
-        "to": "opencode",
-        "filter": [
-          "**/*"
-        ]
-      },
       {
         "from": "resources/cua-driver",
         "to": "cua-driver",

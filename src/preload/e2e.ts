@@ -106,6 +106,7 @@ const backends: BackendDescriptor[] = [
   {
     id: 'opencode',
     label: 'OpenCode',
+    command: 'opencode',
     description: 'OpenCode test backend',
     available: true,
     healthy: true,
@@ -122,6 +123,7 @@ const backends: BackendDescriptor[] = [
   {
     id: 'pi',
     label: 'Pi',
+    command: 'pi',
     description: 'Pi test backend',
     available: true,
     healthy: true,
@@ -132,6 +134,7 @@ const backends: BackendDescriptor[] = [
   {
     id: 'codex',
     label: 'Codex',
+    command: 'codex',
     description: 'Codex test backend',
     available: true,
     healthy: true,
@@ -146,6 +149,7 @@ const backends: BackendDescriptor[] = [
   {
     id: 'claude',
     label: 'Claude Code',
+    command: 'claude',
     description: 'Claude test backend',
     available: true,
     healthy: true,
@@ -1539,7 +1543,6 @@ export function installE2EApi(boss: BossApi): void {
     onBrowseAgentActivity: () => () => {},
     onBrowseExternal: () => () => {},
     optionalList: async () => [
-      { id: 'opencode', installed: true, optional: false, version: 'e2e' },
       { id: 'browser-core', installed: true, optional: true, version: 'e2e' },
       { id: 'computer-use', installed: false, optional: true }
     ],

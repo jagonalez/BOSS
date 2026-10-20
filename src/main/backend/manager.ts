@@ -155,6 +155,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
   opencode: {
     label: 'OpenCode',
     description: 'OpenCode server with native sessions, permissions, tools, and providers.',
+    command: 'opencode',
     capabilities: { streaming: true, models: true, permissions: true, nativeFork: true, steering: 'stop-and-redirect', branching: 'message', images: true, mcp: true, interactiveQuestions: true, nativeAutoMode: false, revert: true, compact: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before sensitive actions' },
@@ -196,7 +197,7 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
     label: 'Lab',
     description: 'From-scratch harness speaking OpenAI-compatible APIs to a local ollama or any cloud endpoint.',
     // No command: there is no CLI to resolve, so the backend is always
-    // available regardless of PATH (mirrors how opencode has no command).
+    // available regardless of PATH.
     capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true, revert: false, compact: true },
     modes: [
       { id: 'ask', label: 'Ask', description: 'prompt before every file write or shell command' },
@@ -912,7 +913,7 @@ export class BackendManager {
 
   /** Where each backend's CLI lives, keyed by backend id rather than command name so
    *  the renderer never has to know a backend's command. Backends with no command of
-   *  their own (opencode runs as a server) are absent. */
+   *  their own are absent. */
   private binaryPaths(): Partial<Record<BackendId, string>> {
     const stored = this.binaryOverrides?.all() ?? {}
     const paths: Partial<Record<BackendId, string>> = {}

@@ -5,7 +5,7 @@ import test from 'node:test'
 import { backendVersionWarning, parseBackendVersion } from './backend-version.ts'
 
 test('reads a version out of each CLI\'s own --version wording', () => {
-  // The three backends answer differently, and a parser that assumed the
+  // The backends answer differently, and a parser that assumed the
   // number came first read "codex-cli 0.147.0" as 0.
   assert.equal(parseBackendVersion('codex-cli 0.147.0'), '0.147.0')
   assert.equal(parseBackendVersion('0.84.1'), '0.84.1')
@@ -41,8 +41,10 @@ test('says so when a backend answers in a shape it cannot read', () => {
   assert.match(String(backendVersionWarning('codex', 'some-wrapper')), /could not read a version/)
 })
 
-test('leaves the bundled backend alone', () => {
-  // opencode ships with BOSS, so its version is pinned and there is no user
-  // upgrade that could surprise us.
+test('checks opencode like every other user-installed CLI', () => {
+  // BOSS no longer bundles opencode, so the user's own install can be older
+  // than the last release BOSS shipped and tested.
   assert.equal(backendVersionWarning('opencode', '1.18.15'), undefined)
+  assert.equal(backendVersionWarning('opencode', '1.20.3'), undefined)
+  assert.match(String(backendVersionWarning('opencode', '1.17.2')), /1\.18\.15/)
 })

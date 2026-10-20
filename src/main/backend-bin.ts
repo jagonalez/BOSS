@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { delimiter, isAbsolute, join } from 'node:path'
 
 // PATH repair (see shell-path.ts) fixes the common case, but it cannot fix every case:
 // a non-POSIX login shell (nushell, fish) defeats the probe, and no list of fallback
@@ -95,4 +96,34 @@ export function resolveBackendBin(command: string): string {
     if (trimmed && existsSync(trimmed)) return trimmed
   }
   return command
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false
+    accessSync(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The absolute path of the executable a backend command resolves to, or undefined when
+ * there is none. A caller that hands the path to a library rather than to spawn needs
+ * this: the Claude Agent SDK runs its own bundled binary unless it is given a real file,
+ * and BOSS runs the user's installed CLI so a new model works the day it ships.
+ */
+export function findBackendExecutable(command: string, pathEnv = process.env.PATH ?? ''): string | undefined {
+  const resolved = resolveBackendBin(command)
+  if (isAbsolute(resolved)) return isExecutableFile(resolved) ? resolved : undefined
+  const names = process.platform === 'win32' ? [`${resolved}.exe`, `${resolved}.cmd`, resolved] : [resolved]
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue
+    for (const name of names) {
+      const candidate = join(dir, name)
+      if (isExecutableFile(candidate)) return candidate
+    }
+  }
+  return undefined
 }

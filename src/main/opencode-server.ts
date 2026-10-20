@@ -5,6 +5,7 @@ import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { ServerInfo } from '@shared/ipc'
+import { resolveBackendBin } from './backend-bin'
 import type { ThreadBusConnection } from '@shared/thread-bus'
 import { REPORT_TOOL_DESCRIPTIONS, THREAD_TOOL_DESCRIPTIONS } from '@shared/thread-bus'
 import { COMPUTER_USE_OPERATIONS, qaDescription } from '@shared/qa'
@@ -26,22 +27,10 @@ function getFreePort(): Promise<number> {
   })
 }
 
+/** The opencode the user installed. OPENCODE_BIN predates the shared BOSS_<NAME>_BIN
+ *  overrides and still wins, so an existing setup keeps working. */
 export function resolveOpenCodeBin(): string {
-  const exe = process.platform === 'win32' ? 'opencode.exe' : 'opencode'
-  if (process.env.OPENCODE_BIN) return process.env.OPENCODE_BIN
-  if (!app.isPackaged) return exe
-  const candidates = [
-    join(process.resourcesPath ?? '', 'opencode', exe),
-    join(app.getAppPath(), 'resources', 'opencode', exe)
-  ]
-  for (const c of candidates) {
-    try {
-      if (statSync(c).isFile()) return c
-    } catch {
-      /* skip */
-    }
-  }
-  return exe
+  return process.env.OPENCODE_BIN || resolveBackendBin('opencode')
 }
 
 function isDirectory(p: string): boolean {
@@ -85,7 +74,6 @@ export class OpenCodeServer {
   private restartTimer: NodeJS.Timeout | null = null
   private attempts = 0
   private cwd = app.getPath('home')
-  private fallbackToPath = false
   private threadBus?: ThreadBusConnection
   private threadBusConfigDir = ''
 
@@ -392,7 +380,7 @@ export const computer = tool({
     }
     this.port = await getFreePort()
     this.password = randomBytes(32).toString('hex')
-    const bin = this.fallbackToPath ? (process.platform === 'win32' ? 'opencode.exe' : 'opencode') : resolveOpenCodeBin()
+    const bin = resolveOpenCodeBin()
     const proc = spawn(bin, ['serve', '--port', String(this.port), '--hostname', '127.0.0.1'], {
       cwd: isDirectory(this.cwd) ? this.cwd : app.getPath('home'),
       env: {
@@ -420,10 +408,6 @@ export const computer = tool({
       this.healthy = false
       this.emitStatus()
       if (this.stopping || this.suppressRestart) return
-      const code = (err as NodeJS.ErrnoException).code
-      if (code === 'ENOENT') {
-        this.fallbackToPath = true
-      }
       if (process.env.BOSS_DEBUG) process.stderr.write(`[opencode] spawn error: ${err.message}\n`)
       this.scheduleRestart(1, null)
     })
@@ -455,7 +439,6 @@ export const computer = tool({
         this.healthy = health.healthy
         this.version = health.version
         this.attempts = 0
-        this.fallbackToPath = false
         this.emitStatus()
         return
       }
