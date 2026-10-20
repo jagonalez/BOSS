@@ -7,6 +7,7 @@ import { delimiter, isAbsolute, join } from 'node:path'
 // opencode already had through OPENCODE_BIN, extended to the other backends.
 //
 // Resolution order for a command:
+//   0. OPENCODE_BIN, for opencode only: the name it had before the others existed
 //   1. BOSS_<NAME>_BIN environment variable  (e.g. BOSS_CODEX_BIN=/opt/codex/bin/codex)
 //   2. an absolute path recorded in settings  (Settings > Models & connections)
 //   3. the bare command name, resolved through PATH
@@ -90,7 +91,8 @@ export function envHint(command: string): string {
  * is configured and present on disk, otherwise the bare name for PATH to resolve.
  */
 export function resolveBackendBin(command: string): string {
-  const candidates = [process.env[envKey(command)], readOverrides()[command]]
+  const legacy = command === 'opencode' ? process.env.OPENCODE_BIN : undefined
+  const candidates = [legacy, process.env[envKey(command)], readOverrides()[command]]
   for (const candidate of candidates) {
     const trimmed = candidate?.trim()
     if (trimmed && existsSync(trimmed)) return trimmed

@@ -24,6 +24,8 @@ function withTempDir(run: (dir: string) => void): void {
     // Each test installs its own reader; leave the module as it was found.
     setBinaryOverrideSource(() => ({}))
     delete process.env.BOSS_CODEX_BIN
+    delete process.env.OPENCODE_BIN
+    delete process.env.BOSS_OPENCODE_BIN
   }
 }
 
@@ -130,5 +132,18 @@ test('prefers an override to PATH and reports a missing CLI as undefined', () =>
     assert.equal(findBackendExecutable('codex', bin), pinned)
     delete process.env.BOSS_CODEX_BIN
     assert.equal(findBackendExecutable('codex', join(dir, 'nowhere')), undefined)
+  })
+})
+
+test('OPENCODE_BIN resolves opencode the same way for the probe and the server', () => {
+  withTempDir((dir) => {
+    // Settings probes resolveBackendBin('opencode') and the server spawns it, so the
+    // older variable must count here or a working server shows as unavailable.
+    const legacy = shim(dir, 'legacy-opencode')
+    const current = shim(dir, 'boss-opencode')
+    process.env.OPENCODE_BIN = legacy
+    process.env.BOSS_OPENCODE_BIN = current
+    assert.equal(resolveBackendBin('opencode'), legacy)
+    assert.equal(resolveBackendBin('codex'), 'codex', 'OPENCODE_BIN applies to opencode only')
   })
 })

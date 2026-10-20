@@ -27,10 +27,9 @@ function getFreePort(): Promise<number> {
   })
 }
 
-/** The opencode the user installed. OPENCODE_BIN predates the shared BOSS_<NAME>_BIN
- *  overrides and still wins, so an existing setup keeps working. */
+/** The opencode the user installed, resolved exactly as Settings probes it. */
 export function resolveOpenCodeBin(): string {
-  return process.env.OPENCODE_BIN || resolveBackendBin('opencode')
+  return resolveBackendBin('opencode')
 }
 
 function isDirectory(p: string): boolean {

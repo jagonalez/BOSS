@@ -1408,7 +1408,10 @@ export class BackendManager {
   async descriptors(): Promise<BackendDescriptor[]> {
     return (Object.keys(DEFINITIONS) as BackendId[]).map((id) => {
       const definition = DEFINITIONS[id]
-      const probe = definition.command ? probeVersion(definition.command) : { available: true }
+      // With BOSS_SERVER_URL and its password set, OpenCodeServer connects to a running
+      // server and never spawns the CLI, so there is no binary to probe.
+      const external = id === 'opencode' && Boolean(process.env.BOSS_SERVER_URL && process.env.BOSS_SERVER_PASSWORD)
+      const probe = definition.command && !external ? probeVersion(definition.command) : { available: true }
       const info = this.backends[id].info()
       return {
         id,
