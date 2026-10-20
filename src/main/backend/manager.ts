@@ -14,15 +14,13 @@ import type {
   BackendMessageOptions,
   BackendModeId,
   BackendModelPreference,
-  LabConnectionsSettings,
-  LabConnectionUpdate,
   DelegatePlacement,
   QueuedFollowUp,
   QueuedFollowUpAttachment,
   ThreadCreationScope,
   ThreadTitleSettings
 } from '@shared/backend'
-import { isAbortError, withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
+import { isAbortError, isBackendId, withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import { canAutoNameThread, DEFAULT_THREAD_TITLE_SETTINGS, normalizeGeneratedThreadTitle, titleFromFirstPrompt } from '@shared/thread-title'
 import { DEFAULT_SANDBOX_SETTINGS } from '@shared/sandbox'
 import type { SandboxSettings } from '@shared/sandbox'
@@ -191,19 +189,6 @@ const DEFINITIONS: Record<BackendId, BackendDefinition> = {
       { id: 'auto', label: 'Auto', description: 'let Claude decide which tool calls can run automatically' },
       { id: 'accept-edits', label: 'Edit automatically', description: 'approve file edits; prompt for other protected tools' },
       { id: 'plan', label: 'Plan', description: 'read-only planning mode' }
-    ]
-  },
-  lab: {
-    label: 'Lab',
-    description: 'From-scratch harness speaking OpenAI-compatible APIs to a local ollama or any cloud endpoint.',
-    // No command: there is no CLI to resolve, so the backend is always
-    // available regardless of PATH.
-    capabilities: { streaming: true, models: true, permissions: true, nativeFork: false, steering: 'stop-and-redirect', branching: 'thread', images: false, mcp: false, interactiveQuestions: false, nativeAutoMode: true, revert: false, compact: true },
-    modes: [
-      { id: 'ask', label: 'Ask', description: 'prompt before every file write or shell command' },
-      { id: 'auto', label: 'Auto', description: 'run file writes and shell commands without asking' },
-      { id: 'accept-edits', label: 'Edit automatically', description: 'approve file edits; prompt for shell commands' },
-      { id: 'plan', label: 'Plan', description: 'read-only; no writes or shell' }
     ]
   }
 }
@@ -802,39 +787,6 @@ export class BackendManager {
     }
   }
 
-  private assertLabIdle(): void {
-    if ([...this.bindings.values()].some((binding) => binding.backendId === 'lab' && this.busyThreads.has(binding.id))) {
-      throw new Error('Wait for running Lab threads to finish before changing API connections.')
-    }
-  }
-
-  private labConnections(): LabConnectionsSettings | Promise<LabConnectionsSettings> {
-    const lab = this.backends.lab
-    if (!lab.labConnections) throw new Error('Lab API connections are not available in this build.')
-    return lab.labConnections()
-  }
-
-  private async saveLabConnection(connection: LabConnectionUpdate): Promise<LabConnectionsSettings> {
-    this.assertLabIdle()
-    const lab = this.backends.lab
-    if (!lab.saveLabConnection) throw new Error('Lab API connections are not available in this build.')
-    return lab.saveLabConnection(connection)
-  }
-
-  private async deleteLabConnection(connectionId: string): Promise<LabConnectionsSettings> {
-    this.assertLabIdle()
-    const lab = this.backends.lab
-    if (!lab.deleteLabConnection) throw new Error('Lab API connections are not available in this build.')
-    const settings = await lab.deleteLabConnection(connectionId)
-    this.loadDefaultModels()
-    if (this.defaultModels?.lab?.providerID === connectionId) {
-      const defaults = { ...this.defaultModels }
-      delete defaults.lab
-      this.setDefaultModels(defaults)
-    }
-    return settings
-  }
-
   defaultModel(backendId: BackendId): BackendModelPreference | undefined {
     this.loadDefaultModels()
     const preference = this.defaultModels?.[backendId]
@@ -977,7 +929,11 @@ export class BackendManager {
     try {
       const parsed = JSON.parse(readFileSync(stateFile(), 'utf8')) as StoredBackendState | PreviousBackendState | LegacyBackendState
       if ((parsed.version === 2 || parsed.version === 3) && Array.isArray(parsed.threads)) {
-        for (const binding of parsed.threads) this.bindings.set(binding.id, binding)
+        // A thread of a backend BOSS no longer has (Lab) cannot run or load its
+        // history. Its transcript stays on disk; the binding is dropped.
+        for (const binding of parsed.threads) {
+          if (isBackendId(binding.backendId)) this.bindings.set(binding.id, binding)
+        }
         if (parsed.version === 3 && parsed.threadTitleSettings) {
           this.threadTitleSettings = { ...DEFAULT_THREAD_TITLE_SETTINGS, ...parsed.threadTitleSettings }
         }
@@ -2675,9 +2631,6 @@ export class BackendManager {
       case 'backend.auth.status': return this.backendAuth?.statuses() ?? []
       case 'backend.subscription-usage': return this.backendAuth?.subscriptionUsage() ?? []
       case 'backend.defaults.set': return this.setDefaultModels(request.defaults)
-      case 'lab.connections.get': return this.labConnections()
-      case 'lab.connection.save': return this.saveLabConnection(request.connection)
-      case 'lab.connection.delete': return this.deleteLabConnection(request.connectionId)
       case 'thread.title.settings.get': return this.titleSettings()
       case 'thread.title.settings.set': return this.titleSettings({ autoNameFromFirstPrompt: request.autoNameFromFirstPrompt })
       case 'sandbox.settings.get': return this.sandbox()

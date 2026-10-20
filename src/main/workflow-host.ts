@@ -41,14 +41,14 @@ export class BossWorkflowHost implements WorkflowHost {
   private readonly reviews?: ReviewManager
   private readonly notifications?: NotificationRouter
   /** Used when a script names no backend and the workflow has no default. */
-  private readonly fallbackBackendId: 'claude' | 'codex' | 'opencode' | 'pi' | 'lab'
+  private readonly fallbackBackendId: 'claude' | 'codex' | 'opencode' | 'pi'
 
   constructor(options: {
     backends: BackendManager
     worktrees?: WorktreeManager
     reviews?: ReviewManager
     notifications?: NotificationRouter
-    fallbackBackendId?: 'claude' | 'codex' | 'opencode' | 'pi' | 'lab'
+    fallbackBackendId?: 'claude' | 'codex' | 'opencode' | 'pi'
   }) {
     this.backends = options.backends
     this.worktrees = options.worktrees

@@ -1,4 +1,4 @@
-export const BACKEND_IDS = ['opencode', 'pi', 'codex', 'claude', 'lab'] as const
+export const BACKEND_IDS = ['opencode', 'pi', 'codex', 'claude'] as const
 export type BackendId = typeof BACKEND_IDS[number]
 
 export function isBackendId(value: string): value is BackendId {
@@ -122,40 +122,6 @@ export interface BackendModelPreference {
   mode?: BackendModeId
 }
 
-export interface LabConnectionModel {
-  id: string
-  name?: string
-  source?: 'local' | 'cloud' | 'custom'
-}
-
-/** One OpenAI-compatible API available to Lab. Keys deliberately never leave
- * main; the renderer only learns whether a key is configured. */
-export interface LabConnection {
-  id: string
-  name: string
-  baseUrl: string
-  apiKeyConfigured: boolean
-  healthy: boolean
-  manualModels: string[]
-  models: LabConnectionModel[]
-}
-
-export interface LabConnectionsSettings {
-  connections: LabConnection[]
-}
-
-export interface LabConnectionUpdate {
-  /** Omit when adding a connection. */
-  id?: string
-  name: string
-  baseUrl: string
-  manualModels: string[]
-  /** Omit to keep the existing key. */
-  apiKey?: string
-  /** Remove the securely stored key. */
-  clearApiKey?: boolean
-}
-
 export type { ThreadTitleSettings } from './thread-title'
 export type { SandboxSettings } from './sandbox'
 
@@ -228,9 +194,6 @@ export type BackendRequest =
   | { type: 'backend.auth.status' }
   | { type: 'backend.subscription-usage' }
   | { type: 'backend.defaults.set'; defaults: Partial<Record<BackendId, BackendModelPreference>> }
-  | { type: 'lab.connections.get' }
-  | { type: 'lab.connection.save'; connection: LabConnectionUpdate }
-  | { type: 'lab.connection.delete'; connectionId: string }
   | { type: 'thread.title.settings.get' }
   | { type: 'thread.title.settings.set'; autoNameFromFirstPrompt: boolean }
   | { type: 'sandbox.settings.get' }

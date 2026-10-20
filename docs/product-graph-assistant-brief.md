@@ -62,15 +62,14 @@ Do not edit files or start a workflow yet. Return:
 - the exact unit and E2E behaviors the slice would protect;
 - no more than three decisions that require the user.
 
-## Assistant and Lab
+## Assistant and agent runtimes
 
 The Assistant is the user-facing product and coordination control plane: work,
 attention, decisions, runs, and one standing conversation. Workflows own the
 durable cross-task state machine. A BOSS-owned Agent Runtime contract isolates
 those layers from provider SDKs.
 
-Lab is the reference runtime and multi-model evaluation testbed, not a required
-proxy for every backend. Codex, Claude, OpenCode, Pi, Lab, and future engines
-remain adapters with explicit capabilities. Lab should not own a separate
-product model, workflow state, or memory. Every layer operates on the same
-Product Graph and evidence records.
+BOSS has no agent harness of its own. Codex, Claude, OpenCode, Pi, and future
+engines are the user's installed CLIs, wrapped as adapters with explicit
+capabilities. No adapter owns a separate product model, workflow state, or
+memory. Every layer operates on the same Product Graph and evidence records.

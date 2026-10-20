@@ -7,7 +7,6 @@ import type {
   BackendModeId,
   BackendModelDescriptor,
   BackendModelPreference,
-  LabConnectionsSettings,
   BackendRequest,
   QueuedFollowUp
 } from '../shared/backend'
@@ -161,21 +160,6 @@ const backends: BackendDescriptor[] = [
       { id: 'auto', label: 'Auto', description: 'Approve supported actions.' },
       { id: 'plan', label: 'Plan', description: 'Read-only planning.' }
     ]
-  },
-  {
-    id: 'lab',
-    label: 'Lab',
-    description: 'Lab test backend',
-    available: true,
-    healthy: true,
-    version: 'e2e',
-    capabilities: { ...capabilities, nativeFork: false, mcp: false },
-    modes: [
-      { id: 'ask', label: 'Ask', description: 'Ask before protected actions.' },
-      { id: 'accept-edits', label: 'Accept edits', description: 'Accept file edits.' },
-      { id: 'auto', label: 'Auto', description: 'Approve supported actions.' },
-      { id: 'plan', label: 'Plan', description: 'Read-only planning.' }
-    ]
   }
 ]
 
@@ -189,8 +173,7 @@ const models: Record<BackendId, BackendModelDescriptor[]> = {
   claude: [
     { id: 'claude-opus-5', name: 'Claude Opus 5', provider: 'anthropic', variants: ['low', 'high'] },
     { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', provider: 'anthropic', variants: ['low', 'high'] }
-  ],
-  lab: [{ id: 'lab-e2e', name: 'Lab E2E', provider: 'lab-local', providerName: 'Local test' }]
+  ]
 }
 
 const projectInfo: ProjectInfo = {
@@ -487,17 +470,6 @@ export function installE2EApi(boss: BossApi): void {
   }
   const revertedMessages: Record<string, MessageWithParts[]> = {}
   let defaults: Partial<Record<BackendId, BackendModelPreference>> = {}
-  let labConnections: LabConnectionsSettings = {
-    connections: [{
-      id: 'lab-local',
-      name: 'Local test',
-      baseUrl: 'http://localhost:11434/v1',
-      apiKeyConfigured: false,
-      healthy: true,
-      manualModels: ['lab-e2e'],
-      models: [{ id: 'lab-e2e', name: 'Lab E2E', source: 'local' }]
-    }]
-  }
   let modesBySession: Record<string, BackendModeId> = {}
   let followUps: Record<string, QueuedFollowUp[]> = {
     'thread-claude': [{
@@ -695,7 +667,7 @@ export function installE2EApi(boss: BossApi): void {
     workflowConfig: {
       planner: { backendId: 'claude' },
       implementer: { backendId: 'codex' },
-      reviewers: [{ backendId: 'lab' }],
+      reviewers: [{ backendId: 'opencode' }],
       maxReviewCycles: 2
     }
   }
@@ -968,42 +940,11 @@ export function installE2EApi(boss: BossApi): void {
           { backendId: 'claude', plan: 'Claude Max', updatedAt: 1_800_000_000_000, windows: [
             { label: 'Current session', usedPercent: 8, resetLabel: 'Aug 22 at 12:50pm (America/Edmonton)' }
           ] },
-          { backendId: 'pi', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'Pi has no subscription of its own; its limits belong to the provider accounts it uses.' },
-          { backendId: 'lab', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'Lab API usage is not connected to a provider billing account.' }
+          { backendId: 'pi', updatedAt: 1_800_000_000_000, windows: [], unavailableReason: 'Pi has no subscription of its own; its limits belong to the provider accounts it uses.' }
         ]
       case 'backend.defaults.set':
         defaults = structuredClone(request.defaults)
         return undefined
-      case 'lab.connections.get': return labConnections
-      case 'lab.connection.save': {
-        const current = request.connection.id
-          ? labConnections.connections.find((connection) => connection.id === request.connection.id)
-          : undefined
-        const id = request.connection.id ?? `lab-connection-${labConnections.connections.length + 1}`
-        const manualModels = request.connection.manualModels
-        const connection = {
-          id,
-          name: request.connection.name,
-          baseUrl: request.connection.baseUrl,
-          apiKeyConfigured: request.connection.clearApiKey ? false : Boolean(request.connection.apiKey) || current?.apiKeyConfigured || false,
-          healthy: true,
-          manualModels,
-          models: manualModels.map((modelId) => ({ id: modelId, name: modelId, source: 'custom' as const }))
-        }
-        labConnections = { connections: current
-          ? labConnections.connections.map((item) => item.id === id ? connection : item)
-          : [...labConnections.connections, connection] }
-        models.lab = labConnections.connections.flatMap((item) => item.models.map((model) => ({
-          ...model,
-          provider: item.id,
-          providerName: item.name
-        })))
-        return labConnections
-      }
-      case 'lab.connection.delete':
-        labConnections = { connections: labConnections.connections.filter((connection) => connection.id !== request.connectionId) }
-        models.lab = labConnections.connections.flatMap((item) => item.models.map((model) => ({ ...model, provider: item.id, providerName: item.name })))
-        return labConnections
       case 'thread.title.settings.get': return threadTitleSettings
       case 'thread.title.settings.set':
         threadTitleSettings = { autoNameFromFirstPrompt: request.autoNameFromFirstPrompt }

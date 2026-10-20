@@ -25,7 +25,7 @@ export interface SettingsEntry {
 
 export const SETTINGS_INDEX: SettingsEntry[] = [
   // Agent defaults
-  { label: 'Default agent', section: 'agents', keywords: ['backend', 'claude', 'codex', 'opencode', 'pi', 'lab'] },
+  { label: 'Default agent', section: 'agents', keywords: ['backend', 'claude', 'codex', 'opencode', 'pi'] },
   { label: 'Permission mode', section: 'agents', keywords: ['auto', 'approve', 'ask', 'plan', 'confirm'] },
   { label: 'Auto-name threads', section: 'agents', keywords: ['title', 'rename', 'naming'] },
   { label: 'Agent network access', section: 'agents', keywords: ['sandbox', 'offline', 'curl', 'npm', 'gh'] },
@@ -36,7 +36,6 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { label: 'Runtime location', section: 'connections', keywords: ['binary', 'path', 'cli', 'executable', 'which'] },
   { label: 'Default model', section: 'connections', keywords: ['opus', 'sonnet', 'haiku', 'gpt', 'thinking'] },
   { label: 'Restart backend server', section: 'connections', keywords: ['reload', 'switch account'] },
-  { label: 'Lab API connections', section: 'connections', keywords: ['openai', 'compatible', 'endpoint', 'base url'] },
 
   // Usage
   { label: 'Provider usage and balances', section: 'usage', keywords: ['quota', 'limit', 'plan', 'tokens', 'spend', 'rate limit', 'reset'] },

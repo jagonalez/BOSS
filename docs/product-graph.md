@@ -227,17 +227,14 @@ Assistant is the user-facing coordination and attention surface. Durable
 Workflows execute the cross-task state machine. They dispatch bounded agent
 runs through a BOSS-owned runtime contract.
 
-Lab remains valuable, but it is not the coordinator and is not a mandatory
-pipe in front of every provider:
+BOSS has no agent harness of its own. Agents are the user's installed CLIs:
 
 - **Assistant** decides what needs attention and helps shape work.
 - **Workflows** durably sequence, retry, pause, ask, review, and record work.
 - **Agent Runtime contract** defines run input, streamed events, permissions,
   capabilities, cancellation, result, and evidence independently of a vendor.
 - **Backend adapters** translate that contract to Codex, Claude, OpenCode, Pi,
-  Lab, or another runtime.
-- **Lab** is the reference runtime and model testbed for OpenAI-compatible
-  endpoints, plus the place to run controlled behavioral evaluations.
+  or another runtime.
 
 Provider-specific capabilities remain visible through negotiation rather than
 being erased into a lowest-common-denominator API. A Workflow can require a
@@ -251,14 +248,12 @@ provider SDK objects and wire events stay inside adapters. SDK upgrades then
 rerun the same deterministic adapter-conformance and behavior suites rather
 than forcing Product or Workflow logic to change.
 
-Testing has three distinct layers:
+Testing has two distinct layers:
 
 1. **Adapter conformance** — deterministic fixtures verify lifecycle,
    permissions, cancellation, events, and result normalization for every
    backend without judging model quality.
-2. **Model behavior** — Lab runs the same task scenarios across selected local
-   and hosted models, recording tool use, changed files, tests, cost, and time.
-3. **Factory behavior** — Assistant and Workflow scenarios verify planning,
+2. **Factory behavior** — Assistant and Workflow scenarios verify planning,
    routing, approvals, retries, evidence, and rollout gates end to end.
 
 Pi stays only if it satisfies useful capability profiles. A backend is not
