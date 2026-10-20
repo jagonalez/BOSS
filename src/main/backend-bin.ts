@@ -91,7 +91,11 @@ export function envHint(command: string): string {
  * is configured and present on disk, otherwise the bare name for PATH to resolve.
  */
 export function resolveBackendBin(command: string): string {
-  const legacy = command === 'opencode' ? process.env.OPENCODE_BIN : undefined
+  const legacy = command === 'opencode' ? process.env.OPENCODE_BIN?.trim() : undefined
+  // OPENCODE_BIN was always handed straight to spawn, so a bare name such as
+  // `opencode-dev` resolved through PATH. Keep that: PATH resolves it for the
+  // probe and the server alike.
+  if (legacy && !legacy.includes('/') && !legacy.includes('\\')) return legacy
   const candidates = [legacy, process.env[envKey(command)], readOverrides()[command]]
   for (const candidate of candidates) {
     const trimmed = candidate?.trim()

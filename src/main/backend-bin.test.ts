@@ -147,3 +147,16 @@ test('OPENCODE_BIN resolves opencode the same way for the probe and the server',
     assert.equal(resolveBackendBin('codex'), 'codex', 'OPENCODE_BIN applies to opencode only')
   })
 })
+
+test('a bare OPENCODE_BIN name still resolves through PATH', () => {
+  withTempDir((dir) => {
+    // OPENCODE_BIN=opencode-dev worked when the value went straight to spawn.
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    const dev = shim(bin, 'opencode-dev')
+    shim(bin, 'opencode')
+    process.env.OPENCODE_BIN = 'opencode-dev'
+    assert.equal(resolveBackendBin('opencode'), 'opencode-dev')
+    assert.equal(findBackendExecutable('opencode', bin), dev)
+  })
+})
