@@ -100,7 +100,7 @@ test('Lab Assistant saves and starts a managed planner, implementer, reviewer wo
     config: {
       planner: { backendId: 'claude' },
       implementer: { backendId: 'codex' },
-      reviewers: [{ backendId: 'lab' }],
+      reviewers: [{ backendId: 'opencode' }],
       maxReviewCycles: 3
     }
   })

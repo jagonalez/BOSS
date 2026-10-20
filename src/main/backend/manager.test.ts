@@ -324,3 +324,11 @@ test('an external OpenCode server is not probed for a CLI it never spawns', () =
   assert.match(descriptors, /id === 'opencode' && Boolean\(process\.env\.BOSS_SERVER_URL && process\.env\.BOSS_SERVER_PASSWORD\)/)
   assert.match(descriptors, /definition\.command && !external \? probeVersion/)
 })
+
+test('threads of a removed backend are dropped when the state loads', () => {
+  // The Lab backend is gone, but a profile can still list Lab threads. Every
+  // lookup of this.backends[binding.backendId] would then find nothing.
+  const start = source.indexOf('  private load(): void {')
+  const load = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.match(load, /if \(isBackendId\(binding\.backendId\)\) this\.bindings\.set\(binding\.id, binding\)/)
+})

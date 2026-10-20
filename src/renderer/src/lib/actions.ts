@@ -14,7 +14,7 @@ import type { FanOutWorker } from '@shared/fan-out'
 import type { Project, ReviewRun, SessionMeta } from '@shared/opencode'
 import { composeAnnotatedPrompt, createAnnotation, remainingAnnotations, sideChatSeedPrompt, type Annotation, type AnnotationAnchor } from '@shared/annotations'
 import type { BackendId, BackendModeId, BackendModelDescriptor, BackendModelPreference, DelegatePlacement, ThreadCreationScope } from '@shared/backend'
-import { withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
+import { isBackendId, withBackendDefaults, THREAD_BUSY_ERROR } from '@shared/backend'
 import { threadIsWorking } from './status'
 import { serializeThreadMarkdown, exportFileName } from './thread-export'
 import { BACKEND_SHORT_LABELS } from './backend-labels'
@@ -1471,7 +1471,7 @@ export async function loadEngine(): Promise<void> {
   }
   try {
     const saved = localStorage.getItem('boss.engine') as BackendId | null
-    if (saved && ['opencode', 'pi', 'codex', 'claude', 'lab'].includes(saved)) appStore.setState({ engine: saved })
+    if (saved && isBackendId(saved)) appStore.setState({ engine: saved })
   } catch {
     /* ignore */
   }

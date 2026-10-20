@@ -126,9 +126,6 @@ export class BackendAuth {
       case 'claude': return { command: 'claude', args: ['auth', 'login'] }
       case 'opencode': return { command: this.openCodeCommand(), args: ['auth', 'login'] }
       case 'pi': return { command: 'pi', args: [], initialInput: '/login\r' }
-      // Lab needs no CLI sign-in: it authenticates through LAB_API_KEY on the
-      // endpoint itself, so there is nothing to launch in a terminal.
-      case 'lab': throw new Error('Lab connects to an OpenAI-compatible endpoint; no CLI sign-in is needed.')
     }
   }
 
@@ -234,8 +231,7 @@ export class BackendAuth {
       openCodeGo,
       { backendId: 'pi', windows: [], unavailableReason: 'Pi has no subscription of its own; its limits belong to the provider accounts it uses.', updatedAt },
       codex,
-      claude,
-      { backendId: 'lab', windows: [], unavailableReason: 'Lab API usage is not connected to a provider billing account.', updatedAt }
+      claude
     ]
   }
 }

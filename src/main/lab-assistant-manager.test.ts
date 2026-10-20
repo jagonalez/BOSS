@@ -142,7 +142,7 @@ function agentStep(seq: number, threadId: string): JournalEntry {
 const managedWorkflow: LabAssistantWorkflowConfig = {
   planner: { backendId: 'claude' },
   implementer: { backendId: 'codex' },
-  reviewers: [{ backendId: 'lab' }],
+  reviewers: [{ backendId: 'opencode' }],
   maxReviewCycles: 2
 }
 

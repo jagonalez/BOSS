@@ -261,9 +261,9 @@ test('shows an attached image and one copy of a response echoed under two messag
   await expect(appPage.locator('.step-card')).toHaveCount(2)
 })
 
-test('shows Lab reasoning separately from the final answer', async ({ appPage }) => {
+test('shows reasoning separately from the final answer', async ({ appPage }) => {
   const sessionID = 'thread-source'
-  const messageID = 'lab-reasoning-e2e'
+  const messageID = 'reasoning-e2e'
   const created = Date.now()
   await appPage.locator('.session-row').filter({ hasText: 'Source thread' }).click()
 
@@ -647,63 +647,14 @@ test('a failed Codex send keeps the message retryable and shows it after retry',
   await expect(appPage.locator('.chat-error')).toHaveCount(0)
 })
 
-async function configureLabDefaults(page: Parameters<typeof control>[0]): Promise<void> {
-  await openSettings(page)
-  await page.getByRole('button', { name: 'Agent defaults' }).click()
-  await page.locator('.settings-backend').filter({ hasText: 'Lab' }).click()
-  await page.getByRole('button', { name: 'Models & connections' }).click()
-
-  const row = page.locator('.settings-connection-row').filter({ hasText: 'Lab' })
-  await row.locator('.settings-model-picker-trigger').click()
-  await row.getByRole('button', { name: /Lab E2E/ }).click()
-}
-
-test('adds a named Lab API, key, and model from Models & connections', async ({ appPage }) => {
+test('offers only the installed-CLI backends, with no built-in harness', async ({ appPage }) => {
+  // BOSS dropped its own Lab harness: every agent is a CLI the user installs.
   await openSettings(appPage)
-  const row = appPage.locator('.settings-connection-row').filter({ hasText: 'Lab' })
-  const connections = row.getByRole('region', { name: 'Lab API connections' })
-  await expect(connections).toBeVisible()
-  await connections.getByRole('button', { name: 'Add connection' }).click()
-
-  const editor = connections.getByRole('region', { name: 'Add Lab connection' })
-  await editor.getByLabel('Lab connection name').fill('Cloud test')
-  await editor.getByLabel('Lab endpoint URL').fill('https://models.example.test/v1')
-  await editor.getByLabel('Lab API key').fill('test-key')
-  await editor.getByLabel('Lab manual models').fill('coding-model')
-  await editor.getByRole('button', { name: 'Save & test' }).click()
-
-  const call = await lastBackendCall(appPage, 'lab.connection.save')
-  expect(call.request).toEqual({
-    type: 'lab.connection.save',
-    connection: {
-      name: 'Cloud test',
-      baseUrl: 'https://models.example.test/v1',
-      manualModels: ['coding-model'],
-      apiKey: 'test-key'
-    }
-  })
-  const card = connections.getByRole('article', { name: 'Cloud test Lab connection' })
-  await expect(card).toContainText('Ready')
-  await expect(card).toContainText('Key saved')
-  await expect(card).toContainText('coding-model')
-
-  await row.locator('.settings-model-picker-trigger').click()
-  await row.getByRole('button', { name: /coding-model/ }).click()
-  await expect(row.locator('.settings-model-picker-trigger')).toContainText('Cloud test')
-})
-
-test('quick-create with Lab uses the drop-in backend and its default model', async ({ appPage }) => {
-  await configureLabDefaults(appPage)
-  await appPage.getByRole('button', { name: 'Done' }).click()
-  await control(appPage).then((item) => item.resetCalls())
-
-  await appPage.getByRole('tab', { name: /Chats/ }).click()
-  await appPage.getByRole('button', { name: 'New chat', exact: true }).click()
-  const created = await lastBackendCall(appPage, 'thread.create')
-  expect(created.request).toMatchObject({ backendId: 'lab', scope: 'global' })
-
-  await expect(appPage.getByRole('tab', { name: /^New lab thread/ })).toBeVisible()
-  await expect(appPage.locator('.model-picker-btn').filter({ hasText: 'Lab E2E' })).toBeVisible()
+  await appPage.getByRole('button', { name: 'Agent defaults' }).click()
+  await expect(appPage.locator('.settings-backend strong')).toHaveText(['OpenCode', 'Pi', 'Codex', 'Claude Code'])
+  await appPage.getByRole('button', { name: 'Models & connections' }).click()
+  await expect(appPage.locator('.settings-connection-row h2')).toHaveText(['OpenCode', 'Pi', 'Codex', 'Claude Code'])
+  await expect(appPage.getByRole('region', { name: 'Lab API connections' })).toHaveCount(0)
 })
 
 test('delegation sends the chosen backend, worktree placement, and target defaults', async ({ appPage }) => {

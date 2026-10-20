@@ -7,7 +7,7 @@ export interface CompactionDetails {
   trigger?: CompactionTrigger
   preTokens?: number
   postTokens?: number
-  /** Lab can omit old turns to stay within a local model's budget without
+  /** A backend can omit old turns to stay within a model's budget without
    *  actually summarizing them. That deserves a warning, not a claim that a
    *  summary was produced. */
   overflow?: boolean

@@ -157,11 +157,6 @@ npm run pack             # builds + packages into dist/
 | `npm run build` | Build main/preload/renderer to `out/` |
 | `npm run pack` | Package for the current platform (`dist/`) |
 | `npm run dist` | Build installers (dmg/nsis/AppImage) |
-| `npm run eval:lab` | Run real-model Lab coding evaluations in disposable fixtures |
-| `npm run eval:assistant` | Run Lab Assistant orchestration evaluations in a simulated BOSS world |
-
-See [Lab evaluations](docs/lab-evals.md) for scenario design, model
-configuration, trace reports, and adding another runtime.
 
 ### Lab Assistant GitHub monitoring
 

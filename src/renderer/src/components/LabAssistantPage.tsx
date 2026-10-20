@@ -142,7 +142,7 @@ export function LabAssistantPage(): React.JSX.Element {
       workflowInitialized.current = true
       setWorkflowDraft(assistant.workflowConfig)
     } else if (available.length) {
-      const preferred = available.find((backend) => backend.id === 'lab') ?? available.find((backend) => backend.id === 'codex') ?? available[0]
+      const preferred = available.find((backend) => backend.id === 'codex') ?? available[0]
       workflowInitialized.current = true
       setWorkflowDraft({
         planner: { backendId: preferred.id },

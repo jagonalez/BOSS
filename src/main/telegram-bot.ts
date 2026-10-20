@@ -19,7 +19,7 @@ import {
  * the configured thread through the same follow-up queue the composer uses, so
  * busy threads are steered and idle ones receive the message immediately.
  * The bot token never touches disk unencrypted — it is sealed with Electron
- * safeStorage, the same way Lab API keys are stored.
+ * safeStorage, like the other secrets BOSS keeps.
  */
 
 interface TelegramHost {
