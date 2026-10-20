@@ -12,9 +12,10 @@ import type { BackendId } from './backend'
  *  point is to name versions that are known bad, not to refuse anything that
  *  has not been tested yet.
  *
- *  opencode is absent on purpose. BOSS bundles that binary, so its version is
- *  already pinned and there is no user upgrade to be surprised by. */
+ *  Every CLI is the user's own install, opencode included: BOSS used to bundle
+ *  opencode, and 1.18.15 is the last release it shipped. */
 export const MINIMUM_BACKEND_VERSIONS: Partial<Record<BackendId, string>> = {
+  opencode: '1.18.15',
   codex: '0.100.0',
   pi: '0.80.0',
   claude: '2.0.0'
@@ -43,7 +44,7 @@ function isOlderThan(version: string, floor: string): boolean {
 
 /** Pull a dotted version out of whatever a CLI prints for --version.
  *
- *  The three backends each answer differently — "codex-cli 0.147.0", a bare
+ *  The backends each answer differently — "codex-cli 0.147.0", a bare
  *  "0.84.1", and "2.1.234 (Claude Code)" — so the number is found anywhere in
  *  the line rather than assumed to be at the front. Returns undefined when
  *  there is no number to read, which is treated as unknown rather than old. */

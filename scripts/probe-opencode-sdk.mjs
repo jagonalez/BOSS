@@ -4,7 +4,7 @@
  * The unit tests stub fetch, so they prove BOSS builds the request it intends
  * to. They cannot prove the server accepts it, or that the response matches the
  * shape the code reads. That gap is what let modelsList read a key the server
- * never returned. This closes it: it spawns the bundled binary, points the
+ * never returned. This closes it: it spawns the installed binary, points the
  * backend at it, and calls each read-only method for real.
  *
  * Read-only by design. Anything that needs a model or provider credentials
@@ -14,7 +14,7 @@
  * Usage: node scripts/probe-opencode-sdk.mjs
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -24,15 +24,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const fixture = join(root, 'out', 'probe-fixture')
 
 function resolveBinary() {
-  const candidates = [
-    process.env.OPENCODE_BIN,
-    join(root, 'resources', 'opencode', 'opencode'),
-    // The worktree may not have had fetch:opencode run in it; fall back to the
-    // main checkout's copy rather than making the probe unrunnable.
-    join(root, '..', '..', '..', 'resources', 'opencode', 'opencode')
-  ].filter(Boolean)
-  for (const candidate of candidates) if (existsSync(candidate)) return candidate
-  throw new Error('opencode binary not found. Run npm run fetch:opencode, or set OPENCODE_BIN.')
+  // The opencode the user installed, as BOSS itself runs it.
+  return process.env.OPENCODE_BIN || 'opencode'
 }
 
 async function waitForHealth(baseUrl, timeoutMs = 30_000) {

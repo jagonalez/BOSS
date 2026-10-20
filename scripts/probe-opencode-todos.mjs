@@ -7,7 +7,7 @@
  * Usage: npm run probe:opencode:todos
  */
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -15,13 +15,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const fixture = join(root, 'out', 'probe-todo-fixture')
 
 function resolveBinary() {
-  const candidates = [
-    process.env.OPENCODE_BIN,
-    join(root, 'resources', 'opencode', 'opencode'),
-    join(root, '..', '..', '..', 'resources', 'opencode', 'opencode')
-  ].filter(Boolean)
-  for (const c of candidates) if (existsSync(c)) return c
-  throw new Error('opencode binary not found. Run npm run fetch:opencode, or set OPENCODE_BIN.')
+  // The opencode the user installed, as BOSS itself runs it.
+  return process.env.OPENCODE_BIN || 'opencode'
 }
 
 async function waitForHealth(baseUrl, timeoutMs = 30_000) {

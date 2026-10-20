@@ -53,7 +53,7 @@ export interface BrowseNavEvent {
   state: BrowseNavigationState
 }
 
-export type OptionalComponentId = 'opencode' | 'browser-core' | 'computer-use'
+export type OptionalComponentId = 'browser-core' | 'computer-use'
 
 export interface OptionalComponentInfo {
   id: OptionalComponentId

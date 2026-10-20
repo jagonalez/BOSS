@@ -393,6 +393,29 @@ test('a backend server can be restarted from settings', async ({ appPage }) => {
   await expect(row.getByRole('button', { name: 'Restarted' })).toBeVisible()
 })
 
+test('every backend runs the CLI installed on the machine, with a location override', async ({ appPage }) => {
+  // BOSS bundles no agent CLI. Each backend, OpenCode included, runs the
+  // user's own install, so a new model works as soon as that CLI updates.
+  const connection = (label: string) => appPage.locator('.settings-connection-row')
+    .filter({ has: appPage.getByRole('heading', { name: label, exact: true }) })
+  await openSettings(appPage)
+  await appPage.getByRole('button', { name: 'Models & connections' }).click()
+  for (const label of ['OpenCode', 'Pi', 'Codex', 'Claude Code']) {
+    await expect(connection(label).getByRole('textbox', { name: 'Location' })).toHaveValue('')
+  }
+
+  const openCode = connection('OpenCode')
+  await openCode.getByRole('textbox', { name: 'Location' }).fill('/opt/opencode/bin/opencode')
+  await openCode.getByRole('button', { name: 'Save' }).click()
+
+  expect((await lastBackendCall(appPage, 'backend.bin.set')).request).toEqual({
+    type: 'backend.bin.set',
+    backendId: 'opencode',
+    path: '/opt/opencode/bin/opencode'
+  })
+  await expect(openCode.getByRole('textbox', { name: 'Location' })).toHaveValue('/opt/opencode/bin/opencode')
+})
+
 test('shows provider subscription windows on their own Usage page', async ({ appPage }) => {
   await openSettings(appPage)
   await expect(appPage.getByRole('button', { name: 'Refresh usage' })).toHaveCount(0)

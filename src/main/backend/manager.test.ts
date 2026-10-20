@@ -317,3 +317,10 @@ test('a cloned thread continues in the source checkout, not the open project', (
     'a clone must inherit a live worktree, and never a reaped one'
   )
 })
+
+test('an external OpenCode server is not probed for a CLI it never spawns', () => {
+  const start = source.indexOf('  async descriptors(): Promise<BackendDescriptor[]> {')
+  const descriptors = source.slice(start, source.indexOf('\n  }\n', start))
+  assert.match(descriptors, /id === 'opencode' && Boolean\(process\.env\.BOSS_SERVER_URL && process\.env\.BOSS_SERVER_PASSWORD\)/)
+  assert.match(descriptors, /definition\.command && !external \? probeVersion/)
+})

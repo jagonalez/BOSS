@@ -135,24 +135,18 @@ BOSS ships local speech built on [`@huggingface/transformers`](https://www.npmjs
 
 ## Getting started
 
-Prereqs: Node 20+, plus at least one backend — `opencode`, `claude`, `codex`,
-or `pi` on your PATH. opencode can also be bundled (see below); the others are
-connected from **Settings → Backends**, which opens a terminal for their own
-login flow.
+Prereqs: Node 20+, plus at least one backend CLI installed on your PATH —
+`opencode`, `claude`, `codex`, or `pi`. BOSS bundles none of them: it runs the
+CLI you installed, so updating that CLI is all a new model needs. Log in to each
+one from **Settings → Backends**, which opens a terminal for its own login flow.
+If BOSS cannot find a CLI, set its location in **Settings → Models &
+connections** or with `BOSS_<NAME>_BIN` (for example `BOSS_CODEX_BIN`).
 
 ```bash
 npm install
 npm run dev
+npm run pack             # builds + packages into dist/
 ```
-
-### Bundle the opencode binary (for packaging)
-
-```bash
-npm run fetch:opencode   # copies your local `opencode` into resources/opencode/
-npm run pack             # builds + packages into dist/ (bundles the binary)
-```
-
-The packaged app uses the bundled binary; in dev it uses your PATH `opencode`.
 
 ## Scripts
 
@@ -161,7 +155,6 @@ The packaged app uses the bundled binary; in dev it uses your PATH `opencode`.
 | `npm run dev` | Run in development (Vite HMR + Electron) |
 | `npm run typecheck` | Type-check main, preload, and renderer |
 | `npm run build` | Build main/preload/renderer to `out/` |
-| `npm run fetch:opencode` | Bundle an `opencode` binary for packaging |
 | `npm run pack` | Package for the current platform (`dist/`) |
 | `npm run dist` | Build installers (dmg/nsis/AppImage) |
 | `npm run eval:lab` | Run real-model Lab coding evaluations in disposable fixtures |
@@ -191,7 +184,8 @@ incident automatically.
 
 | Env var | Purpose |
 | --- | --- |
-| `OPENCODE_BIN` | Path to the `opencode` binary (overrides PATH/bundled) |
+| `BOSS_<NAME>_BIN` | Path to a backend CLI, e.g. `BOSS_CLAUDE_BIN` (overrides PATH and the Settings location) |
+| `OPENCODE_BIN` | Path to the `opencode` binary (older name; overrides `BOSS_OPENCODE_BIN`) |
 | `BOSS_SERVER_URL` / `BOSS_SERVER_PASSWORD` | Connect to an already-running `opencode serve` instead of spawning one |
 | `BOSS_OPTIONAL_CDN` | Base URL for optional component downloads (browser-core, computer-use) |
 | `BOSS_DEBUG` | Verbose logging from the opencode child process |
@@ -249,7 +243,7 @@ src/
   preload/    contextBridge typed API (window.boss)
   renderer/   React UI (sidebar, chat, panel tabs)
   shared/     IPC contracts + opencode API types (shared main/renderer)
-scripts/      build/utility scripts (fetch-opencode)
+scripts/      build/utility scripts
 ```
 
 ## Roadmap

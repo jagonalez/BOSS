@@ -18,7 +18,6 @@ interface ComponentDef {
 }
 
 const COMPONENTS: ComponentDef[] = [
-  { id: 'opencode', label: 'opencode engine', optional: true, sizeMb: 90 },
   { id: 'browser-core', label: 'Browser core', optional: true, sizeMb: 60 },
   { id: 'computer-use', label: 'Computer use', optional: true, sizeMb: 25 }
 ]
@@ -35,21 +34,12 @@ function componentMarker(id: string): string {
   return join(componentDir(id), '.installed')
 }
 
-function bundledOpenCodePath(): string {
-  const exe = process.platform === 'win32' ? 'opencode.exe' : 'opencode'
-  const candidate = join(app.getAppPath(), 'resources', 'opencode', exe)
-  return existsSync(candidate) ? candidate : ''
-}
-
 export class OptionalDeps {
   constructor(private readonly baseUrl = process.env.BOSS_OPTIONAL_CDN ?? '') {}
 
   list(): OptionalComponentInfo[] {
     return COMPONENTS.map((def) => {
-      const installed =
-        def.id === 'opencode'
-          ? Boolean(bundledOpenCodePath()) || existsSync(componentDir(def.id))
-          : existsSync(componentDir(def.id))
+      const installed = existsSync(componentDir(def.id))
       let version: string | undefined
       if (installed) {
         version = safeRead(componentMarker(def.id)) || 'bundled'

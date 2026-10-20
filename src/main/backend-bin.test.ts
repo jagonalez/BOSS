@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import test from 'node:test'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { BinaryOverrides, resolveBackendBin, setBinaryOverrideSource } from './backend-bin.ts'
+import { BinaryOverrides, findBackendExecutable, resolveBackendBin, setBinaryOverrideSource } from './backend-bin.ts'
 
 /** A real executable at a path no PATH lookup would ever reach. */
 function shim(dir: string, name: string): string {
@@ -24,6 +24,8 @@ function withTempDir(run: (dir: string) => void): void {
     // Each test installs its own reader; leave the module as it was found.
     setBinaryOverrideSource(() => ({}))
     delete process.env.BOSS_CODEX_BIN
+    delete process.env.OPENCODE_BIN
+    delete process.env.BOSS_OPENCODE_BIN
   }
 }
 
@@ -93,5 +95,68 @@ test('survives a corrupt or non-string settings file', () => {
     assert.deepEqual(new BinaryOverrides(file).all(), {}, 'unreadable settings fall back to PATH')
     writeFileSync(file, JSON.stringify({ codex: 42, pi: '/bin/sh' }))
     assert.deepEqual(new BinaryOverrides(file).all(), { pi: '/bin/sh' }, 'non-string entries are dropped')
+  })
+})
+
+test('finds the installed CLI on PATH as an absolute path', () => {
+  withTempDir((dir) => {
+    const empty = join(dir, 'empty')
+    const bin = join(dir, 'bin')
+    mkdirSync(empty)
+    mkdirSync(bin)
+    const codex = shim(bin, 'codex')
+    assert.equal(findBackendExecutable('codex', [empty, bin].join(delimiter)), codex)
+  })
+})
+
+test('skips a PATH entry that is not executable', () => {
+  withTempDir((dir) => {
+    const first = join(dir, 'first')
+    const second = join(dir, 'second')
+    mkdirSync(first)
+    mkdirSync(second)
+    // A stray file with the right name must not shadow the real install behind it.
+    writeFileSync(join(first, 'codex'), 'not a program')
+    const codex = shim(second, 'codex')
+    assert.equal(findBackendExecutable('codex', [first, second].join(delimiter)), codex)
+  })
+})
+
+test('prefers an override to PATH and reports a missing CLI as undefined', () => {
+  withTempDir((dir) => {
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    shim(bin, 'codex')
+    const pinned = shim(dir, 'pinned-codex')
+    process.env.BOSS_CODEX_BIN = pinned
+    assert.equal(findBackendExecutable('codex', bin), pinned)
+    delete process.env.BOSS_CODEX_BIN
+    assert.equal(findBackendExecutable('codex', join(dir, 'nowhere')), undefined)
+  })
+})
+
+test('OPENCODE_BIN resolves opencode the same way for the probe and the server', () => {
+  withTempDir((dir) => {
+    // Settings probes resolveBackendBin('opencode') and the server spawns it, so the
+    // older variable must count here or a working server shows as unavailable.
+    const legacy = shim(dir, 'legacy-opencode')
+    const current = shim(dir, 'boss-opencode')
+    process.env.OPENCODE_BIN = legacy
+    process.env.BOSS_OPENCODE_BIN = current
+    assert.equal(resolveBackendBin('opencode'), legacy)
+    assert.equal(resolveBackendBin('codex'), 'codex', 'OPENCODE_BIN applies to opencode only')
+  })
+})
+
+test('a bare OPENCODE_BIN name still resolves through PATH', () => {
+  withTempDir((dir) => {
+    // OPENCODE_BIN=opencode-dev worked when the value went straight to spawn.
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    const dev = shim(bin, 'opencode-dev')
+    shim(bin, 'opencode')
+    process.env.OPENCODE_BIN = 'opencode-dev'
+    assert.equal(resolveBackendBin('opencode'), 'opencode-dev')
+    assert.equal(findBackendExecutable('opencode', bin), dev)
   })
 })
