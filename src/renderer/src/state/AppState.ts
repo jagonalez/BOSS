@@ -94,6 +94,8 @@ export interface AppState {
   modelSwitch: { to: string; providerID?: string; sessionId?: string } | null
   commitPath: string | null
   renameTarget: string | null
+  /** The picker for bringing in a Claude Code session run outside BOSS. */
+  importOpen: boolean
   delegateTarget: string | null
   policyTarget: string | null
   /** `notice` drops the Cancel button: there is nothing to decline. */
@@ -219,6 +221,7 @@ export const initialState: AppState = {
   modelSwitch: null,
   commitPath: null,
   renameTarget: null,
+  importOpen: false,
   delegateTarget: null,
   policyTarget: null,
   confirm: null,

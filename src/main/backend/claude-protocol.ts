@@ -1,4 +1,6 @@
-import type { Part } from '@shared/opencode'
+import type { MessageWithParts, Part } from '@shared/opencode'
+// @ts-expect-error Node's type-stripping test runner needs the extension.
+import { toolLabel } from '../../shared/tool-label.ts'
 
 /** The mode names the Claude Agent SDK takes.
  *
@@ -109,6 +111,186 @@ export function claudeStreamedPartId(
   if (type === 'text' && index === firstTextIndex) return `${messageId}-text`
   if (type === 'thinking' && index === firstThinkingIndex) return `${messageId}-thinking`
   return `${messageId}-${type}-${index}`
+}
+
+/** The BOSS parts for the content of one assistant message from Claude.
+ *
+ *  Used for the live stream and for an imported transcript alike, so a message
+ *  read back from Claude Code's own file has the ids the stream would have
+ *  given it. */
+export function claudeContentParts(sessionId: string, messageId: string, content: unknown): Part[] {
+  if (!Array.isArray(content)) return []
+  const firstTextIndex = content.findIndex((block) => (
+    Boolean(block) && typeof block === 'object' && (block as { type?: string }).type === 'text'
+  ))
+  const firstThinkingIndex = content.findIndex((block) => (
+    Boolean(block) && typeof block === 'object' && (block as { type?: string }).type === 'thinking'
+  ))
+  return content.flatMap<Part>((block, index): Part[] => {
+    if (!block || typeof block !== 'object') return []
+    const item = block as Record<string, unknown>
+    if (item.type === 'text' || item.type === 'thinking') {
+      return [{
+        id: claudeStreamedPartId(messageId, String(item.type), index, firstTextIndex, firstThinkingIndex),
+        type: item.type === 'thinking' ? 'reasoning' as const : 'text' as const,
+        sessionID: sessionId,
+        messageID: messageId,
+        text: String(item.text ?? item.thinking ?? '')
+      }]
+    }
+    if (item.type === 'tool_use') {
+      return [{
+        id: String(item.id ?? `${messageId}-tool-${index}`),
+        type: 'tool' as const,
+        sessionID: sessionId,
+        messageID: messageId,
+        state: {
+          status: 'running' as const,
+          tool: String(item.name ?? 'tool'),
+          // Without a title the transcript heads every call with the tool's name, so a run of
+          // shell calls reads as "Bash" fifteen times. Codex already names its own this way.
+          title: toolLabel(String(item.name ?? ''), item.input),
+          input: item.input
+        }
+      }]
+    }
+    if (item.type === 'tool_result') {
+      return [{
+        id: String(item.tool_use_id ?? `${messageId}-result-${index}`),
+        type: 'tool' as const,
+        sessionID: sessionId,
+        messageID: messageId,
+        state: { status: item.is_error ? 'error' as const : 'completed' as const, output: item.content }
+      }]
+    }
+    return []
+  })
+}
+
+/** One line of a Claude Code transcript, as the Agent SDK's
+ *  getSessionMessages returns it. `timestamp` is on every line Claude Code
+ *  writes but missing from the SDK's type. */
+export interface ClaudeHistoryEntry {
+  type: 'user' | 'assistant' | 'system'
+  uuid: string
+  message: unknown
+  parent_tool_use_id: string | null
+  timestamp?: string
+}
+
+function isToolResult(block: unknown): boolean {
+  return Boolean(block) && typeof block === 'object' && (block as { type?: string }).type === 'tool_result'
+}
+
+/** What the user wrote, as BOSS parts. Ids follow claudeTranscriptParts, so a
+ *  message BOSS sent reads back with the parts it was recorded with. */
+function claudeUserParts(sessionId: string, messageId: string, content: unknown): Part[] {
+  if (typeof content === 'string') {
+    return content.trim() ? [{ id: `${messageId}-text-0`, type: 'text', sessionID: sessionId, messageID: messageId, text: content }] : []
+  }
+  if (!Array.isArray(content)) return []
+  return content.flatMap<Part>((block, index): Part[] => {
+    if (!block || typeof block !== 'object') return []
+    const item = block as { type?: string; text?: string; source?: { type?: string; media_type?: string; data?: string } }
+    if (item.type === 'text' && item.text?.trim()) {
+      return [{ id: `${messageId}-text-${index}`, type: 'text', sessionID: sessionId, messageID: messageId, text: item.text }]
+    }
+    if (item.type === 'image' && item.source?.type === 'base64' && item.source.media_type && item.source.data) {
+      return [{
+        id: `${messageId}-file-${index}`,
+        type: 'file',
+        sessionID: sessionId,
+        messageID: messageId,
+        state: {
+          status: 'completed',
+          name: 'Image',
+          mime: item.source.media_type,
+          url: `data:${item.source.media_type};base64,${item.source.data}`
+        }
+      }]
+    }
+    return []
+  })
+}
+
+/** The content blocks of each assistant reply, joined across the lines
+ *  Claude Code writes it on.
+ *
+ *  Claude Code puts every block of a reply on its own line under the reply's
+ *  id, and the SDK streams the same lines. Mapped one line at a time, the first
+ *  text block of every line took the same id, so a reply with two text blocks
+ *  kept only the last. The live stream and the importer both join through
+ *  this, so a reply gets the same parts either way. A line is keyed by its own
+ *  uuid, so one seen twice is not added twice. */
+export class ClaudeReplyBlocks {
+  private readonly replies = new Map<string, Map<string, unknown[]>>()
+
+  add(messageId: string, lineId: string, content: unknown): unknown[] {
+    const lines = this.replies.get(messageId) ?? new Map<string, unknown[]>()
+    lines.set(lineId, Array.isArray(content) ? content : [])
+    this.replies.set(messageId, lines)
+    return [...lines.values()].flat()
+  }
+}
+
+/** A Claude Code session's history as BOSS messages, for importing a session
+ *  the user ran outside BOSS.
+ *
+ *  The lines of one reply are joined back into one message, the way the live
+ *  stream joins them. A tool's result arrives on a later user line and
+ *  completes the call it answers; anything else on that line is still the
+ *  user's message. Subagent lines are left out: the subagent's report reaches
+ *  the conversation as the result of the tool that started it. */
+export function claudeHistoryMessages(sessionId: string, entries: ClaudeHistoryEntry[]): MessageWithParts[] {
+  const messages: MessageWithParts[] = []
+  const assistants = new Map<string, MessageWithParts>()
+  const replies = new ClaudeReplyBlocks()
+  const tools = new Map<string, MessageWithParts>()
+  const results = new Map<string, Pick<NonNullable<Part['state']>, 'status' | 'output'>>()
+  const withResult = (part: Part): Part => {
+    const result = results.get(part.id)
+    return part.type === 'tool' && result ? { ...part, state: { ...part.state, ...result } } : part
+  }
+  for (const entry of entries) {
+    if (entry.parent_tool_use_id) continue
+    const inner = (entry.message ?? {}) as { id?: string; content?: unknown; model?: string }
+    const parsed = entry.timestamp ? Date.parse(entry.timestamp) : Number.NaN
+    const created = Number.isFinite(parsed) ? parsed : undefined
+    if (entry.type === 'assistant') {
+      const id = inner.id ?? entry.uuid
+      let message = assistants.get(id)
+      if (!message) {
+        message = {
+          info: {
+            id,
+            sessionID: sessionId,
+            role: 'assistant',
+            model: inner.model ? { id: inner.model, provider: 'anthropic' } : undefined,
+            time: { created }
+          },
+          parts: []
+        }
+        assistants.set(id, message)
+        messages.push(message)
+      }
+      message.parts = claudeContentParts(sessionId, id, replies.add(id, entry.uuid, inner.content)).map(withResult)
+      for (const part of message.parts) if (part.type === 'tool') tools.set(part.id, message)
+    } else if (entry.type === 'user') {
+      if (Array.isArray(inner.content)) {
+        for (const block of inner.content) {
+          if (!isToolResult(block)) continue
+          const result = block as { tool_use_id?: string; content?: unknown; is_error?: boolean }
+          if (!result.tool_use_id) continue
+          results.set(result.tool_use_id, { status: result.is_error ? 'error' : 'completed', output: result.content })
+          const owner = tools.get(result.tool_use_id)
+          if (owner) owner.parts = owner.parts.map(withResult)
+        }
+      }
+      const parts = claudeUserParts(sessionId, entry.uuid, inner.content)
+      if (parts.length) messages.push({ info: { id: entry.uuid, sessionID: sessionId, role: 'user', time: { created } }, parts })
+    }
+  }
+  return messages
 }
 
 export function claudePermissionMode(mode?: BossClaudeMode): ClaudePermissionMode {

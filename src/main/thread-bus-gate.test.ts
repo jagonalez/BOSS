@@ -155,3 +155,32 @@ test('worktree spawning carries an optional target project through every backend
   assert.ok(fork.includes('projectId: target.projectId'), 'the worktree should belong to the target project')
   assert.ok(fork.includes('projectPath: target.projectPath'), 'the child thread should remain grouped under the target project')
 })
+
+test('every agent backend can import a Claude Code session', () => {
+  // The user asks whichever agent they are talking to; the tool has to be
+  // there for all four, and the source of the import does not depend on the
+  // caller.
+  for (const file of [
+    join(import.meta.dirname, 'backend', 'claude-backend.ts'),
+    join(import.meta.dirname, 'backend', 'codex-backend.ts'),
+    join(import.meta.dirname, 'backend', 'pi-backend.ts'),
+    join(import.meta.dirname, 'opencode-server.ts')
+  ]) {
+    assert.ok(readFileSync(file, 'utf8').includes('boss_threads_import'), `${file} should register boss_threads_import`)
+  }
+  const handler = source.slice(source.indexOf("case 'boss_threads_import':"), source.indexOf("case 'boss_threads_leave_worktree':"))
+  assert.ok(handler.includes('this.host.importableSessions(IMPORT_SOURCE)'), 'no session id lists what can be imported')
+  assert.ok(handler.includes('this.host.importThread(IMPORT_SOURCE, sessionId)'), 'a session id imports that session')
+})
+
+test('an imported session is bound as imported, and importing again keeps its thread', () => {
+  // Imported means BOSS holds a copy: deleting the thread must leave the
+  // user's own Claude Code session alone. A second import refreshes the thread
+  // it already is instead of adding a duplicate beside it.
+  const body = manager.slice(manager.indexOf('async importSession('), manager.indexOf('async fork(threadId'))
+  assert.ok(body.includes("this.registerNative(backendId, native, 'imported')"), 'a new import must be bound as imported')
+  assert.ok(body.includes('const existing = this.bindingForNative(backendId, nativeSessionId)'), 'an existing thread must be found first')
+  assert.ok(body.indexOf('throw new Error(THREAD_BUSY_ERROR)') < body.indexOf('backend.importSession('), 'a running thread must not be overwritten')
+  const listing = manager.slice(manager.indexOf('async importableSessions('), manager.indexOf('async importSession('))
+  assert.ok(listing.includes('!this.bindingForNative(backendId, session.id)'), 'sessions that are already threads are not offered')
+})

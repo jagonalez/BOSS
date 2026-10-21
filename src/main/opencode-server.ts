@@ -199,6 +199,17 @@ export const leave_worktree = tool({
   execute(args, context) { return call("boss_threads_leave_worktree", args, context) }
 })
 
+// "import" is a reserved word, so the tool is declared under another name and
+// exported as import, which OpenCode turns into boss_threads_import.
+const importSession = tool({
+  description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.importSession)},
+  args: {
+    sessionId: tool.schema.string().describe(${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.importSessionId)}).optional()
+  },
+  execute(args, context) { return call("boss_threads_import", args, context) }
+})
+export { importSession as import }
+
 export const git_create_change_request = tool({
   description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequest)},
   args: {

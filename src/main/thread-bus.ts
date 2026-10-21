@@ -4,7 +4,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BACKEND_IDS, isBackendId, type BackendId } from '@shared/backend'
-import type { MessageWithParts } from '@shared/opencode'
+import type { MessageWithParts, SessionInfo } from '@shared/opencode'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS, isAgentToolResult, type QaAgentTool, type QaPolicy } from '@shared/qa'
 import type {
   CollaborationPolicy,
@@ -65,10 +65,16 @@ export interface ThreadBusHost {
   spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId, project?: string): Promise<ThreadBusThread>
   useWorktree(threadId: string): Promise<{ path: string; branch: string }>
   leaveWorktree(threadId: string): Promise<{ path: string; branch: string }>
+  importableSessions(backendId: BackendId): Promise<SessionInfo[]>
+  importThread(backendId: BackendId, nativeSessionId: string): Promise<ThreadBusThread>
   emitThreadBus(snapshot: ThreadBusSnapshot): void
 }
 
 const MAX_MESSAGES = 500
+/** Whose sessions boss_threads_import brings in. Claude Code is the one CLI
+ *  whose sessions BOSS can read back so far; the caller's own backend does not
+ *  matter. */
+const IMPORT_SOURCE: BackendId = 'claude'
 const MAX_BODY = 16_000
 const MAX_QUEUE_PER_THREAD = 25
 
@@ -365,7 +371,7 @@ export class ThreadBus {
     }
     const policy = this.policy(caller.projectId)
     if (policy === 'off') throw new Error('Thread collaboration is disabled for this project.')
-    if (!['boss_threads_list', 'boss_threads_read', 'boss_threads_send', 'boss_threads_reply', 'boss_threads_spawn_worktree', 'boss_threads_use_worktree', 'boss_threads_leave_worktree'].includes(tool)) {
+    if (!['boss_threads_list', 'boss_threads_read', 'boss_threads_send', 'boss_threads_reply', 'boss_threads_spawn_worktree', 'boss_threads_use_worktree', 'boss_threads_leave_worktree', 'boss_threads_import'].includes(tool)) {
       throw new Error('Unknown BOSS thread tool.')
     }
 
@@ -419,6 +425,21 @@ export class ThreadBus {
           agent = requestedAgent
         }
         return this.host.spawnWorktreeThread(caller.id, instruction, agent, project || undefined)
+      }
+      case 'boss_threads_import': {
+        // The import lands in the session's own project, which need not be the
+        // caller's, and any agent may bring one in.
+        const sessionId = stringArg(args, 'sessionId')
+        if (!sessionId) {
+          return (await this.host.importableSessions(IMPORT_SOURCE)).map((session) => ({
+            sessionId: session.id,
+            title: session.title,
+            directory: session.directory,
+            updated: session.time?.updated ? new Date(session.time.updated).toISOString() : undefined
+          }))
+        }
+        const thread = await this.host.importThread(IMPORT_SOURCE, sessionId)
+        return { thread: { id: thread.id, title: thread.title, projectPath: thread.projectPath } }
       }
       case 'boss_threads_leave_worktree':
         return this.host.leaveWorktree(caller.id)
@@ -789,6 +810,15 @@ export class ThreadBus {
         name: 'boss_threads_leave_worktree',
         description: THREAD_TOOL_DESCRIPTIONS.leaveWorktree,
         inputSchema: { type: 'object', properties: {}, additionalProperties: false }
+      },
+      {
+        name: 'boss_threads_import',
+        description: THREAD_TOOL_DESCRIPTIONS.importSession,
+        inputSchema: {
+          type: 'object',
+          properties: { sessionId: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.importSessionId } },
+          additionalProperties: false
+        }
       },
       {
         name: 'boss_git_create_change_request',

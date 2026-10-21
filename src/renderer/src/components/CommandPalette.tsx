@@ -20,6 +20,7 @@ function commandItems(): PaletteItem[] {
   return [
     { id: 'cmd.thread.new', label: 'New Thread', hint: 'Command', keywords: 'create chat project', run: () => runMenuCommand('thread.new') },
     { id: 'cmd.thread.new-global', label: 'New Chat', hint: 'Command', keywords: 'create thread global no project', run: () => runMenuCommand('thread.new-global') },
+    { id: 'cmd.thread.import', label: 'Import Claude Code Session', hint: 'Command', keywords: 'resume terminal cli conversation bring in move', run: () => appStore.setState({ importOpen: true }) },
     { id: 'cmd.view.new', label: 'New View', hint: 'Command', keywords: 'workspace pane layout', run: () => runMenuCommand('view.new') },
     { id: 'cmd.tab.close', label: 'Close Tab', hint: 'Command', keywords: 'dismiss pane', run: () => runMenuCommand('tab.close') },
     { id: 'cmd.pane.split-horizontal', label: 'Split Left and Right', hint: 'Command', keywords: 'pane split horizontal side', run: () => runMenuCommand('pane.split-horizontal') },

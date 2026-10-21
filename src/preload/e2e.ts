@@ -45,10 +45,21 @@ const THREAD_TITLE_SETTINGS_KEY = 'boss-e2e-thread-title-settings'
  *  app's backend-threads.json, so the reload test exercises the same contract
  *  the manager keeps. */
 const THREAD_PINS_KEY = 'boss-e2e-thread-pins'
+/** Imported session ids, so a renderer reload finds the threads they became. */
+const IMPORTED_SESSIONS_KEY = 'boss-e2e-imported-sessions'
 
 interface E2EStorage {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
+}
+
+function savedImportedSessions(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(e2eStorage()?.getItem(IMPORTED_SESSIONS_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
 }
 
 function e2eStorage(): E2EStorage | undefined {
@@ -899,6 +910,61 @@ export function installE2EApi(boss: BossApi): void {
     return session
   }
 
+  // Claude Code sessions the user ran outside BOSS. thread.importable offers
+  // each until it is a thread, and thread.import turns one into a thread with
+  // its history, the way the Claude backend copies a real transcript.
+  const importableSessions: SessionInfo[] = [
+    { id: 'claude-cli-upload', title: 'Fix the flaky upload test', directory: PROJECT, time: { created: Date.now() - 7_200_000, updated: Date.now() - 3_600_000 } },
+    { id: 'claude-cli-billing', title: 'Sketch the billing page', directory: PROJECT, time: { created: Date.now() - 172_800_000, updated: Date.now() - 86_400_000 } }
+  ]
+  const importThread = (nativeSessionId: string): SessionInfo => {
+    const existing = sessions.find((session) => session.backendId === 'claude' && session.nativeSessionId === nativeSessionId)
+    if (existing) return existing
+    const source = importableSessions.find((session) => session.id === nativeSessionId)
+    if (!source) throw new Error('Claude Code has no session with that id.')
+    const id = `thread-imported-${nativeSessionId}`
+    const session: SessionInfo = {
+      id,
+      backendId: 'claude',
+      nativeSessionId,
+      nativeSessionOwnership: 'imported',
+      projectId: 'boss-e2e',
+      projectPath: PROJECT,
+      executionPath: CHECKOUT,
+      title: source.title,
+      time: { created: source.time?.created, updated: source.time?.updated }
+    }
+    sessions = [...sessions, session]
+    const imported = new Set(savedImportedSessions())
+    imported.add(nativeSessionId)
+    e2eStorage()?.setItem(IMPORTED_SESSIONS_KEY, JSON.stringify([...imported]))
+    messages[id] = [
+      {
+        info: { id: `${id}-user`, sessionID: id, role: 'user', time: { created: Date.now() - 3_700_000 } },
+        parts: [{ id: `${id}-user-text`, type: 'text', sessionID: id, messageID: `${id}-user`, text: 'The upload test fails one run in five.' }]
+      },
+      {
+        info: { id: `${id}-agent`, sessionID: id, role: 'assistant', time: { created: Date.now() - 3_650_000, completed: Date.now() - 3_600_000 } },
+        // One reply in the shape the Claude backend now records: its blocks
+        // joined, so the text before a tool call and the text after it are
+        // separate parts of the same message rather than one overwriting the
+        // other.
+        parts: [
+          { id: `${id}-agent-text`, type: 'text', sessionID: id, messageID: `${id}-agent`, text: 'The test races the upload progress event.' },
+          {
+            id: `${id}-agent-tool`, type: 'tool', sessionID: id, messageID: `${id}-agent`,
+            state: { status: 'completed', tool: 'Bash', title: '$ npm test -- upload', input: { command: 'npm test -- upload' }, output: '1 failing' }
+          },
+          { id: `${id}-agent-text-2`, type: 'text', sessionID: id, messageID: `${id}-agent`, text: 'Awaiting the progress event fixes it.' }
+        ]
+      }
+    ]
+    return session
+  }
+  // A reload starts this fixture again, the way a restart reloads the real
+  // main's bindings; threads imported before it are still threads after it.
+  for (const nativeSessionId of savedImportedSessions()) importThread(nativeSessionId)
+
   const backendRequest = async (request: BackendRequest): Promise<unknown> => {
     recordBackend(request)
     if (nextBackendFailure?.type === request.type) {
@@ -962,6 +1028,9 @@ export function installE2EApi(boss: BossApi): void {
       case 'thread.list': return sessions
       case 'thread.create': return createThread(request.backendId, request.title, request.scope === 'global' ? '' : PROJECT)
       case 'thread.get': return sessions.find((session) => session.id === request.threadId)
+      case 'thread.importable':
+        return importableSessions.filter((candidate) => !sessions.some((session) => session.nativeSessionId === candidate.id))
+      case 'thread.import': return importThread(request.nativeSessionId)
       case 'thread.backend.set': {
         const found = sessions.find((session) => session.id === request.threadId)
         if (!found) throw new Error(`Unknown fixture thread ${request.threadId}`)
