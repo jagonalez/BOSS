@@ -84,6 +84,12 @@ export interface Backend {
   sessionDelete(id: string): Promise<void>
   sessionRename(id: string, title: string): Promise<SessionInfo>
   sessionGet(id: string): Promise<SessionInfo>
+  /** Sessions the user ran in the agent's own CLI, newest first, that BOSS
+   *  could bring in. A backend without this cannot import. */
+  importableSessions?(): Promise<SessionInfo[]>
+  /** Copy one of those sessions into BOSS so it can be continued here.
+   *  Returns it as a native session for the manager to bind. */
+  importSession?(nativeSessionId: string): Promise<SessionInfo>
   /** Optional inexpensive model-backed title generation. Returning undefined
    *  asks the manager to use its local fallback. */
   generateTitle?(sessionId: string, parts: unknown[], options?: ThreadTitleGenerationOptions): Promise<string | undefined>

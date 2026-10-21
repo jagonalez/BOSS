@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { findBackendExecutable, resolveBackendBin } from '../backend-bin'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+import { getSessionInfo, getSessionMessages, listSessions, query, type Query, type SDKMessage, type SDKUserMessage, type PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import type { Backend, McpServerConfig, ModelInfo, ThinkingLevel } from './backend'
 import { THREAD_BUSY_ERROR } from '@shared/backend'
 import type { BackendMessageOptions, BackendModeId } from '@shared/backend'
@@ -12,9 +12,8 @@ import type { ThreadBusConnection } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
-import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol'
-import type { ClaudePermissionRequest } from './claude-protocol'
-import { toolLabel } from '@shared/tool-label'
+import { claudeContentParts, claudeHistoryMessages, claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol'
+import type { ClaudeHistoryEntry, ClaudePermissionRequest } from './claude-protocol'
 import { compactionCompletedEvents, compactionStartedEvent, type CompactionTrigger } from './compaction-events'
 
 /** A turn in flight, and the questions it is still waiting on.
@@ -38,58 +37,11 @@ interface ClaudeStore {
 }
 
 const SAVE_DEBOUNCE_MS = 100
+/** Enough to find a recent session; Claude Code keeps a month of them. */
+const IMPORTABLE_LIMIT = 50
 
 function storeFile(): string {
   return join(app.getPath('userData'), 'claude-threads.json')
-}
-
-function contentParts(sessionId: string, messageId: string, content: unknown): Part[] {
-  if (!Array.isArray(content)) return []
-  const firstTextIndex = content.findIndex((block) => (
-    Boolean(block) && typeof block === 'object' && (block as { type?: string }).type === 'text'
-  ))
-  const firstThinkingIndex = content.findIndex((block) => (
-    Boolean(block) && typeof block === 'object' && (block as { type?: string }).type === 'thinking'
-  ))
-  return content.flatMap<Part>((block, index): Part[] => {
-    if (!block || typeof block !== 'object') return []
-    const item = block as Record<string, unknown>
-    if (item.type === 'text' || item.type === 'thinking') {
-      return [{
-        id: claudeStreamedPartId(messageId, String(item.type), index, firstTextIndex, firstThinkingIndex),
-        type: item.type === 'thinking' ? 'reasoning' as const : 'text' as const,
-        sessionID: sessionId,
-        messageID: messageId,
-        text: String(item.text ?? item.thinking ?? '')
-      }]
-    }
-    if (item.type === 'tool_use') {
-      return [{
-        id: String(item.id ?? `${messageId}-tool-${index}`),
-        type: 'tool' as const,
-        sessionID: sessionId,
-        messageID: messageId,
-        state: {
-          status: 'running' as const,
-          tool: String(item.name ?? 'tool'),
-          // Without a title the transcript heads every call with the tool's name, so a run of
-          // shell calls reads as "Bash" fifteen times. Codex already names its own this way.
-          title: toolLabel(String(item.name ?? ''), item.input),
-          input: item.input
-        }
-      }]
-    }
-    if (item.type === 'tool_result') {
-      return [{
-        id: String(item.tool_use_id ?? `${messageId}-result-${index}`),
-        type: 'tool' as const,
-        sessionID: sessionId,
-        messageID: messageId,
-        state: { status: item.is_error ? 'error' as const : 'completed' as const, output: item.content }
-      }]
-    }
-    return []
-  })
 }
 
 export class ClaudeBackend implements Backend {
@@ -248,6 +200,45 @@ export class ClaudeBackend implements Backend {
     return { id, title: record.title, directory: record.projectPath, time: { created: record.createdAt, updated: record.updatedAt } }
   }
 
+  /** Sessions the user ran in Claude Code itself, newest first.
+   *
+   *  Programmatic sessions are left out, the way Claude Code's own /resume
+   *  leaves them out: those are BOSS's own threads and other tools' headless
+   *  runs, not conversations the user had. */
+  async importableSessions(): Promise<SessionInfo[]> {
+    const sessions = await listSessions({ includeProgrammatic: false, limit: IMPORTABLE_LIMIT })
+    return sessions.map((session) => ({
+      id: session.sessionId,
+      title: session.customTitle || session.summary,
+      directory: session.cwd,
+      time: { created: session.createdAt, updated: session.lastModified }
+    }))
+  }
+
+  /** Copy a Claude Code session into BOSS's store so it can go on here.
+   *
+   *  The record takes the session's own id, which is what sendMessage resumes,
+   *  so the next message continues the same Claude Code conversation. Importing
+   *  again replaces the copy with the file as it is now, which picks up turns
+   *  taken in a terminal since. */
+  async importSession(id: string): Promise<SessionInfo> {
+    if (this.runs.has(id)) throw new Error(THREAD_BUSY_ERROR)
+    const info = await getSessionInfo(id)
+    if (!info) throw new Error('Claude Code has no session with that id.')
+    const entries = await getSessionMessages(id) as unknown as ClaudeHistoryEntry[]
+    const existing = this.store.sessions[id]
+    const record = {
+      title: existing?.title ?? (info.customTitle || info.summary),
+      projectPath: info.cwd || existing?.projectPath || this.projectPath,
+      createdAt: existing?.createdAt ?? info.createdAt ?? info.lastModified,
+      updatedAt: info.lastModified,
+      messages: claudeHistoryMessages(id, entries)
+    }
+    this.store.sessions[id] = record
+    this.save()
+    return { id, title: record.title, directory: record.projectPath, time: { created: record.createdAt, updated: record.updatedAt } }
+  }
+
   async messagesList(sessionId: string, limit?: number): Promise<MessageWithParts[]> {
     const messages = this.record(sessionId).messages
     return limit ? messages.slice(-limit) : messages
@@ -393,9 +384,13 @@ export class ClaudeBackend implements Backend {
     // and no interruption, and a content-block array sent that way ends the
     // turn silently — no assistant message, no result, no error. BOSS attaches
     // images and interrupts runs, so the message goes through a generator.
+    // The uuid is the id Claude Code gives this line in its own transcript, so
+    // a session imported again later reads back with the message BOSS already
+    // holds instead of a second copy of it.
     async function* input(): AsyncGenerator<SDKUserMessage> {
       yield {
         type: 'user',
+        uuid: userId,
         message: { role: 'user', content },
         parent_tool_use_id: null
       } as SDKUserMessage
@@ -501,7 +496,7 @@ export class ClaudeBackend implements Backend {
           assistantId = inner?.id ?? assistantId
           this.upsert(sessionId, {
             info: { id: assistantId, sessionID: sessionId, role: 'assistant', model: inner?.model ? { id: inner.model, provider: 'anthropic' } : undefined, time: { created: Date.now() } },
-            parts: contentParts(sessionId, assistantId, inner?.content)
+            parts: claudeContentParts(sessionId, assistantId, inner?.content)
           })
         } else if (value.type === 'user') {
           const inner = value.message as { content?: unknown } | undefined
@@ -582,6 +577,7 @@ export class ClaudeBackend implements Backend {
       'mcp__boss_thread_bus__boss_threads_spawn_worktree',
       'mcp__boss_thread_bus__boss_threads_use_worktree',
       'mcp__boss_thread_bus__boss_threads_leave_worktree',
+      'mcp__boss_thread_bus__boss_threads_import',
       'mcp__boss_thread_bus__boss_git_create_change_request',
       'mcp__boss_thread_bus__boss_reports_create',
       'mcp__boss_thread_bus__boss_reports_update',

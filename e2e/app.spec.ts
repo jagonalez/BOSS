@@ -1116,6 +1116,39 @@ test('the command palette opens from the keyboard and runs a command', async ({ 
   await expect(appPage.locator('.command-palette')).toHaveCount(0)
 })
 
+test('a Claude Code session run outside BOSS imports as a thread with its history', async ({ appPage }) => {
+  const palette = appPage.getByRole('dialog', { name: 'Command palette' })
+  const picker = appPage.getByRole('dialog', { name: 'Import a Claude Code session' })
+  const list = picker.getByRole('list', { name: 'Claude Code sessions' })
+  const openPicker = async (): Promise<void> => {
+    await appPage.keyboard.press('Control+k')
+    await palette.getByRole('textbox', { name: 'Search commands' }).fill('import claude code session')
+    await appPage.keyboard.press('Enter')
+    await expect(picker).toBeVisible()
+  }
+
+  await openPicker()
+  await expect(list.getByRole('button')).toHaveCount(2)
+  await list.getByRole('button', { name: /Fix the flaky upload test/ }).click()
+
+  // The picker closes on the thread it made, with the session's history.
+  await expect(picker).toHaveCount(0)
+  expect((await lastBackendCall(appPage, 'thread.import')).request).toEqual({
+    type: 'thread.import',
+    backendId: 'claude',
+    nativeSessionId: 'claude-cli-upload'
+  })
+  await expect(appPage.locator('.msg.assistant')).toContainText('The test races the upload progress event.')
+  await expect(appPage.locator('.sidebar-section.projects .session-row', { hasText: 'Fix the flaky upload test' })).toHaveCount(1)
+
+  // It is a thread now, so it is not offered a second time.
+  await openPicker()
+  await expect(list.getByRole('button')).toHaveCount(1)
+  await expect(list.getByRole('button', { name: /Sketch the billing page/ })).toBeVisible()
+  await picker.getByRole('button', { name: 'Cancel' }).click()
+  await expect(picker).toHaveCount(0)
+})
+
 test('an attention event raises an unread badge that mark-all-read clears', async ({ appPage }) => {
   const bell = appPage.getByRole('button', { name: 'Activity' })
   await expect(bell.locator('.inbox-badge')).toHaveCount(0)

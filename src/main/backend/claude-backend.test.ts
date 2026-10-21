@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol.ts'
+import { claudeContentParts, claudeHistoryMessages, claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol.ts'
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -253,6 +253,69 @@ test('a message with no thinking still ids its text', () => {
   assert.equal(claudeStreamedPartId('msg-1', 'tool_use', 1, 0, -1), 'msg-1-tool_use-1')
 })
 
+/** A Claude Code transcript as getSessionMessages returns it: one line per
+ *  content block, tool results on user lines, a subagent's turns tagged with
+ *  the tool call that started them. */
+const TRANSCRIPT = [
+  { type: 'user', uuid: 'u1', parent_tool_use_id: null, timestamp: '2026-10-21T10:00:00.000Z', message: { role: 'user', content: 'Fix the build' } },
+  { type: 'assistant', uuid: 'a1', parent_tool_use_id: null, timestamp: '2026-10-21T10:00:01.000Z', message: { id: 'msg_1', model: 'claude-opus-5-5', role: 'assistant', content: [{ type: 'thinking', thinking: 'Look at the log.' }] } },
+  { type: 'assistant', uuid: 'a2', parent_tool_use_id: null, timestamp: '2026-10-21T10:00:02.000Z', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'npm test' } }] } },
+  { type: 'user', uuid: 'u2', parent_tool_use_id: null, timestamp: '2026-10-21T10:00:03.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: '1 failing', is_error: true }] } },
+  { type: 'assistant', uuid: 's1', parent_tool_use_id: 'toolu_1', message: { id: 'msg_sub', role: 'assistant', content: [{ type: 'text', text: 'subagent work' }] } },
+  { type: 'assistant', uuid: 'a3', parent_tool_use_id: null, timestamp: '2026-10-21T10:00:04.000Z', message: { id: 'msg_2', role: 'assistant', content: [{ type: 'text', text: 'One test fails.' }] } },
+  { type: 'user', uuid: 'u3', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } }, { type: 'text', text: 'See this' }] } }
+] as const
+
+test('an imported transcript joins the lines of one reply into one message', () => {
+  // Claude Code writes each content block on its own line under the reply's
+  // id. Read one line at a time, a reply that thought and then ran a command
+  // came back as two replies.
+  const messages = claudeHistoryMessages('thread', [...TRANSCRIPT])
+  assert.deepEqual(messages.map((message) => [message.info.role, message.info.id]), [
+    ['user', 'u1'],
+    ['assistant', 'msg_1'],
+    ['assistant', 'msg_2'],
+    ['user', 'u3']
+  ])
+  assert.deepEqual(messages[1].parts.map((part) => [part.type, part.id]), [['reasoning', 'msg_1-thinking'], ['tool', 'toolu_1']])
+  assert.deepEqual(messages[1].info.model, { id: 'claude-opus-5-5', provider: 'anthropic' })
+  assert.equal(messages[0].info.time?.created, Date.parse('2026-10-21T10:00:00.000Z'))
+})
+
+test('a tool result completes its call instead of becoming a user message', () => {
+  const tool = claudeHistoryMessages('thread', [...TRANSCRIPT])[1].parts[1]
+  assert.equal(tool.state?.status, 'error')
+  assert.equal(tool.state?.output, '1 failing')
+  assert.equal(tool.state?.tool, 'Bash')
+  assert.equal(tool.state?.title, '$ npm test')
+})
+
+test('a subagent turn is left out of the imported conversation', () => {
+  // Its report reaches the conversation as the result of the tool that
+  // started it; its own steps are not the user's conversation.
+  const text = claudeHistoryMessages('thread', [...TRANSCRIPT]).flatMap((message) => message.parts).map((part) => part.text)
+  assert.ok(!text.includes('subagent work'))
+})
+
+test('an imported prompt keeps its text and its image', () => {
+  const messages = claudeHistoryMessages('thread', [...TRANSCRIPT])
+  assert.deepEqual(messages[0].parts, [{ id: 'u1-text-0', type: 'text', sessionID: 'thread', messageID: 'u1', text: 'Fix the build' }])
+  assert.deepEqual(messages[3].parts.map((part) => [part.type, part.id]), [['file', 'u3-file-0'], ['text', 'u3-text-1']])
+  assert.equal(messages[3].parts[0].state?.url, `data:image/png;base64,${PNG}`)
+})
+
+test('an imported reply has the part ids the live stream gives it', () => {
+  // The manager's transcript store matches parts by id. If a reply read back
+  // from the file were keyed differently from the one streamed, a thread
+  // imported again would show every streamed reply twice.
+  const streamed = TRANSCRIPT.filter((line) => line.type === 'assistant' && !line.parent_tool_use_id)
+    .flatMap((line) => claudeContentParts('thread', line.message.id, line.message.content).map((part) => part.id))
+  const imported = claudeHistoryMessages('thread', [...TRANSCRIPT])
+    .filter((message) => message.info.role === 'assistant')
+    .flatMap((message) => message.parts.map((part) => part.id))
+  assert.deepEqual(imported, streamed)
+})
+
 /** Claude imports @shared as a value, an alias only the bundler resolves, so
  *  the class cannot be constructed here. Reading the source holds the wiring in
  *  place: the risk is the refusal going back to a prose string, and that is
@@ -303,4 +366,19 @@ test('a refused message is never half-recorded', () => {
     backendSource.indexOf('THREAD_BUSY_ERROR', start) < backendSource.indexOf('this.upsert(sessionId', start),
     'the busy guard must precede the transcript record'
   )
+})
+
+test('BOSS hands Claude Code the id it records for the user message', () => {
+  // Claude Code keeps the uuid it is given as the line's id in its own
+  // transcript, so importing a session BOSS has already sent to reads back the
+  // message BOSS holds rather than a second copy.
+  const start = backendSource.indexOf('async function* input()')
+  assert.ok(/uuid:\s*userId/.test(backendSource.slice(start, start + 300)))
+})
+
+test('only sessions the user ran themselves are offered for import', () => {
+  // BOSS's own threads run through the SDK and are programmatic sessions;
+  // offering them would import BOSS into itself.
+  const start = backendSource.indexOf('async importableSessions(')
+  assert.ok(/includeProgrammatic:\s*false/.test(backendSource.slice(start, start + 400)))
 })

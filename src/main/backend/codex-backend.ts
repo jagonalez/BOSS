@@ -160,6 +160,16 @@ const THREAD_BUS_TOOLS: Array<Record<string, unknown>> = [
   },
   {
     type: 'function',
+    name: 'boss_threads_import',
+    description: THREAD_TOOL_DESCRIPTIONS.importSession,
+    inputSchema: {
+      type: 'object',
+      properties: { sessionId: { type: 'string', description: THREAD_TOOL_DESCRIPTIONS.importSessionId } },
+      additionalProperties: false
+    }
+  },
+  {
+    type: 'function',
     name: 'boss_git_create_change_request',
     description: THREAD_TOOL_DESCRIPTIONS.createChangeRequest,
     inputSchema: {

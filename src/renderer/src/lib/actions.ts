@@ -2256,6 +2256,15 @@ export async function exportSessionMarkdown(id: string): Promise<void> {
   }
 }
 
+/** Bring in a session the user ran in the agent's own CLI and open it.
+ *  Failures reach the caller, which shows them beside the session picked. */
+export async function importAgentSession(backendId: BackendId, nativeSessionId: string): Promise<void> {
+  const session = await OpenCode.importSession(backendId, nativeSessionId)
+  upsertSessionMeta(session.id, { kind: 'main', projectPath: session.projectPath ?? '' })
+  await refreshSessions()
+  selectSession(session.id)
+}
+
 export async function forkSession(id: string): Promise<void> {
   try {
     const session = await OpenCode.fork(id)

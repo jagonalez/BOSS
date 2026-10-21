@@ -15,6 +15,7 @@ import { shouldScheduleMessageHistoryRefresh } from './lib/live-message-refresh'
 import { applyTypography, loadTypography } from './lib/typography'
 import { CommitDialog } from './components/CommitDialog'
 import { RenameModal } from './components/RenameModal'
+import { ImportSessionModal } from './components/ImportSessionModal'
 import { ConfirmModal } from './components/ConfirmModal'
 import { DelegateModal } from './components/DelegateModal'
 import { TaskPolicyModal } from './components/TaskPolicyModal'
@@ -447,6 +448,7 @@ export function App(): React.JSX.Element {
       <ModelSwitchModal />
       <CommitDialog />
       <RenameModal />
+      <ImportSessionModal />
       <ConfirmModal />
       <DelegateModal />
       <TaskPolicyModal />

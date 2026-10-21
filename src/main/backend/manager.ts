@@ -1992,6 +1992,12 @@ export class BackendManager {
     return { path: binding.projectPath, branch: worktree.branch }
   }
 
+  /** Import a session for the agent tool, answered as the thread it became. */
+  async importThread(backendId: BackendId, nativeSessionId: string): Promise<ThreadBusThread> {
+    const session = await this.importSession(backendId, nativeSessionId)
+    return this.threadBusInfo(this.binding(session.id))
+  }
+
   async spawnWorktreeThread(threadId: string, instruction: string, agent?: BackendId, project?: string): Promise<ThreadBusThread> {
     const created = await this.forkIntoWorktree(threadId, instruction, undefined, agent, project)
     const info = this.threadInfo(created.id)
@@ -2056,6 +2062,40 @@ export class BackendManager {
       // and looked to the user like it had disappeared.
       void this.deliverNextFollowUp(threadId)
     }
+  }
+
+  /** Sessions the user ran in this backend's own CLI that are not threads
+   *  here yet, newest first. */
+  async importableSessions(backendId: BackendId): Promise<SessionInfo[]> {
+    const backend = await this.ensureStarted(backendId)
+    if (!backend.importableSessions) throw new Error(`${backendId} sessions cannot be imported.`)
+    const sessions = await backend.importableSessions()
+    return sessions.filter((session) => !this.bindingForNative(backendId, session.id))
+  }
+
+  /** Bring a session the user ran outside BOSS in as a thread.
+   *
+   *  The thread is bound as imported: BOSS holds a copy of the history, and
+   *  deleting the thread here leaves the session in the agent's own store.
+   *  A session that is already a thread is copied again and keeps its thread,
+   *  so importing twice refreshes it instead of making a duplicate. */
+  async importSession(backendId: BackendId, nativeSessionId: string): Promise<SessionInfo> {
+    const backend = await this.ensureStarted(backendId)
+    if (!backend.importSession) throw new Error(`${backendId} sessions cannot be imported.`)
+    const existing = this.bindingForNative(backendId, nativeSessionId)
+    if (existing && this.busyThreads.has(existing.id)) throw new Error(THREAD_BUSY_ERROR)
+    const native = await backend.importSession(nativeSessionId)
+    let binding = existing
+    if (binding) {
+      binding.updatedAt = native.time?.updated ?? now()
+    } else {
+      binding = this.registerNative(backendId, native, 'imported')
+      binding.model = boundModel(this.defaultModel(backendId))
+    }
+    this.save()
+    const session = this.session(binding, native)
+    this.emit({ type: existing ? 'session.updated' : 'session.created', properties: { info: session }, backendId })
+    return session
   }
 
   async fork(threadId: string, messageId?: string): Promise<SessionInfo> {
@@ -2644,6 +2684,8 @@ export class BackendManager {
         : this.sessionCreate(request.backendId, request.title, undefined, request.scope)
       case 'thread.backend.set': return this.setEmptyThreadBackend(request.threadId, request.backendId)
       case 'thread.get': return this.sessionGet(request.threadId)
+      case 'thread.importable': return this.importableSessions(request.backendId)
+      case 'thread.import': return this.importSession(request.backendId, request.nativeSessionId)
       case 'thread.delete': return this.sessionDelete(request.threadId)
       case 'thread.rename': return this.sessionRename(request.threadId, request.title)
       case 'thread.messages': {

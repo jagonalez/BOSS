@@ -72,6 +72,7 @@ export type ThreadBusAgentTool =
   | 'boss_threads_spawn_worktree'
   | 'boss_threads_use_worktree'
   | 'boss_threads_leave_worktree'
+  | 'boss_threads_import'
   // Not a boss_threads_* tool: it acts on the caller's own checkout rather than reaching another
   // thread, so it is not gated by the collaboration policy either.
   | 'boss_git_create_change_request'
@@ -108,6 +109,8 @@ export const THREAD_TOOL_DESCRIPTIONS = {
   spawnWorktreeAgent: 'Agent backend for the child thread. Omit to reuse the current thread\'s agent.',
   spawnWorktreeProject: 'Target project already opened in BOSS, as an absolute path or unique folder name. Omit to use the current project.',
   leaveWorktree: 'Come off this thread\'s worktree and back to the project directory, once its work is committed or merged. Git refuses while anything is uncommitted or untracked, so nothing is lost by trying; the branch is kept either way.',
+  importSession: 'Bring a Claude Code session the user ran outside BOSS, in a terminal or an IDE, into BOSS as a thread with its history, so it can be continued here. Call it without sessionId to list recent sessions that are not BOSS threads yet, then again with the session the user means. Importing a session that is already a thread refreshes that thread from Claude Code\'s file. Tell the user to close the session where it is running before continuing it in BOSS, so that two processes do not add to one conversation.',
+  importSessionId: 'Claude Code session id from the list. Omit to list the sessions that can be imported.',
   useWorktree: 'Move this conversation onto its own Git worktree, so your changes are isolated from the project directory and from other threads. Use it when a conversation turns from working something out to changing files, and the user has not already put you on one. It keeps this conversation — nothing is handed off. It returns the new path: your working directory changes from your next message, not during this one, so do not start editing files in the new checkout until then. Fails harmlessly if this thread already has a worktree.',
   createChangeRequest: 'Publish the committed branch and open a pull request (GitHub) or merge request (GitLab) for this thread\'s checkout. Use it instead of running `gh pr create` or `glab mr create` yourself: BOSS uses its host credentials and GitHub publishing works even when the agent shell has no SSH key. Commit first; this refuses uncommitted files. Omit title and body to fill both from the commits.',
   createChangeRequestTitle: 'Title for the request. Omit together with body to fill both from the commits.',

@@ -487,6 +487,15 @@ export default function (pi: ExtensionAPI) {
     execute: (_id, args, signal) => call("boss_threads_leave_worktree", args, signal)
   })
   pi.registerTool({
+    name: "boss_threads_import",
+    label: "Import a Claude Code session",
+    description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.importSession)},
+    parameters: Type.Object({
+      sessionId: Type.Optional(Type.String({ description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.importSessionId)} }))
+    }),
+    execute: (_id, args, signal) => call("boss_threads_import", args, signal)
+  })
+  pi.registerTool({
     name: "boss_git_create_change_request",
     label: "Open a pull or merge request",
     description: ${JSON.stringify(THREAD_TOOL_DESCRIPTIONS.createChangeRequest)},

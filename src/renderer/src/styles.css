@@ -9729,6 +9729,70 @@ select:hover {
   gap: 8px;
 }
 
+.import-modal {
+  width: 560px;
+}
+
+.import-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.import-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.import-row:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.import-row:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.import-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.import-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.import-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+}
+
 .delegate-modal {
   width: 580px;
 }

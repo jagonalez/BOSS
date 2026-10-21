@@ -208,6 +208,10 @@ export type BackendRequest =
   | { type: 'thread.create'; backendId: BackendId; title?: string; scope?: ThreadCreationScope; executionPath?: string }
   | { type: 'thread.backend.set'; threadId: string; backendId: BackendId }
   | { type: 'thread.get'; threadId: string }
+  /** Sessions run in the backend's own CLI that are not BOSS threads yet. */
+  | { type: 'thread.importable'; backendId: BackendId }
+  /** Copy one of those sessions in as a thread, or refresh the thread it already is. */
+  | { type: 'thread.import'; backendId: BackendId; nativeSessionId: string }
   | { type: 'thread.delete'; threadId: string }
   | { type: 'thread.rename'; threadId: string; title: string }
   /** `trimOutput` caps how many characters of a tool part's output come back,

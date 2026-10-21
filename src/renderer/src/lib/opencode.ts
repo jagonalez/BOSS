@@ -138,6 +138,10 @@ export const OpenCode = {
     backendRequest<SessionInfo>({ type: 'thread.backend.set', threadId, backendId }),
   deleteSession: (id: string) => backendRequest<void>({ type: 'thread.delete', threadId: id }),
   getSession: (id: string) => backendRequest<SessionInfo>({ type: 'thread.get', threadId: id }),
+  importableSessions: (backendId: BackendId) =>
+    backendRequest<SessionInfo[]>({ type: 'thread.importable', backendId }),
+  importSession: (backendId: BackendId, nativeSessionId: string) =>
+    backendRequest<SessionInfo>({ type: 'thread.import', backendId, nativeSessionId }),
   renameSession: (id: string, title: string) =>
     backendRequest<SessionInfo>({ type: 'thread.rename', threadId: id, title }),
   listMessages: (id: string, limit?: number) =>
