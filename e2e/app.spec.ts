@@ -311,6 +311,37 @@ test('shows reasoning separately from the final answer', async ({ appPage }) => 
   await expect(reply.locator('.thought-body')).toContainText('I should inspect Workspace.tsx before answering.')
 })
 
+test('a streamed Claude reply keeps its text on both sides of a tool call', async ({ appPage }) => {
+  // The Claude backend sends the whole reply so far with each streamed block,
+  // under one id per block. Text after a tool call used to arrive under the
+  // id of the text before it, so the first paragraph vanished mid-stream.
+  const sessionID = 'thread-claude'
+  const messageID = 'claude-multi-block'
+  const created = Date.now()
+  await appPage.locator('.session-row').filter({ hasText: 'Claude stop thread' }).click()
+  const emit = async (event: Record<string, unknown>): Promise<void> => {
+    await control(appPage).then((item) => item.emit(event))
+  }
+  await emit({
+    type: 'message.updated',
+    properties: { info: { id: messageID, sessionID, role: 'assistant', time: { created, completed: created + 1 } } }
+  })
+  await emit({ type: 'message.part.updated', properties: { part: { id: `${messageID}-text`, type: 'text', sessionID, messageID, text: 'Reading the config first.' } } })
+  await emit({
+    type: 'message.part.updated',
+    properties: {
+      part: {
+        id: 'toolu_multi', type: 'tool', sessionID, messageID,
+        state: { status: 'completed', tool: 'Read', title: 'vite.config.ts', input: { file_path: 'vite.config.ts' }, output: 'export default {}' }
+      }
+    }
+  })
+  await emit({ type: 'message.part.updated', properties: { part: { id: `${messageID}-text-2`, type: 'text', sessionID, messageID, text: 'The config has no alias for @shared.' } } })
+
+  await expect(appPage.getByText('Reading the config first.')).toBeVisible()
+  await expect(appPage.getByText('The config has no alias for @shared.')).toBeVisible()
+})
+
 test('persists backend, model, permission, and thinking defaults through the UI', async ({ appPage }) => {
   await configureClaudeDefaults(appPage)
 
@@ -1138,8 +1169,18 @@ test('a Claude Code session run outside BOSS imports as a thread with its histor
     backendId: 'claude',
     nativeSessionId: 'claude-cli-upload'
   })
-  await expect(appPage.locator('.msg.assistant')).toContainText('The test races the upload progress event.')
-  await expect(appPage.locator('.sidebar-section.projects .session-row', { hasText: 'Fix the flaky upload test' })).toHaveCount(1)
+  // The reply's text before its tool call and after it both survive, live and
+  // after a reload: Claude Code stores them as separate lines of one reply.
+  const row = appPage.locator('.sidebar-section.projects .session-row', { hasText: 'Fix the flaky upload test' })
+  await expect(row).toHaveCount(1)
+  for (const text of ['The test races the upload progress event.', 'Awaiting the progress event fixes it.']) {
+    await expect(appPage.getByText(text)).toBeVisible()
+  }
+  await appPage.reload()
+  await row.click()
+  for (const text of ['The test races the upload progress event.', 'Awaiting the progress event fixes it.']) {
+    await expect(appPage.getByText(text)).toBeVisible()
+  }
 
   // It is a thread now, so it is not offered a second time.
   await openPicker()

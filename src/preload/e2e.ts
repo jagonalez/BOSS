@@ -931,7 +931,18 @@ export function installE2EApi(boss: BossApi): void {
       },
       {
         info: { id: `${id}-agent`, sessionID: id, role: 'assistant', time: { created: Date.now() - 3_650_000, completed: Date.now() - 3_600_000 } },
-        parts: [{ id: `${id}-agent-text`, type: 'text', sessionID: id, messageID: `${id}-agent`, text: 'The test races the upload progress event.' }]
+        // One reply in the shape the Claude backend now records: its blocks
+        // joined, so the text before a tool call and the text after it are
+        // separate parts of the same message rather than one overwriting the
+        // other.
+        parts: [
+          { id: `${id}-agent-text`, type: 'text', sessionID: id, messageID: `${id}-agent`, text: 'The test races the upload progress event.' },
+          {
+            id: `${id}-agent-tool`, type: 'tool', sessionID: id, messageID: `${id}-agent`,
+            state: { status: 'completed', tool: 'Bash', title: '$ npm test -- upload', input: { command: 'npm test -- upload' }, output: '1 failing' }
+          },
+          { id: `${id}-agent-text-2`, type: 'text', sessionID: id, messageID: `${id}-agent`, text: 'Awaiting the progress event fixes it.' }
+        ]
       }
     ]
     return session
