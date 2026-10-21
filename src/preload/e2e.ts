@@ -45,10 +45,21 @@ const THREAD_TITLE_SETTINGS_KEY = 'boss-e2e-thread-title-settings'
  *  app's backend-threads.json, so the reload test exercises the same contract
  *  the manager keeps. */
 const THREAD_PINS_KEY = 'boss-e2e-thread-pins'
+/** Imported session ids, so a renderer reload finds the threads they became. */
+const IMPORTED_SESSIONS_KEY = 'boss-e2e-imported-sessions'
 
 interface E2EStorage {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
+}
+
+function savedImportedSessions(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(e2eStorage()?.getItem(IMPORTED_SESSIONS_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
 }
 
 function e2eStorage(): E2EStorage | undefined {
@@ -924,6 +935,9 @@ export function installE2EApi(boss: BossApi): void {
       time: { created: source.time?.created, updated: source.time?.updated }
     }
     sessions = [...sessions, session]
+    const imported = new Set(savedImportedSessions())
+    imported.add(nativeSessionId)
+    e2eStorage()?.setItem(IMPORTED_SESSIONS_KEY, JSON.stringify([...imported]))
     messages[id] = [
       {
         info: { id: `${id}-user`, sessionID: id, role: 'user', time: { created: Date.now() - 3_700_000 } },
@@ -947,6 +961,9 @@ export function installE2EApi(boss: BossApi): void {
     ]
     return session
   }
+  // A reload starts this fixture again, the way a restart reloads the real
+  // main's bindings; threads imported before it are still threads after it.
+  for (const nativeSessionId of savedImportedSessions()) importThread(nativeSessionId)
 
   const backendRequest = async (request: BackendRequest): Promise<unknown> => {
     recordBackend(request)
