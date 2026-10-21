@@ -213,19 +213,44 @@ function claudeUserParts(sessionId: string, messageId: string, content: unknown)
   })
 }
 
+/** The content blocks of each assistant reply, joined across the lines
+ *  Claude Code writes it on.
+ *
+ *  Claude Code puts every block of a reply on its own line under the reply's
+ *  id, and the SDK streams the same lines. Mapped one line at a time, the first
+ *  text block of every line took the same id, so a reply with two text blocks
+ *  kept only the last. The live stream and the importer both join through
+ *  this, so a reply gets the same parts either way. A line is keyed by its own
+ *  uuid, so one seen twice is not added twice. */
+export class ClaudeReplyBlocks {
+  private readonly replies = new Map<string, Map<string, unknown[]>>()
+
+  add(messageId: string, lineId: string, content: unknown): unknown[] {
+    const lines = this.replies.get(messageId) ?? new Map<string, unknown[]>()
+    lines.set(lineId, Array.isArray(content) ? content : [])
+    this.replies.set(messageId, lines)
+    return [...lines.values()].flat()
+  }
+}
+
 /** A Claude Code session's history as BOSS messages, for importing a session
  *  the user ran outside BOSS.
  *
- *  Claude Code writes one line per content block, so the lines of one reply
- *  share its message id and are joined back into one message here, the way
- *  the live stream joins them. A tool's result arrives on a later user line and
- *  completes the call it answers rather than appearing as a user message.
- *  Subagent lines are left out: the subagent's report reaches the conversation
- *  as the result of the tool that started it. */
+ *  The lines of one reply are joined back into one message, the way the live
+ *  stream joins them. A tool's result arrives on a later user line and
+ *  completes the call it answers; anything else on that line is still the
+ *  user's message. Subagent lines are left out: the subagent's report reaches
+ *  the conversation as the result of the tool that started it. */
 export function claudeHistoryMessages(sessionId: string, entries: ClaudeHistoryEntry[]): MessageWithParts[] {
   const messages: MessageWithParts[] = []
   const assistants = new Map<string, MessageWithParts>()
+  const replies = new ClaudeReplyBlocks()
   const tools = new Map<string, MessageWithParts>()
+  const results = new Map<string, Pick<NonNullable<Part['state']>, 'status' | 'output'>>()
+  const withResult = (part: Part): Part => {
+    const result = results.get(part.id)
+    return part.type === 'tool' && result ? { ...part, state: { ...part.state, ...result } } : part
+  }
   for (const entry of entries) {
     if (entry.parent_tool_use_id) continue
     const inner = (entry.message ?? {}) as { id?: string; content?: unknown; model?: string }
@@ -248,27 +273,18 @@ export function claudeHistoryMessages(sessionId: string, entries: ClaudeHistoryE
         assistants.set(id, message)
         messages.push(message)
       }
-      for (const part of claudeContentParts(sessionId, id, inner.content)) {
-        const index = message.parts.findIndex((existing) => existing.id === part.id)
-        if (index >= 0) message.parts[index] = part
-        else message.parts.push(part)
-        if (part.type === 'tool') tools.set(part.id, message)
-      }
+      message.parts = claudeContentParts(sessionId, id, replies.add(id, entry.uuid, inner.content)).map(withResult)
+      for (const part of message.parts) if (part.type === 'tool') tools.set(part.id, message)
     } else if (entry.type === 'user') {
-      if (Array.isArray(inner.content) && inner.content.some(isToolResult)) {
+      if (Array.isArray(inner.content)) {
         for (const block of inner.content) {
           if (!isToolResult(block)) continue
           const result = block as { tool_use_id?: string; content?: unknown; is_error?: boolean }
-          const owner = result.tool_use_id ? tools.get(result.tool_use_id) : undefined
-          const index = owner?.parts.findIndex((part) => part.id === result.tool_use_id) ?? -1
-          if (!owner || index < 0) continue
-          const part = owner.parts[index]
-          owner.parts[index] = {
-            ...part,
-            state: { ...part.state, status: result.is_error ? 'error' : 'completed', output: result.content }
-          }
+          if (!result.tool_use_id) continue
+          results.set(result.tool_use_id, { status: result.is_error ? 'error' : 'completed', output: result.content })
+          const owner = tools.get(result.tool_use_id)
+          if (owner) owner.parts = owner.parts.map(withResult)
         }
-        continue
       }
       const parts = claudeUserParts(sessionId, entry.uuid, inner.content)
       if (parts.length) messages.push({ info: { id: entry.uuid, sessionID: sessionId, role: 'user', time: { created } }, parts })

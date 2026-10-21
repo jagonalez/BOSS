@@ -12,7 +12,7 @@ import type { ThreadBusConnection } from '@shared/thread-bus'
 import { QA_GUIDANCE, QA_TOOL_DEFINITIONS } from '@shared/qa'
 import type { EventMessage, SessionInfo, MessageWithParts, Todo, FileDiff, FileNode, FileContent, Part } from '@shared/opencode'
 import { SessionDirectories } from './session-directory'
-import { claudeContentParts, claudeHistoryMessages, claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol'
+import { ClaudeReplyBlocks, claudeContentParts, claudeHistoryMessages, claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol'
 import type { ClaudeHistoryEntry, ClaudePermissionRequest } from './claude-protocol'
 import { compactionCompletedEvents, compactionStartedEvent, type CompactionTrigger } from './compaction-events'
 
@@ -460,6 +460,7 @@ export class ClaudeBackend implements Backend {
    *  iterator. */
   private async consume(sessionId: string, run: ClaudeRun, session: Query, settle: () => void): Promise<void> {
     let assistantId: string = randomUUID()
+    const replies = new ClaudeReplyBlocks()
     let liveText = ''
     let liveThinking = ''
     try {
@@ -494,9 +495,13 @@ export class ClaudeBackend implements Backend {
         } else if (value.type === 'assistant') {
           const inner = value.message as { id?: string; content?: unknown; model?: string } | undefined
           assistantId = inner?.id ?? assistantId
+          // Each streamed line is one block of the reply. The whole reply so far
+          // goes out each time: upsert replaces the message, and one line
+          // alone dropped the blocks before it.
+          const content = replies.add(assistantId, String(value.uuid ?? randomUUID()), inner?.content)
           this.upsert(sessionId, {
             info: { id: assistantId, sessionID: sessionId, role: 'assistant', model: inner?.model ? { id: inner.model, provider: 'anthropic' } : undefined, time: { created: Date.now() } },
-            parts: claudeContentParts(sessionId, assistantId, inner?.content)
+            parts: claudeContentParts(sessionId, assistantId, content)
           })
         } else if (value.type === 'user') {
           const inner = value.message as { content?: unknown } | undefined

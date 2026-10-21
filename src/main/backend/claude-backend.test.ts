@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 // Node's type-stripping test runner requires the explicit extension.
 // @ts-expect-error Application code uses bundler resolution.
-import { claudeContentParts, claudeHistoryMessages, claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol.ts'
+import { ClaudeReplyBlocks, claudeContentParts, claudeHistoryMessages, claudeMessageContent, claudePermissionMode, claudePermissionDecision, claudeQuestionInput, claudeResultError, claudeStreamedPartId, claudeTranscriptParts, parseClaudeQuestions } from './claude-protocol.ts'
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -307,13 +307,62 @@ test('an imported prompt keeps its text and its image', () => {
 test('an imported reply has the part ids the live stream gives it', () => {
   // The manager's transcript store matches parts by id. If a reply read back
   // from the file were keyed differently from the one streamed, a thread
-  // imported again would show every streamed reply twice.
-  const streamed = TRANSCRIPT.filter((line) => line.type === 'assistant' && !line.parent_tool_use_id)
-    .flatMap((line) => claudeContentParts('thread', line.message.id, line.message.content).map((part) => part.id))
+  // imported again would show every streamed reply twice. The stream sends
+  // the same lines, one block each, and joins them the same way.
+  const replies = new ClaudeReplyBlocks()
+  const streamed = new Map<string, string[]>()
+  for (const line of TRANSCRIPT) {
+    if (line.type !== 'assistant' || line.parent_tool_use_id) continue
+    const content = replies.add(line.message.id, line.uuid, line.message.content)
+    streamed.set(line.message.id, claudeContentParts('thread', line.message.id, content).map((part) => part.id))
+  }
   const imported = claudeHistoryMessages('thread', [...TRANSCRIPT])
     .filter((message) => message.info.role === 'assistant')
-    .flatMap((message) => message.parts.map((part) => part.id))
-  assert.deepEqual(imported, streamed)
+    .map((message) => [message.info.id, message.parts.map((part) => part.id)])
+  assert.deepEqual(imported, [...streamed.entries()])
+})
+
+test('a reply with two text blocks keeps both', () => {
+  // Each block is its own line, and each line's first text block used to take
+  // the reply's text id, so the second overwrote the first.
+  const lines = [
+    { type: 'assistant', uuid: 'l1', parent_tool_use_id: null, message: { id: 'msg_t', content: [{ type: 'text', text: 'Before the call.' }] } },
+    { type: 'assistant', uuid: 'l2', parent_tool_use_id: null, message: { id: 'msg_t', content: [{ type: 'tool_use', id: 'toolu_t', name: 'Read', input: { file_path: 'a.ts' } }] } },
+    { type: 'assistant', uuid: 'l3', parent_tool_use_id: null, message: { id: 'msg_t', content: [{ type: 'text', text: 'After the call.' }] } }
+  ] as const
+  const [reply] = claudeHistoryMessages('thread', [...lines])
+  assert.deepEqual(reply.parts.map((part) => [part.id, part.text ?? part.state?.tool]), [
+    ['msg_t-text', 'Before the call.'],
+    ['toolu_t', 'Read'],
+    ['msg_t-text-2', 'After the call.']
+  ])
+})
+
+test('a line seen twice is not joined twice', () => {
+  const replies = new ClaudeReplyBlocks()
+  replies.add('msg', 'line', [{ type: 'text', text: 'once' }])
+  assert.equal(replies.add('msg', 'line', [{ type: 'text', text: 'once' }]).length, 1)
+})
+
+test('text sent beside tool results is kept as the user message', () => {
+  // Claude Code can put the results and what the user typed next on one line.
+  // Skipping the whole line completed the tools and lost the words.
+  const lines = [
+    { type: 'assistant', uuid: 'a', parent_tool_use_id: null, message: { id: 'msg_r', content: [{ type: 'tool_use', id: 'toolu_r', name: 'Bash', input: { command: 'ls' } }] } },
+    { type: 'user', uuid: 'u', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_r', content: 'a.ts' }, { type: 'text', text: 'Now open it' }] } }
+  ] as const
+  const messages = claudeHistoryMessages('thread', [...lines])
+  assert.equal(messages[0].parts[0].state?.status, 'completed')
+  assert.deepEqual(messages[1].parts, [{ id: 'u-text-1', type: 'text', sessionID: 'thread', messageID: 'u', text: 'Now open it' }])
+})
+
+test('the live stream joins a reply\'s lines before it records them', () => {
+  // upsert replaces the whole message, so recording one line alone dropped
+  // the blocks streamed before it.
+  const start = backendSource.indexOf("value.type === 'assistant'")
+  const branch = backendSource.slice(start, start + 900)
+  assert.ok(/replies\.add\(assistantId,/.test(branch), 'each streamed line must join the reply so far')
+  assert.ok(/claudeContentParts\(sessionId, assistantId, content\)/.test(branch), 'the parts must come from the joined reply')
 })
 
 /** Claude imports @shared as a value, an alias only the bundler resolves, so
