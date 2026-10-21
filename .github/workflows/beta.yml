@@ -3,12 +3,16 @@ name: Beta release
 # Signed prereleases from main, so a change can be tried in the real app
 # without cutting a release by hand. Stable releases stay manual: scripts/release.sh.
 on:
+  # Every merge to main, so a change can be tried as soon as it lands rather
+  # than the next morning.
+  push:
+    branches: [main]
   workflow_dispatch:
-  schedule:
-    # 09:00 UTC — early morning US, so a night's merges are installable by the
-    # start of the day.
-    - cron: '0 9 * * *'
 
+# One beta at a time, and a running one is never cancelled: stopping it after
+# the release is created but before the manifest uploads would leave a release
+# the updater ignores. GitHub keeps only the newest waiting run, so merges that
+# land during a build collapse into one beta of the latest main.
 concurrency:
   group: beta
   cancel-in-progress: false
@@ -25,8 +29,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # A nightly with no new commits would publish a build identical to
-      # yesterday's, and every installed beta would download it again.
+      # A run with no commits since the last beta would publish a build identical
+      # to it, and every installed beta would download it again. That happens
+      # when a queued run's commits already went out in the build before it.
       - name: Check for new commits
         id: changed
         run: |
